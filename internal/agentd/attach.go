@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -23,14 +24,18 @@ import (
 type AttachConfig struct {
 	Origin, ComputerID, Host, Workspace string
 	Executables                         map[string]string
-	LocalAuth                           LocalAuthenticator
+	Identities                          map[string]agentsetup.AttachIdentity
+	LocalSigner                         func(context.Context, string, string, string) (string, error)
 	Exchange                            func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error)
 }
 type AttachManager struct {
-	mu       sync.Mutex
-	cfg      AttachConfig
-	observe  func(int) (attachObservation, error)
-	sessions map[string]*localAttach
+	mu        sync.Mutex
+	cfg       AttachConfig
+	observe   func(int) (attachObservation, error)
+	ancestry  func(int) (attachObservation, error)
+	signature func(context.Context, string) (attachSignature, error)
+	sessions  map[string]*localAttach
+	closed    bool
 }
 type localAttach struct {
 	peer               attachwatch.Process
@@ -40,10 +45,19 @@ type localAttach struct {
 	requested          bool
 	sequence           int64
 	touched            time.Time
-	confirmation       chan error
+	confirmation       chan localConsentResult
+	signatureProof     string
+	confirmedNonce     string
 	cancelConfirmation context.CancelFunc
 	confirmedDigest    string
+	image              os.FileInfo
+	checking           bool
 }
+type localConsentResult struct {
+	signature string
+	err       error
+}
+
 type AttachLocalRequest struct {
 	Operation  string `json:"operation"`
 	ID         string `json:"id,omitempty"`
@@ -71,10 +85,14 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	if ValidateBaseURL(c.Origin) != nil || !workorders.UUID(c.ComputerID) || !attachwatch.PhysicalPath(c.Workspace) || !attachwatch.Text(c.Host, 128) || c.Exchange == nil {
 		return nil, errors.New("paired attach configuration unavailable")
 	}
-	if c.LocalAuth == nil {
-		c.LocalAuth = systemLocalAuthenticator{}
+	if c.LocalSigner == nil {
+		c.LocalSigner = func(context.Context, string, string, string) (string, error) {
+			return "", errors.New("Touch ID unavailable; upgrade this computer's pairing to enable Touch ID")
+		}
 	}
-	return &AttachManager{cfg: c, observe: observeAttachProcess, sessions: make(map[string]*localAttach)}, nil
+	c.Executables = maps.Clone(c.Executables)
+	c.Identities = maps.Clone(c.Identities)
+	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
 	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
@@ -115,6 +133,7 @@ func (m *AttachManager) Sweep(ctx context.Context) {
 func (m *AttachManager) Close(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closed = true
 	for id, s := range m.sessions {
 		m.end(ctx, id, s)
 	}
@@ -123,17 +142,22 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	reject := errors.New("attach rejected; inspect the process and approved folder")
+	if m.closed {
+		return AttachLocalView{}, reject
+	}
 	if in.Operation == "preview" {
 		if len(m.sessions) >= 8 || !workorders.UUID(in.ProjectID) || !workorders.UUID(in.TicketID) {
 			return AttachLocalView{}, reject
 		}
 		observed, err := m.observe(in.PID)
-		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.observe) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
+		if err != nil || observed.UID != os.Getuid() || !independentAttachPeer(peer, observed, m.ancestry) || !attachwatch.Within(m.cfg.Workspace, observed.CWD) {
 			return AttachLocalView{}, reject
 		}
-		approved := m.cfg.Executables[in.Harness]
-		physical, err := filepath.EvalSymlinks(approved)
-		if err != nil || approved == "" || observed.Executable != physical {
+		image, err := m.validateHarnessImageUnlocked(ctx, observed, in.Harness)
+		if err != nil {
+			return AttachLocalView{}, err
+		}
+		if m.closed || len(m.sessions) >= 8 || !independentAttachPeer(peer, observed, m.ancestry) {
 			return AttachLocalView{}, reject
 		}
 		// Status-only must be explicit; a missing transcript never downgrades watch consent.
@@ -161,6 +185,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 		id := fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 		s := &localAttach{peer: peer.Process, snapshot: attachwatch.Snapshot{Mode: mode, ComputerID: m.cfg.ComputerID, ProjectID: in.ProjectID, TicketID: in.TicketID, Host: m.cfg.Host, Harness: in.Harness, Process: observed.Process, Transcript: in.Transcript, FileID: fileID, Platform: runtime.GOOS}, tail: tail, touched: time.Now(), view: attachwatch.View{State: "local_review"}}
+		s.image = image
 		if !s.snapshot.Valid() {
 			if tail != nil {
 				tail.close()
@@ -179,19 +204,30 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		s.view.State = "detached"
 		return m.localView(in.ID, s), nil
 	}
+	if s.checking {
+		return AttachLocalView{}, reject
+	}
+	s.checking = true
+	defer func() { s.checking = false }()
 	observed, err := m.observe(s.snapshot.Process.PID)
 	if errors.Is(err, errAttachExited) {
 		m.endAs(ctx, in.ID, s, "exited")
 		s.view.State = "confirmed_exited"
 		return m.localView(in.ID, s), nil
 	}
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil || in.Digest != s.snapshot.Digest() {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
 	}
 	if in.Operation == "confirm" && !s.requested {
+		if err := m.recheckHarnessImage(ctx, peer, observed, in.ID, s); err != nil {
+			if m.sessions[in.ID] == s {
+				m.end(ctx, in.ID, s)
+			}
+			return AttachLocalView{}, err
+		}
 		// Best-effort terminal factor only; same-UID agents can emulate a PTY.
-		// The person approval is the gate; strict mode also needs LocalAuthentication.
+		// The person approval is the gate; strict mode also needs the pairing-pinned enclave signature.
 		s.sequence = 0
 		view, err := m.cfg.Exchange(ctx, m.request(s, in.ID, "request"))
 		if err != nil {
@@ -225,7 +261,11 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	}
 	if s.confirmation != nil && s.confirmedDigest == "" {
 		select {
-		case authErr := <-s.confirmation:
+		case result := <-s.confirmation:
+			authErr := result.err
+			if authErr == nil && result.signature == "" {
+				authErr = errors.New("local confirmation returned an empty signature")
+			}
 			s.cancelConfirmation()
 			if authErr != nil {
 				m.end(ctx, in.ID, s)
@@ -235,6 +275,8 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 				return v, nil
 			}
 			s.confirmedDigest = s.view.ConsentDigest
+			s.confirmedNonce = s.view.LocalAuthNonce
+			s.signatureProof = result.signature
 		default:
 		}
 	}
@@ -245,7 +287,10 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	if s.view.State != "pending" {
 		req.ConsentDigest = s.view.ConsentDigest
 	}
-	req.LocalConfirmed = s.confirmedDigest != "" && s.confirmedDigest == s.view.ConsentDigest
+	if s.view.State == "approved" && s.confirmedDigest == s.view.ConsentDigest && s.confirmedNonce == s.view.LocalAuthNonce {
+		req.LocalAuthSignature = s.signatureProof
+		req.LocalAuthNonce = s.confirmedNonce
+	}
 	s.sequence++
 	req.Sequence = s.sequence
 	if s.view.State == "active" && s.tail != nil {
@@ -256,9 +301,15 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		}
 	}
 	observed, err = m.observe(s.snapshot.Process.PID)
-	if err != nil || observed.Process != s.snapshot.Process || !independentAttachPeer(peer, observed, m.observe) || s.tail != nil && s.tail.check() != nil {
+	if err != nil || observed.Process != s.snapshot.Process || !m.unchangedHarnessImage(observed, s.image) || !independentAttachPeer(peer, observed, m.ancestry) || s.tail != nil && s.tail.check() != nil {
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("identity changed; watch detached")
+	}
+	if err := m.recheckHarnessImage(ctx, peer, observed, in.ID, s); err != nil {
+		if m.sessions[in.ID] == s {
+			m.end(ctx, in.ID, s)
+		}
+		return AttachLocalView{}, err
 	}
 	view, err := m.cfg.Exchange(ctx, req)
 	// Never retry an uncertain text submission, and never retain it for recovery.
@@ -278,19 +329,27 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		m.end(ctx, in.ID, s)
 		return AttachLocalView{}, errors.New("watch consent binding changed or local confirmation missing")
 	}
+	if view.State == "approved" && view.ConsentMode == attachwatch.ConsentLocalAuth && (!attachwatch.LocalAuthNonceValid(view.LocalAuthNonce) || s.view.State == "approved" && s.view.LocalAuthNonce != view.LocalAuthNonce) {
+		m.end(ctx, in.ID, s)
+		return AttachLocalView{}, errors.New("local confirmation challenge changed or missing")
+	}
 	if view.State == "approved" && view.ConsentMode == attachwatch.ConsentLocalAuth && s.confirmation == nil {
 		// This goroutine owns only a result channel, not session state; revocation,
 		// peer loss and Close cancel it. Socket polls stay fast during the OS dialog.
 		authCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		s.cancelConfirmation = cancel
-		result := make(chan error, 1)
+		result := make(chan localConsentResult, 1)
 		s.confirmation = result
 		action := "watching the conversation"
 		if s.snapshot.Mode == attachwatch.ModeLease {
 			action = "status only (no conversation text) for"
 		}
 		reason := fmt.Sprintf("Allow %s %s session PID %d on %s", action, s.snapshot.Harness, s.snapshot.Process.PID, s.snapshot.Host)
-		go func() { result <- m.cfg.LocalAuth.Confirm(authCtx, reason) }()
+		consent, nonce := view.ConsentDigest, view.LocalAuthNonce
+		go func() {
+			proof, err := m.cfg.LocalSigner(authCtx, consent, nonce, reason)
+			result <- localConsentResult{signature: proof, err: err}
+		}()
 	}
 	if view.State != "pending" && view.State != "active" && view.State != "approved" {
 		m.end(ctx, in.ID, s)
@@ -302,6 +361,9 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 			m.end(ctx, in.ID, s)
 			return AttachLocalView{}, err
 		}
+	}
+	if view.State == "active" {
+		s.signatureProof = ""
 	}
 	s.view = view
 	s.touched = time.Now()
@@ -325,7 +387,15 @@ func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token stri
 	}
 	view, err := m.handle(r.Context(), peer, in)
 	if err != nil {
-		http.Error(w, err.Error(), 409)
+		var identityError *AttachLocalError
+		if errors.As(err, &identityError) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(identityError)
+		} else {
+			http.Error(w, err.Error(), 409)
+		}
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

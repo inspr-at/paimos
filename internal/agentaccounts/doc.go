@@ -119,7 +119,9 @@
 // Account/pool/user schedules support override=sprint (remaining quota until the next reset in scope, stored
 // as override_until) or hold (zero allowance). Outside work bands routing waits
 // unless Sprint is active.
-// A missing period baseline anchors at the first sample and remains marked unknown.
+// Daily shares use the schedule period, including for accounts first read late
+// in the day. A missing usage baseline counts deltas from the first sample and
+// remains marked unknown; it never shrinks the share to the remaining day.
 // Every report is a full normalized snapshot per source; missing buckets retire
 // derived windows but never delete history. Claude sparse events retain unexpired
 // peers at their original observation times and drop them after reset.

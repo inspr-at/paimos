@@ -109,7 +109,7 @@ func TestStableServiceExecutable(t *testing.T) {
 				}
 				l.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained"}
 				l.states[testAccount] = l.states[""]
-				p, err = e.Status(t.Context())
+				p, err = e.Step(t.Context())
 				if err != nil || p.Stage != "disconnected" || x.active {
 					t.Fatalf("cleanup: %s %v", p.Stage, err)
 				}

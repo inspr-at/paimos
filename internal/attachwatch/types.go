@@ -26,7 +26,7 @@ const ConsentAeon = "aeon"
 const ConsentLocalAuth = "local_auth"
 
 // Daemon-reported LocalAuthentication capability. These values are advisory:
-// only an in-process confirmation activates a strict watch.
+// only a signature from the pairing-pinned key activates a strict watch.
 const (
 	LocalAuthAvailable   = "available"
 	LocalAuthUnsupported = "unsupported"
@@ -91,6 +91,8 @@ func (s Snapshot) Valid() bool {
 }
 
 type DeviceRequest struct {
+	LocalAuthNonce      string   `json:"local_auth_nonce,omitempty"`
+	LocalAuthSignature  string   `json:"local_auth_signature,omitempty"`
 	AttachProtocol      int      `json:"attach_protocol,omitempty"`
 	ConsentDigest       string   `json:"consent_digest,omitempty"`
 	LocalConfirmed      bool     `json:"local_confirmed,omitempty"`
@@ -115,14 +117,15 @@ func ConsentDigest(requestID, snapshotDigest, mode string) string {
 func ConsentModeValid(mode string) bool { return mode == ConsentAeon || mode == ConsentLocalAuth }
 
 type View struct {
-	ConsentMode   string     `json:"consent_mode"`
-	ConsentDigest string     `json:"consent_digest"`
-	RequestID     string     `json:"request_id"`
-	Digest        string     `json:"request_digest"`
-	Snapshot      Snapshot   `json:"snapshot"`
-	State         string     `json:"state"`
-	ExpiresAt     time.Time  `json:"expires_at"`
-	LeaseUntil    *time.Time `json:"lease_until"`
-	SessionID     *string    `json:"session_id"`
-	UserCode      string     `json:"user_code,omitempty"`
+	LocalAuthNonce string     `json:"local_auth_nonce,omitempty"`
+	ConsentMode    string     `json:"consent_mode"`
+	ConsentDigest  string     `json:"consent_digest"`
+	RequestID      string     `json:"request_id"`
+	Digest         string     `json:"request_digest"`
+	Snapshot       Snapshot   `json:"snapshot"`
+	State          string     `json:"state"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	LeaseUntil     *time.Time `json:"lease_until"`
+	SessionID      *string    `json:"session_id"`
+	UserCode       string     `json:"user_code,omitempty"`
 }

@@ -30,6 +30,8 @@ const (
 	harnessCursorUsage
 	// harnessAgentStatus is <worktree>/.agent-status.json.
 	harnessAgentStatus
+	// harnessExplicitStatus is an explicitly selected non-credential JSON file.
+	harnessExplicitStatus
 )
 
 var errHarnessFileDenied = errors.New("refusing a file outside the harness usage allowlist")
@@ -101,6 +103,8 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 		ok = base == "cursor.jsonl"
 	case harnessAgentStatus:
 		ok = base == ".agent-status.json"
+	case harnessExplicitStatus:
+		ok = strings.HasSuffix(base, ".json")
 	default:
 		ok = false
 	}

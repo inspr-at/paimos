@@ -218,6 +218,12 @@
         "expected_revision": "required integer from reviewed PairingView; stale scope 409, identical completed retry succeeds"
       },
       "response": "PairingView"
+    },
+    "POST /api/agent-pairing/computers/{computerId}/remove": {
+      "permission": "person account.manage; same-origin Origin required",
+      "request": {},
+      "response": "PairingView",
+      "notes": "revoked or never-confirmed computers only; archives the computer and its account bindings, keeps rows, runs and events"
     }
   },
   "runtime_endpoints": {

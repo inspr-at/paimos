@@ -170,7 +170,13 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			return err
 		}
 		blockedChildren := offenders(children, target.AllowedChildKinds)
-		storedFields, dropped, blockedFields, err := fitKindFields(targetSchema, current.Fields)
+		// A task may store roadmap_public. That is not a person approval, so a
+		// kind change drops it before the target schema can keep the keys.
+		prepared, cleared, err := withoutInheritedRoadmapPublication(current.Fields)
+		if err != nil {
+			return err
+		}
+		storedFields, dropped, blockedFields, err := fitKindFields(targetSchema, prepared)
 		if err != nil {
 			return err
 		}
@@ -178,7 +184,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			return conversionBlocked(target.Slug, parentBlocked, blockedChildren, blockedFields)
 		}
 		var row pgx.Row
-		if len(dropped) > 0 {
+		if len(dropped) > 0 || cleared {
 			row = tx.QueryRow(ctx, `
 				UPDATE nodes
 				SET kind_id = $1::uuid,

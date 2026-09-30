@@ -66,6 +66,12 @@ export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | '
   return session.display_label?.trim() || name || session.agent?.name || session.host
 }
 
+// Live sessions keep the order they started in, stopped ones lead with the latest
+// stop; UUIDs break ties. Heartbeats only decide state, never position (AEON-468).
+const byId = (a: HarnessSession, b: HarnessSession) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+export const byStart = (a: HarnessSession, b: HarnessSession) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b)
+export const byStopped = (a: HarnessSession, b: HarnessSession) => Date.parse(b.stopped_at ?? b.created_at) - Date.parse(a.stopped_at ?? a.created_at) || byId(a, b)
+
 export interface SessionBranch<T> {
   view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
 }
@@ -92,7 +98,6 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   }
   const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
   const activityRank = (branch: SessionBranch<T>) => branch.workingCount ? 0 : branch.liveCount ? 1 : 2
-  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
     branch.liveCount = s.phase === 'stopped' || s.stopped_at ? 0 : 1
@@ -105,10 +110,10 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
       branch.workingCount += child.workingCount
       if (rank(child.group) < rank(branch.group)) branch.group = child.group
     }
-    // Active branches lead, including stopped parents of live descendants.
-    // UUIDs break heartbeat ties; keyed rows retain their identity on refresh.
-    branch.children.sort((a, b) => activityRank(a) - activityRank(b)
-      || beat(b.view.session) - beat(a.view.session) || a.view.session.id.localeCompare(b.view.session.id))
+    // Active branches lead, including stopped parents of live descendants, in
+    // start order; ended ones follow, latest stop first. UUIDs break ties. A
+    // heartbeat never moves a row (AEON-468).
+    branch.children.sort((a, b) => activityRank(a) - activityRank(b) || (activityRank(a) === 2 ? byStopped : byStart)(a.view.session, b.view.session))
   }
   roots.forEach(summarize)
   return roots
@@ -130,9 +135,8 @@ export function groupSessions(sessions: HarnessSession[], now: number, needs: (s
     const status = sessionStatus(session, now, needs(session))
     buckets[status.group].push({ session, status })
   }
-  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
-  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
-  buckets.stopped.sort((a, b) => Date.parse(b.session.stopped_at ?? b.session.created_at) - Date.parse(a.session.stopped_at ?? a.session.created_at))
+  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => byStart(a.session, b.session))
+  buckets.stopped.sort((a, b) => byStopped(a.session, b.session))
   return buckets
 }
 

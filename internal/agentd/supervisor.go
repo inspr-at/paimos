@@ -41,6 +41,9 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
+	// PollDiagnostic receives bounded cause codes on changes and 15-minute
+	// reminders only, never raw errors or bindings.
+	PollDiagnostic func(string)
 }
 
 type replay struct {
@@ -53,6 +56,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	VerificationReason    string `json:"verification_reason,omitempty"`
 	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
 	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
@@ -123,6 +127,9 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	startedAt           time.Time
+	capacityStartedAt   time.Time
+	capacityAccountID   string
 	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
 	signalsPublished    map[string]AccountSignals
 	statuslineMu        sync.Mutex
@@ -141,6 +148,10 @@ type Supervisor struct {
 	closing             bool
 	blockedAccounts     map[string]bool
 	probedAccounts      map[string]bool
+	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
+	pollDiagnostic      func(string)
+	pollDiagnosticMu    sync.Mutex
+	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired       map[string]bool
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
@@ -308,9 +319,13 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx}
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
+	for _, account := range s.accounts {
+		s.probePendingSince[account.ID] = s.startedAt
+	}
 	if err := s.loadCapacityCaptures(); err != nil {
 		return nil, err
 	}
@@ -390,20 +405,28 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	diagnostic := ""
+	defer func() { s.reportPollDiagnostic(diagnostic) }()
 	// Recover no-launch claims before a fresh probe changes account generation.
 	recoveryErr := s.recoverUnlaunched(ctx)
 	s.settlePending(ctx)
 	if !s.dispatchAllowed("") {
+		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
 	runs, err := s.api.Queued(ctx)
 	if err != nil {
+		diagnostic = "queue_unavailable"
 		return err
 	}
 	failures := []error{recoveryErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
+	pendingProbes := make(map[string]time.Time, len(accounts))
+	for _, account := range accounts {
+		pendingProbes[account.ID] = s.probePendingSince[account.ID]
+	}
 	for k, v := range s.adapters {
 		adapters[k] = v
 	}
@@ -415,6 +438,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		fenced, fenceErr := s.readFence(account.ID)
 		if fenced || fenceErr != nil {
+			diagnostic = "dispatch_not_allowed"
 			continue
 		}
 		if account.DependencyBlocked {
@@ -423,25 +447,17 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		// Account probes can start vendor executables. A refused verification
-		// must not reach one merely because health probing precedes dispatch.
-		probeBlocked := false
-		for _, run := range runs {
-			if run.AgentPrincipalID == s.principalID && run.Purpose == VerificationPurpose && run.requestedAccount() == account.ID && validQueuedExecutionMode(run, adapters[account.Harness]) != nil {
-				probeBlocked = true
-				break
-			}
-		}
-		if probeBlocked {
-			s.mu.Lock()
-			s.probedAccounts[account.ID] = false
-			s.mu.Unlock()
-			continue
-		}
+		// Account health is independent of optional verification. Refusing a
+		// verification never prevents the enrolled account's normal probe.
 		probe := adapters[account.Harness].(AccountProber)
 		s.mu.Lock()
 		hold := s.harnessHolds[account.Harness]
+		pendingSince := pendingProbes[account.ID]
+		current := s.probePendingSince[account.ID].Equal(pendingSince)
 		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		// A held harness (AEON-342) is not probed and reports unavailable.
 		status := probeUnavailable
 		var dependencyErr, probeErr error
@@ -489,6 +505,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			pi.probeMu.Unlock()
 		}
 		available := status.OK
+		s.mu.Lock()
+		current = s.probePendingSince[account.ID].Equal(pendingSince)
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		var err error
 		if reporter, ok := s.api.(ProbeStatusReporter); ok {
 			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
@@ -496,6 +518,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		// A concurrent repin/hold release starts a new probe lifecycle. The old
+		// adapter's in-flight result cannot consume that wait or establish local readiness.
+		if !s.probePendingSince[account.ID].Equal(pendingSince) {
+			s.mu.Unlock()
+			continue
+		}
 		if s.dependencyErrors == nil {
 			s.dependencyErrors = map[string]string{}
 		}
@@ -519,6 +547,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		s.blockedAccounts[account.ID] = err != nil || !available
 		s.probedAccounts[account.ID] = err == nil && available
+		delete(s.probePendingSince, account.ID)
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
 		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
@@ -552,6 +581,55 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
+func (s *Supervisor) reportPollDiagnostic(reason string) {
+	s.reportPollDiagnosticAt(reason, time.Now())
+}
+
+func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
+	if s.pollDiagnostic == nil {
+		return
+	}
+	reasons := make([]string, 0, 3)
+	if reason != "" {
+		reasons = append(reasons, reason)
+	}
+	// Multiple accounts produce at most one line per readiness cause per poll.
+	failed, timedOut := false, false
+	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
+		failed = failed || detail.Reason == "probe_failed"
+		timedOut = timedOut || detail.Reason == "probe_timeout"
+	}
+	if failed {
+		reasons = append(reasons, "probe_failed")
+	}
+	if timedOut {
+		reasons = append(reasons, "probe_timeout")
+	}
+	s.pollDiagnosticMu.Lock()
+	changed := len(reasons) != len(s.pollDiagnosticLast)
+	for _, reason := range reasons {
+		if _, ok := s.pollDiagnosticLast[reason]; !ok {
+			changed = true
+		}
+	}
+	next := make(map[string]time.Time, len(reasons))
+	var emit []string
+	for _, reason := range reasons {
+		last := s.pollDiagnosticLast[reason]
+		if changed || now.Sub(last) >= 15*time.Minute {
+			emit = append(emit, reason)
+			last = now
+		}
+		next[reason] = last
+	}
+	// Dropping cleared reasons makes their next occurrence an immediate change.
+	s.pollDiagnosticLast = next
+	s.pollDiagnosticMu.Unlock()
+	for _, reason := range emit {
+		s.pollDiagnostic(reason)
+	}
+}
+
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
@@ -575,6 +653,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
 		entry.mu.Unlock()
 		if !retry {
+			entry.mu.Lock()
+			refused, reason := entry.record.LaunchState == launchRefused, entry.record.VerificationReason
+			entry.mu.Unlock()
+			if refused {
+				return s.reportVerificationRefusal(ctx, run, reason)
+			}
 			return nil
 		}
 		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
@@ -604,6 +688,34 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	held := s.harnessHeld(profile.Harness)
 	adapter := s.adapters[profile.Harness]
 	s.mu.Unlock()
+	if run.Purpose == VerificationPurpose {
+		reason := ""
+		if adapter == nil || profile.ID == "" {
+			reason = "local_binding_missing"
+		} else if err := validQueuedExecutionMode(run, adapter); err != nil {
+			reason = "binding_incomplete"
+			if errors.Is(err, ErrVerificationUnavailable) {
+				reason = "adapter_unsupported"
+			}
+		}
+		if reason == "" {
+			found := false
+			for _, a := range s.accounts {
+				if a.ID == run.requestedAccount() && a.Harness == profile.Harness && !a.DependencyBlocked {
+					found = true
+				}
+			}
+			if !found {
+				reason = "local_binding_missing"
+			}
+		}
+		if reason != "" {
+			if err := s.refuseVerification(run, reason); err != nil {
+				return err
+			}
+			return s.reportVerificationRefusal(ctx, run, reason)
+		}
+	}
 	if held {
 		return ErrDraining
 	}
@@ -611,11 +723,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return ErrUnsupported
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
-		if errors.Is(err, ErrVerificationUnavailable) && entry == nil {
-			if saveErr := s.refuseVerification(run); saveErr != nil {
-				return saveErr
-			}
-		}
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose

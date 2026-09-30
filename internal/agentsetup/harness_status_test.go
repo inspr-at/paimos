@@ -24,13 +24,13 @@ type recoveryTable struct {
 
 func TestRecoveryFixIsOneSharedVocabulary(t *testing.T) {
 	table := recoveryTable{Harnesses: []string{"claude", "codex", "cursor", "grok", "pi"}, Reasons: append(append([]string(nil), HarnessReasons...), "future_reason"), Fixes: map[string]map[string]*HarnessFix{}}
-	kinds := map[string]string{"dependency_invalid": FixAddHarness, PinMissing: FixAddHarness, PinPartial: FixAddHarness, PinDrifted: FixAddHarness, PinInvalid: FixAddHarness, PinUnsafe: FixAddHarness, "login_required": FixLogin, "harness_failed": FixRestart, "cli_unavailable": FixRestart, "profile_permissions": FixRestart}
+	kinds := map[string]string{"dependency_invalid": FixAddHarness, PinMissing: FixAddHarness, PinPartial: FixAddHarness, PinDrifted: FixAddHarness, PinInvalid: FixAddHarness, PinUnsafe: FixAddHarness, "login_required": FixLogin, "harness_failed": FixRestart, "cli_unavailable": FixRestart, "profile_permissions": FixRestart, "binding_missing": FixAddHarness, "probe_timeout": FixRestart, "probe_failed": FixRestart, "capacity_timeout": FixRestart}
 	for _, harness := range table.Harnesses {
 		table.Fixes[harness] = map[string]*HarnessFix{}
 		for _, reason := range table.Reasons {
 			fix := RecoveryFix(harness, reason)
 			want := kinds[reason]
-			if harness == "claude" && want == FixAddHarness {
+			if harness == "claude" && want == FixAddHarness && reason != "binding_missing" {
 				want = FixRepin
 			}
 			if fix.Kind != want || (want == "") != (fix.Command == "") {

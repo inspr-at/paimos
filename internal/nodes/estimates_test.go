@@ -37,6 +37,51 @@ func estimateFieldsOf(t *testing.T, n nodeJSON) map[string]any {
 	return f
 }
 
+func TestEstimateOnlyPatchPreservesFieldsAndRevision(t *testing.T) {
+	p := newPrincipal(t, "estimate-only")
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Work","fields":{"priority":"high","notes":"Keep me","tags":["ETA"]}}`, kindBySlug(t, p, "ticket").ID))
+	code, body := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"estimate_hours":1.5}`)
+	updated := decode[nodeJSON](t, code, body, 200)
+	f := estimateFieldsOf(t, updated)
+	if f["estimate_hours"] != 1.5 || f["priority"] != "high" || f["notes"] != "Keep me" || f["estimate_source"] != "person" || f["estimate_by"] != p.ID {
+		t.Fatal(f)
+	}
+	if !updated.UpdatedAt.After(n.UpdatedAt) {
+		t.Fatal("revision did not advance")
+	}
+	code, body = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"type":"ticket","estimate_hours":2}`)
+	if f := estimateFieldsOf(t, decode[nodeJSON](t, code, body, 200)); f["estimate_hours"] != float64(2) || f["notes"] != "Keep me" {
+		t.Fatal("same-kind patch skipped estimate", f)
+	}
+	for _, patch := range []string{`{"estimate_hours":0}`, `{"estimate_hours":201}`, `{"estimate_hours":"2"}`, `{"estimate_hours":2,"fields":{"priority":"low"}}`} {
+		code, _ := call(t, &p, "PATCH", "/api/nodes/"+n.ID, patch)
+		if code != 400 {
+			t.Fatalf("accepted invalid patch %s: %d", patch, code)
+		}
+	}
+	r := httptest.NewRequest("PATCH", "/api/nodes/"+n.ID, strings.NewReader(`{"estimate_hours":4}`))
+	r.Header.Set("If-Unmodified-Since", n.UpdatedAt.Format(time.RFC3339Nano))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+	w := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	New(appPool, nil).Mount(mux)
+	mux.ServeHTTP(w, r)
+	if w.Code != 412 {
+		t.Fatalf("stale patch: %d %s", w.Code, w.Body.String())
+	}
+	code, body = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"estimate_hours":null}`)
+	cleared := decode[nodeJSON](t, code, body, 200)
+	f = estimateFieldsOf(t, cleared)
+	if f["estimate_hours"] != nil || f["estimate_by"] != nil || f["priority"] != "high" || f["notes"] != "Keep me" {
+		t.Fatal(f)
+	}
+	foreign := addPrincipal(t, "estimate-only-foreign")
+	code, _ = call(t, &foreign, "PATCH", "/api/nodes/"+n.ID, `{"estimate_hours":2}`)
+	if code == 200 {
+		t.Fatal("foreign tenant wrote estimate")
+	}
+}
+
 func TestEstimateValidationAttributionAndPreservation(t *testing.T) {
 	p := newPrincipal(t, "estimates")
 	agent := estimateAgent(t, p)

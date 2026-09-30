@@ -20,17 +20,376 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
-A push of a `v*` tag runs `.github/workflows/release.yml`.
+### Test runner routing (AEON-438, AEON-459)
 
-1. Check out the repository with tags, so release history can see earlier coordinates.
-2. Validate the tag and run `scripts/verify-release.mjs --release`. Fail if `version.json` disagrees with the tag.
-3. Refuse a coordinate whose GitHub release already exists, including drafts (the authenticated, paginated release list includes them). macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The Ubuntu job builds Linux `paimos-agentd` statically and all `aeon-cli` targets with CGO off, then checks the darwin binaries.
-4. Generate the release-history manifest embedded in the server image. That file is produced at release time. It is not committed.
-5. Run the image smoke gate. Publishing waits for it.
-6. Refuse a coordinate whose GHCR image tag already exists, including a tag left by a partial earlier run. Push the image to `ghcr.io/inspr-at/aeon:<version>`. There is no `latest` tag.
-7. Create the GitHub release once as a **draft** with the CLI, signed/notarized darwin `paimos-agentd`, Linux `paimos-agentd`, and `SHA256SUMS`. Existing releases are never uploaded to or overwritten. The notes name the image and its digest. A successful tag build ends here; it does not publish the draft or open a Homebrew PR.
-8. The release coordinator deploys that exact image digest through the normal deployment gates and verifies the live server's version and health. Only then publish the existing draft as described below. Failed or incomplete verification leaves it a draft.
-9. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
+slots, and selects the entire Go batch behind independent event, ref and
+rerun-attempt guards. The manual smoke workflow calls its own router for one
+slot. Only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
+
+- A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
+- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+
+The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
+**exactly one** class label matching the verified run's event; the configured
+sets contain neither both classes on one runner nor hosted-looking labels
+([default.nix:115–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L143), [aeon_builder.py:120–123](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L120-L123), [aeon_builder.py:857–875](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L857-L875)).
+`could_take` is a case-insensitive **subset** check against the complete minted
+label set, so a competing job need not request a class label to match
+([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100)).
+The reviewed workflows route PRs to `ubuntu-latest`;
+a PR can modify those workflows or the guard, so runner-side admission is the
+enforcement boundary. The manual `Test runner smoke` workflow exercises the same
+router and small Go/Node checks. Go tests use four pool shards when routing
+admits the batch, otherwise the existing seven hosted shards. Timing budgets,
+static checks and the required `go` aggregate always run hosted.
+
+**Active and required admission contract: mode B (Free plan), decided by Markus
+on 2026-09-30 and recorded on NIX-600.** The implementation references below
+are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
+`5e304365cad08794fc839487c8a4512928d738cd`; module filenames mean
+`modules/aeon-builder/`, and test filenames mean `tests/`. These are source
+references, not live acceptance evidence. Publishing
+`AEON_MBP2606_AVAILABILITY` remains gated on coordinator verification of all
+three controls and their integration. A JIT registration is not a reservation
+for the checked job: even a base-only job fits the runner's labels
+([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100), [test_aeon_builder.py:615–624](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L615-L624)).
+
+1. **Verified JIT minting:** `tick` selects queued jobs carrying `mbp2606` and
+   verifies the repository and head repository, allowed event, workflow path,
+   `main` head branch and head SHA reachability; missing or mismatched run
+   metadata is rejected
+   ([aeon_builder.py:65–86](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L65-L86), [aeon_builder.py:645–675](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L645-L675)).
+   The configured repository is `inspr-at/paimos`, events are `push` and
+   `workflow_dispatch`, and workflow paths are `.github/workflows/ci.yml` and
+   `.github/workflows/test-runner-smoke.yml`
+   ([default.nix:107–110](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L107-L110), [default.nix:137–155](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L137-L155)).
+   `claim_slot` records job ID, run ID/attempt and event; `serve` records a
+   unique runner name before requesting its JIT configuration
+   ([aeon_builder.py:811–828](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L811-L828), [aeon_builder.py:867–872](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L867-L872)).
+   `class_ok` requires exactly the verified event's class from the configured
+   pair: `mbp2606-push` for `push`, `mbp2606-dispatch` for `workflow_dispatch`
+   ([aeon_builder.py:103–117](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L103-L117), [default.nix:125–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L125-L143)).
+   At candidate selection, a missing, opposite or doubled class triggers a
+   cancellation attempt and prevents that run from being served
+   ([aeon_builder.py:676–684](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L676-L684), [test_aeon_builder.py:615–631](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L615-L631)).
+   Before **every mint**, `serve` passes the prospective runner's full labels
+   to `unverified_label_runs` and refuses that mint if the sweep finds a
+   rejected run ([aeon_builder.py:855–869](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L855-L869)).
+   The sweep examines queued jobs whose labels fit that set through
+   `could_take`; each matching job must belong to a verified run and pass
+   `class_ok`, **including jobs of already verified runs**
+   ([aeon_builder.py:899–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L899-L929)).
+   It attempts to cancel runs failing either check, including base-only jobs
+   such as `[self-hosted, Linux, ARM64, mbp2606]`, `self-hosted`,
+   `[self-hosted, linux]` or `ARM64`
+   ([aeon_builder.py:909–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L909-L929), [test_aeon_builder.py:595–609](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L595-L609), [test_aeon_builder.py:633–641](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L633-L641)).
+   Cancellation uses `actions:write`; JIT registration uses
+   `administration:write` ([aeon_builder.py:44–51](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L44-L51), [aeon_builder.py:366–376](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L366-L376)).
+   The runner starts for one job inside the VM, with VM retirement and runner
+   deregistration in the controller's cleanup path
+   ([provision-base.sh:41–68](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/provision-base.sh#L41-L68), [aeon_builder.py:875–897](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L875-L897)).
+
+2. **Job-started hook:** the sealed image installs the executable hook at
+   `/opt/aeon/job-started.sh`, outside the checkout and runner directory, and
+   sets `ACTIONS_RUNNER_HOOK_JOB_STARTED` to that path
+   ([provision-base.sh:23–54](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/provision-base.sh#L23-L54)).
+   The hook checks repository, event, `GITHUB_REF`, workflow ref and payload
+   metadata against the baked allowlist; its fully qualified workflow refs
+   are derived from the configured repository, paths and `refs/heads/main`
+   ([job-started.sh:33–48](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L33-L48), [aeon_builder.py:227–234](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L227-L234), [default.nix:107–155](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L107-L155)).
+   **PR events and PR-shaped payloads are denied**, including same-repository
+   PRs: the allowlist has only `push` and `workflow_dispatch`, and the payload
+   must have the expected repository and no `pull_request`
+   ([default.nix:137–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L137-L143), [job-started.sh:37–48](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L37-L48)).
+   The hook checks event and payload metadata, not class labels
+   ([job-started.sh:33–58](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L33-L58)).
+   **Class binding is `class_ok` at candidate selection and in the pre-mint
+   sweep**, not the post-job check
+   ([aeon_builder.py:676–684](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L676-L684), [aeon_builder.py:857–860](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L857-L860), [aeon_builder.py:912–928](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L912-L928)).
+   On denial, the production hook records an error, freezes `Runner.Listener`
+   and `Runner.Worker` with `SIGSTOP`, invokes `poweroff -ff` and waits without
+   returning; freezing avoids systemd reaping the hook before power-off
+   ([job-started.sh:17–31](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L17-L31)).
+   A permitted hook writes the admission marker and waits for `cache-ready`
+   ([job-started.sh:50–58](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L50-L58)).
+   The cache remains locked at runner startup; the controller waits for that
+   admission marker, attributes `runner_name` through the API and requires
+   membership in `verifiedRuns` before unlocking and mounting the cache
+   ([start-runner.sh:2–6](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/start-runner.sh#L2-L6), [aeon_builder.py:1017–1023](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1017-L1023), [aeon_builder.py:1037–1067](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1037-L1067), [cache-lock.sh:19–48](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/cache-lock.sh#L19-L48)).
+   The separate `admit` cache safeguard refuses to unlock a trusted push disk
+   for another event; it checks the actual run event, not class labels or the
+   minted job ID/attempt ([aeon_builder.py:1053–1067](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1053-L1067)).
+   NIX-600 smoke acceptance must still demonstrate that rejection prevents
+   workflow-step output and cache writes, including an `if: always()` step
+   and an action with a `pre:` step. The deny and cache-wait mechanisms above
+   are implementation references, not proof of that acceptance result.
+
+   GitHub's [job hook documentation](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/run-scripts)
+   says "the job will not run"; this contract explicitly **does not rely on
+   that claim**. In actions/runner at `ca43437862b6d6be24e6de73dff3971c99140c9a`,
+   the hook is an ordinary `always()` pre-job step
+   ([JobExtension.cs:302–310](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/JobExtension.cs#L302-L310)).
+   A failed step only updates the job result
+   ([StepsRunner.cs:274–278](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L274-L278));
+   later step conditions are still evaluated
+   ([StepsRunner.cs:203–241](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/StepsRunner.cs#L203-L241)),
+   and action `pre-if` defaults to `always()`
+   ([ActionManifestManager.cs:458](https://github.com/actions/runner/blob/ca43437862b6d6be24e6de73dff3971c99140c9a/src/Runner.Worker/ActionManifestManager.cs#L458)).
+
+3. **Controller post-job check:** `find_runner_job` queries the expected job
+   through the API, then searches jobs across all attempts of the last 20
+   verified run IDs and up to 30 recent runs for the minted `runner_name`
+   ([aeon_builder.py:350–360](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L350-L360), [aeon_builder.py:1069–1081](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1069-L1081)).
+   Step 3 accepts attribution to a run in `verifiedRuns`, **including a
+   sibling job of that run**; it does **not** re-check class labels or compare
+   the actual job ID/attempt with the values recorded before minting
+   ([aeon_builder.py:1083–1093](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1083-L1093), [test_aeon_builder.py:518–522](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L518-L522)).
+   If the runner cannot be attributed or the actual run is not in
+   `verifiedRuns`, it calls `pause`, which records an alert, stops minting,
+   attempts to clear availability and cancel matching queued runs
+   ([aeon_builder.py:1083–1091](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1083-L1091), [aeon_builder.py:615–635](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L615-L635)).
+   `serve` invokes this host-controller check after work and taints the slot
+   when it fails; its `finally` path retires the VM and removes the runner
+   registration independently of a job completion hook
+   ([aeon_builder.py:876–897](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L876-L897)).
+
+**Deny recording:** the hook writes a deny line to its log and an error to job
+stderr ([job-started.sh:17–21](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L17-L21)).
+While monitoring work, the controller treats VM power-off or a hook deny line
+as denial and pauses; its hard-stop check takes precedence
+([aeon_builder.py:1002–1016](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1002-L1016)).
+Denied, unverified and unattributable outcomes taint the slot
+([aeon_builder.py:876–883](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L876-L883)).
+Actual-job attribution uses API job/run evidence for `runner_name`, rather than
+trusting the job's writable VM logs
+([aeon_builder.py:1060–1081](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1060-L1081)).
+
+The configured controller and baked hook allow only **`push`,
+`workflow_dispatch` on main**
+([default.nix:137–155](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L137-L155), [aeon_builder.py:65–86](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L65-L86), [aeon_builder.py:227–234](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L227-L234), [job-started.sh:37–42](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/job-started.sh#L37-L42)).
+`ci.yml` uses that same event/ref allowlist. `schedule`, `merge_group` and tags
+are excluded. Expanding events or refs requires a reviewed change to the
+controller, hook configuration and workflow guard.
+
+**Ruleset precondition:** the configured main ruleset is **24240960** with a
+pinned expected baseline ([default.nix:249–261](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L249-L261)).
+The controller compares active enforcement, target, ref conditions, bypass
+actors and rules (including parameters), using a fresh API read before each
+availability publish and mint; drift calls `pause`
+([aeon_builder.py:136–158](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L136-L158), [aeon_builder.py:369–372](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L369-L372), [aeon_builder.py:637–643](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L637-L643), [aeon_builder.py:737–750](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L737-L750), [aeon_builder.py:855–860](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L855-L860)).
+The ruleset API call uses `administration:write` so the response includes
+bypass actors; that permission is not itself evidence of intact protection
+([aeon_builder.py:369–372](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L369-L372)).
+
+**Mode-B runtime:** `serve` clones and starts a fresh job VM from the sealed
+rootful-Docker base; base configuration disables host mounts and SSH agent
+forwarding, and the runner download targets Linux ARM64
+([default.nix:75–79](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L75-L79), [aeon_builder.py:189–205](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L189-L205), [aeon_builder.py:843–847](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L843-L847), [provision-base.sh:23–32](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/provision-base.sh#L23-L32)).
+The provisioned runner has Docker access and passwordless sudo, making the VM
+the isolation boundary ([provision-base.sh:16–21](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/provision-base.sh#L16-L21)).
+Controller retirement deletes the VM before settling its disk or releasing
+its slot; a failed deletion or disk settlement holds the slot and pauses
+([aeon_builder.py:767–782](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L767-L782)).
+Persistent slot caches are LUKS2 containers, unlocked and mounted only after
+hook admission and verified-run attribution; trusted slot disks are for pushes,
+while dispatches receive disposable copies
+([cache-lock.sh:2–8](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/cache-lock.sh#L2-L8), [cache-lock.sh:19–48](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/cache-lock.sh#L19-L48), [aeon_builder.py:1017–1067](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1017-L1067), [default.nix:156–160](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L156-L160), [aeon_builder.py:945–966](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L945-L966)).
+Existing disks attach with `format:false`; only newly created disks permit
+formatting and cache initialization with `--init`
+([aeon_builder.py:175–186](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L175-L186), [aeon_builder.py:945–966](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L945-L966), [aeon_builder.py:1061–1064](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1061-L1064), [cache-lock.sh:28–37](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/cache-lock.sh#L28-L37)).
+A tainted trusted disk is restored from its last known-good APFS clone, or
+removed if no such clone exists; an untainted used trusted disk becomes the
+next known-good copy after the external check, and scratch disks are discarded
+([aeon_builder.py:876–897](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L876-L897), [aeon_builder.py:968–996](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L968-L996)).
+
+**Network precondition:** host `pf` rules block configured private ranges and
+host loopback for user `ci`, except the stateless Lima SSH loopback range from
+`sshPortBase - 1` through `sshPortBase + slots - 1`
+([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224), [default.nix:222–235](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L222-L235), [hosts/mbp2606/home-ci.nix:24–35](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/hosts/mbp2606/home-ci.nix#L24-L35)).
+The pinned defaults provide four job slots plus one base/proof port; the base
+and proof use the preceding port, with no host mounts or SSH agent forwarding
+([default.nix:162–165](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L162-L165), [default.nix:191–200](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L191-L200), [aeon_builder.py:175–205](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L175-L205), [aeon_builder.py:573–586](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L573-L586)).
+The rule generator documents hostagent DNS resolution through
+`mDNSResponder`; it blocks private destinations, not all port-53 egress, so
+host-resolver DNS remains a residual risk
+([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224)).
+The controller probes network reachability at `on`, before each mint, and on
+periodic idle proofs (ten minutes by default), rather than inspecting the
+anchor before every availability publish
+([aeon_builder.py:547–586](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L547-L586), [aeon_builder.py:1222–1240](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1222-L1240), [aeon_builder.py:849–854](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L854), [aeon_builder.py:707–725](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L707-L725), [default.nix:207–215](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L207-L215), [aeon_builder.py:737–750](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L737-L750)).
+A failed per-job or periodic proof pauses the pool
+([aeon_builder.py:719–723](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L719-L723), [aeon_builder.py:849–854](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L854)).
+Coordinator network-isolation acceptance is required before enabling the pool.
+
+Org state verified on 2026-09-30: only the **Default** runner group, public
+repositories not allowed, **0 runners**; Blacksmith is removed.
+
+Mode A is only a possible future Team-plan upgrade: a group restricted to paimos
+and the two selected main workflow refs, recorded and verified before adoption,
+retaining the baked job-started hook as defence in depth.
+
+Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
+That is defence in depth, not the runner admission boundary. A `merge_group` run
+executes PR code, so queueing a PR is a decision to run it on the Mac if routing
+is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
+mode B today**: GitHub documents exact pinned workflow refs; matching
+`gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
+Merge-queue CI continues on hosted runners. See GitHub's
+[runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
+
+Routing is disabled until NIX-600's controller publishes the repository variable
+`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape
+([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:388–404](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L388-L404)):
+
+```json
+{"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
+```
+
+The schema remains **version 1**; mode and rerun-attempt metadata require no new
+availability fields. In mode B, `idle_runners` counts free VM slots after
+occupied slots and pending jobs are subtracted, not idle registered runners
+([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:607–616](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L607-L616)).
+The publisher waits `min(5, pollSeconds)` seconds between publication attempts;
+publication requires mode `on` and a fresh ruleset check, and represents
+exhausted capacity with `busy:true`
+([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:727–750](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L727-L750)).
+`off` changes mode and attempts to clear availability under the same state
+lock as publication ([aeon_builder.py:737–750](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L737-L750), [aeon_builder.py:1268–1279](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1268-L1279)).
+Records expire after **30 seconds**. An absent, invalid, expired, future-dated,
+offline or busy record selects hosted immediately;
+there is no network wait and no runner administration credential in CI. GitHub's
+[runner-list API](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
+requires repository Administration read access; that belongs to the host
+controller, not the workflow token. Neither token permissions nor environment
+secrets are added here. The Linux ARM64 pool must provide Docker service-container
+support, Ubuntu-compatible `apt`/`sudo`, Go 1.26 and the shells used by the tests.
+Routable `go` and future routed `e2e` jobs must not assume amd64:
+`pgvector/pgvector:pg18` is multi-arch, and setup-go/setup-node select ARM64 on
+this runner. The guard rejects routed jobs referencing `amd64`, `x86_64`,
+`x86-64`, `i[3-6]86` or the token `x64` in artifacts, including action inputs,
+services, matrices and inherited environment/default settings. `release.yml`
+and `pairing-platform.yml` are **never routed**; their multi-platform artifacts
+and evidence remain hosted.
+
+**Off/drain:** with a running controller, `off` attempts to clear availability
+and enters `draining`; `tick` keeps serving verified queued jobs carrying
+`mbp2606` and passing
+`class_ok`, with the same mint checks, until candidates and active slots/workers
+are gone ([aeon_builder.py:1268–1287](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1268-L1287), [aeon_builder.py:645–705](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L645-L705), [aeon_builder.py:849–869](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L869)).
+**Pause:** a ruleset/network failure or failed post-job attribution calls
+`pause`, stops minting and attempts to clear availability and cancel runs with
+queued jobs matching the combined `pool_labels` by case-insensitive subset
+([aeon_builder.py:615–643](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L615-L643), [aeon_builder.py:719–723](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L719-L723), [aeon_builder.py:849–854](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L854), [aeon_builder.py:1083–1091](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1083-L1091), [aeon_builder.py:1149–1157](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1149-L1157)).
+`pool_labels` contains the base labels plus **both** `mbp2606-push` and
+`mbp2606-dispatch` ([aeon_builder.py:126–128](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L126-L128), [default.nix:115–130](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L130)).
+**Hard stop:** with a running controller, `off --now` enters `stopping` and
+attempts to clear availability and cancel runs with queued or in-progress jobs
+matching that same combined set; monitored workers stop and retire their VMs
+([aeon_builder.py:1275–1285](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1275-L1285), [aeon_builder.py:1149–1157](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1149-L1157), [aeon_builder.py:1007–1010](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1007-L1010), [aeon_builder.py:889–897](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L889-L897)).
+A lease is an admission check, not an atomic reservation: concurrent
+admissions or host failure after selection remain a queue risk. Never publish
+a simple persistent `on` flag. Offline/busy smoke and full-suite timing must be
+recorded when the host becomes available.
+
+For routed workflows, use **Re-run all jobs** (`gh run rerun RUN_ID` without
+`--failed`) so the hosted router refreshes the lease. It emits `run_attempt`;
+consumers compare it with `github.run_attempt` and select hosted if a failed-job
+or individual-job rerun retains an older output. This rejects stale attempts,
+not a lease that expires after initial job scheduling; the controller's draining
+duties cover already queued jobs ([aeon_builder.py:645–705](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L645-L705)). See GitHub's
+[rerun behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+
+**Go shard integration (AEON-459):** `go-test` depends on `runner-route` and
+uses its guarded runner selection and class to choose **4 Go shards on
+mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix
+when GitHub evaluates it. A failed-job or individual-job rerun may retain
+earlier matrix values; do not assume it creates seven hosted shards. Use
+**Re-run all jobs** to refresh both the router and the entire shard layout.
+`scripts/ci-go-shards` accepts `-count` (default 7). Its checked-in plans are
+`scripts/ci/go-shards.txt` and `scripts/ci/go-shards-4.txt`; both retain the same
+timing weights and inventory, including `scripts/ci-runner-guard`. Static
+coverage checks prove exactly-once execution for both layouts, including new
+packages and tests, with timing tests excluded from the parallel commands.
+The **Timing budgets, alone** step runs once in its own `go-timing` job on
+`ubuntu-latest`, where its budgets were calibrated. It is unconditional for
+both routes and required by `go`; moving it out of hosted shard 4 prevents
+reruns or a route switch from skipping it. The required check names remain
+`go`, `web`, `release-check` and `e2e`.
+Every Mac shard sets **`GOFLAGS=-count=1`** and records its actual runner class,
+source commit and event. Routed checkout uses **`persist-credentials: false`**,
+and `setup-go` cache is enabled only on main pushes. Insufficient capacity
+sends the entire batch to hosted; broader routed fan-outs must request their
+whole simultaneous capacity through `required-idle-runners`.
+
+**Measurement gate:** the pool stays off during worker validation. The lead
+must record five successful Mac runs and five successful hosted runs of the
+same commit and event on AEON-459, with run IDs and median Go-phase wall time.
+Measure from the first start of `go-test`, `go-static` or `go-timing` to the
+completion of the required `go` aggregate; the aggregate's own short duration
+does not measure the tests. Include queue delay within that phase. Keep this
+route only if the Mac median is lower; otherwise retain hosted routing.
+
+Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
+cached test results. Routed action caches are written only by main pushes.
+The controller's persistent Go, npm and Playwright slot cache is for verified
+pushes; dispatches receive disposable scratch copies of known-good
+([provision-base.sh:50–54](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/provision-base.sh#L50-L54), [default.nix:156–160](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L156-L160), [aeon_builder.py:945–966](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L945-L966), [aeon_builder.py:1053–1067](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1053-L1067)).
+NIX-600 must enforce that isolation. The routed workflows disable `setup-go`
+caching outside main pushes. A test cache hit is not fresh evidence.
+
+`go run ./scripts/ci-runner-guard` scans **all** workflow YAML, including `.yml`
+and `.yaml` in any letter case. Hosted labels are exactly `ubuntu-latest`,
+`ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel`. The
+controller mints only the configured base labels plus the verified event class
+([default.nix:115–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L143), [aeon_builder.py:120–123](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L120-L123)).
+The guard's fixture tests reject
+direct labels, hosted-looking impostors, unsafe expressions, matrix labels,
+unguarded router outputs, routed jobs with secrets/environments/write permissions,
+amd64 artifact references, and routed release/pairing/image/attestation/pin jobs.
+Unknown dynamic expressions fail closed.
+The hosted `release-check` runs both guard and router tests. Release workflows,
+image build/relink, attestation and pin gates always stay hosted; attestation
+verification must retain `--deny-self-hosted-runners` in its owning gate.
+
+The lead accepted mbp2606 green evidence for tree-keyed reuse of **tests/evals**
+only (AEON-438, 2026-09-30). Successful routed jobs record their actual
+`runner_class=hosted|mbp2606`, source commit and event in the job summary. Any
+future reuse record must preserve that class. Image provenance, attestations and
+pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
+
+A push of an annotated `v*` tag runs `.github/workflows/release.yml`. Create it with `git tag -a "$tag" -m "Release $tag"`; lightweight tags fail before the image build (AEON-398).
+
+The `image` job starts independently of the macOS jobs (AEON-407):
+
+1. Check out all tags, validate the calendar coordinate and presentation bundle, and require the tag to match `version.json`.
+2. Refuse an existing GitHub release, including a draft, or an existing GHCR image tag, including one left by a partial run. API lookup failures stop the job.
+3. Generate the release-history manifest embedded in the server image. It is not committed; both image builds use the working directory as their context.
+4. Import the registry cache at `ghcr.io/inspr-at/aeon:buildcache`, build linux/amd64 and load it into Docker. Resolve the loaded tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable local ID. BuildKit's config digest alone is not runnable in every Docker image store.
+5. After smoke passes, export the same build inputs with BuildKit `provenance: mode=max`, push only `ghcr.io/inspr-at/aeon:<version>`, and update the separate registry cache in `mode=max`. There is no `latest` release alias. The first cache import may miss; the build still runs.
+6. Create a GitHub build-provenance attestation for the pushed digest and store it in GHCR. Verify its repository, release workflow, source tag and source commit with `gh attestation verify`. The job exposes `version` and `digest` outputs and records the verified digest in its summary. It cannot succeed if attestation or verification fails.
+
+In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
+
+Publication remains the coordinator's explicit step after deployment and live verification of the exact image digest, version and health. Failed or incomplete verification leaves the release a draft. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+
+To verify a published image independently, use its exact digest and source commit:
+
+```sh
+gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
+  --repo inspr-at/paimos \
+  --signer-workflow inspr-at/paimos/.github/workflows/release.yml \
+  --source-ref "refs/tags/v$VERSION" --source-digest "$COMMIT" \
+  --deny-self-hosted-runners
+```
+
+The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the image job. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. The image job retains its existing `contents: write` permission so its immutability lookup can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
+
+### Dry runs and timing evidence
+
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. It runs the workflow regression tests, generates offline release history, imports the same registry cache, loads the production build and runs the same smoke gate. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+
+Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 
 ### Publish after live verification (AEON-356)
 
@@ -52,7 +411,7 @@ Drafts are excluded from public release discovery and GitHub's `latest` endpoint
 
 ## Image smoke gate
 
-`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
+`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
 
 The gate needs Docker. It is a release check, not the day-to-day `just test` run.
 
@@ -117,7 +476,8 @@ classic database is contacted by the history builder.
 
 At reservation, the release coordinator reviews that export and freezes its
 public projection in `internal/releasehistory/data/product-notes.json` **before
-tagging** (AEON-372):
+the release PR** (AEON-405), so the release ships its own notes. Publication
+only verifies that capture; it does not fetch notes for the following release:
 
 ```sh
 go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
@@ -219,6 +579,61 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+### Own-release notes without journey membership (AEON-405)
+
+At reservation, write an ignored JSON array of the release's reviewed ticket
+keys (for example `tmp/release-scope.json`). Use the exact scope being cut,
+including hidden members; `[]` explicitly declares an internal-only release.
+Do not infer this scope from earlier tags or require the release to be published.
+After updating `version.json`, capture through the configured PPM client and
+freeze the public projection in the same release PR:
+
+```sh
+go run ./internal/releasehistory/exporthistoric -repo . -client /path/to/ppm-client -tenant TENANT_UUID -project AEON_PROJECT_UUID -reserve VERSION -tickets tmp/release-scope.json -out tmp/own-release-notes.json
+go run ./internal/releasehistory/packnotes -repo . -historic tmp/own-release-notes.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+node scripts/check-own-release-notes.mjs
+```
+
+The explicit version, channel and sequence must match `version.json`. The
+exporter verifies the authenticated tenant and each member's project ancestry.
+Every public member must have both 2–4-word pills and both nonblank benefits;
+hidden members contribute no key or text. The raw ignored export stays local.
+Identical reruns use that same export; changed observations conflict with the
+frozen original. Commit the public bundle alongside the version reservation
+before opening the PR. CI's `release-check` rejects a missing own-version entry,
+a mismatched sequence/channel or invalid bilingual fields. AEON-405 pins the
+legacy cutoff at release sequence **113** (`LEGACY_RELEASE_SEQUENCE_CUTOFF` in
+the checker): captures through that sequence may omit channel/sequence and
+bilingual fields, but every field present is still validated. From sequence
+**114** onward, the complete matching channel/sequence and all four bilingual
+fields are required, even when `written_after_release` is set. The cutoff stays
+fixed; it does not follow `version.json` or future releases. Historic entries
+remain immutable; reserve and capture the next release rather than rewriting a
+legacy entry to satisfy the gate. After
+publication, verify the same capture digest and both languages on the target
+instance; do not recapture or rewrite it.
+
+### Reviewed corrections and fix markers (AEON-405)
+
+File bug-fix tickets with `paimos issue create ... --bug` (or `--tags bug`).
+The MCP `issue_create` argument schema exposes the same `bug` and `tags`
+fields; its existing R1 placeholder remains, so file through the CLI today.
+The helper preserves the ticket kind and writes the literal `bug` tag that the
+release classifier reads. Mark actual repairs when filing them; feature work
+keeps its feature classification. A mixed ticket's benefit can still describe
+its real new capability without overstating the repair.
+
+Published frozen entries stay insert-only. Reviewed corrections live separately
+in `internal/releasehistory/data/product-note-corrections.json`, with a version,
+ticket key, original snapshot SHA-256, reason, and new group and/or existing
+bilingual text. A correction must target a public item already in that capture;
+it cannot add hidden or absent members. Invalid bindings fail the history build.
+The served notes keep the original digest and expose the exact correction
+records under `notes.corrections`; Details → Evidence shows their keys and
+reasons. Tenant-local snapshots retain their existing precedence. The AEON-405
+layer applies the reviewed fix/feature and wording audit to each frozen public
+occurrence without rewriting the bundle, tags or published artifacts.
 
 ### Historic product notes without journey membership (AEON-398)
 

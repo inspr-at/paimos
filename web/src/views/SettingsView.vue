@@ -16,6 +16,7 @@ import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
 import { SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
+import { doctrineInbox } from '../lib/doctrineInbox'
 
 // Settings: Personal for everyone; Workspace, Business and Projects for admins;
 // Access for whoever may see the members (can('members.read')).
@@ -77,6 +78,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
           <span class="link-text"><span class="link-label">{{ section.label }}</span><span class="link-summary">{{ section.summary }}</span></span>
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
+          <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'} for review`" />
         </RouterLink>
       </nav>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
@@ -118,6 +120,8 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 .link-label { font-weight: 600; font-size: 13.5px; }
 .link-summary { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--ink-3); }
+/* Doctrine proposals wait (AEON-444): a small neutral dot. */
+.waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }
 .body { min-width: 0; }
 .gate { display: grid; justify-items: center; gap: 8px; max-width: 560px; margin: 0 auto; padding: 40px 28px; text-align: center; }
 .gate h2 { font-size: 17px; }

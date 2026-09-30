@@ -22,6 +22,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type Details struct {
+	LocalAuthPublicKey string      `json:"local_auth_public_key,omitempty"`
 	ComputerName       string      `json:"computer_name"`
 	Platform           string      `json:"platform"`
 	Arch               string      `json:"arch"`
@@ -77,19 +78,20 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	AccountingState   string   `json:"accounting_state"`
-	LocalProcesses    string   `json:"local_processes"`
-	VerificationState string   `json:"verification_state"`
-	VerificationError string   `json:"verification_error"`
-	AccountID         string   `json:"account_id"`
-	AccountKey        string   `json:"account_key"`
-	Harness           string   `json:"harness"`
-	Label             string   `json:"label"`
-	ProfileID         string   `json:"model_profile_id"`
-	State             string   `json:"state"`
-	Cleanup           string   `json:"local_cleanup"`
-	VerificationRunID string   `json:"verification_run_id"`
-	ActiveRunIDs      []string `json:"active_run_ids"`
+	AccountingState    string   `json:"accounting_state"`
+	LocalProcesses     string   `json:"local_processes"`
+	VerificationState  string   `json:"verification_state"`
+	VerificationError  string   `json:"verification_error"`
+	VerificationReason string   `json:"verification_reason,omitempty"`
+	AccountID          string   `json:"account_id"`
+	AccountKey         string   `json:"account_key"`
+	Harness            string   `json:"harness"`
+	Label              string   `json:"label"`
+	ProfileID          string   `json:"model_profile_id"`
+	State              string   `json:"state"`
+	Cleanup            string   `json:"local_cleanup"`
+	VerificationRunID  string   `json:"verification_run_id"`
+	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
 	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`

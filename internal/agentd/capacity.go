@@ -414,6 +414,8 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		}
 		s.mu.Lock()
 		s.capacityCapturing = true
+		s.capacityStartedAt = time.Now()
+		s.capacityAccountID = a.ID
 		s.capacityAttempt[a.ID] = now
 		s.mu.Unlock()
 		s.dispatchMu.Unlock()
@@ -453,6 +455,8 @@ func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 		cancel()
 		s.mu.Lock()
 		s.capacityCapturing = false
+		s.capacityAccountID = ""
+		s.capacityStartedAt = time.Time{}
 		s.mu.Unlock()
 	}
 }

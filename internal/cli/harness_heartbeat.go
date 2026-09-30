@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
@@ -26,14 +28,16 @@ import (
 )
 
 const (
-	heartbeatSchema       = "aeon.harness-heartbeat.v1"
-	heartbeatInterval     = 50
-	heartbeatMaxCommits   = 20
-	heartbeatMaxTokens    = 1_000_000_000_000
-	heartbeatIndexMax     = 65536
-	heartbeatTitleLineMax = 4096
-	heartbeatUsageLineMax = 1 << 20
-	heartbeatNoteMax      = 120
+	heartbeatSchema        = "aeon.harness-heartbeat.v1"
+	heartbeatInterval      = 50
+	heartbeatMaxCommits    = 20
+	heartbeatMaxTokens     = 1_000_000_000_000
+	heartbeatIndexMax      = 65536
+	heartbeatTitleLineMax  = 4096
+	heartbeatUsageLineMax  = 1 << 20
+	heartbeatNoteMax       = 120
+	heartbeatProgressStale = 30 * time.Minute
+	heartbeatRemainingMax  = 364 * 24 * 60
 )
 
 // heartbeatStopTimeout bounds one stop attempt. The final usage flush has its
@@ -74,6 +78,7 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
 	Interval          int
@@ -141,6 +146,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
 			fs.string(&o.Worktree, "worktree", 0, "worktree path")
+			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
 			fs.string(&o.Branch, "branch", 0, "branch name")
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
@@ -151,7 +157,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
-			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source")
+			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
@@ -322,10 +328,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if heartbeatSettling(&session) {
 		explainClosedHeartbeat(rt, &session)
 		rt.settleGeneration(o, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if session.disk.Terminal {
 		explainClosedHeartbeat(rt, &session)
+		releaseSessionIndex(&session)
 		return nil
 	}
 	if created {
@@ -353,6 +361,11 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
 	}
+	if err := recordSessionIndex(rt, o, &session); err != nil {
+		return err
+	}
+	// Runs before hold.release, so every return after publish withdraws the binding.
+	defer releaseSessionIndex(&session)
 	return rt.heartbeatLoop(ctx, o, dep, &session)
 }
 
@@ -378,8 +391,10 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
+				releaseSessionIndex(session)
 				return serr
 			}
+			releaseSessionIndex(session)
 			return nil
 		case err != nil && ctx.Err() != nil:
 			return rt.finishHeartbeat(o, session)
@@ -473,6 +488,7 @@ func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession
 	}
 	if session.disk.Terminal {
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return nil
 	}
 	return rt.finishStop(o, session)
@@ -601,6 +617,7 @@ func (rt *runtime) finishStop(o heartbeatOptions, session *heartbeatSession) err
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
 		rememberSettlement(session)
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	return persistStopSuccess(session)
@@ -689,7 +706,9 @@ func persistStopSuccess(session *heartbeatSession) error {
 	if session.hold.dir != nil {
 		_ = session.hold.remove("stop.intent")
 	}
-	return saveHeartbeatSession(session)
+	err := saveHeartbeatSession(session)
+	releaseSessionIndex(session)
+	return err
 }
 
 // abandonHeartbeat closes a generation whose state could not be saved, and
@@ -701,9 +720,11 @@ func (rt *runtime) abandonHeartbeat(o heartbeatOptions, session *heartbeatSessio
 		fmt.Fprintf(rt.stderr, "heartbeat: could not close the new session\n")
 		_ = session.hold.writeFile("session.id", []byte(session.id+"\n"))
 		rememberStopIntent(session, false, 1, heartbeatStatus(err))
+		releaseSessionIndex(session)
 		return cause
 	}
 	_ = clearHeartbeatIdentity(&session.hold)
+	releaseSessionIndex(session)
 	return cause
 }
 
@@ -721,6 +742,10 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	session.hold = hold
 	defer func() {
 		if err != nil {
+			// The state lock is already held. A busy lock returns above, before
+			// this defer, and leaves the other helper's binding in place.
+			// Use the local hold: a named return replaces session before defers run.
+			releaseSessionIndex(&heartbeatSession{hold: hold})
 			hold.release()
 		}
 	}()
@@ -925,6 +950,7 @@ func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSessi
 			rememberSettlement(kept)
 			_ = saveHeartbeatSession(kept)
 		}
+		releaseSessionIndex(holder)
 		return stopErr
 	}
 	if kept != nil {
@@ -951,9 +977,11 @@ func (rt *runtime) finishBoundedStop(ctx context.Context, o heartbeatOptions, st
 		if strict {
 			fmt.Fprintf(rt.stderr, "heartbeat: owner %d failed the start check\n", o.OwnerPID)
 		}
+		releaseSessionIndex(&heartbeatSession{hold: hold})
 		return errHeartbeatStopBound
 	}
 	fmt.Fprintf(rt.stderr, "heartbeat: stop will not be retried\n")
+	releaseSessionIndex(&heartbeatSession{hold: hold})
 	return errHeartbeatStopRejected
 }
 
@@ -1026,9 +1054,29 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
+	status, statusOK := readAgentStatus(o)
+	now := time.Now().UTC()
+	if !statusOK {
+		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "status_file_unavailable", Hint: "Status file is missing, malformed or refused; keep pct (0–100) and remaining_min (0–524160) current in --status-file."}}, &session.disk.WarningAt, now)
+	}
+	if !status.ModifiedAt.IsZero() && now.Sub(status.ModifiedAt) > heartbeatProgressStale {
+		rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "stale_progress", Hint: "Status file has not been updated for over 30 minutes; refresh pct, remaining_min and note."}}, &session.disk.WarningAt, now)
+	}
+	if o.Role == "worker" && o.Ticket != "" {
+		if status.Progress != nil {
+			body["progress_pct"] = *status.Progress
+		}
+		if status.Remaining != nil {
+			ready := status.ModifiedAt.Add(time.Duration(*status.Remaining * float64(time.Minute)))
+			// Keep a margin inside the server window for client/server clock skew.
+			if !ready.Before(now.Add(-eta.MaxPast+eta.ClockSkew)) && !ready.After(now.Add(eta.MaxFuture-eta.ClockSkew)) {
+				body["eta_ready_at"] = ready.Format(time.RFC3339Nano)
+			}
+		}
+	}
 	note := heartbeatNote(o.Note)
 	if note == "" {
-		note = agentStatusNote(o.Worktree)
+		note = status.Note
 	}
 	if note != "" {
 		body["activity_note"] = note
@@ -1042,7 +1090,23 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		body["commits"] = items
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
-	err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
+	var response struct {
+		Warnings []harness.EstimateWarning `json:"warnings"`
+	}
+	postBeat := func() error {
+		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
+		// A ticket can be unbound while this helper retains its original flags.
+		// Optional status-file estimates must never prevent a liveness report.
+		if heartbeatStatus(err) == http.StatusBadRequest && (body["progress_pct"] != nil || body["eta_ready_at"] != nil) {
+			delete(body, "progress_pct")
+			delete(body, "eta_ready_at")
+			rt.printEstimateWarnings([]harness.EstimateWarning{{Code: "status_file_unavailable", Hint: "Status-file progress or ETA was rejected; continuing the heartbeat without those fields."}}, &session.disk.WarningAt, time.Now())
+			response.Warnings = nil
+			err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
+		}
+		return err
+	}
+	err = postBeat()
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
 		markHeartbeatTerminal(session, terminalReason(err))
@@ -1056,7 +1120,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
 			session.disk.Sequence = status.ActivitySequence + 1
 			body["activity_sequence"] = session.disk.Sequence
-			err = rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, new(any))
+			err = postBeat()
 		}
 	}
 	if heartbeatTerminalStatus(err) {
@@ -1073,6 +1137,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
 	}
+	rt.printEstimateWarnings(response.Warnings, &session.disk.WarningAt, time.Now())
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
@@ -1189,6 +1254,7 @@ func (rt *runtime) rejectDeadOwner(o heartbeatOptions, session *heartbeatSession
 	if err != nil {
 		rememberStopIntent(session, true, 1, heartbeatStatus(err))
 		_ = saveHeartbeatSession(session)
+		releaseSessionIndex(session)
 		return err
 	}
 	if err := persistStopSuccess(session); err != nil {
@@ -1519,31 +1585,61 @@ func heartbeatNote(raw string) string {
 	return string([]rune(clean)[:heartbeatNoteMax])
 }
 
-func agentStatusNote(worktree string) string {
-	if strings.TrimSpace(worktree) == "" {
-		return ""
+type agentStatus struct {
+	Note       string
+	Progress   *int
+	Remaining  *float64
+	ModifiedAt time.Time
+}
+
+func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
+	path, kind := o.StatusFile, harnessExplicitStatus
+	if path == "" {
+		if o.Role != "worker" || strings.TrimSpace(o.Worktree) == "" {
+			return agentStatus{}, true
+		}
+		path, kind = filepath.Join(o.Worktree, ".agent-status.json"), harnessAgentStatus
 	}
-	path := filepath.Join(worktree, ".agent-status.json")
-	f, err := openHarnessFile(harnessAgentStatus, path)
+	f, err := openHarnessFile(kind, path)
 	if err != nil {
-		return ""
+		return agentStatus{}, false
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil || st.Size() > 65536 {
-		return ""
+		return agentStatus{}, false
 	}
 	raw := make([]byte, st.Size())
 	if _, err := io.ReadFull(f, raw); err != nil {
-		return ""
+		return agentStatus{}, false
 	}
 	var doc struct {
-		Note string `json:"note"`
+		Note      string          `json:"note"`
+		Pct       json.RawMessage `json:"pct"`
+		Remaining json.RawMessage `json:"remaining_min"`
 	}
-	if json.Unmarshal(raw, &doc) != nil {
-		return ""
+	if json.Unmarshal(raw, &doc) != nil || string(bytesTrim(raw)) == "null" {
+		return agentStatus{}, false
 	}
-	return heartbeatNote(doc.Note)
+	status := agentStatus{Note: heartbeatNote(doc.Note), ModifiedAt: st.ModTime().UTC()}
+	valid := true
+	if len(doc.Pct) > 0 && string(doc.Pct) != "null" {
+		var n int
+		if json.Unmarshal(doc.Pct, &n) != nil || n < 0 || n > 100 {
+			valid = false
+		} else {
+			status.Progress = &n
+		}
+	}
+	if len(doc.Remaining) > 0 && string(doc.Remaining) != "null" {
+		var minutes float64
+		if json.Unmarshal(doc.Remaining, &minutes) != nil || math.IsNaN(minutes) || math.IsInf(minutes, 0) || minutes < 0 || minutes > heartbeatRemainingMax {
+			valid = false
+		} else {
+			status.Remaining = &minutes
+		}
+	}
+	return status, valid
 }
 
 func heartbeatStatus(err error) int {

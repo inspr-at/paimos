@@ -83,6 +83,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 func heartbeatRuntime(t *testing.T, srv *httptest.Server) (*runtime, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	isolate(t)
+	// Session-index maintenance must not touch the operator's real home.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
 	var stdout, stderr bytes.Buffer

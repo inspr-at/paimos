@@ -35,7 +35,7 @@ func refuseKindChange(ctx context.Context, tx pgx.Tx, current nodeJSON, raw map[
 	delete(raw, "kind")
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "state":
+		case "title", "body", "fields", "estimate_hours", "state":
 			return false, nil
 		}
 	}

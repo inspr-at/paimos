@@ -73,7 +73,7 @@ const (
 )
 
 // HarnessReasons lists the known reason codes in the order documented above.
-var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions"}
+var HarnessReasons = []string{"repin_pending", "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe, "login_required", "starting", "harness_failed", "cli_unavailable", "profile_permissions", "binding_missing", "probe_pending", "probe_timeout", "probe_failed", "capacity_capture", "capacity_timeout"}
 
 // HarnessFix is the one fix form for blocked_accounts and harness_details: a
 // kind and the exact CLI line. Commands are derived from the harness and reason
@@ -207,6 +207,8 @@ func RecoveryFix(harness, reason string) HarnessFix {
 		return HarnessFix{}
 	}
 	switch reason {
+	case "binding_missing":
+		return HarnessFix{FixAddHarness, "aeon-agentd add-harness --harness " + harness}
 	case "dependency_invalid", PinMissing, PinPartial, PinDrifted, PinInvalid, PinUnsafe:
 		if harness == "claude" {
 			return HarnessFix{FixRepin, "aeon-agentd repin --harness claude"}
@@ -224,7 +226,7 @@ func RecoveryFix(harness, reason string) HarnessFix {
 			command = "pi"
 		}
 		return HarnessFix{FixLogin, command}
-	case "harness_failed", "cli_unavailable", "profile_permissions":
+	case "harness_failed", "cli_unavailable", "profile_permissions", "probe_timeout", "probe_failed", "capacity_timeout":
 		return HarnessFix{FixRestart, "aeon-agentd setup"}
 	}
 	return HarnessFix{}
