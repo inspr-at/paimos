@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings / Accounts (AEON-384): the words for how an account is read, its
+// Settings → Accounts (AEON-384): the words for how an account is read, its
 // windows and last readings, inline rename, and the one Advanced sentence
 // ("Let agents use at most 20% of this account per day") that replaced the
 // allowance form. Limits set by hand before it show as "Set by you" with

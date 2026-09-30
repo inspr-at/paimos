@@ -30,7 +30,7 @@ async function openAgents(page: Page, path = '/agents') {
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
   await expect(page.locator('.agents-page .row').first()).toBeVisible()
 }
-// Account management lives in Settings / Accounts (AEON-299).
+// Account management lives in Settings → Accounts (AEON-299).
 async function grantAccounts(page: Page, manage = false) {
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)

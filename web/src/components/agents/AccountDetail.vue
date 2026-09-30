@@ -14,7 +14,7 @@ import AppIcon from '../AppIcon.vue'
 import PiAccountModel from '../settings/PiAccountModel.vue'
 import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
 
-// The inline detail of one account in Settings / Accounts (AEON-384): its
+// The inline detail of one account in Settings → Accounts (AEON-384): its
 // name, each window with source and freshness, the last three readings,
 // money for an API key, and the Advanced sentence. Limits set by hand before
 // the sentence stay as "Set by you" with Remove and Make this repeat.

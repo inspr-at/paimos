@@ -18,7 +18,7 @@ import AccountsCard from '../agents/AccountsCard.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
 import SettingsCard from './SettingsCard.vue'
 
-// Settings / Accounts: the place behind "Manage accounts" on the Agents desk.
+// Settings → Accounts: the place behind "Manage accounts" on the Agents desk.
 // Pausing an account and limits set by hand live here; sign-ins happen on the
 // computer itself, and credentials never reach Aeon.
 const agents = useAgents()

@@ -23,7 +23,7 @@ import ScheduleEditor from './ScheduleEditor.vue'
 // The accounts agents work on, per vendor pool: what is left, what is kept for
 // you, today's share and where to stop tonight, one plan sentence per pool, and
 // the pacing controls (work days, Keep for you, nights) with a popover each.
-// Sign-ins, names and which accounts agents may use live in Settings / Accounts.
+// Sign-ins, names and which accounts agents may use live in Settings → Accounts.
 const capacity = useCapacity()
 const agents = useAgents()
 const session = useSession()

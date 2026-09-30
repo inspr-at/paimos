@@ -43,7 +43,7 @@ export interface CapacityOptions {
   /** Away until Monday 08:00, set on the person's schedule. */
   away?: boolean
   /**
-   * Settings / Accounts (AEON-384): Main has the Advanced sentence (20% a day,
+   * Settings → Accounts (AEON-384): Main has the Advanced sentence (20% a day,
    * 12% used), Spare an old limit set by hand, Grok 5 runs a week (3 so far).
    */
   limits?: boolean
@@ -252,7 +252,7 @@ export function capacityWorld(options: CapacityOptions = {}) {
       return { status: 204 }
     }
     if (path === '/api/agent-pairing/computers' && method === 'GET') return { json: { computers } }
-    // Settings / Accounts (AEON-384): rename, the Advanced sentence, old limits, readings.
+    // Settings → Accounts (AEON-384): rename, the Advanced sentence, old limits, readings.
     const one = /^\/api\/agent-accounts\/([^/]+)\/(label|limit|readings|windows\/([^/]+)(\/repeat)?)$/.exec(path)
     if (!one) return null
     const [, id, what, windowId, repeat] = one
