@@ -998,7 +998,8 @@ root plus owner recorded at pairing or by `repin --harness claude`,
 `add-harness --harness codex` or `add-harness --harness cursor`; restart agentd
 after recording a fallback identity. Unknown layouts retain only the approved
 exact-file pin. Recorded roots survive removal of an old version and stay bound
-to the same pairing and account.
+to the same pairing and account. A recorded owner and root must match even
+when the running image still has the old exact path.
 The daemon does not interpret or execute wrappers to discover an install root.
 Every image and ancestor must satisfy the existing ownership and permission
 rules, and confirmation and polls recheck the image. Local HTTP 409 diagnostics
