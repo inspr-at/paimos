@@ -11,12 +11,13 @@ import { harnessLabel } from '../lib/agentState'
 import { myPermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
 import { useSession } from '../stores/session'
+import { PairingFollow } from '../lib/pairingFollow'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeProgress,
+  addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeHarnessStatus, describeProgress,
   formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
-  isAddHarness, lookupPairing, pairingPermissions,
-  pairingReadGeneration, peekPairingCode, planPoll, platformCaption, presentPublicGuide,
+  isAddHarness, lookupPairing, pairingLiveCopy, pairingPermissions,
+  pairingEventScope, pairingReadGeneration, peekPairingCode, platformCaption, presentPublicGuide, subscribePairingEvents,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
   chooseInstallMethod, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   connectDisabledReason, denyDisabledReason, unsupportedVerification, verifiableAccountKeys, verificationWarning,
@@ -60,6 +61,8 @@ const selectedTarget = computed(() => {
   return targets.find(item => `${item.platform}/${item.arch}` === platformKey.value) ?? targets[0] ?? null
 })
 const progress = computed(() => current.value ? describeProgress(current.value) : null)
+const liveCopy = computed(() => current.value ? pairingLiveCopy(current.value) : null)
+const computersRefresh = ref(0)
 const permissions = computed(() => pairingPermissions({
   permissions: [...myPermissions()],
   principalKind: session.identity?.principal.kind,
@@ -140,8 +143,12 @@ const verifyNote = computed(() => {
 })
 watch(verifyLocked, locked => { if (locked) verify.value = false })
 watch([verify, selected, current], () => { verificationChoice.value = false })
-let pollTimer = 0
-let pollStarted = 0
+// Follows the approved computer: polling with backoff, and a read when the live stream names it.
+const follower = new PairingFollow({
+  onView: view => { current.value = view; computersRefresh.value += 1 },
+  onFailure: error => assignError(error, 'The computer status could not be refreshed.'),
+})
+let stopLive = () => {}
 
 watch(guide, value => {
   const first = value?.install_targets[0]
@@ -160,6 +167,7 @@ const stopAccess = onAccessChange(change => { if (change === 'reset') clearSigne
 watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
 onMounted(async () => {
+  stopLive = subscribePairingEvents(() => pairingEventScope(current.value), () => follower.poke())
   window.addEventListener('online', onLine)
   window.addEventListener('offline', onLine)
   await loadGuide()
@@ -182,7 +190,8 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   stopAccess()
-  if (pollTimer) window.clearTimeout(pollTimer)
+  stopLive()
+  follower.stop()
   window.removeEventListener('online', onLine)
   window.removeEventListener('offline', onLine)
 })
@@ -197,9 +206,8 @@ function clearSignedInPreview() {
   message.value = ''
   nextStep.value = ''
   busy.value = ''
-  pollStarted = 0
+  follower.stop()
   permissionsReady.value = false
-  if (pollTimer) window.clearTimeout(pollTimer)
 }
 
 function onLine() { online.value = navigator.onLine }
@@ -251,7 +259,7 @@ async function lookup() {
     verify.value = verifiableHarnesses(found, selected.value).length > 0
     allowAgents.value = true
     approvalPending.value = false
-    armPoll(found)
+    follower.follow(found)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started !== pairingReadGeneration()) return
@@ -287,9 +295,11 @@ async function connect() {
     if (started !== pairingReadGeneration()) return
     grantedKeys.value = keys
     current.value = approved
+    // The daemon reports after this click. Follow it now; account approval must not hold the first read.
+    follower.follow(approved)
+    computersRefresh.value += 1
     if (allowAgents.value) await approveAccounts(approved, keys)
     if (started !== pairingReadGeneration()) return
-    armPoll(approved)
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started === pairingReadGeneration()) assignError(error, 'The computer was not connected.')
@@ -363,8 +373,7 @@ function resetCode() {
   approvalPending.value = false
   message.value = ''
   nextStep.value = ''
-  pollStarted = 0
-  if (pollTimer) window.clearTimeout(pollTimer)
+  follower.stop()
 }
 
 function reviewAsNewComputer() {
@@ -421,34 +430,8 @@ function chooseAccount(harness: string, accountKey: string) {
   selected.value = setHarnessAccount(current.value.requested_accounts, selected.value, harness, accountKey || null)
 }
 
-function armPoll(pairing: PairingView) {
-  if (pollTimer) window.clearTimeout(pollTimer)
-  if (!pollStarted) pollStarted = Date.now()
-  const computerId = pairing.computer_id
-  const phase = describeProgress(pairing).phase
-  const failed = pairing.setup_state === 'setup_failed' || pairing.enrollments.some(item => item.verification_state === 'failed' || item.verification_state === 'cancelled' || item.verification_state === 'expired' || item.verification_state === 'ownership_lost')
-  if (!computerId || failed || phase === 'connected' || phase === 'expired' || phase === 'denied' || phase === 'revoked') return
-  const plan = planPoll({ startedAt: pollStarted, now: Date.now(), intervalSeconds: pairing.interval_seconds, state: pairing.state })
-  if (plan.action === 'stop') return
-  pollTimer = window.setTimeout(() => void refreshComputer(computerId), plan.delayMs)
-}
-
-async function refreshComputer(computerId: string) {
-  try {
-    const started = pairingReadGeneration()
-    const pairing = await getPairingComputer(computerId)
-    if (started !== pairingReadGeneration() || current.value?.computer_id !== computerId) return
-    current.value = pairing
-    armPoll(pairing)
-  } catch (error) {
-    if (error instanceof PairingError && error.code === 'session_reset') return
-    if (error instanceof PairingError && error.code === 'rate_limited') {
-      const plan = planPoll({ startedAt: pollStarted, now: Date.now(), rateLimited: true, retryAfterSeconds: error.retryAfterSeconds, state: current.value?.state })
-      if (plan.action === 'wait') pollTimer = window.setTimeout(() => void refreshComputer(computerId), plan.delayMs)
-      return
-    }
-    assignError(error, 'The computer status could not be refreshed.')
-  }
+function harnessState(enrollment: PairingView['enrollments'][number]) {
+  return current.value ? describeHarnessStatus(current.value, enrollment.harness) : ''
 }
 
 function assignError(error: unknown, fallback: string) {
@@ -623,8 +606,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
     <section v-else-if="progress" class="card" aria-live="polite" aria-label="Pairing review">
       <header class="review-head">
         <div>
-          <h2 ref="reviewTitle" tabindex="-1">{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : progress.title }}</h2>
-          <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : progress.detail }}</p>
+          <h2 ref="reviewTitle" tabindex="-1">{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : liveCopy?.title }}</h2>
+          <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : liveCopy?.detail }}</p>
         </div>
         <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">Use a different code</button>
       </header>
@@ -676,12 +659,13 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </template>
 
       <div v-else class="progress-copy">
-        <p>{{ progress.next }}</p>
+        <p>{{ liveCopy?.next }}</p>
         <ul class="enrollments">
           <li v-for="enrollment in current.enrollments" :key="enrollment.account_id">
             <HarnessMark :harness="enrollment.harness" :size="16" />
             <div class="enrollment-text">
               <p><strong>{{ enrollment.label }}</strong> <span class="sub">{{ harnessLabel(enrollment.harness) }}</span></p>
+              <p v-if="harnessState(enrollment)" class="sub">{{ harnessState(enrollment) }}</p>
               <p class="sub">{{ enrollmentDetail(enrollment) }}</p>
             </div>
           </li>
@@ -705,7 +689,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
     <p v-if="message" class="problem" role="alert">{{ message }}</p>
     <p v-if="nextStep" class="next">{{ nextStep }}</p>
 
-    <ConnectedComputers :permissions="permissions" />
+    <ConnectedComputers :permissions="permissions" :refresh-token="computersRefresh" />
   </article>
 </template>
 

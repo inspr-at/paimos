@@ -48,6 +48,22 @@ does not implement Aithema's snapshot-only plugin protocol or change Aithema's
 separate `pending_op.payload` limit (AIT-89); the adapter integration remains
 tracked by AEON-360.
 
+Aithema token primitives live in `internal/aithema/tokens`. Hosts with an HTTPS
+`AEON_PUBLIC_URL` expose public Ed25519 keys at `GET /api/aithema/jwks`; the exact
+URL is the issuer and delegated audience, while session tokens use `aithema`.
+The host-wide key set is owned by the bootstrap tenant under forced RLS and
+encrypted with the existing session-key secret, a signing-specific derivation,
+and the existing AES-GCM vault. Keep that host secret stable across restarts;
+HTTPS development also requires a persistent `AEON_SESSION_KEY_FILE`.
+Keys rotate daily on use; a next key is prepublished and retired public keys
+remain for 960 seconds. Discovery caches for at most 60 seconds and supports
+ETags; HTTP-only development returns noncacheable 503. Trusted integrations can
+mint session/delegated claims and rotate through the package API. Both claim
+sets are closed, enforce a 900-second maximum lifetime and preserve safe
+integers before conversion; `nbf` is refused because the binding schema does
+not permit it. Verification grants no route access: project, generation and
+epoch freshness checks remain AEON-360's responsibility. No journal is required.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space

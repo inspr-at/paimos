@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ci-runner-guard checks the reviewed workflows' runner selections. The NIX-600
+// ci-runner-guard enforces repository-wide CI and runner workflow policy. The NIX-600
 // runner-side boundary enforces admission even when a PR edits this guard.
 // Unknown dynamic selections fail closed.
 package main
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,6 +18,30 @@ import (
 
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+
+const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}`
+
+// These exact mappings are the sole authority for workflow concurrency. Jobs
+// never own concurrency, and reusable workflows cannot enter a caller's group.
+var workflowConcurrency = map[string]map[string]any{
+	"ci.yml": {
+		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' }}`,
+	},
+	"release.yml": {
+		"group": `release-${{ github.ref }}`, "cancel-in-progress": false,
+	},
+	"homebrew-tap.yml": {
+		"group": `homebrew-tap-${{ github.event.release.tag_name }}`, "cancel-in-progress": false,
+	},
+	"release-image-check.yml": {
+		"group": `release-image-check-${{ github.ref }}`, "cancel-in-progress": true,
+	},
+}
+
+var reservedCIJobs = map[string]bool{
+	"go": true, "web": true, "release-check": true, "e2e": true,
+	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
+}
 
 var matrixRunner = regexp.MustCompile(`^\$\{\{\s*matrix\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}$`)
 
@@ -50,7 +75,7 @@ func main() {
 	if len(problems) != 0 {
 		os.Exit(1)
 	}
-	fmt.Println("runner guard: reviewed workflows keep PRs and release/image/attestation/pin jobs GitHub-hosted")
+	fmt.Println("workflow guard: CI identities, triggers and concurrency are isolated; reviewed runner boundaries hold")
 }
 
 func checkDirectory(dir string) ([]string, error) {
@@ -92,10 +117,88 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 	if len(jobs) == 0 {
 		return nil, fmt.Errorf("workflow has no jobs")
 	}
+	problems := checkWorkflowPolicy(name, workflow)
+	return append(problems, checkRunnerJobs(name, workflow)...), nil
+}
+
+// Apply before runner selection, including uses: jobs; runner admission must
+// never short-circuit repository-wide identity, trigger or concurrency rules.
+func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 	var problems []string
+	reject := func(reason string) { problems = append(problems, name+": "+reason) }
 	if hasEvent(workflow["on"], "pull_request_target") {
-		problems = append(problems, name+": pull_request_target is forbidden")
+		reject("pull_request_target is forbidden")
 	}
+	if concurrency, exists := workflow["concurrency"]; exists {
+		if hasEvent(workflow["on"], "workflow_call") {
+			reject("reusable workflows must not define concurrency")
+		}
+		group, _ := mapping(concurrency)["group"].(string)
+		if scalar, ok := concurrency.(string); ok {
+			group = scalar
+		}
+		if name != "ci.yml" && strings.EqualFold(compact(group), compact(ciConcurrencyGroup)) {
+			reject("other workflows must not copy ci.yml's concurrency group")
+		}
+		if expected, allowed := workflowConcurrency[name]; !allowed {
+			reject("workflow-level concurrency is not allowlisted")
+		} else if !reflect.DeepEqual(mapping(concurrency), expected) {
+			reject("must retain the exact reviewed concurrency policy")
+		}
+	} else if name == "ci.yml" {
+		reject("must retain the exact reviewed concurrency policy")
+	}
+	for id, value := range mapping(workflow["jobs"]) {
+		job := mapping(value)
+		if _, exists := job["concurrency"]; exists {
+			reject(fmt.Sprintf("job %q must not override workflow-level concurrency", id))
+		}
+		if name != "ci.yml" {
+			jobName, _ := job["name"].(string)
+			if reservedCIJobs[strings.ToLower(strings.TrimSpace(id))] || reservedCIJobs[strings.ToLower(strings.TrimSpace(jobName))] {
+				reject(fmt.Sprintf("job %q id and name are reserved to ci.yml", id))
+			}
+		}
+	}
+	if name == "ci.yml" {
+		if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
+			reject(err.Error())
+		}
+	} else if hasEvent(workflow["on"], "pull_request") {
+		pr := mapping(mapping(workflow["on"])["pull_request"])
+		_, paths := pr["paths"]
+		_, ignored := pr["paths-ignore"]
+		if paths == ignored || !(validPaths(pr["paths"]) || validPaths(pr["paths-ignore"])) {
+			reject("pull_request outside ci.yml requires nonempty paths or paths-ignore")
+		}
+	}
+	return problems
+}
+
+func validPaths(value any) bool {
+	paths, ok := value.([]any)
+	if !ok || len(paths) == 0 {
+		return false
+	}
+	for _, value := range paths {
+		path, ok := value.(string)
+		if !ok || strings.TrimSpace(path) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func checkRunnerJobs(name string, workflow map[string]any) []string {
+	jobs := mapping(workflow["jobs"])
+	var problems []string
+	routeID := "runner-route"
+	if name == "test-runner-smoke.yml" {
+		routeID = "smoke-route"
+	}
+	// The smoke caller has a distinct identity but identical event/ref/attempt
+	// guards. No other caller can rename the reviewed router dependency.
+	runnerExpression := strings.ReplaceAll(routedRunner, "needs.runner-route.", "needs."+routeID+".")
 	for id, value := range jobs {
 		job := mapping(value)
 		reject := func(reason string) { problems = append(problems, name+"/"+id+": "+reason) }
@@ -109,7 +212,7 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 			continue
 		}
 		selection, ok := job["runs-on"].(string)
-		if ok && compact(selection) == compact(routedRunner) {
+		if ok && compact(selection) == compact(runnerExpression) {
 			if shards, exists := mapping(mapping(job["strategy"])["matrix"])["shard"]; exists {
 				selection, ok := shards.(string)
 				if !ok || compact(selection) != compact(routedGoShards) {
@@ -122,7 +225,7 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 			if containsAMD64Artifact(job) || containsAMD64Artifact(workflow["env"]) || containsAMD64Artifact(workflow["defaults"]) {
 				reject("routed jobs run on Linux ARM64 and must not reference amd64/x86_64/x86-64/i[3-6]86/x64 artifacts")
 			}
-			if !hasNeed(job["needs"], "runner-route") || mapping(jobs["runner-route"])["uses"] != "./.github/workflows/test-runner-route.yml" {
+			if !hasNeed(job["needs"], routeID) || mapping(jobs[routeID])["uses"] != "./.github/workflows/test-runner-route.yml" {
 				reject("routed tests must depend on the hosted runner-route workflow")
 			}
 			if job["environment"] != nil || containsSecret(job) || containsSecret(workflow["env"]) {
@@ -150,7 +253,63 @@ func checkWorkflow(name string, body []byte) ([]string, error) {
 			reject("runner selection is not proven hosted or event-guarded; mbp2606 is forbidden on PRs")
 		}
 	}
-	return problems, nil
+	return problems
+}
+
+func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
+	events := mapping(workflow["on"])
+	var names []string
+	for name := range events {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, []string{"merge_group", "pull_request", "push", "workflow_dispatch"}) {
+		return fmt.Errorf("CI must cover main, PRs, the merge queue and manual runs exactly once: %v", names)
+	}
+	if !reflect.DeepEqual(mapping(events["push"]), map[string]any{"branches": []any{"main"}}) {
+		return fmt.Errorf("branch and tag pushes outside main must not duplicate PR CI: %v", events["push"])
+	}
+	if events["pull_request"] != nil {
+		return fmt.Errorf("required PR checks must run without path or activity filters: %v", events["pull_request"])
+	}
+	if !reflect.DeepEqual(mapping(events["merge_group"]), map[string]any{"types": []any{"checks_requested"}}) {
+		return fmt.Errorf("merge queue check requests must run CI: %v", events["merge_group"])
+	}
+
+	// These are the active main ruleset's contexts. Renaming or conditionally
+	// skipping them would strand a PR or merge queue waiting for its checks.
+	jobs := mapping(workflow["jobs"])
+	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
+		job := mapping(jobs[id])
+		if job == nil {
+			return fmt.Errorf("required CI job %q is missing", id)
+		}
+		if id == "go-static" || id == "go-timing" {
+			if _, exists := job["if"]; exists {
+				return fmt.Errorf("required CI job %q must run without an if condition", id)
+			}
+		}
+	}
+	for _, context := range []string{"go", "web", "release-check", "e2e"} {
+		job := mapping(jobs[context])
+		if job == nil {
+			return fmt.Errorf("required check %q is missing", context)
+		}
+		if name, exists := job["name"]; exists && name != context {
+			return fmt.Errorf("required check %q renamed to %v", context, name)
+		}
+		if context == "go" {
+			if job["if"] != "always()" {
+				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
+			}
+			if !reflect.DeepEqual(job["needs"], []any{"go-test", "go-static", "go-timing"}) {
+				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
+			}
+		} else if _, exists := job["if"]; exists {
+			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+		}
+	}
+	return nil
 }
 
 func mapping(v any) map[string]any {

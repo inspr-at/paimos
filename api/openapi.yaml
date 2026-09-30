@@ -6,6 +6,52 @@ info:
 servers:
   - url: /api
 paths:
+  /aithema/jwks:
+    get:
+      operationId: aithemaJWKS
+      summary: Public Aithema token verification keys
+      description: Host-wide Ed25519 signing keys (active, prepublished next, and retired keys during the 960-second overlap). Requires no authentication. Private keys are never returned.
+      security: []
+      responses:
+        "200":
+          description: Public JSON Web Key Set
+          headers:
+            Cache-Control:
+              schema: {type: string, const: "public, max-age=60, must-revalidate"}
+            ETag:
+              schema: {type: string}
+          content:
+            application/jwk-set+json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [kty, crv, alg, use, kid, x]
+                      properties:
+                        kty: {type: string, const: OKP}
+                        crv: {type: string, const: Ed25519}
+                        alg: {type: string, const: EdDSA}
+                        use: {type: string, const: sig}
+                        kid: {type: string}
+                        x: {type: string}
+        "304": {description: Public key set unchanged}
+        "503":
+          description: Signing key store unavailable or HTTPS token issuer not configured
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, code]
+                properties:
+                  error: {type: string}
+                  code: {type: string, const: unavailable}
   /rules/layers:
     get:
       operationId: "listRuleLayers"
@@ -929,7 +975,7 @@ paths:
       security: []
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingReconcileRequest"}}}}
       responses:
-        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '200': {"description": "Pairing result; see state and cleanup fields. A change of setup state or harness report appends agent_pairing.reported (computer_id and setup_state only) to /events and /events/stream. Only the person who approved the pairing reads it; other people, agent keys and other tenants do not. An unchanged heartbeat appends nothing.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
         '400': {description: Invalid or mismatched request}
         '403': {description: Person permission and same-origin approval required}
         '404': {description: Request or proof not found}
