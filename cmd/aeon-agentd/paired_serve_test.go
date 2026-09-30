@@ -35,6 +35,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 		{"old server", "invalid attach request", 400},
 		{"protocol refusal", "update agentd to attach protocol 2", 409},
 		{"proof refusal", "computer proof rejected", 403},
+		{"consent version refusal", "upgrade paimos-agentd to local consent proof v2", 409},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Keep the real generation socket below Darwin's path limit.
@@ -65,7 +66,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 				case "/api/agent-pairing/attach":
 					registrations.Add(1)
 					if updated.Load() {
-						_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
+						_ = json.NewEncoder(w).Encode(map[string]any{"state": "registered", "local_consent_proof_version": attachwatch.LocalConsentProofVersion})
 						return
 					}
 					if tc.status == 400 {
@@ -220,11 +221,12 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 	var registrations []string
 	var mu sync.Mutex
 	refuse := 0
+	proofVersion := attachwatch.LocalConsentProofVersion
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		var in attachwatch.DeviceRequest
-		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.AttachProtocol != attachwatch.Protocol || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" || !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
+		if r.Method != "POST" || r.URL.Path != "/api/agent-pairing/attach" || json.NewDecoder(r.Body).Decode(&in) != nil || in.Operation != "register" || in.AttachProtocol != attachwatch.Protocol || in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion || in.ComputerID != computer || in.DeviceProof != lifecycle || len(in.PollKey) != 64 || in.PollKey == lifecycle || in.Text != "" || !attachwatch.LocalAuthCapabilityReported(in.LocalAuthCapability) {
 			t.Error("invalid daemon-start registration")
 			w.WriteHeader(403)
 			return
@@ -235,7 +237,11 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 			w.WriteHeader(refuse)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
+		ack := map[string]any{"state": "registered"}
+		if proofVersion != 0 {
+			ack["local_consent_proof_version"] = proofVersion
+		}
+		_ = json.NewEncoder(w).Encode(ack)
 	}))
 	defer server.Close()
 	view := agentsetup.View{RequestID: request, TenantID: tenant, ComputerID: computer, PrincipalID: principal}
@@ -266,6 +272,17 @@ func TestPairedAttachRegistersFreshMemoryOnlyKeyAtEveryStart(t *testing.T) {
 	if !distinct {
 		t.Fatal("daemon restart reused poll key")
 	}
+	for _, version := range []int{0, 1, 3} {
+		mu.Lock()
+		refuse, proofVersion = 0, version
+		mu.Unlock()
+		if manager, err := pairedAttach(root, c, remote); err == nil || manager != nil || !strings.Contains(err.Error(), "upgrade Aeon and paimos-agentd") {
+			t.Fatal("missing or unsupported server proof version left attach enabled")
+		}
+	}
+	mu.Lock()
+	refuse, proofVersion = 403, attachwatch.LocalConsentProofVersion
+	mu.Unlock()
 	if manager, err := pairedAttach(root, c, remote); err == nil || manager != nil {
 		t.Fatal("registration failure left attach enabled")
 	}

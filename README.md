@@ -1175,14 +1175,22 @@ Conversation watching shares only new turns after activation with people
 explicitly granted `harness.watch` in the project. Status-only (`snapshot.mode=lease`)
 opens no transcript, rejects conversation text and has no conversation viewer.
 The project permission remains off for all built-in roles and is never implied
-by `harness.read` or `nodes.read`. Both attach modes require protocol 2. An older
-daemon connecting to a newer server still registers and keeps serving work; its
-attach requests receive HTTP 409 `update_agentd` and cannot create a watch or
-lease. The released older terminal helper shows `local lifecycle request rejected`
+by `harness.read` or `nodes.read`. Both attach modes require protocol 2 and
+`local_consent_proof_version=2`, negotiated at startup registration. A
+protocol-less older daemon still registers and keeps serving work; its attach
+requests receive HTTP 409 `update_agentd` and cannot create a watch or lease.
+An AEON-460 protocol-2 daemon with an omitted or v1 proof version is refused at
+registration with HTTP 409 `update_agentd` and “upgrade paimos-agentd” guidance,
+before approval or Touch ID; ordinary work continues with attachment disabled.
+The released older terminal helper shows `local lifecycle request rejected`
 (the daemon's local refusal is `paired instance refused attach`), rather than
-the server's update message. Update agentd, restart it and give fresh approval.
+the server's update message. Upgrade `paimos-agentd`, restart it and give fresh
+approval. Existing pairing capabilities and Enclave keys remain valid; the proof
+format upgrade does not require re-pairing. The updated daemon requires the
+server's v2 acknowledgement and refuses missing or unknown proof versions.
 A newer daemon connecting to an older server receives HTTP 400 on attach
-registration because that server rejects the unknown `attach_protocol` field.
+registration because that server rejects an unknown `attach_protocol` or
+`local_consent_proof_version` field.
 The daemon logs the server's refusal, disables attach and keeps serving work
 and local control. An attach attempt through that daemon shows
 `local lifecycle request rejected`. After updating the server, restart agentd
@@ -1203,7 +1211,9 @@ can attach. It also runs the real serve loop through registration refusals,
 checks that work polling and local control continue with attach disabled, and
 restarts against an updated server to recover attach. Server regressions verify
 that protocol-less registrations keep daemon identity usable while every attach
-operation requires an update, even if later requests claim protocol 2.
+operation requires an update, even if later requests claim protocol 2. Consent
+proof regressions reject v1 and unknown versions before approval, reject a v1
+signature, and accept v2 using the unchanged browser-pinned pairing key.
 `TestAttachModesProtectionMatrix` checks consent, mode tampering and terminal
 states in both modes, sending text on refused watch polls. Early text at pending,
 discovery, local-confirmation and activation stages detaches without a session.
