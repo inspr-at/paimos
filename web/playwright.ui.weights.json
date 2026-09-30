@@ -1,5 +1,5 @@
 {
-  "source": "CI 36707092811 at d5aab020: actual single-worker durations for all 241 groups on Ubuntu ARM with the complete test graph. Mac runner measurement will replace this baseline.",
+  "source": "CI 36707092811 at d5aab020: actual single-worker durations for all 241 groups on Ubuntu ARM with the complete test graph. Standard Linux fan-out retained after the Mac experiment exceeded queue and runtime targets.",
   "durationMs": {
     "a11y.spec.ts": 208572,
     "access.spec.ts": 88828,

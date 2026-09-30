@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
 }
 /* Keep the complete state word and the chip on one line in a 320px card. */
 @media (max-width: 420px) {
-  .live-chip, .as-row .live-chip { gap: 3px; padding-inline: 4px 6px; }
+  .live-chip, .as-row .live-chip { gap: 3px; }
   .words { gap: 3px; }
 }
 /* ---------- The popover ---------- */

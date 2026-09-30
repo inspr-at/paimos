@@ -182,7 +182,8 @@ jobs:
   playwright:
     name: playwright
     needs: [playwright-shard]
-    if: ${{ always() && !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
+    # A timed-out shard must fail this required gate, rather than skip it.
+    if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
