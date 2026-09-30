@@ -16,8 +16,14 @@ import (
 // Logo limits. The header draws a logo at most 32 px high and 160 px wide, so
 // 32 px on the short side is the least that stays crisp, and a logo may be
 // square, wide (up to 8:1) or a little tall (down to 1:2).
-// A raster logo also has at most 4 megapixels (4096×1024, or 2048×2048), which
-// bounds what a decode may allocate.
+// A raster logo also has at most 4 megapixels (4096×1024, or 2048×2048). That
+// bounds the pixel buffer a decode allocates (4 bytes a pixel, 16 MiB at most),
+// not the decoder's own tables: a lossless WebP sizes its Huffman groups from
+// indexes in the file, so 96 bytes at 32×32 made golang.org/x/image v0.36.0
+// allocate 167 MiB. Those tables are bounded by the decoder, x/image v0.45.0 or
+// later (fewer than 2600 groups, and no more than the image has tiles beyond
+// 1000); TestVP8LHuffmanBomb measures it, so a downgrade fails. Module admits
+// one decode at a time on top of that.
 const (
 	MaxLogoBytes  = 256 << 10
 	minLogoSide   = 32

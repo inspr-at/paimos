@@ -44,9 +44,19 @@ const EventType = "tenant.brand_updated"
 const maxShortName = 32
 
 // Module serves the brand settings and the logo images.
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool *pgxpool.Pool
+	// decoding admits one logo check at a time. What a single decode may
+	// allocate is bounded by the pixel limit and by the decoder (see
+	// maxLogoPixels); this bound is our own and holds whatever the decoder
+	// does: however many uploads arrive at once, only one decode's memory is
+	// live.
+	decoding chan struct{}
+}
 
-func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
+func New(pool *pgxpool.Pool) *Module {
+	return &Module{pool: pool, decoding: make(chan struct{}, 1)}
+}
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings/brand", m.settings(false, m.get))
@@ -196,6 +206,17 @@ func (m *Module) putName(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	return m.record(r.Context(), tx, p, before)
 }
 
+// checkLogo runs ValidateLogo once no other check is running.
+func (m *Module) checkLogo(ctx context.Context, declared string, body []byte) (Logo, error) {
+	select {
+	case m.decoding <- struct{}{}:
+	case <-ctx.Done():
+		return Logo{}, ctx.Err()
+	}
+	defer func() { <-m.decoding }()
+	return ValidateLogo(declared, body)
+}
+
 func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	v, err := variant(r)
 	if err != nil {
@@ -205,11 +226,13 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	logo, err := ValidateLogo(r.Header.Get("Content-Type"), body)
+	logo, err := m.checkLogo(r.Context(), r.Header.Get("Content-Type"), body)
 	var tooLarge TooLargeError
 	switch {
 	case errors.As(err, &tooLarge):
 		return nil, failure{http.StatusRequestEntityTooLarge, codeLogoTooLarge, err.Error()}
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return nil, err
 	case err != nil:
 		return nil, fail(http.StatusBadRequest, err.Error())
 	}

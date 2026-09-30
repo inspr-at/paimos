@@ -5,15 +5,20 @@ package tenantbrand
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"hash/crc32"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/image/webp"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Samples from cwebp 64×64: lossless (VP8L), lossy (VP8) and lossy with an
@@ -216,5 +221,96 @@ func TestPNGBombIsRefusedBeforeDecoding(t *testing.T) {
 		if _, err := ValidateLogo("image/png", b); !errors.Is(err, errUnreadable) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// bitWriter packs values least significant bit first, as VP8L reads them.
+type bitWriter struct {
+	b []byte
+	n uint
+}
+
+func (w *bitWriter) put(v uint32, bits uint) {
+	for i := range bits {
+		if w.n%8 == 0 {
+			w.b = append(w.b, 0)
+		}
+		w.b[len(w.b)-1] |= byte(v>>i&1) << (w.n % 8)
+		w.n++
+	}
+}
+
+// oneSymbol writes a simple prefix code with the single symbol s.
+func (w *bitWriter) oneSymbol(s uint32) {
+	w.put(1, 1) // simple code
+	w.put(0, 1) // one symbol
+	if s > 1 {
+		w.put(1, 1)
+		w.put(s, 8)
+	} else {
+		w.put(0, 1)
+		w.put(s, 1)
+	}
+}
+
+// vp8lHuffmanBomb is the review's shape: a w×h lossless frame, 96 bytes as a
+// file, whose one-tile meta prefix image names Huffman group 65535. A decoder
+// that sizes its group table from the largest index allocates 65536 groups
+// (167 MiB on x/image v0.36.0) before it reads the first one.
+func vp8lHuffmanBomb(w, h int) []byte {
+	var bw bitWriter
+	bw.put(0x2f, 8)
+	bw.put(uint32(w-1), 14)
+	bw.put(uint32(h-1), 14)
+	bw.put(0, 4) // no alpha hint, version 0
+	bw.put(0, 1) // no transform
+	bw.put(0, 1) // no colour cache
+	bw.put(1, 1) // a meta prefix image follows
+	bw.put(7, 3) // 512-px tiles: one tile up to 512×512
+	// The prefix image: one pixel, red 0xff and green 0xff, so group 0xffff.
+	bw.put(0, 1) // no colour cache
+	// Its codes: green, red, blue, alpha, distance.
+	for _, s := range []uint32{0xff, 0xff, 0, 0, 0} {
+		bw.oneSymbol(s)
+	}
+	frame := bw.b
+	// Pad to the review's 96 bytes; the decoder reads no further than the
+	// group table's first code.
+	frame = append(frame, make([]byte, 96-20-len(frame))...)
+	return riff(chunk("VP8L", frame))
+}
+
+func TestVP8LHuffmanBomb(t *testing.T) {
+	for _, side := range []int{32, 512} {
+		b := vp8lHuffmanBomb(side, side)
+		if len(b) != 96 {
+			t.Fatalf("%d: sample is %d bytes", side, len(b))
+		}
+		// The library itself must refuse it (x/image v0.45.0 and later).
+		if _, err := webp.Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "too many Huffman trees") {
+			t.Errorf("%d: webp.Decode: %v", side, err)
+		}
+		var err error
+		if n := allocated(func() { _, err = ValidateLogo("image/webp", b) }); n > 16<<20 {
+			t.Errorf("%d: allocated %d bytes", side, n)
+		}
+		if !errors.Is(err, errUnreadable) {
+			t.Errorf("%d: %v", side, err)
+		}
+	}
+}
+
+// An upload waits while another logo is being checked, and gives up with its
+// request.
+func TestLogoChecksTakeTurns(t *testing.T) {
+	m := New(nil)
+	m.decoding <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	r := httptest.NewRequestWithContext(ctx, "PUT", "/api/settings/brand/logo/light", bytes.NewReader(unhex(t, webpLossless)))
+	r.SetPathValue("variant", "light")
+	r.Header.Set("Content-Type", "image/webp")
+	if _, err := m.putLogo(r, nil, tenant.Principal{}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("putLogo while another check runs: %v", err)
 	}
 }
