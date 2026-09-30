@@ -3,13 +3,15 @@
 // person's one schedule, and which computers are online. Sprint and Hold ride on
 // pool schedule entries (the AEON-297 contract); those entries copy the person's
 // schedule, so a schedule change is carried into them and a finished override is
-// removed instead of leaving a stale copy behind.
+// removed instead of leaving a stale copy behind. Keep for you (AEON-375) is the
+// person's reserve on their own schedule, a pool may carry its own, and Away
+// rides on the person's schedule until its date.
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import { listPairingComputers, type PairingView } from '../lib/agentPairing'
 import {
-  buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride,
-  type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ScheduleOverride,
+  activeOverride, buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride, stripReserve, withReserve,
+  type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ReserveMode, type ScheduleOverride,
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
 import { usePolledData } from '../lib/usePolledData'
@@ -26,6 +28,7 @@ export const useCapacity = defineStore('capacity', () => {
   const gaugePref = usePreference<GaugePreference>('agents.capacity.gauge')
   const state = computed(() => capacityRead.status.value.state)
   const loaded = computed(() => capacityRead.status.value.updatedAt !== null)
+  const schedulesLoaded = computed(() => schedulesRead.status.value.updatedAt !== null)
   const stale = computed(() => capacityRead.stale.value)
 
   async function load() {
@@ -41,11 +44,14 @@ export const useCapacity = defineStore('capacity', () => {
     const computer = computerOf.value.get(a.id)
     return {
       id: a.id, label: a.label, harness: a.harness, host: a.host_label || computer?.computer_name || a.daemon_id, state: a.state, last_probe_ok: a.last_probe_ok, plan: a.plan,
+      fingerprint: a.quota_fingerprint, groupId: a.group_id, groupName: a.group_name,
       // The computer's setup flag is computer-wide; sign-ins are judged per account (probe_failure).
       connectivity: computer?.connectivity,
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
+  /** The raw projection per account: windows, the Advanced limit, API-key spend. */
+  const byAccount = computed(() => new Map(capacityRead.data.value.map(c => [c.account_id, c])))
   const pools = computed(() => buildPools(rows.value, agents.now))
   const ready = computed(() => ({ live: rows.value.filter(r => r.state === 'live').length, total: rows.value.length }))
   const signins = computed(() => rows.value.filter(r => r.state === 'signin'))
@@ -62,14 +68,29 @@ export const useCapacity = defineStore('capacity', () => {
     return own ? stripOverride(own) : defaultSchedule(timezone.value)
   })
   const poolEntry = (pool: string) => entries.value.find(e => e.scope === 'pool' && e.pool === pool)
+  /** Away until this instant, while it is in force; empty otherwise. */
+  const away = computed(() => (activeOverride(userEntry.value, agents.now) === 'away' ? userEntry.value?.override_until ?? '' : ''))
+  /** The one-time plan card stays until the person has chosen a reserve once. */
+  const reserveConfirmed = computed(() => !!userEntry.value?.reserve)
+  const hasUserSchedule = computed(() => !!userEntry.value)
+  /** Each pool's own Keep for you; '' follows the person's. */
+  const poolReserves = computed(() => {
+    const out: Record<string, { reserve: ReserveMode; percent?: number }> = {}
+    for (const e of entries.value) if (e.scope === 'pool' && e.pool && e.schedule?.reserve) out[e.pool] = { reserve: e.schedule.reserve, percent: e.schedule.reserve_percent }
+    return out
+  })
+  const keepAway = (body: CapacitySchedule): CapacitySchedule => (away.value ? { ...body, override: 'away', override_until: away.value } : body)
 
   function local(next: ScheduleOverride[]) { schedulesRead.invalidate(); schedulesRead.data.value = next }
-  // One request: the server saves the schedule and carries every entry that only
-  // holds Sprint/Hold in the same transaction, so a save is all or nothing. A
-  // failure propagates to the caller (the editor stays open, no "Saved"), and the
-  // refresh puts the screen back to what the server has.
+  // Work days, nights and the editors change the shape; Keep for you and Away ride along.
   async function saveSchedule(next: CapacitySchedule) {
-    const body = stripOverride(clone(next))
+    await saveUser(keepAway(stripOverride(clone(next))))
+  }
+  // One request: the server saves the schedule and carries every entry that only
+  // holds Sprint/Hold or its own reserve in the same transaction, so a save is all
+  // or nothing. A failure propagates to the caller (the editor stays open, no
+  // "Saved"), and the refresh puts the screen back to what the server has.
+  async function saveUser(body: CapacitySchedule) {
     const before = entries.value
     local([...before.filter(e => e.scope !== 'user'), { scope: 'user', schedule: body }])
     try {
@@ -100,23 +121,62 @@ export const useCapacity = defineStore('capacity', () => {
   async function setNights(on: boolean) {
     await saveSchedule({ ...clone(schedule.value), nights: on })
   }
-  async function setPoolOverride(pool: string, value: Override) {
-    const entry = poolEntry(pool)
-    const carrier = !entry?.schedule || sameShape(entry.schedule, schedule.value)
-    const shape = carrier ? schedule.value : stripOverride(entry!.schedule!)
+  /** Sprint, Hold (optionally until a time) or back to the plan; a pool's own reserve stays. */
+  async function setPoolOverride(pool: string, value: Override, until?: string) {
+    const group = pool.startsWith('group:') ? pool.slice('group:'.length) : ''
+    const entry = group
+      ? entries.value.find(e => e.scope === 'group' && e.group_id === group)?.schedule ?? null
+      : poolEntry(pool)?.schedule ?? null
+    const carrier = !entry || sameShape(entry, schedule.value)
+    const own = entry?.reserve ?? ''
+    const shape = withReserve(stripReserve(carrier ? schedule.value : stripOverride(entry!)), own, entry?.reserve_percent)
+    const write = (body: CapacitySchedule | null) => group
+      ? putSchedule({ scope: 'group', group_id: group, schedule: body })
+      : putSchedule({ scope: 'pool', pool: pool as Pool, schedule: body })
     try {
-      if (!value && carrier) await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: null })
-      else await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: { ...clone(shape), override: value } })
+      if (!value && carrier && !own) await write(null)
+      else await write({ ...clone(shape), override: value, ...(value === 'hold' && until ? { override_until: until } : {}) })
     } finally {
       await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
     }
   }
+  /**
+   * Keep for you: the person's reserve and Away in one save, then each pool
+   * whose own reserve changed. A pool that follows the person again and carries
+   * nothing else is removed.
+   */
+  async function saveKeep(draft: { reserve: ReserveMode; percent?: number; away: string; pools: Record<string, { reserve: ReserveMode; percent?: number }> }) {
+    const body = withReserve(stripOverride(clone(schedule.value)), draft.reserve, draft.percent)
+    await saveUser(draft.away ? { ...body, override: 'away', override_until: draft.away } : body)
+    try {
+      for (const [pool, want] of Object.entries(draft.pools)) {
+        const entry = poolEntry(pool)?.schedule ?? null
+        const percent = want.reserve === 'fixed' ? want.percent : undefined
+        if ((entry?.reserve ?? '') === want.reserve && entry?.reserve_percent === percent) continue
+        if (!entry) {
+          if (want.reserve) await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: withReserve(stripReserve(stripOverride(schedule.value)), want.reserve, percent) })
+          continue
+        }
+        const override = activeOverride(entry, agents.now)
+        if (!want.reserve && !override && sameShape(entry, schedule.value)) { await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: null }); continue }
+        const next = withReserve(override ? entry : stripOverride(entry), want.reserve, percent)
+        await putSchedule({ scope: 'pool', pool: pool as Pool, schedule: next })
+      }
+    } finally {
+      await Promise.all([schedulesRead.refresh(), capacityRead.refresh()])
+    }
+  }
+  /** The plan card's answer: keep Auto, or turn the reserve off. */
+  const confirmReserve = (mode: 'auto' | 'off') => saveUser(keepAway(withReserve(stripOverride(clone(schedule.value)), mode)))
+  /** End Away now (the header chip's close). */
+  const endAway = () => saveUser(stripOverride(clone(schedule.value)))
 
   const gauge = computed(() => gaugePref.value.value)
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
-    state, loaded, stale, load, inputs, rows, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    state, loaded, stale, load, inputs, rows, byAccount, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate: () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() },
   }
 })

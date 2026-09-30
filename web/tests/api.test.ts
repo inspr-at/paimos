@@ -88,7 +88,10 @@ test('R1 mutations send JSON, tolerate 204, and surface API failures', async () 
   }
   assert.equal((await updateNode('node/id', { body: '# Changed' })).body, '# Changed')
   globalThis.fetch = async () => new Response(null, { status: 204 })
-  assert.equal(await deleteNode('node-1'), undefined)
+  assert.deepEqual(await deleteNode('node-1'), { revision: null })
+  // A delete names the revision of its event (AEON-326).
+  globalThis.fetch = async () => new Response(null, { status: 204, headers: { 'aeon-revision': '2026-09-29T10:00:04.000001Z' } })
+  assert.deepEqual(await deleteNode('node-2'), { revision: '2026-09-29T10:00:04.000001Z' })
   respond({ error: 'Owner only' }, 403)
   await assert.rejects(deleteNode('node-1'), error => error instanceof APIError && error.status === 403 && error.message === 'Owner only')
   globalThis.fetch = async () => new Response('gateway unavailable', { status: 502 })
@@ -96,7 +99,7 @@ test('R1 mutations send JSON, tolerate 204, and surface API failures', async () 
 })
 
 test('R2 reads and mutations use only the human-session contract', async () => {
-  const { listAccounts, getRun, listApprovals, setAccountState, decideApproval, revokeApproval, createWindow } = await import('../src/lib/agents.ts')
+  const { listAccounts, getRun, listApprovals, setAccountState, decideApproval, revokeApproval } = await import('../src/lib/agents.ts')
   const calls: { url: string; method: string; body: unknown }[] = []
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined })
@@ -108,8 +111,6 @@ test('R2 reads and mutations use only the human-session contract', async () => {
   await setAccountState('account/id', 'draining')
   await decideApproval('approval/id', 'denied', 'Wrong resource')
   await revokeApproval('approval/id')
-  const window = { starts_at: '2026-09-23T10:00:00Z', ends_at: '2026-09-23T12:00:00Z', unit: 'tokens' as const, allowance: 1000, pace_model: 'frontload' as const, burst_ratio: 0.1 }
-  await createWindow('account/id', window)
   assert.deepEqual(calls, [
     { url: '/api/agent-accounts', method: 'GET', body: undefined },
     { url: '/api/runs/run%2Fid', method: 'GET', body: undefined },
@@ -117,7 +118,6 @@ test('R2 reads and mutations use only the human-session contract', async () => {
     { url: '/api/agent-accounts/account%2Fid', method: 'PATCH', body: { state: 'draining' } },
     { url: '/api/approvals/approval%2Fid/decision', method: 'POST', body: { decision: 'denied', reason: 'Wrong resource' } },
     { url: '/api/approvals/approval%2Fid/revoke', method: 'POST', body: undefined },
-    { url: '/api/agent-accounts/account%2Fid/windows', method: 'POST', body: window },
   ])
 })
 
@@ -130,22 +130,4 @@ test('R2 failures retain HTTP status and tolerate non-JSON error bodies', async 
   }
   globalThis.fetch = async () => new Response('Unavailable', { status: 502 })
   await assert.rejects(getRun('run-1'), /Request failed \(502\)/)
-})
-
-test('pacing curves preserve steady/frontload policy and hard allowance bounds', async () => {
-  const { paceFraction } = await import('../src/lib/agents.ts')
-  assert.equal(paceFraction('steady', 0.5, 0.1), 0.6)
-  assert.equal(paceFraction('frontload', 0.5, 0.1), 0.85)
-  assert.equal(paceFraction('unrestricted', 0, 0), 1)
-  assert.equal(paceFraction('steady', -1, 0.1), 0.1)
-  for (const model of ['steady', 'frontload', 'unrestricted'] as const) {
-    assert.equal(paceFraction(model, 2, 0.1), 1)
-    assert.equal(paceFraction(model, 0.75, 1), 1)
-    let previous = 0
-    for (let step = 0; step <= 100; step++) {
-      const value = paceFraction(model, step / 100, 0.1)
-      assert.ok(value >= previous && value <= 1)
-      previous = value
-    }
-  }
 })

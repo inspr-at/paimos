@@ -193,6 +193,61 @@ test('/ opens the palette only where the page has no list search', async ({ page
   await expect(palette(page)).toBeVisible()
 })
 
+test('Tab during an in-flight search runs the visible action', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  await page.keyboard.press('Control+k')
+  await page.keyboard.type('hetzner')
+  await expect(group(page, 'Tickets')).toHaveCount(2)
+  let release = () => {}
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => url.pathname === '/api/nodes' && (url.searchParams.get('q') ?? '').includes('shortcut'), async route => {
+    await held
+    await route.fallback().catch(() => undefined)
+  })
+  try {
+    await palette(page).getByRole('combobox').fill('shortcuts')
+    const option = palette(page).getByRole('group', { name: 'Actions' }).getByRole('option', { name: 'Keyboard shortcuts' })
+    await expect(option).toBeVisible()
+    await expect(option).toHaveAttribute('aria-selected', 'true')
+    await expect(palette(page).getByRole('option')).toHaveCount(1)
+    await page.keyboard.press('Tab')
+    await expect(option).toHaveAttribute('aria-selected', 'true')
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
+  } finally {
+    release()
+  }
+})
+
+test('Cmd+K selects the query and Ctrl+K moves the highlight', async ({ page }) => {
+  await openProjects(page)
+  await page.keyboard.press('Control+k')
+  const input = palette(page).getByRole('combobox')
+  await page.keyboard.type('hetzner')
+  const options = palette(page).getByRole('option')
+  await expect(group(page, 'Tickets')).toHaveCount(2)
+  await expect(options.first()).toHaveAttribute('aria-selected', 'true')
+  await input.evaluate(el => { const field = el as HTMLInputElement; field.setSelectionRange(field.value.length, field.value.length) })
+  await page.keyboard.press('Meta+k')
+  await expect(palette(page)).toBeVisible()
+  await expect(options.first()).toHaveAttribute('aria-selected', 'true')
+  expect(await input.evaluate(el => {
+    const field = el as HTMLInputElement
+    return field.value === 'hetzner' && field.selectionStart === 0 && field.selectionEnd === field.value.length
+  })).toBe(true)
+  await input.evaluate(el => { const field = el as HTMLInputElement; field.setSelectionRange(field.value.length, field.value.length) })
+  await page.keyboard.press('Control+k')
+  await expect(palette(page)).toBeVisible()
+  await expect(options.first()).toHaveAttribute('aria-selected', 'false')
+  await expect(options.last()).toHaveAttribute('aria-selected', 'true')
+  expect(await input.evaluate(el => {
+    const field = el as HTMLInputElement
+    return field.selectionStart === field.value.length && field.selectionEnd === field.value.length
+  })).toBe(true)
+})
+
 test('a newer query cancels the one still in flight', async ({ page }) => {
   await openProjects(page)
   const failed: string[] = []

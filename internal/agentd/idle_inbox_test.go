@@ -185,6 +185,7 @@ func TestCodexIdleInboxStartsTurnOnSameThreadAndBusySteers(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.emit(t, lifecycleUsage)
+	f.emit(t, `{"method":"thread/settings/updated","params":{"threadId":"synthetic-thread","threadSettings":{"model":"model-b"}}}`)
 	f.emit(t, lifecycleTerminal)
 	select {
 	case <-f.proc.done:
@@ -227,6 +228,12 @@ func TestCodexIdleInboxStartsTurnOnSameThreadAndBusySteers(t *testing.T) {
 			}
 		case <-time.After(time.Second):
 			t.Fatal("delivery hung")
+		}
+		f.proc.eventMu.Lock()
+		model := f.proc.capacityModel
+		f.proc.eventMu.Unlock()
+		if model != "model-a" {
+			t.Fatal("new turn retained the previous turn's quota model")
 		}
 	}
 	f.emit(t, `{"method":"thread/tokenUsage/updated","params":{"threadId":"synthetic-thread","turnId":"second-turn","model":"model-a","tokenUsage":{"total":{"inputTokens":120,"outputTokens":25,"cachedInputTokens":30}}}}`)

@@ -25,6 +25,7 @@ func (rt *runtime) cmdIssue() *Command {
 			rt.cmdIssueGet(),
 			rt.cmdIssueCreate(),
 			rt.cmdIssueUpdate(),
+			rt.cmdIssueConvert(),
 			rt.cmdIssueEstimate(),
 			rt.cmdIssueComment(),
 			rt.cmdIssueMove(),
@@ -190,7 +191,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
 			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
-			fs.string(&typ, "type", 0, "new type")
+			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
 			fs.string(&priority, "priority", 0, "new priority")
 			fs.string(&parent, "parent", 0, "new parent key or id:<n>")
@@ -236,7 +237,11 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			if err := validateRouteFlags(role, area); err != nil {
 				return err
 			}
-			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile+role+area) != "" ||
+			if err := rt.noteKindUpdate(args[0], typ); err != nil {
+				return err
+			}
+			askedKind := strings.TrimSpace(typ) != ""
+			changed := strings.TrimSpace(title+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile+role+area) != "" ||
 				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed() || estimate != ""
 			if estimate != "" {
 				if _, err := parseEstimate(estimate); err != nil {
@@ -244,6 +249,9 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				}
 			}
 			if !changed {
+				if askedKind {
+					return nil
+				}
 				return usagef("nothing to update")
 			}
 			if dryRun {
@@ -251,11 +259,35 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				return nil
 			}
 			return rt.updateIssue(issuePatch{
-				Estimate: estimate, Benefits: benefits, Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
+				Estimate: estimate, Benefits: benefits, Ref: args[0], Title: title, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
 				RouteRole: role, Area: area,
 			})
+		},
+	}
+}
+
+func (rt *runtime) cmdIssueConvert() *Command {
+	var to string
+	return &Command{
+		Name:    "convert",
+		Short:   "Point a person at kind conversion",
+		Use:     "issue convert <ref> --to <kind>",
+		Long:    "Does not convert. A person converts a kind in the web app. The command checks --to against this tenant's issue-family kinds, prints the ticket link, and exits.",
+		minArgs: 1,
+		maxArgs: 1,
+		addFlags: func(fs *flagSet) {
+			fs.string(&to, "to", 0, "issue-family kind a person converts to")
+		},
+		run: func(args []string) error {
+			if _, err := normalizeIssueRef(args[0]); err != nil {
+				return err
+			}
+			if strings.TrimSpace(to) == "" {
+				return usagef("--to is required")
+			}
+			return rt.convertIssue(args[0], strings.TrimSpace(to))
 		},
 	}
 }

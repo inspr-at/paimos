@@ -128,6 +128,9 @@ func ladderHasHarness(steps []ladderStep, harness string) bool {
 
 func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, health map[string]agentaccounts.HarnessHealth) []string {
 	var reasons []string
+	if role.cross && step.Profile.Family == "unknown" {
+		reasons = append(reasons, "unknown author family")
+	}
 	if role.cross && step.Profile.Family == q.AuthorFamily {
 		reasons = append(reasons, "author family")
 	}

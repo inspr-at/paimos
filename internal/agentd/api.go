@@ -418,6 +418,9 @@ func (r *Remote) ProbeStatus(ctx context.Context, accountID, daemonID, generatio
 	if host, err := os.Hostname(); err == nil && host != "" && len(host) <= 128 {
 		body["host_label"] = host
 	}
+	if status.OpenRouterCredits != nil {
+		body["openrouter_credits"] = status.OpenRouterCredits
+	}
 	path := "/api/agent-accounts/" + url.PathEscape(accountID) + "/probe"
 	err := r.Client.Do(ctx, "POST", path, body, nil)
 	if err != nil && body["failure"] != nil {
@@ -442,4 +445,11 @@ func ValidateBaseURL(raw string) error {
 		return nil
 	}
 	return errors.New("AEON URL must use HTTPS outside loopback")
+}
+
+// RefuseVerification reports no-launch evidence through the existing claim path.
+func (r *Remote) RefuseVerification(ctx context.Context, run, daemon, generation, reason string) error {
+	return r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(run)+"/claim", map[string]any{
+		"daemon_id": daemon, "daemon_generation": generation, "reservation_ids": []string{}, "verification_unavailable": reason,
+	}, nil)
 }

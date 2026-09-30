@@ -64,6 +64,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }], ['o']], label: 'Open the ticket in the side panel' },
     { keys: [['Esc']], label: 'Close the side panel' },
     { keys: [['/']], label: 'Search this list' },
+    { keys: [['u']], label: 'Show updates made elsewhere' },
     { keys: [[{ icon: 'shift', label: 'Shift' }, 'F']], label: 'Filter by labels, epic, cost unit, release or date' },
     { keys: [['-']], label: 'In a filter menu: exclude the value' },
   ] },
@@ -114,6 +115,7 @@ const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
 async function open() {
+  if (dialog.value?.open) return
   opener = document.activeElement as HTMLElement
   dialog.value?.showModal()
   await nextTick()

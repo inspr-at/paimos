@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -85,6 +86,7 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
+	quotaIDs    sync.Map
 	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
 	Path        string
 	Homes       map[string]string
@@ -105,7 +107,11 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
-	capacityParser capacity.Parser
+	capacityParser   capacity.Parser
+	capacityModel    string
+	lastCapacity     []capacity.Reading
+	pendingLimit     *capacity.LimitHit
+	pendingLimitTurn string
 	*wireProcess
 	persistent                                               bool
 	idleTimeout                                              time.Duration
@@ -205,7 +211,8 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if err != nil {
 		return nil, err
 	}
-	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile}
+	p.limitVendor = Codex
+	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1), persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose, idleTimeout: a.IdleTimeout, profile: r.Profile, capacityModel: r.Profile.Model}
 	p.setOnEvent(cp.notification)
 	fail := p.failStart
 	op, cancel := operationContext(ctx)
@@ -223,15 +230,22 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
 	var account struct {
 		Account *struct {
-			Type  string  `json:"type"`
-			Email *string `json:"email"`
+			ID    string `json:"id"`
+			Type  string `json:"type"`
+			Email string `json:"email"`
 		} `json:"account"`
 	}
-	if err != nil || json.Unmarshal(raw, &account) != nil || account.Account == nil || account.Account.Type != "chatgpt" || account.Account.Email == nil ||
-		!strings.EqualFold(strings.TrimSpace(*account.Account.Email), expectedEmail) {
+	if err != nil || json.Unmarshal(raw, &account) != nil || account.Account == nil || account.Account.Type != "chatgpt" ||
+		!agentsetup.CodexAccountMatches(expectedEmail, account.Account.Email) {
 		return fail(errors.New("Codex account identity mismatch"))
 	}
+	if account.Account.ID != "" {
+		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
+	}
 	cp.readCapacity(op, "start")
+	if p.vendorLimited.Load() {
+		return fail(errors.New("Codex capacity refused run"))
+	}
 	var thread struct {
 		Thread struct {
 			ID string `json:"id"`
@@ -252,6 +266,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
+	if thread.Model != "" {
+		cp.capacityModel = thread.Model
+	}
 	// An unsupported attribution leaves session tokens unreported; it must not
 	// prevent the existing run protocol and settlement from operating.
 	cp.usage, _ = sessionusage.NewManagedCodex(p.threadID, r.Profile.Model)
@@ -269,6 +286,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
+	OpenRouter openrouter.Client
 	Path       string
 	Homes      map[string]string
 	Providers  map[string]string
@@ -279,6 +297,7 @@ type PiAdapter struct {
 }
 
 type piProbeResult struct {
+	credits              *openrouter.Credits
 	path, home, provider string
 	node                 piprobe.Node
 	expires              time.Time
@@ -415,6 +434,11 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	if a.Providers != nil && provider != a.Providers[r.AccountKey] {
 		return nil, errors.New("Pi model provider differs from the enrolled account")
 	}
+	if provider == "openrouter" {
+		if err := agentsetup.ConfigureOpenRouterModel(home, model); err != nil {
+			return nil, err
+		}
+	}
 	queue, err := openPiQueue(r)
 	if err != nil {
 		return nil, err
@@ -423,13 +447,14 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		return nil, errors.New("Pi held queue requires explicit operator reconciliation")
 	}
 	childEnv := harnesslaunch.Environment(withEnv("PI_CODING_AGENT_DIR", home), a.Nodes[r.AccountKey].Path)
-	if a.Providers != nil {
+	if a.Providers != nil || provider == "openrouter" {
 		childEnv = piprobe.Environment(home, a.Nodes[r.AccountKey].Path)
 	}
 	p, err := launchWire(a.Path, []string{"--mode", "rpc", "--no-session", "--provider", provider, "--model", model, "--thinking", r.Profile.Effort}, r.Workspace, childEnv, "pi", observe)
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Pi
 	pp := &piProcess{wireProcess: p, provider: provider, model: model, effort: r.Profile.Effort, queue: queue,
 		scope: piHeldQueue{TenantID: r.TenantID, PrincipalID: r.PrincipalID, RunID: r.Run.ID, Generation: r.Generation}}
 	p.setOnEvent(func(raw json.RawMessage) {
@@ -542,6 +567,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil {
 		return nil, err
 	}
+	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
 	var costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
@@ -565,6 +591,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		if len(frame.ID) > 0 && strings.Trim(string(frame.ID), "\"") == cp.promptID {
+			if hit := capacity.VendorLimit(Cursor, raw, nil, time.Now().UTC()); hit != nil {
+				observe(limitEvent(hit))
+			}
 			var result struct {
 				StopReason string `json:"stopReason"`
 			}
@@ -641,6 +670,9 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 var claudeAssets embed.FS
 
 type ClaudeAdapter struct {
+	quotaIDs                      sync.Map
+	quotaCache                    *sync.Map
+	usage                         *claudeUsageCapability
 	NodePath, SDKPath, ClaudePath string
 	Workspace                     string
 	Homes                         map[string]string
@@ -653,10 +685,25 @@ func NewClaudeAdapter(nodePath, sdkPath, claudePath string, homes map[string]str
 func (*ClaudeAdapter) Name() string                                 { return Claude }
 func (a *ClaudeAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 
+// clone shares verified quota identities without copying sync.Map's locks.
+// Runtime paths are local to each launch; configuration is immutable once bound.
+func (a *ClaudeAdapter) clone() *ClaudeAdapter {
+	return &ClaudeAdapter{quotaCache: a.quotaIdentities(), usage: a.usage,
+		NodePath: a.NodePath, SDKPath: a.SDKPath, ClaudePath: a.ClaudePath,
+		Workspace: a.Workspace, Homes: a.Homes, Emails: a.Emails}
+}
+
+func (a *ClaudeAdapter) quotaIdentities() *sync.Map {
+	if a.quotaCache != nil {
+		return a.quotaCache
+	}
+	return &a.quotaIDs
+}
+
 func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	var configured *ClaudeAdapter
 	if a.Workspace != "" && workspace != a.Workspace {
-		bound := *a
+		bound := a.clone()
 		bound.Workspace = ""
 		var err error
 		configured, err = bound.resolved(a.Workspace)
@@ -669,7 +716,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	}
 	deps, err := agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: a.NodePath, SDKPath: a.SDKPath}, workspace)
 	if err != nil {
-		return nil, errors.New("Claude dependencies changed/invalid: run aeon-agentd repin --harness claude; " + err.Error())
+		return nil, &agentsetup.HarnessIssue{Reason: "dependency_invalid", Err: errors.New("Claude dependencies changed/invalid: run aeon-agentd repin --harness claude; " + err.Error())}
 	}
 	cli, err := agentsetup.ResolveClaudeExecutable(a.ClaudePath, workspace)
 	if err != nil {
@@ -678,9 +725,9 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 	if configured != nil && (configured.NodePath != deps.NodePath || configured.SDKPath != deps.SDKPath || configured.ClaudePath != cli) {
 		return nil, errors.New("Claude dependency links changed during launch validation")
 	}
-	resolved := *a
+	resolved := a.clone()
 	resolved.NodePath, resolved.SDKPath, resolved.ClaudePath = deps.NodePath, deps.SDKPath, cli
-	return &resolved, nil
+	return resolved, nil
 }
 
 type claudeProcess struct {
@@ -833,6 +880,32 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 					at = time.Now().UTC()
 				}
 				readings := capacityParser.Claude(payload.Event, at)
+				if hit := capacity.VendorLimit(Claude, payload.Event, readings, at); hit != nil {
+					phase := "update"
+					if !capacitySeen {
+						phase = "start"
+					}
+					if payload.Phase == "end" {
+						phase = "end"
+					}
+					if len(hit.Readings) == 0 {
+						for i := range readings {
+							readings[i].Phase = phase
+						}
+						if len(readings) > 0 {
+							capacitySeen = true
+							observe(AdapterEvent{Capacity: readings})
+						}
+					} else {
+						hit.Readings = overlayNamedReadings(readings, hit.Readings)
+						for i := range hit.Readings {
+							hit.Readings[i].Phase = phase
+						}
+						capacitySeen = len(hit.Readings) > 0
+					}
+					observe(limitEvent(hit))
+					return
+				}
 				for i := range readings {
 					readings[i].Phase = "update"
 					if !capacitySeen {
@@ -841,6 +914,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 					if payload.Phase == "end" {
 						readings[i].Phase = "end"
 					}
+				}
+				// A rejection that names no window does not change stored
+				// percentages. The one-hour vendor stop is the fallback.
+				if capacity.ClaudeUnnamedStop(payload.Event) {
+					observe(AdapterEvent{Kind: "usage", ErrorCode: "vendor_limit"})
 				}
 				if len(readings) > 0 {
 					capacitySeen = true

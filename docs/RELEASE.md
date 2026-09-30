@@ -8,7 +8,7 @@ Releases up to `260929113854.0.0` (release 10, sequence 105) were reserved under
 
 The version pill uses the shared INSPR renderer: six segments (`YY·MM·DD hh:mm`, seconds on hover, focus or tap), never the `v` or `.0.0`. Copying always yields the exact canonical version, `.0.0` included. The label table (`schemes.json`) names the schemes INSPR-CalVer3, INSPR-CalVer2 and INSPR-CalVer1.
 
-The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. `scripts/release-tag.mjs` checks that a pushed tag has that shape. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
+The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. Create an annotated tag with a message: `git tag -a "$tag" -m "Release $tag"`. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
 
 Development builds leave the linker version at `dev`. A release build sets:
 
@@ -33,7 +33,7 @@ The `image` job starts independently of the macOS jobs (AEON-407):
 
 In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
 
-Publication remains the coordinator's explicit step after deployment and live verification. AEON-356's separate `homebrew-tap.yml` runs on `release: published`. The tag workflow never opens a tap pull request while the release is draft. The tap workflow renders `Formula/aeon-agentd.rb` from that release's darwin `SHA256SUMS` entries and, when its App secrets are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. Absent secrets skip the bump. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+Publication remains the coordinator's explicit step after deployment and live verification of the exact image digest, version and health. Failed or incomplete verification leaves the release a draft. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
 To verify a published image independently, use its exact digest and source commit:
 
@@ -51,6 +51,24 @@ The attestation action uses the existing `packages`, `attestations` and OIDC wri
 `.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. It runs the workflow regression tests, generates offline release history, imports the same registry cache, loads the production build and runs the same smoke gate. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
 
 Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
+
+### Publish after live verification (AEON-356)
+
+Run this explicit step from the release coordinator's checked-out release commit, only after recording the successful live verification against the image digest in the draft notes. Confirm the tag, draft state and complete nine-asset set (eight binaries plus `SHA256SUMS`); do not publish a draft from a failed or partial tag workflow.
+
+```sh
+tag="v$(node -p 'require("./version.json").version')"
+gh release view "$tag" --repo inspr-at/paimos --json tagName,isDraft,assets,body
+# After live verification and inspection above:
+gh release edit "$tag" --repo inspr-at/paimos --draft=false
+gh release view "$tag" --repo inspr-at/paimos --json tagName,isDraft,publishedAt,url
+```
+
+Use the coordinator's approved GitHub CLI identity (or an approved GitHub App identity) with release write access. Do not publish using a workflow's `GITHUB_TOKEN`: GitHub suppresses downstream release-event workflows for that token. Publishing via this CLI step emits `release.published`, which starts the Homebrew workflow at the release tag. The new workflow must be included in the tagged commit. See GitHub's [release event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release) and [workflow token restrictions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+
+Confirm `isDraft: false`, public asset availability, and the Homebrew workflow result/PR before considering distribution complete. If the tap job fails, fix its cause and rerun that job; do not rerun the tag build, toggle publication to retrigger it, replace assets, or reuse the coordinate. The tap PR still follows its own checks and merge approval. Missing app secrets mean no automatic PR; record that result for the coordinator to resolve before claiming Homebrew is updated.
+
+Drafts are excluded from public release discovery and GitHub's `latest` endpoint. The tap script uses unauthenticated exact-tag metadata and asset requests, with an explicit published-state check before any tap mutation. The server's installation guide already pins the running server version and uses unauthenticated exact asset URLs; it never enumerates authenticated drafts or substitutes `latest`. Between server deployment and publication those downloads fail closed, and Homebrew still offers its previously merged release. Publication makes the same pinned URLs available without a server rebuild. Never give these consumers credentials to read drafts. See GitHub's [release API visibility rules](https://docs.github.com/en/rest/releases/releases#list-releases).
 
 ## Image smoke gate
 
@@ -117,20 +135,75 @@ Deleted/unavailable public members remain explicit gap entries. `captured_at`,
 release revision and each member's `updated_at` record the observation. No live API or
 classic database is contacted by the history builder.
 
-The release coordinator reviews that export and records its exact JSON bytes at
-`release-notes/<version>.json` in the release commit **before tagging**. Use the
-configured `paimos --instance … curl` API client; no code discovers credentials
-from other applications or files. The export is read-only, not a publication
-permission or an immutable server snapshot. It includes hidden fields for
-provenance: record it only in the release's authorized source/artifact context.
-Do not add snapshots to already-published tags or rebuild an old artifact under
-its original coordinate.
+At reservation, the release coordinator reviews that export and freezes its
+public projection in `internal/releasehistory/data/product-notes.json` **before
+tagging** (AEON-372):
 
-`internal/releasehistory/generate` reads only that file **from its matching
-annotated Git tag**, including under `-offline`. Current worktree files and later
-ticket edits cannot change those notes. The generated manifest records the exact
+```sh
+go run ./internal/releasehistory/packnotes -repo . -snapshot SNAPSHOT.json -reserve VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+```
+
+`VERSION` must match `version.json`. Both UUIDs bind the source to the selected
+PPM tenant and AEON project. This explicit reserve step may freeze an unpublished
+preview; historical snapshot imports must already be frozen. Historic ticket
+exports use the separate explicit workflow below. Use the configured API
+client with `releases.read`/`nodes.read` to obtain the export. Keep the raw export
+in its authorized local context: it may contain hidden text and tenant IDs and
+must not be committed as the public projection. The generated file contains
+only public ticket keys, pills, benefits, captured groups and capture provenance.
+Review and commit it with the reservation. Identical reruns are idempotent
+only with that same export file: a fresh export has a new `captured_at` and
+conflicts. Restore the file before re-reserving; do not export the preview again.
+Conflicting entries fail instead of rewriting a reserved version.
+
+For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
+one directory and run the same command with `-snapshots DIRECTORY -tenant
+TENANT_UUID -project AEON_PROJECT_UUID`. A run with no exports imports only
+authoritative snapshots already in local tags and reports missing versions.
+Alternatively, save an authorized PPM `GET /api/releases` response, record that
+workspace's `tenant_id` and `project_node_id` on the saved file, and pass
+`-history HISTORY.json -tenant TENANT_UUID -project AEON_PROJECT_UUID`. Prefer
+`-history` over `-snapshots` for backfill. A snapshot file from before group
+storage has no group, and this snapshot import cannot derive one offline; those embedded
+items then take a group from the viewing tenant's own tickets, which usually
+means Features. `-history` records the group the serving workspace already
+derived. The two identifiers must match the flags; a file for another workspace
+is rejected. This consumes only `database-snapshot` or immutable tag-snapshot
+notes, never `changes.linked_tickets`. It records each ticket's group, including
+a group the server derived from the live classification when the snapshot itself
+had none. The explicit historic-ticket workflow below is the only import of current
+ticket fields for missing snapshots; release PR bodies and pills.tsv are not sources.
+Existing tags and artifacts stay unchanged; the new
+binary carries the backfill. Migration `0997` captures future groups alongside
+the five note fields. Older snapshots have no group. Serving those classifies
+every commit ticket from the current classification, not only the tickets the
+capture tells: a hidden bug, a ticket with no pill or benefit, and a commit
+ticket that was not a release member. A bug is a fix and a visible benefit is a
+feature, the same rule as AEON-289. Only those two facts are read. The captured
+pill and benefit stay frozen, and live pill or benefit text never enters
+`linked_tickets`. The history export above records that group, so other
+workspaces see Fixes from the embedded notes.
+
+A release with no capture uses that same classification for `changes[].group`.
+It loses live-text Highlights by design: the no-live-text rule keeps pill and
+benefit text out of the response, so Highlights has nothing to show until a
+capture exists. Compare still follows the classified group.
+
+A capture that already stores a group keeps that group and its frozen text.
+Commit tickets the capture does not name — a hidden member, a member with no
+pill or benefit, and a ticket that was not a release member — still take
+`changes[].group` from those same two live facts. The note on that
+classification stays empty, so live pill and benefit text never reaches
+`linked_tickets` or Highlights. Tickets the capture already grouped are not
+read again. A shared commit still takes the strongest group. Compare follows
+that group.
+
+`internal/releasehistory/generate` also reads legacy `release-notes/VERSION.json`
+files **from their matching annotated Git tags**, including under `-offline`.
+Later ticket edits cannot change those notes. The generated manifest records the exact
 file SHA-256, tag/path, capture time, revision, both languages, hidden count and
-gaps. Members sort by recorded position, then key and ID. Exact duplicate IDs
+gaps. Portable notes are the additive `notes.public_items`, with no tenant UUIDs;
+the existing `notes.items` schema stays unchanged. Members sort by recorded position, then key and ID. Exact duplicate IDs
 collapse; conflicting duplicates, duplicate keys, malformed metadata and a
 recorded version that differs from the tag fail the build. If the release had no
 assigned version at capture time (candidate registration can happen later), the
@@ -166,6 +239,57 @@ The writing-rule proposal is `docs/proposals/ticket-benefit-writing.json`, using
 AR1's draft Rule DTO. It must be imported as a draft at the fetched revision and
 published separately by an authorized human; it changes no effective harness
 files or company rules.
+
+### Historic product notes without journey membership (AEON-398)
+
+Historic AEON tickets often have no journey release assignment. For published
+releases without a capture, use the same Git tag history and union of release
+and commit ticket keys as the history builder. This is explicitly later
+`release-manifest-tickets` evidence, not original journey membership. No
+database write, migration, tag rewrite or deployment is involved.
+
+The history also recognizes historical lightweight release tags when their
+committed `version.json` matches the tag and the coordinate is not an unpublished
+reservation. Their channel and sequence come from that file, and their release
+time comes from the tagged commit's committer date. Keep published tags unchanged;
+new releases require annotated tags as described above.
+
+From a full checkout with release tags, use a configured PPM agent client (or
+wrapper) with `nodes.read`. It must select the approved PPM tenant; no credential
+is passed on the command line. Both source UUIDs are explicit:
+
+```sh
+go run ./internal/releasehistory/exporthistoric -repo . -client /path/to/ppm-client -tenant TENANT_UUID -project AEON_PROJECT_UUID -out tmp/historic-notes.json
+# Review the ignored local export, then freeze only its public projection:
+go run ./internal/releasehistory/packnotes -repo . -historic tmp/historic-notes.json -tenant TENANT_UUID -project AEON_PROJECT_UUID
+```
+
+The exporter verifies the authenticated tenant, resolves each node's kind and
+project ancestry, and reads the four bilingual note fields, type, tags and hide
+flag. The output must be ignored and inside this checkout; an existing file is
+never overwritten. Keep it local: hidden text is present for the projection
+check and must never be committed. API failures, missing tickets, wrong source
+bindings, duplicate keys and invalid hide flags fail the import rather than
+publishing a partial history. A later release can repeat these two commands with
+a new export filename; already captured versions remain unchanged.
+
+`packnotes -historic` reuses `ParseTicketMeta` and the live linked-note projection
+for Features/Fixes, including bug kinds, types and tags. Hidden notes are omitted;
+tickets with no note text stay under Other. Missing translations stay empty.
+The public bundle contains only ticket keys, existing note text, groups and
+capture provenance. Its digest covers the version, manifest membership source,
+capture time and selected ticket observations; `written_after_release` is true.
+Only published versions without captures are added; reservations and existing
+snapshots are skipped. Review and commit `internal/releasehistory/data/product-notes.json`
+with the code. Export counts distinguish releases and ticket occurrences across
+releases (classified, Other and hidden); one ticket can occur in several releases.
+
+Regression: `TestHistoricNotesNonPPMTenant` builds historic Git membership,
+imports the export and serves it without tenant ticket data. The Playwright
+`release-historic-tenant.spec.ts` consumes that HTTP output and exercises both
+groups, the release filters and Highlights/Details at desktop and phone widths.
+`GET /api/releases` and `GET /api/releases/{version}` support agent keys with
+`releases.read`; presentation writes remain person-only.
 
 ## Historical note backfill (AEON-290)
 
@@ -211,10 +335,11 @@ is atomic across both paths. Reruns leave existing rows unchanged. Native journe
 releases still use their own membership and snapshot store, through the same
 person/admin authorization and project/version selectors.
 
-`GET /api/releases` and its detail route keep embedded tag snapshots first,
-then use stored journey snapshots where a native version exists, then explicit
-version-keyed backfills for the visible AEON project. Otherwise they retain the
-historical tag headline. The database overlay is computed per request and never
+`GET /api/releases` and its detail route use stored journey snapshots first,
+then explicit version-keyed backfills for the visible AEON project, then the
+embedded tag/public product notes. Tenants without that project use the public
+product notes too. Empty or hidden-only tenant captures remain authoritative.
+Without any capture, the historical evidence remains. The overlay is computed per request and never
 changes the shared embedded manifest. A malformed database snapshot is logged
 without its payload and falls back for that release alone; other releases remain
 available. Releases with no public notes or gaps show a quiet **Internal changes
@@ -232,11 +357,13 @@ English and German. The release detail shows them as a compact header above the
 blocks every release shows: Features and Fixes with one block per ticket (the
 pill as heading, the key, the benefit sentence and its commits folded), then
 Other changes. A captured or backfilled snapshot decides which tickets are told
-and their text; without one, the tickets linked from the commits do. A ticket is
-a fix when it is a bug (the served change group), else when its commits are only
-`fix:`; otherwise a feature. The release list shows version, date and theme, or
-the pills. A release without a presentation has no header. The Git tag message
-is evidence, never a title; "Notes written after release" is one muted line.
+and their text. Without a capture, Aeon does not fill Highlights from live
+ticket text: that is the no-live-text rule. Compare still uses the served change
+group. A ticket is a fix when it is a bug (the served change group), else when
+its commits are only `fix:`; otherwise a feature. The release list shows version,
+date and theme, or the pills. A release without a presentation has no header.
+The Git tag message is evidence, never a title; "Notes written after release"
+is one muted line.
 
 Presentations live in `release_presentations` (migration `0945`), keyed by
 tenant, product project and calendar version, protected by tenant RLS and project

@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
-  agentRouteKind, canonicalUserCode, clearPairingClientState, createOngoingLimits, denyPairing,
-  describeComputerStatus, describeProgress, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
+  describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
-  ongoingLimitError, pairingPermissions, planApproval, planLookup, planOngoingLimits, planPoll,
+  pairingPermissions, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
   chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
-  isAddHarness, matchOngoingLimit, pairingScopeKey, setHarnessAccount,
+  isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
-  ongoingLimitAccounts, pairingReadGeneration, unsupportedVerification,
-  type OngoingLimitDraft, type PairingGuide, type PairingView, type RequestedAccount,
+  pairingReadGeneration, unsupportedVerification, verifiableAccountKeys, connectDisabledReason, approvePairedAccounts,
+  type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
 
 const originalFetch = globalThis.fetch
@@ -331,41 +332,7 @@ test('a conflict is not retried and a revision is not sent as an unknown field',
   assert.deepEqual(Object.keys(bodies[0] as object).sort(), ['request_digest', 'selected_account_keys', 'verification'])
 })
 
-test('ongoing limits are a separate person allowance and are not part of approval', async () => {
-  const draft: OngoingLimitDraft = {
-    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
-    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
-  }
-  assert.equal(ongoingLimitError({ ...draft, allowance: 1.5 }), 'Enter valid start and end times, a positive whole allowance, and a burst ratio from 0 to 1.')
-  const plan = planApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
-  assert.equal(plan.ok, true)
-  if (plan.ok) {
-    assert.equal(plan.body.verification, 'connect_only')
-    assert.equal('allowance' in plan.body, false)
-    assert.equal('expected_revision' in plan.body, false)
-  }
-  const calls: { url: string; body: unknown }[] = []
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
-    if (String(url).endsWith('/approve')) return jsonResponse(view({ state: 'approved', computer_id: COMPUTER, enrollments: [enrollment()] }))
-    return jsonResponse({ id: 'window' })
-  }
-  await submitApproval({ view: view(), choice: 'ongoing_limits', selectedAccountKeys: ['cursor-1'], permissions: person, drafts: [draft] })
-  assert.deepEqual(calls.map(call => call.url), ['/api/agent-pairing/requests/11111111-1111-4111-8111-111111111111/approve'])
-  const windows = planOngoingLimits({
-    choice: 'ongoing_limits', drafts: [draft], selectedAccountKeys: ['cursor-1'], enrollments: [enrollment()], permissions: person,
-  })
-  assert.equal(windows.action, 'send')
-  if (windows.action === 'send') {
-    await createOngoingLimits(windows.windows, person)
-    assert.equal(calls[1]?.url, `/api/agent-accounts/${ACCOUNT}/windows`)
-    assert.equal((calls[1]?.body as { allowance: number }).allowance, 4)
-    assert.equal(JSON.stringify(calls[1]?.body).includes('quota'), false)
-  }
-  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body: { starts_at: draft.starts_at, ends_at: draft.ends_at, unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0 } }], agent))
-})
-
-test('an agent cannot approve, deny, disconnect or set limits', async () => {
+test('an agent cannot approve, deny or disconnect', async () => {
   let calls = 0
   globalThis.fetch = async () => { calls += 1; return jsonResponse(view()) }
   assert.equal(agent.canApprove, false)
@@ -548,60 +515,6 @@ test('add harness follows existing_computer_id, and a harness can be left out', 
   if (plan.ok) assert.deepEqual(plan.body.selected_account_keys, ['codex-1'])
 })
 
-test('a lost allowance response is reconciled and is not posted again', async () => {
-  const draft: OngoingLimitDraft = {
-    account_key: 'cursor-1', starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
-    unit: 'requests', allowance: 4, pace_model: 'unrestricted', burst_ratio: 0,
-  }
-  const body = {
-    starts_at: '2026-09-27T18:00:00.000Z', ends_at: '2026-09-27T23:00:00.000Z',
-    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
-  }
-  const posts: string[] = []
-  globalThis.fetch = async (url, init) => {
-    const path = String(url)
-    if (path.endsWith('/windows')) {
-      posts.push(path)
-      return jsonResponse({ error: 'gateway' }, 503)
-    }
-    assert.equal(path, '/api/agent-accounts')
-    assert.equal(init?.method ?? 'GET', 'GET')
-    return jsonResponse([{ id: ACCOUNT, windows: [{ id: 'window', account_id: ACCOUNT, used: 0, reserved: 0, ...body }] }])
-  }
-  const saved = await createOngoingLimits([{ accountId: ACCOUNT, body }], person)
-  assert.deepEqual(saved, { created: [], reconciled: [ACCOUNT] })
-  assert.deepEqual(posts, [`/api/agent-accounts/${ACCOUNT}/windows`])
-  clearPairingClientState()
-  globalThis.fetch = async () => { throw new TypeError('network down') }
-  await assert.rejects(createOngoingLimits([{ accountId: ACCOUNT, body }], person), (error: PairingError) => {
-    assert.equal(error.code, 'allowance_uncertain')
-    assert.equal(error.message.includes('Set allowance again'), false)
-    assert.match(error.next, /lost response is not the same as an unsaved allowance/)
-    return true
-  })
-  assert.equal(await matchOngoingLimit(ACCOUNT, body), 'unknown')
-})
-
-test('a session reset stops the allowance batch before reconciliation or another write', async () => {
-  const body = {
-    starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z',
-    unit: 'requests' as const, allowance: 4, pace_model: 'unrestricted' as const, burst_ratio: 0,
-  }
-  for (const status of [200, 503]) {
-    const calls: string[] = []
-    let release: (response: Response) => void = () => {}
-    globalThis.fetch = (url) => {
-      calls.push(String(url))
-      return new Promise(resolve => { release = resolve })
-    }
-    const pending = createOngoingLimits([{ accountId: ACCOUNT, body }, { accountId: ACCOUNT_2, body }], person)
-    discardPairingReads()
-    release(jsonResponse({ id: 'window', ...body }, status))
-    await assert.rejects(pending, (error: PairingError) => error.code === 'session_reset')
-    assert.deepEqual(calls, [`/api/agent-accounts/${ACCOUNT}/windows`])
-  }
-})
-
 test('disconnect scope includes the revision and enrollments that were reviewed', () => {
   const first = view({
     revision: 3, computer_state: 'connected',
@@ -655,40 +568,6 @@ test('a session reset drops an in-flight lookup and keeps the human code', async
   }
 })
 
-test('the first allowance save uses only this request’s selected accounts', () => {
-  const oldAccount = enrollment({ account_id: ACCOUNT, account_key: 'cursor-old', harness: 'cursor', label: 'Old Cursor' })
-  const selected = enrollment({ account_id: ACCOUNT_2, account_key: 'claude-1', harness: 'claude', label: 'Claude work' })
-  const rows = ongoingLimitAccounts({
-    pending: false,
-    selectedKeys: ['claude-1'],
-    grantedKeys: ['claude-1'],
-    limitsNow: true,
-    showAll: false,
-    requested: [account({ account_key: 'claude-1', harness: 'claude', label: 'Claude work' })],
-    enrollments: [oldAccount, selected],
-  })
-  assert.deepEqual(rows.map(item => item.key), ['claude-1'])
-  const later = ongoingLimitAccounts({
-    pending: false,
-    selectedKeys: ['claude-1'],
-    grantedKeys: ['claude-1'],
-    limitsNow: false,
-    showAll: true,
-    requested: [],
-    enrollments: [oldAccount, selected],
-  })
-  assert.deepEqual(later.map(item => item.key).sort(), ['claude-1', 'cursor-old'])
-  const plan = planOngoingLimits({
-    choice: 'ongoing_limits',
-    drafts: [{ account_key: 'claude-1', starts_at: '2026-09-27T18:00:00Z', ends_at: '2026-09-27T23:00:00Z', unit: 'requests', allowance: 2, pace_model: 'unrestricted', burst_ratio: 0 }],
-    selectedAccountKeys: rows.map(item => item.key),
-    enrollments: [oldAccount, selected],
-    permissions: person,
-  })
-  assert.equal(plan.action, 'send')
-  if (plan.action === 'send') assert.deepEqual(plan.windows.map(item => item.accountId), [ACCOUNT_2])
-})
-
 test('add harness connect stays blocked until the code matches the opened computer', () => {
   const opened = view({ state: 'pending', existing_computer_id: ACCOUNT, computer_name: 'studio' })
   const mismatch = addHarnessTargetProblem({ view: opened, requestedComputerId: COMPUTER, targetName: 'laptop' })
@@ -728,6 +607,23 @@ test('unsupported verification blocks the selected harness and connect only does
   })
   const blocked = unsupportedVerification(current, ['claude-1', 'codex-1', 'cursor-1'])
   assert.deepEqual(blocked.map(item => item.harness), ['codex', 'cursor'])
+  // AEON-400: excluding unsupported harnesses is an explicit selection change;
+  // the approval still verifies all remaining selections under the existing contract.
+  const retained = verifiableAccountKeys(current, ['claude-1', 'codex-1', 'cursor-1'])
+  assert.deepEqual(retained, ['claude-1'])
+  assert.deepEqual(verifiableAccountKeys(current, ['codex-1', 'cursor-1', 'unknown']), [])
+  assert.deepEqual(verifiableAccountKeys(current, []), [])
+  const mixed = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['claude-1', 'codex-1', 'cursor-1'], permissions: person })
+  assert.equal(mixed.ok, false)
+  const withoutVerification = planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['claude-1', 'codex-1', 'cursor-1'], permissions: person })
+  assert.deepEqual(withoutVerification, { ok: true, body: { request_digest: DIGEST, verification: 'connect_only', selected_account_keys: ['claude-1', 'codex-1', 'cursor-1'] } })
+  assert.deepEqual(planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: retained, permissions: person }), {
+    ok: true, body: { request_digest: DIGEST, verification: 'one_per_harness', selected_account_keys: ['claude-1'] },
+  })
+  for (const permissions of [reader, agent]) {
+    assert.equal(planApproval({ view: current, choice: 'connect_only', selectedAccountKeys: ['claude-1', 'codex-1'], permissions }).ok, false)
+    assert.equal(planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: retained, permissions }).ok, false)
+  }
   assert.match(blocked[0]?.reason ?? '', /Codex/)
   assert.doesNotMatch(blocked.map(item => item.reason).join(' '), /installation failed/i)
   const denied = planApproval({ view: current, choice: 'one_per_harness', selectedAccountKeys: ['codex-1'], permissions: person })
@@ -739,8 +635,25 @@ test('unsupported verification blocks the selected harness and connect only does
   assert.equal(connectOnly.ok, true)
   if (connectOnly.ok) assert.equal(connectOnly.body.verification, 'connect_only')
   const unspoken = view({ verification_capabilities: undefined })
+  assert.deepEqual(verifiableAccountKeys(unspoken, ['cursor-1']), [])
   const quiet = planApproval({ view: unspoken, choice: 'one_per_harness', selectedAccountKeys: ['cursor-1'], permissions: person })
   assert.equal(quiet.ok, false)
+})
+
+test('every disabled Connect state gives an actionable reason; mixed verification is a choice', () => {
+  const ready = { busy: '', canApprove: true, selectedAccountKeys: ['claude-1', 'codex-1'], targetProblem: null }
+  assert.equal(connectDisabledReason(ready), null)
+  assert.equal(connectDisabledReason({ ...ready, selectedAccountKeys: [] }), 'Choose at least one harness.')
+  assert.equal(connectDisabledReason({ ...ready, canApprove: false }), 'Only a signed-in person who can manage accounts can connect this computer.')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'approve' }), 'Connecting this computer…')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'deny' }), 'Denying this request…')
+  assert.equal(connectDisabledReason({ ...ready, busy: 'lookup' }), 'Wait for the current action to finish.')
+  for (const code of ['missing', 'mismatch', 'name'] as const) {
+    const targetProblem = { code, message: 'Computer mismatch', next: 'Review the computer.' }
+    assert.equal(connectDisabledReason({ ...ready, targetProblem }), code === 'name'
+      ? 'The computer name must match the computer you opened.'
+      : 'Use the matching code, or review this as a new computer.')
+  }
 })
 
 test('old connect-only enrollment does not block a new verified harness, and a later run is not verification', () => {
@@ -796,6 +709,305 @@ function enrollment(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+test('harness status is scoped, optional and never claims readiness from stale evidence', async () => {
+  const connected = view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' } })
+  assert.equal(describeHarnessStatus(connected, 'claude'), 'Needs attention')
+  assert.equal(describeHarnessStatus(connected, 'codex'), 'Ready')
+  assert.equal(describeHarnessStatus(connected, 'cursor'), '')
+  assert.equal(describeComputerStatus(connected).stateLabel, 'Connected')
+  assert.equal(describeProgress(connected).phase, 'connected')
+  assert.equal(describeHarnessStatus({ ...connected, connectivity: 'offline' }, 'codex'), 'Last reported: ready')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'revoked' }, 'codex'), '')
+  assert.equal(describeHarnessStatus({ ...connected, computer_state: 'draining' }, 'codex'), '')
+  globalThis.fetch = async () => jsonResponse({ computers: [connected] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { claude: 'blocked', codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view({ harness_statuses: { claude: 'raw local diagnostics', future: 'ready', codex: 'ready' } })] })
+  assert.deepEqual((await listPairingComputers())[0]?.harness_statuses, { codex: 'ready' })
+  globalThis.fetch = async () => jsonResponse({ computers: [view()] })
+  assert.equal((await listPairingComputers())[0]?.harness_statuses, undefined)
+})
+
+test('harness details whitelist reasons and derive fixed commands without exposing diagnostics', async () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'repin_pending', fix: 'local-only command' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Waiting for repin')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'claude'), 'Last reported: waiting for repin')
+  assert.equal(JSON.stringify(parsed).includes('local-only'), false)
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid', fix: 'local-only command' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessFix({ ...parsed, computer_state: 'revoked' }, 'claude'), '')
+  report.harness_details = { claude: { state: 'blocked', reason: 'future-code', fix: 'local-only command' }, codex: { state: 'ready', reason: 'dependency_invalid' }, future: { state: 'ready' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details, {})
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention')
+  report.harness_statuses = { claude: 'ready' }
+  report.harness_details = { claude: { state: 'blocked', reason: 'dependency_invalid' } }
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+})
+
+test('web fixes and labels follow the shared daemon/server vocabulary', async () => {
+  // Written by internal/agentsetup TestRecoveryFixIsOneSharedVocabulary from RecoveryFix.
+  const table = JSON.parse(readFileSync(new URL('../../internal/agentsetup/testdata/harness_recovery.json', import.meta.url), 'utf8')) as {
+    harnesses: string[]; reasons: string[]; fixes: Record<string, Record<string, { kind: string; command: string }>>
+  }
+  assert.ok(table.reasons.includes('pin_drifted') && table.reasons.includes('future_reason'))
+  for (const harness of table.harnesses) {
+    for (const reason of table.reasons) {
+      assert.deepEqual(harnessRecovery(harness, reason), table.fixes[harness]?.[reason], `${harness}/${reason}`)
+      const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { [harness]: 'blocked' }, harness_details: { [harness]: { state: 'blocked', reason, fix: 'untrusted' } } })
+      globalThis.fetch = async () => jsonResponse({ computers: [report] })
+      const parsed = (await listPairingComputers())[0]!
+      const label = describeHarnessStatus(parsed, harness)
+      // Every known code has its own words; only a newer code is shown raw.
+      assert.equal(label.startsWith('Needs attention'), reason === 'future_reason', `${harness}/${reason}: ${label}`)
+      assert.equal(label.includes('future_reason'), reason === 'future_reason')
+      assert.equal(describeHarnessFix(parsed, harness), table.fixes[harness]?.[reason]?.command ?? '')
+      assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+    }
+  }
+  const drifted = view({ computer_state: 'connected', connectivity: 'online', setup_state: 'connected', harness_statuses: { claude: 'blocked', codex: 'ready' }, harness_details: { claude: { state: 'blocked', reason: 'pin_drifted' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [drifted] })
+  let parsed = (await listPairingComputers())[0]!
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Pin changed')
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'aeon-agentd repin --harness claude')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Ready')
+  assert.equal(describeHarnessFix(parsed, 'codex'), '')
+  // A newer state is omitted from the closed legacy map but stays visible.
+  const future = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { codex: 'ready' }, harness_details: { claude: { state: 'future_state', reason: 'future_reason' }, codex: { state: 'ready' } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [future] })
+  parsed = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  assert.equal(describeHarnessHint(parsed, 'claude'), '')
+  for (const [reason, hint] of [['repin_pending', 'Retries automatically.'], ['cli_unavailable', 'Restore the approved executable, then retry.'], ['pin_drifted', '']]) {
+    const held = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason } } })
+    globalThis.fetch = async () => jsonResponse({ computers: [held] })
+    assert.equal(describeHarnessHint((await listPairingComputers())[0]!, 'claude'), hint)
+  }
+})
+
+test('a ready harness keeps a blocked sibling account visible', async () => {
+  const blocked = '88888888-8888-4888-8888-888888888888'
+  const enrollments = [
+    enrollment({ account_id: ACCOUNT_2, account_key: 'codex-healthy', harness: 'codex', label: 'Healthy' }),
+    enrollment({ account_id: blocked, account_key: 'codex-blocked', harness: 'codex', label: 'Blocked' }),
+  ]
+  const report = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', reason: 'dependency_invalid', fix: { kind: 'restart', command: 'untrusted' }, attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: 'not-a-uuid', reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: '' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(parsed.harness_details?.codex?.attention_accounts, [{ account_id: blocked, reason: 'pin_drifted' }])
+  assert.equal(parsed.harness_details?.codex?.reason, undefined)
+  assert.equal(JSON.stringify(parsed).includes('untrusted'), false)
+  assert.equal(describeComputerStatus(parsed).stateLabel, 'Connected')
+  assert.equal(describeHarnessStatus(parsed, 'codex'), 'Pin changed')
+  assert.equal(describeHarnessHint(parsed, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(describeHarnessFix(parsed, 'codex'), 'aeon-agentd add-harness --harness codex')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: ACCOUNT_2, harness: 'codex' }), 'Ready')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: blocked, harness: 'codex' }), 'Pin changed')
+  assert.equal(describeHarnessStatus({ ...parsed, connectivity: 'offline' }, 'codex'), 'Last reported: pin changed')
+  assert.equal(describeEnrollmentStatus({ ...parsed, connectivity: 'offline' }, { account_id: ACCOUNT_2, harness: 'codex' }), 'Last reported: ready')
+  const mixed = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [
+      { account_id: blocked, reason: 'pin_drifted' },
+      { account_id: ACCOUNT_2, reason: 'login_required' },
+    ] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [mixed] })
+  const both = (await listPairingComputers())[0]!
+  assert.equal(both.harness_details?.codex?.state, 'ready')
+  assert.equal(both.harness_details?.codex?.attention_accounts, undefined)
+  assert.equal(describeHarnessStatus(both, 'codex'), 'Ready')
+  assert.equal(describeHarnessHint(both, 'codex'), '')
+  const unknown = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: [{ account_id: blocked, reason: 'future_reason' }] } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [unknown] })
+  const future = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessStatus(future, 'codex'), 'Needs attention · future_reason')
+  assert.equal(describeHarnessFix(future, 'codex'), '')
+  assert.equal(describeHarnessHint(future, 'codex'), '1 of 2 accounts needs attention')
+  assert.equal(parsed.harness_details?.codex?.attention_count, 1)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+})
+
+test('six blocked accounts of seven keep the full count and are not labeled ready', async () => {
+  const ids = Array.from({ length: 7 }, (_, index) => `88888888-8888-4888-8888-88888888888${index}`)
+  const healthy = ids[0]!
+  const blocked = ids.slice(1)
+  const enrollments = ids.map((account_id, index) => enrollment({
+    account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+  }))
+  const full = view({
+    state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_count: 6, attention_accounts: blocked.map(account_id => ({ account_id, reason: 'pin_drifted' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [full] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(parsed.harness_details?.codex?.attention_truncated, undefined)
+  assert.equal(parsed.harness_details?.codex?.attention_accounts?.length, 6)
+  assert.equal(describeHarnessHint(parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: healthy, harness: 'codex' }), 'Ready')
+  for (const account_id of blocked) {
+    const label = describeEnrollmentStatus(parsed, { account_id, harness: 'codex' })
+    assert.equal(label.includes('Ready'), false, label)
+    assert.equal(label, 'Pin changed')
+  }
+  const omitted = blocked[5]!
+  const truncated = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: {
+      state: 'ready', attention_count: 6, attention_truncated: true,
+      attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+    } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [truncated] })
+  const capped = (await listPairingComputers())[0]!
+  assert.equal(capped.harness_details?.codex?.attention_count, 6)
+  assert.equal(capped.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(capped, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: omitted, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped, { account_id: healthy, harness: 'codex' }).includes('Ready'), false)
+  for (const account_id of blocked.slice(0, 5)) {
+    assert.equal(describeEnrollmentStatus(capped, { account_id, harness: 'codex' }), 'Pin changed')
+  }
+  const legacy = view({
+    state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+    harness_statuses: { codex: 'ready' },
+    enrollments,
+    harness_details: { codex: { state: 'ready', attention_accounts: blocked.slice(0, 5).map(account_id => ({ account_id, reason: 'login_required' })) } },
+  })
+  globalThis.fetch = async () => jsonResponse({ computers: [legacy] })
+  const old = (await listPairingComputers())[0]!
+  assert.equal(describeHarnessHint(old, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(old, { account_id: omitted, harness: 'codex' }).includes('Ready'), false)
+})
+
+function attentionAccountId(index: number): string {
+  return `88888888-8888-4888-8888-${String(index).padStart(12, '0')}`
+}
+
+test('legacy, count-only and truncation-only attention never call an omitted account ready', async () => {
+  async function parsedAttention(total: number, blockedCount: number, listed: number, detail: Record<string, unknown>) {
+    const ids = Array.from({ length: total }, (_, index) => attentionAccountId(index))
+    const healthy = ids[0]!
+    const blocked = ids.slice(1, 1 + blockedCount)
+    const enrollments = ids.map((account_id, index) => enrollment({
+      account_id, account_key: `codex-${index}`, harness: 'codex', label: index ? `Blocked ${index}` : 'Healthy',
+    }))
+    const computer = view({
+      state: 'redeemed', computer_state: 'connected', connectivity: 'online',
+      harness_statuses: { codex: 'ready' },
+      enrollments,
+      harness_details: {
+        codex: {
+          state: 'ready',
+          attention_accounts: blocked.slice(0, listed).map(account_id => ({ account_id, reason: 'pin_drifted' })),
+          ...detail,
+        },
+      },
+    })
+    globalThis.fetch = async () => jsonResponse({ computers: [computer] })
+    const parsed = (await listPairingComputers())[0]!
+    return { healthy, blocked, parsed }
+  }
+
+  const legacy = await parsedAttention(7, 6, 5, {})
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(legacy.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(legacy.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(legacy.parsed, { account_id: legacy.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const countOnly = await parsedAttention(7, 6, 5, { attention_count: 6 })
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_count, 6)
+  assert.equal(countOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(countOnly.parsed, 'codex'), '6 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.healthy, harness: 'codex' }).includes('Ready'), false)
+  assert.equal(describeEnrollmentStatus(countOnly.parsed, { account_id: countOnly.blocked[0]!, harness: 'codex' }), 'Pin changed')
+
+  const flagOnly = await parsedAttention(7, 6, 5, { attention_truncated: true })
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_count, 5)
+  assert.equal(flagOnly.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeHarnessHint(flagOnly.parsed, 'codex'), 'At least 5 of 7 accounts need attention')
+  assert.equal(describeEnrollmentStatus(flagOnly.parsed, { account_id: flagOnly.blocked[5]!, harness: 'codex' }), 'Needs attention')
+
+  for (const [total, blockedCount] of [[5, 4], [6, 5], [7, 6], [32, 31], [33, 32]] as const) {
+    const current = await parsedAttention(total, blockedCount, blockedCount, { attention_count: blockedCount })
+    assert.equal(current.parsed.harness_details?.codex?.attention_truncated, undefined, `total ${total}`)
+    assert.equal(current.parsed.harness_details?.codex?.attention_count, blockedCount)
+    assert.equal(describeEnrollmentStatus(current.parsed, { account_id: current.healthy, harness: 'codex' }), 'Ready', `total ${total}`)
+    assert.equal(describeHarnessHint(current.parsed, 'codex').startsWith('At least '), false, `total ${total}`)
+  }
+
+  const capped34 = await parsedAttention(34, 33, 32, { attention_count: 33, attention_truncated: true })
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped34.parsed, { account_id: capped34.healthy, harness: 'codex' }).includes('Ready'), false)
+
+  const capped65 = await parsedAttention(65, 64, 32, { attention_count: 64, attention_truncated: true })
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_count, 64)
+  assert.equal(capped65.parsed.harness_details?.codex?.attention_truncated, true)
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.blocked[32]!, harness: 'codex' }), 'Needs attention')
+  assert.equal(describeEnrollmentStatus(capped65.parsed, { account_id: capped65.healthy, harness: 'codex' }).includes('Ready'), false)
+})
+
+test('pairing account approval is selected, idempotent and never creates windows', async () => {
+  const calls: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input))
+    return new Response(null, { status: 204 })
+  }) as typeof fetch
+  const paired = view({ state: 'approved', enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'other' })] })
+  const key = paired.enrollments[0]!.account_key
+  assert.deepEqual(await approvePairedAccounts(paired, [key], person), [ACCOUNT])
+  assert.deepEqual(await approvePairedAccounts(paired, [key], person), [ACCOUNT])
+  assert.deepEqual(calls, [`/api/agent-accounts/${ACCOUNT}/capacity/approve`, `/api/agent-accounts/${ACCOUNT}/capacity/approve`])
+  await assert.rejects(() => approvePairedAccounts(paired, [key], agent), /Only a person/)
+  await assert.rejects(() => approvePairedAccounts(paired, ['missing'], person), /not connected/)
+  assert.equal(calls.length, 2)
+})
+
+test('account approval stops between accounts when the signed-in scope changes', async () => {
+  let finish!: (response: Response) => void
+  let calls = 0
+  globalThis.fetch = (async () => {
+    calls++
+    return new Promise<Response>(resolve => { finish = resolve })
+  }) as typeof fetch
+  const paired = view({ state: 'approved', enrollments: [enrollment(), enrollment({ account_id: ACCOUNT_2, account_key: 'other' })] })
+  const pending = approvePairedAccounts(paired, paired.enrollments.map(e => e.account_key), person)
+  discardPairingReads()
+  finish(new Response(null, { status: 204 }))
+  await assert.rejects(pending, (error: PairingError) => error.code === 'session_reset')
+  assert.equal(calls, 1)
+})
 
 test('Homebrew commands are additive, bounded and published by this instance', async () => {
   const command = "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"
@@ -862,4 +1074,29 @@ test('Homebrew is shown only when the formula matches, and the last install choi
   assert.equal(chooseInstallMethod(['manual', 'nix'], 'homebrew'), 'manual')
   writePairingInstallMethod({ setItem() { throw new Error('blocked') } }, 'nix')
   assert.equal(readPairingInstallMethod({ getItem() { throw new Error('blocked') } }), '')
+})
+
+test('pairing readiness names unbound harnesses and bounded account checks', () => {
+  const computer = view({ computer_state: 'connected', connectivity: 'online',
+    harness_details: { codex: { state: 'blocked', reason: 'binding_missing' } },
+    harness_statuses: { codex: 'blocked' },
+  })
+  assert.match(describeHarnessHint(computer, 'codex'), /Codex was approved but isn't set up/)
+  assert.equal(describeHarnessFix(computer, 'codex'), 'aeon-agentd add-harness --harness codex')
+  for (const [reason, expected] of [['probe_pending', /60 seconds/], ['probe_timeout', /60 seconds/], ['capacity_capture', /10 seconds/], ['capacity_timeout', /10 seconds/]] as const) {
+    computer.harness_details = { codex: { state: reason.endsWith('timeout') ? 'blocked' : 'checking', reason } }
+    computer.harness_statuses = { codex: computer.harness_details.codex!.state as 'blocked' | 'checking' }
+    assert.match(describeHarnessStatus(computer, 'codex'), expected)
+  }
+})
+
+test('verification refusal names the harness and cause without claiming pairing failed', () => {
+  const computer = view({ computer_state: 'connected', connectivity: 'online', state: 'redeemed', setup_state: 'connected',
+    enrollments: [{ account_id: ACCOUNT, harness: 'claude', state: 'connected', verification_state: 'failed', verification_error: 'verification_unavailable', verification_reason: 'adapter_unsupported' }],
+  })
+  const hint = describeHarnessHint(computer, 'claude')
+  assert.match(hint, /Claude verification couldn't run/)
+  assert.match(hint, /installed adapter cannot enforce safe verification/)
+  assert.match(hint, /computer is paired/)
+  assert.match(describeProgress(computer).detail, /Claude verification couldn't run/)
 })

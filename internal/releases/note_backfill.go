@@ -298,7 +298,7 @@ func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, pr
 	// in this tenant/project can resolve the manifest's approximate membership.
 	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.updated_at,coalesce(n.state,''),
   (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes')),
-  statement_timestamp()
+  statement_timestamp(), aeon_release_note_group(n.fields)
   FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
   WHERE n.project_id=$1 AND n.key=ANY($2::text[]) AND n.deleted_at IS NULL AND k.slug='ticket'
   ORDER BY n.key,n.id`, projectID, keys)
@@ -309,7 +309,7 @@ func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, pr
 	for rows.Next() {
 		var ticket releasehistory.NoteTicket
 		var state string
-		if err := rows.Scan(&ticket.ID, &ticket.Key, &ticket.UpdatedAt, &state, &ticket.Fields, &snap.CapturedAt); err != nil {
+		if err := rows.Scan(&ticket.ID, &ticket.Key, &ticket.UpdatedAt, &state, &ticket.Fields, &snap.CapturedAt, &ticket.Group); err != nil {
 			return snap, excluded, err
 		}
 		if !ticketbenefits.Completed(state) {

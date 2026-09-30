@@ -292,3 +292,75 @@ for (const snapshot of [false, true]) {
     await expect(compare.locator('.changes').getByRole('region', { name: /^Features,/ })).toHaveCount(0)
   })
 }
+
+// AEON-386: the response groups AEON-99 and AEON-98 as fixes and AEON-97 as a
+// feature, with no pill or benefit. The shared AEON-21/98 commit is fixes.
+// Compare shows those groups. Frozen text stays; nothing live is added.
+test('compare places server groups that have no note text', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const base = releaseHistory(Date.parse('2026-09-26T12:00:00Z'))
+  const at = '2026-09-26T12:00:00Z'
+  const sha = (id: string) => id.padEnd(40, 'a')
+  const note = (key: string, group: 'features' | 'fixes', pill: string, benefit: string) => ({ key, group, pill_en: pill, pill_de: '', benefit_en: benefit, benefit_de: '' })
+  const commit = (id: string, subject: string, tickets: string[], group: 'features' | 'fixes', linked?: ReturnType<typeof note>[]) => ({
+    commit: sha(id), subject, type: 'other' as const, scope: '', tickets, at, group, ...(linked?.length ? { linked_tickets: linked } : {}),
+  })
+  const changes = [
+    commit('g', 'AEON-20: frozen group', ['AEON-20'], 'fixes', [note('AEON-20', 'fixes', 'Frozen kept', 'Stays a fix.')]),
+    commit('h', 'AEON-99: outside a grouped capture', ['AEON-99'], 'fixes'),
+    commit('i', 'AEON-97: benefit outside a grouped capture', ['AEON-97'], 'features'),
+    commit('j', 'AEON-98: hidden member of a grouped capture', ['AEON-98'], 'fixes'),
+    commit('k', 'AEON-21: shared with a hidden bug', ['AEON-21', 'AEON-98'], 'fixes', [note('AEON-21', 'features', 'Frozen feature', 'Stays a feature.')]),
+  ]
+  const newest = {
+    ...base.releases[0],
+    headline: 'grouped capture',
+    tickets: ['AEON-20', 'AEON-21'],
+    changes,
+    notes: {
+      source: 'database-snapshot', snapshot_sha256: 'ab'.repeat(32), captured_at: at, release_revision: 1, gaps: [], hidden: 1,
+      items: [
+        { id: '20', key: 'AEON-20', group: 'fixes' as const, pill_en: 'Frozen kept', pill_de: '', benefit_en: 'Stays a fix.', benefit_de: '' },
+        { id: '21', key: 'AEON-21', group: 'features' as const, pill_en: 'Frozen feature', pill_de: '', benefit_en: 'Stays a feature.', benefit_de: '' },
+      ],
+    },
+  }
+  const history = { ...base, releases: [newest, base.releases[1]] }
+  await mockWork(page, fixtures())
+  await mockReleases(page, history)
+  const pending = page.waitForResponse(resp => new URL(resp.url()).pathname === '/api/releases')
+  await page.goto('/releases')
+  const body = await (await pending).json()
+  const served = body.releases[0]
+  const byCommit = (id: string) => served.changes.find((change: { commit: string }) => change.commit === sha(id))
+  expect(byCommit('h').group).toBe('fixes')
+  expect(byCommit('j').group).toBe('fixes')
+  expect(byCommit('i').group).toBe('features')
+  expect(byCommit('k').group).toBe('fixes')
+  expect(byCommit('k').tickets).toEqual(['AEON-21', 'AEON-98'])
+  expect(JSON.stringify(body)).not.toMatch(/LIVE|HIDDEN/)
+  await expect(sheet(page)).toBeVisible()
+  await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.keyboard.press('c')
+  const changesPane = sheet(page).locator('.compare .changes')
+  const features = changesPane.getByRole('region', { name: 'Features, 1' })
+  const fixes = changesPane.getByRole('region', { name: 'Fixes, 4' })
+  await expect(features.getByRole('article', { name: 'AEON-97', exact: true })).toBeVisible()
+  await expect(fixes.getByRole('article', { name: 'AEON-99', exact: true })).toBeVisible()
+  await expect(fixes.getByRole('article', { name: 'AEON-98', exact: true })).toBeVisible()
+  await expect(fixes.getByRole('article', { name: 'Frozen feature', exact: true })).toBeVisible()
+  await expect(fixes.getByRole('article', { name: 'Frozen feature', exact: true })).toContainText('Stays a feature.')
+  await expect(features.getByText('Frozen feature')).toHaveCount(0)
+  await expect(features.getByText('AEON-21')).toHaveCount(0)
+  await expect(features.getByText('AEON-98')).toHaveCount(0)
+  await expect(features.getByText('AEON-99')).toHaveCount(0)
+  await expect(changesPane.getByRole('region', { name: /^Other changes/ })).toHaveCount(0)
+  await expect(fixes.getByRole('article', { name: 'AEON-98', exact: true }).locator('summary')).toHaveText('2 commits')
+  await sheet(page).getByRole('radio', { name: 'Details', exact: true }).click()
+  // The shared commit is listed on both fixes it names, and on no feature.
+  await expect(fixes.getByText('Shared with a hidden bug')).toHaveCount(2)
+  await expect(features.getByText('Shared with a hidden bug')).toHaveCount(0)
+  await expect(fixes.getByText('Outside a grouped capture')).toBeVisible()
+  await expect(features.getByText('Benefit outside a grouped capture')).toBeVisible()
+  await expect(sheet(page).locator('section.compare')).not.toContainText('LIVE')
+})

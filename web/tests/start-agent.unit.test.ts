@@ -122,3 +122,15 @@ describe('honest launch state', () => {
     expect(staleGrantRejection(new Error('allow the model profile'))).toBe(false)
   })
 })
+
+
+describe('run now once', () => {
+  it('only sends the override when the person chooses it', async () => {
+    const calls = backend()
+    await startAgent({ ...selection, runNow: true })
+    expect(calls.find(c => c.method === 'POST' && c.path.endsWith('/runs'))?.body?.capacity_override).toBe('now')
+  })
+  it('uses the server wait reason on a queued run', () => {
+    expect(launchState({ ...queued, wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Waiting', detail: 'Waiting for the vendor to allow work again' })
+  })
+})

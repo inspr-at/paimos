@@ -567,7 +567,7 @@ paths:
   /rules/doctrine:
     get:
       operationId: getDoctrineLayer
-      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. There is no route that edits doctrine. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
+      description: "rules.read (person or agent key). The INSPR doctrine as a git-backed, read-only rule layer (AEON-318): every repository this workspace indexes, at its pinned commit. Git is the source of truth. Each rule's identity is its repository, file and heading anchor; source is the exact bytes of its lines at the pinned commit, and url opens those lines. TL;DRs come from a .tldr.yaml sidecar in git and are only displayed. Aeon holds no doctrine text beyond a cache keyed by the pinned commit. Edits are proposed as PRs; the pinned source remains unchanged. Credential-backed sources require an operator-provisioned tenant/repository grant even when reading cached files; unavailable grants show the source as failed with a generic credential error and no cached files."
       responses:
         "200":
           description: The doctrine layer
@@ -576,6 +576,113 @@ paths:
               schema: {"$ref": "#/components/schemas/DoctrineLayer"}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /rules/doctrine/analysis:
+    get:
+      operationId: listDoctrineOutcomeAnalysis
+      description: "Person-only, workspace rules.read, outcome.read and knowledge.read. Up to 100 deterministic outcome findings, including internal notes refused by the public leak guard. Evidence stays inside the workspace. Daily analysis defaults to a 14-day window, 3 occurrences, 5 open drafts and 5 draft attempts per UTC day. No LLM calls or token consumption. Metrics are descriptive, not causal; after measurements require instruction provenance matching the changed file, in the same harness and ticket kind. Missing provenance leaves the comparison pending. Drafts never publish automatically."
+      responses:
+        "200":
+          description: Findings and proposal measurements
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [findings]
+                properties:
+                  findings: {type: array, items: {"$ref": "#/components/schemas/DoctrineFinding"}}
+        "403": {description: Person with workspace rules.read required}
+  /rules/doctrine/proposals:
+    get:
+      operationId: listDoctrineProposals
+      description: "rules.read. Workspace proposal references only; proposed text lives in git. At most 100 recent proposals."
+      responses:
+        "200":
+          description: Proposal history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [proposals]
+                properties:
+                  proposals: {type: array, items: {"$ref": "#/components/schemas/DoctrineProposal"}}
+    post:
+      operationId: proposeDoctrineChange
+      description: "Workspace rules.write. Requires a server-configured GitHub App, operator-acknowledged DCO contribution policy and its designated tenant. The App key reference requires an operator-owned tenant/exact-repository allowlist grant, checked before key use for each proposal, refresh or approval. Tokens are narrowed to the owning repository; all GitHub requests use https://api.github.com with redirects disabled. Commit authorship and sign-off use the verified App bot identity. The source determines the owning repository; only inspr-at/inspr-modules and inspr-at/inspr-doctrine-private are writable. Before any token mint or GitHub call, the changed rule, its TLDR entry and explanation are normalized with the versioned Unicode default-ignorable/NFKD/casefold/confusables pipeline and checked for identity patterns and quotations from the indexed private doctrine. Ambiguous Unicode compatibility/visual forms are refused (422 ambiguous_text). Public proposal letters must be Latin, including German umlauts and ß, and digits must be ASCII (422 non_latin). Quotation exemptions use only blobs identical to the independently resolved main tree cached during public source indexing, never the configured pin, a proposal branch or an unmerged SHA. The cache expires after five minutes; a private match with a missing or stale cache returns 422 public_main_unavailable without fetching. Reindex the public source to refresh it. Proposals without a private match need no guard network reads. Normal PR preparation still checks main and refuses stale exemptions with 409 stale_source. The private guard is an HMAC keyed by the server secret AEON_DOCTRINE_GUARD_KEY_FILE; a missing guard or mismatched normalizer/table/binary-policy version returns 422 private_index_unavailable until reindex or the startup rebuild. Every non-UTF-8 or control-bearing private file blocks the guard unless its exact path and SHA-256 are in the reviewed host binary allowlist (empty by default). Public proposals require an available, authorized private index; unchanged file content is not scanned. GitHub I/O holds no database locks: short authorized transactions reserve a per-proposal lease and compare the saved version before applying results. Source, main-file blob and rule digest must match. Reuse request_id with identical input to recover a timeout; another input returns 409. No draft prose is retained in Aeon. A ref that lands after authority is revoked is stored as branch with orphaned true and a doctrine.branch_observed event."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"$ref": "#/components/schemas/DoctrineProposalInput"}
+      responses:
+        "200":
+          description: Created or recovered proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "400": {description: Invalid edit}
+        "403": {description: Permission or tenant denied}
+        "409": {description: Stale source or request id conflict}
+        "422": {description: "Credential, non-Latin public text (non_latin), ambiguous Unicode text (ambiguous_text), private quotation (private_doctrine), a missing or incompatible private guard (private_index_unavailable), or a missing or stale public main cache (public_main_unavailable) refused the proposal"}
+        "503": {description: App not configured or outcome uncertain; retry the same request id}
+  /rules/doctrine/proposals/{proposalId}/refresh:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: refreshDoctrineProposal
+      description: "Workspace rules.write. Observe PR/check/review/release state from GitHub; never merge or dispatch. An unchanged refresh emits no event. A release is accepted only with owning-repo provenance for this proposal and merge, and a tag resolving to that merge or its descendant."
+      responses:
+        "200":
+          description: Current proposal
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+  /rules/doctrine/proposals/{proposalId}/approve:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveDoctrineProposal
+      description: "Person-only workspace rules.publish, no agent/key approval. Body head_sha must match the recorded and live PR head. Requires protected main, clean mergeability, and the configured independent gate account's latest APPROVED review on that exact head with explicit ok, checks_green, and distinct author/reviewer families. GitHub enforces required checks at merge; the App must not bypass protections. Record the approval before attempting the SHA-guarded merge. Dispatch doctrine-release to the owning repo after merge (idempotency key proposal id); the repo reserves CalVer3 under its own flow. Refresh observes the published release; dispatch alone is never released. Repeating approval recovers uncertain merge/dispatch outcomes. A merge observed outside Aeon is recorded as an observation, never attributed to the observing person as approver; without an existing Aeon approval, release must be requested in the owning repository."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [head_sha]
+              properties:
+                head_sha: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        "200":
+          description: Proposal after approval attempt
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
+        "403": {description: A person with workspace publication authority must approve}
+        "409": {description: Head changed or checks/review gate not green}
+  /rules/doctrine/proposals/{proposalId}/pins:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportDoctrineProposalPin
+      description: "Person-only settings.manage. Record an operator-verified machine pin, never change one. machine_key is a SHA-256 of a stable machine identity (no hostname); commit must equal this proposal's verified release_commit. Upserts the machine's observation for this repository, so newer pins stop counting toward older releases. UI explicitly labels counts as reported."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [machine_key, commit]
+              properties:
+                machine_key: {type: string, pattern: "^[0-9a-f]{64}$"}
+                commit: {type: string, pattern: "^[0-9a-f]{40}$"}
+      responses:
+        "200":
+          description: Updated reported pin count
+          content:
+            application/json:
+              schema: {"$ref": "#/components/schemas/DoctrineProposal"}
   /rules/doctrine/sources:
     post:
       operationId: addDoctrineSource
@@ -809,10 +916,13 @@ paths:
   /agent-pairing/attach:
     post:
       operationId: attachDevice
-      summary: Paired daemon requests, activates, renews or detaches a read-only watch
+      summary: Paired daemon requests, activates, renews or ends an attached session
       description: >-
         The single paired-runtime attach route. At daemon startup, register requires the
-        paired bearer, computer lifecycle proof and a fresh memory-only poll_key. Registration
+        paired bearer, computer lifecycle proof and a fresh memory-only poll_key.
+        Protocol-less registrations are acknowledged as registered with protocol 1 so older
+        daemons keep serving; every other attach operation from those keys returns 409
+        update_agentd. Only keys registered with attach_protocol=2 can attach. Registration
         invalidates all earlier watches on that computer, requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
@@ -824,7 +934,12 @@ paths:
         Missing confirmation never activates; request-supplied policy overrides are refused.
         Registration may report local_auth_capability. Omission is stored as unreported.
         That report is advisory and never satisfies local confirmation. A later poll cannot change it.
-        Text is host-redacted and relayed in memory only, never stored.
+        A snapshot with mode=lease attaches metadata only: transcript and file_id must be
+        empty, text is rejected, and no conversation stream is available. Both modes require
+        consent_digest at approval, activation and every active poll; approval is single-use.
+        The exited operation is only for a kernel confirmation that the pinned process
+        has exited; loss of contact is unreachable.
+        Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
       requestBody:
         required: true
         content:
@@ -843,8 +958,9 @@ paths:
                     additionalProperties: false
                     properties:
                       state: {type: string, const: registered}
+        '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
         '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
-        '409': {description: Snapshot mismatch or poll sequence rejected}
+        '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
         '410': {description: Expired or revoked; new owner approval required}
         '429': {description: Attempt or stream quota exceeded}
   /agent-pairing/attach/lookup:
@@ -886,11 +1002,11 @@ paths:
               required: [request_digest]
               properties:
                 request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: Required for local_auth; binds the mode the person reviewed}
+                consent_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Optional in the legacy request shape; protocol 2 requires this binding for both watch and status-only approval, otherwise returns 409'}
       responses:
         '200': {description: 'Approved snapshot; activation requires the registered daemon poll key and, for local_auth, its local confirmation'}
         '403': {description: Same-origin paired owner required}
-        '409': {description: Digest differs from reviewed snapshot}
+        '409': {description: Digest differs from reviewed snapshot or approval already consumed}
         '410': {description: Approval expired or revoked}
   /agent-pairing/attach/{requestId}/revoke:
     parameters:
@@ -1246,7 +1362,7 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). Save a ReleaseNoteSnapshot as release-notes/<version>.json before tagging for offline history generation; do not save the historical fallback as a snapshot. This request does not itself publish, freeze or backfill a release.
+      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). At reservation, review and freeze a ReleaseNoteSnapshot with internal/releasehistory/packnotes before tagging; package only its public projection, never raw hidden fields or the historical fallback. This request does not itself publish, freeze or backfill a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
@@ -1266,7 +1382,7 @@ paths:
     get:
       operationId: listReleases
       summary: The release history embedded in this build (inspr.release-history.v1)
-      description: Tagged snapshots win. Missing tagged notes may use an immutable version-keyed backfill for the caller tenant and visible AEON project; otherwise the historical headline remains. Backfilled notes are explicitly marked written_after_release.
+      description: Agent keys need the releases.read scope; people need only a session. Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
           description: History, newest first
@@ -1274,12 +1390,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
         '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
         '500': {description: Stored release notes could not be read}
   /releases/{version}:
     get:
       operationId: getRelease
       summary: One release of the embedded history
-      description: Uses the same tenant/project-scoped backfill and tagged snapshot precedence as the list endpoint.
+      description: Agent keys need the releases.read scope; people need only a session. Uses the same tenant snapshot and embedded public product note precedence as the list endpoint.
       parameters:
         - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
       responses:
@@ -1290,6 +1407,7 @@ paths:
               schema: {$ref: '#/components/schemas/Release'}
         '400': {description: Not a calendar version (inspr-calver-3 or inspr-calendar-v2 coordinate)}
         '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
         '500': {description: Stored release notes could not be read}
         '404': {description: No such release in this build's history}
   /releases/{version}/presentation:
@@ -1934,6 +2052,7 @@ paths:
         - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
+        - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
         - {$ref: '#/components/parameters/Sort'}
         - {$ref: '#/components/parameters/Direction'}
         - {$ref: '#/components/parameters/Limit'}
@@ -2010,6 +2129,8 @@ paths:
         answers 409 and changes nothing when any of them changed since. A node that
         cannot take the change (not found, another project, a kind rule, a cycle) is
         listed under skipped with a reason; nodes already so are listed as unchanged.
+        if_unmodified_since names, per node, the updated_at the caller last saw; a
+        node changed since is skipped with code conflict and left as it is.
         Any change to a portal_product, portal_feature or portal_wish, and any
         reparent into or out of a portal parent, requires a person with
         settings.manage. Agents are refused, and the batch changes nothing.
@@ -2042,6 +2163,11 @@ paths:
                           color: {type: string, maxLength: 32}
                 tags_remove: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 100}}
                 parent_id: {type: string, format: uuid}
+                if_unmodified_since:
+                  type: object
+                  description: Node ID to the updated_at the caller last saw (RFC 3339, compared exactly like PATCH's If-Unmodified-Since). Nodes not named are not checked.
+                  maxProperties: 500
+                  additionalProperties: {type: string, format: date-time}
       responses:
         '200':
           description: Changed, unchanged and skipped nodes
@@ -2065,7 +2191,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other skips.
+                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -2139,7 +2265,9 @@ paths:
     patch:
       operationId: updateNode
       description: |
-        Key, kind, and parent are immutable here; use move for parent.
+        Key and parent are immutable here; use move for parent.
+        Naming the node's current kind, type, or kind_id changes nothing.
+        A different kind or type returns 409 with code kind_change_not_allowed and changes nothing else in that call.
         Tag renames use PATCH /tags/{tagId} so assignments change atomically.
         Optional optimistic concurrency compares If-Unmodified-Since to the exact
         updated_at value while holding the node row lock in the write transaction.
@@ -2163,6 +2291,12 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+        '409':
+          description: A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeError'
         '412':
           $ref: '#/components/responses/Error'
         '422':
@@ -2176,11 +2310,13 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
+      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
       security: *auth
       responses:
         '204':
           description: Deleted
+          headers:
+            Aeon-Revision: {$ref: '#/components/headers/NodeRevision'}
         '403':
           $ref: '#/components/responses/Error'
         '404':
@@ -2322,6 +2458,45 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/convert:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: convertNodeKind
+      description: |
+        Change an issue between issue-family kinds in one transaction.
+        A kind is in that family when its field_schema sets issue_family true.
+        When the flag is absent, epic, ticket and task are, and so is a kind that uses one of those icons.
+        issue_family false excludes a kind. Parent and child rules still apply.
+        Person callers only; agent keys are refused even with nodes.write.
+        The key, history, relations, comments and attachments stay.
+        Fields the new schema does not allow are removed from the node and kept in full on the node.kind_changed event: before is the previous node, after is the stored node. Undo restores those fields with the old kind.
+        The stored fields are checked with the same schema validator as PATCH, including root constraints.
+        One node.kind_changed event records from, to and by.
+        Naming the current kind returns the node and writes nothing.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. A mismatch returns 412 without changing the node or appending an event.
+          schema: {type: string}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConvertNode'}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: |
+            kind_change_not_allowed when the pair is not an issue-kind conversion.
+            kind_conversion_blocked when the parent, existing children, or schema fields do not allow it. children and fields list the offenders. The node is unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeError'}
+        '412': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/move:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
@@ -2504,10 +2679,11 @@ paths:
   /events/stream:
     get:
       operationId: streamEvents
-      description: SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive.
+      description: 'SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive. Live mode (AEON-326): with the after query parameter every connection first sends an event named stream.ready whose id and data {"after": N, "resumed": bool} name the event ID the stream continues after. after=latest starts at the newest event without replaying the log; a numeric after replays from there. Last-Event-ID (a browser reconnect) wins over after. A resume point more than 1000 events behind, or ahead of the newest event, restarts at the newest event. resumed is true only when the stream continues exactly after the ID the client sent; false (after=latest, or a restart) tells the client to refetch what it shows. Node events carry node_changes.'
       security: *auth
       parameters:
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: after, in: query, description: 'Live mode: latest, or an exclusive event ID', schema: {type: string, pattern: '^(latest|[0-9]+)$'}}
       responses:
         '200':
           description: Tenant event stream
@@ -3210,6 +3386,17 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunCreate'}}}}
       responses:
         '201': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/capacity-override:
+    post:
+      operationId: runNowOnce
+      summary: Let a queued managed run skip its schedule and reserve once
+      description: Person with run.create permission and work-order edit access only. Vendor, account, approval, freshness and concurrency fences still apply.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capacity_override], properties: {capacity_override: {type: string, const: now}}}}}}
+      responses:
+        '200': {description: Updated run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions:
@@ -4070,7 +4257,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
@@ -4130,7 +4317,7 @@ paths:
   /runs/queued:
     get:
       operationId: listQueuedRuns
-      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed.
+      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
       security: [{agentKey: []}]
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:
@@ -4259,15 +4446,29 @@ paths:
     get:
       operationId: listAccountCapacity
       summary: Current observed capacity and schedule pacing per account
-      description: Person account.read permission. Separate from the legacy account contract. Manual active windows override routing; readings remain visible here.
+      description: Person account.read permission. Separate from the legacy account contract. Manual active windows and the account's Advanced limit cap on top of these readings (AEON-384); both bind.
       responses:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '403': {description: Person account.read permission required}
+  /agent-accounts/capacity/next:
+    get:
+      operationId: nextCapacityAccount
+      summary: Next eligible accounts in the router's order, without reserving them
+      description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
+      security: *auth
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: daemon_id, in: query, schema: {type: string, maxLength: 128}}
+        - {name: model_profile_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ordered advice, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityNext'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/capacity/approve:
     post:
       operationId: approveOngoingObservedCapacity
       summary: Approve ongoing managed work using observed account capacity
-      description: Person account.manage permission required. Records the existing separate pairing approval without creating a manual allowance window. Fresh readings, probe, grant and reservation checks still apply. Ingesting a reading never grants this approval.
+      description: Person account.manage permission required. Records ongoing-use approval after pairing approval, including before helper redemption, without creating a manual allowance window. Dispatch still requires redeemed pairing, a fresh probe, model grants and capacity admission. Accounts without readings use the provisional first-run policy. Ingesting a reading never grants this approval.
       parameters:
         - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -4306,7 +4507,7 @@ paths:
     post:
       operationId: previewAccountCapacity
       summary: Capacity paced with a draft schedule, without saving it
-      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold follow the draft, ended overrides fall away. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
+      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold or their own Keep for you follow the draft, ended overrides fall away. A drafted Away (override away with override_until) previews until its date; drafted Sprint and Hold are ignored. pool_reserves drafts each pool's own Keep for you. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
       requestBody:
         required: true
         content:
@@ -4317,6 +4518,18 @@ paths:
               required: [schedule]
               properties:
                 schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+                pool_reserves:
+                  type: array
+                  maxItems: 8
+                  description: Drafted Keep for you per pool (AEON-375), at most one entry per pool. An empty reserve drops the pool's own choice so it follows the person's.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [pool, reserve]
+                    properties:
+                      pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                      reserve: {type: string, enum: ["", auto, fixed, off]}
+                      reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: Required with fixed; omitted otherwise.}
       responses:
         '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
         '400': {description: Invalid schedule}
@@ -4334,12 +4547,98 @@ paths:
     put:
       operationId: putCapacitySchedule
       summary: Set current person's default, pool or account schedule
-      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over pool (harness), then user default, then built-in default. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override.
+      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over the account's group, then pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool, group or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override. A group scope names group_id and leaves account_id empty.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
       responses:
         '204': {description: Schedule saved}
         '400': {description: Invalid schedule}
         '403': {description: Person account.manage permission required}
+  /agent-accounts/groups:
+    get:
+      operationId: listAccountGroups
+      summary: Groups that split a vendor pool
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence.
+      responses:
+        '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
+    post:
+      operationId: createAccountGroup
+      summary: Keep selected accounts separate
+      description: Person account.manage. Exclusive requires at least one project. A fenced project routes only inside the group. An exclusive group's other work waits rather than using its members.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '201': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/groups/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch:
+      operationId: updateAccountGroup
+      description: Person account.manage. account_ids and project_ids, when present, replace the membership. Omit a list to leave it.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountGroup
+      summary: Return the group's accounts to the vendor pool
+      description: Person account.manage. Members lose the group. The group's schedule rows are removed.
+      responses:
+        '204': {description: Group removed}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/pins:
+    get:
+      operationId: listAccountPins
+      description: Person account.read. Pins for one ticket.
+      parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
+    put:
+      operationId: putAccountPin
+      summary: Remember an account or a group for this ticket
+      description: Person run.create. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
+      responses:
+        '204': {description: Pin saved}
+        '400': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountPin
+      parameters:
+        - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+      responses:
+        '204': {description: Pin removed}
+  /agent-accounts/use:
+    get:
+      operationId: useAccount
+      summary: Resolve a harness label or account id to door ids for the local agent
+      description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: label, in: query, schema: {type: string, maxLength: 128}}
+        - {name: account_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Doors of one quota, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUse'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Several distinct quotas share that label}
+  /agent-accounts/runs/{runId}/target:
+    post:
+      operationId: setRunAccountTarget
+      summary: Move a queued run to an account or a group
+      description: Person run.create, and the caller can edit the work order. Only while the run is queued and has no account yet. account_id sets the existing requested-account pin. group_id clears that pin and stores a group target. Exactly one of the two.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                account_id: {type: string, format: uuid}
+                group_id: {type: string, format: uuid}
+      responses:
+        '204': {description: Target saved}
+        '409': {description: Run is not awaiting an account}
   /agent-accounts/catalog:
     get:
       operationId: getAgentAccountCatalog
@@ -4352,10 +4651,73 @@ paths:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/signals:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: reportAccountSignals
+      description: Only the registering agent may publish reading support and the tenant-keyed quota fingerprint. Never accepts a vendor identity, email, path or credential.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountSignals'}}}}
+      responses:
+        '204': {description: Accepted}
+  /agent-accounts/{accountId}/statusline:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAccountStatusline
+      description: Registering agent reads explicit human consent. A read writes no settings.
+      security: *auth
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+    put:
+      operationId: setAccountStatusline
+      description: A person may opt in only for a Claude account enrolled on a computer they approved, or a workspace owner or admin may opt in for any Claude account. account.manage alone is not enough. The enrolled daemon applies the change locally and preserves a status line it did not install.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+  /agent-accounts/{accountId}/quota-key:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: getTenantQuotaKey
+      description: Registering agents with account.probe only. Stable tenant HMAC key for local fingerprinting; never log, journal, pass to children or include in public projections. No vendor credentials involved.
+      security: *auth
+      responses:
+        '200':
+          description: Private key; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: {type: string, contentEncoding: base64}
+  /agent-accounts/{accountId}/model:
+    put:
+      operationId: setPiAccountModel
+      summary: Choose the model for new pi runs
+      description: Requires a person with account.manage. Provider is fixed by local enrollment. Saves an immutable registry profile and replaces this account's profile grant; active runs retain their model. OpenRouter's public catalog is cached with a bounded timeout; unknown or unreachable slugs are saved with unknown status. No credentials are accepted.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model]
+              properties:
+                model: {type: string, minLength: 1, maxLength: 116, description: 'Provider model ID; OpenRouter uses vendor/model[:variant].'}
+      responses:
+        '200': {description: Saved account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/metadata:
     put:
       operationId: replaceAgentAccountMetadata
-      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness. No credentials, home paths or provider identities. Audited and idempotent.
+      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness and match a pi account's configured provider/model. Change that binding through the person-only model endpoint; empty grants still revoke dispatch. No credentials, home paths or provider identities. Audited and idempotent.
       security: *auth
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountMetadataWrite'}}}}
@@ -4364,10 +4726,32 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/label:
+    put:
+      operationId: renameAgentAccount
+      summary: Rename an account
+      description: Person account.manage permission. Changes only the display label (Settings, inline rename); plan, host label and model grants stay exactly as they are, including a legacy null grant policy. Audited; an identical label is a no-op.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties:
+                label: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow
-      description: Admin sets a bounded allowance and pacing policy. Overlapping windows of one unit are rejected.
+      description: Admin sets a bounded allowance and pacing policy for the CLI and older clients. Overlapping windows of one unit are rejected. The window caps on top of readings, pacing and Keep for you; it no longer replaces them (AEON-384). The web app offers the Advanced limit instead.
       security: [{session: []}]
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindowWrite'}}}}
@@ -4375,6 +4759,58 @@ paths:
         '201': {description: Window, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindow'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}:
+    delete:
+      operationId: removeAccountWindow
+      summary: Remove a limit set by hand
+      description: Person account.manage permission. The manual window stops capping; its row, usage and reservations stay, so nothing is lost and running work settles as before. Windows read from the vendor and pairing verifications are not removable (404).
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Removed}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}/repeat:
+    post:
+      operationId: repeatAccountWindow
+      summary: Make a limit set by hand repeat
+      description: Person account.manage permission. Turns a manual window into the account's Advanced limit - its allowance and unit per the period its length matches (up to 36 hours a day, up to 10 days a week, else a month) - and hides the window in the same transaction. Its original cap stays binding until expiry. An existing Advanced limit is preserved and returns 409.
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
+  /agent-accounts/{accountId}/limit:
+    put:
+      operationId: putAccountLimit
+      summary: Set the Advanced limit of an account
+      description: 'Person account.manage permission. One sentence per account - "Let agents use at most <amount> <unit> of this account per <period>" - in the account owner''s schedule timezone. It caps on top of readings, pacing and Keep for you and never replaces them. percent sums positive reading deltas across vendor resets within the owner calendar period, including the person''s use; the largest total across vendor window kinds and buckets binds. Synthetic refresh runs obey the same cap. Admission atomically counts measured usage plus outstanding per-run estimates (one run, learned request/token/cost estimates or conservative defaults). Missing cost telemetry retains its estimate. cost_micros requires priced run accounting; unsupported accounts return 422 unsupported_limit_unit. A run may finish above its estimate. A reached limit waits with code allowance until the period ends, and Run now does not skip it. An identical sentence is a no-op; a different one replaces the old, which stays as history.'
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitWrite'}}}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
+    delete:
+      operationId: removeAccountLimit
+      summary: Remove the Advanced limit of an account
+      description: Person account.manage permission. Idempotent; the removed rule stays as history.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: No limit}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}:
     patch:
       operationId: updateAgentAccount
@@ -4400,7 +4836,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -6108,7 +6544,8 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.3']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.5']}}
+    NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
@@ -6150,7 +6587,18 @@ components:
       type: object
       additionalProperties: false
       required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      description: Mode lease is the explicit status-only option; omitted mode selects the default conversation watch.
+      allOf:
+        - if:
+            required: [mode]
+            properties:
+              mode: {const: lease}
+          then:
+            properties:
+              transcript: {const: ''}
+              file_id: {const: ''}
       properties:
+        mode: {type: string, const: lease}
         computer_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         ticket_id: {type: string, format: uuid}
@@ -6169,24 +6617,25 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach]}
+            operation: {enum: [request, poll, detach, exited]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach]}
+        operation: {type: string, enum: [register, request, poll, detach, exited]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
+        attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
         device_proof: {type: string, writeOnly: true, description: 'Existing computer lifecycle proof; registration only, never watch authority'}
         poll_key: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true, description: Fresh daemon-start random key held only in memory; required for every operation}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
         request_digest: {type: string, description: 'Required with the snapshot for request, activation, poll and detachment'}
-        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for strict activation}
+        consent_digest: {type: string, description: Echo of the server-selected consent binding; required for activation and every active poll in both modes}
         local_confirmed: {type: boolean, description: Set only by the daemon after in-process LocalAuthentication; never accepted on the local socket}
         local_auth_capability:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
-        text: {type: string, maxLength: 16384, description: Host-redacted new complete records only; no persistence or replay}
+        text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -6194,7 +6643,7 @@ components:
         request_id: {type: string, format: uuid}
         request_digest: {type: string}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
-        state: {type: string, enum: [pending, approved, active, detached, unreachable]}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable, confirmed_exited]}
         expires_at: {type: string, format: date-time}
         lease_until: {type: [string, 'null'], format: date-time}
         session_id: {type: [string, 'null'], format: uuid}
@@ -6764,6 +7213,95 @@ components:
           maxItems: 16
           description: "Comparison limits. Tokens only; no paths or instruction text."
           items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+    DoctrineProposalInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, source_id, path, rule_key, rule_sha256, source, tldr, explanation]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        source: {type: string, maxLength: 8000, description: "Replacement rule source, including its explicit marker if present. Must still parse as exactly one rule in the same set."}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+        explanation: {type: string, maxLength: 2000, description: Why this change; stored only in the PR body}
+    DoctrineProposal:
+      type: object
+      required: [id, source_id, repository, path, rule_key, state, head_sha, pr_number, pr_url, proposed_by, created_at, gate_ready, pinned_machines]
+      properties:
+        id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        repository: {type: string}
+        path: {type: string}
+        rule_key: {type: string}
+        state: {type: string, enum: [proposed, in_review, merged, released, pinned, closed]}
+        head_sha: {type: string}
+        pr_number: {type: integer}
+        pr_url: {type: string}
+        proposed_by: {type: string, format: uuid}
+        approved_by: {type: string, format: uuid}
+        merge_commit: {type: string}
+        release: {type: string}
+        release_commit: {type: string}
+        release_url: {type: string}
+        release_requested: {type: boolean}
+        gate_ready: {type: boolean}
+        gate_reason: {type: string}
+        pinned_machines: {type: integer, minimum: 0, description: "Operator-reported, not live machine inventory"}
+        branch: {type: string, description: "Proposal branch name when the GitHub ref exists"}
+        orphaned: {type: boolean, description: "True when that branch exists without a pull request because authority was revoked during the ref write. An admin should delete the branch."}
+        created_at: {type: string, format: date-time}
+        draft: {type: boolean, description: "Automatic outcome proposals are created as GitHub drafts; only a person may make them ready on GitHub."}
+        automatic: {type: boolean, description: Generated by the deterministic outcome analysis}
+    DoctrineFinding:
+      type: object
+      required: [id, pattern, title, count, rules_version, harness, ticket_kind, status, evidence, before, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        pattern: {type: string}
+        title: {type: string}
+        count: {type: integer, minimum: 1}
+        rules_version: {type: string}
+        harness: {type: string}
+        ticket_kind: {type: string}
+        status: {type: string, enum: [pending, draft, awaiting_use, internal_note, observed, closed]}
+        reason: {type: string, description: Value-free reason for an internal note or pending retry}
+        proposal_id: {type: string, format: uuid}
+        pr_url: {type: string}
+        rule_label: {type: string}
+        before: {"$ref": "#/components/schemas/DoctrineMetric"}
+        metrics: {type: array, items: {"$ref": "#/components/schemas/DoctrineMetric"}, description: "Baseline context for review and fix rounds, CI failures, reverts, exception votes and time to done; missing observations are omitted"}
+        after: {"$ref": "#/components/schemas/DoctrineMetric"}
+        delta: {type: number, description: After mean minus before mean; lower is the intended direction}
+        evidence:
+          type: array
+          items:
+            type: object
+            required: [id, ticket_id, ticket_key, href, kind]
+            properties:
+              id: {type: string}
+              ticket_id: {type: string, format: uuid}
+              ticket_key: {type: string}
+              href: {type: string}
+              kind: {type: string}
+        created_at: {type: string, format: date-time}
+    DoctrineMetric:
+      type: object
+      required: [name, rules_version, samples, value, from, until]
+      properties:
+        name: {type: string}
+        rules_version: {type: string}
+        samples: {type: integer, minimum: 1}
+        value: {type: number}
+        from: {type: string, format: date-time}
+        until: {type: string, format: date-time}
     DoctrineTLDR:
       type: object
       additionalProperties: false
@@ -6858,6 +7396,8 @@ components:
       required: [sources]
       properties:
         sources: {type: array, maxItems: 8, items: {"$ref": "#/components/schemas/DoctrineSource"}}
+        proposals_enabled: {type: boolean, description: Whether this workspace has a server-provisioned proposal App and quotation guard key}
+        proposals_disabled_reason: {type: string, description: Admin-visible reason proposal creation is disabled; contains no key material or host path}
     RuleChannels:
       type: object
       additionalProperties: false
@@ -6953,13 +7493,16 @@ components:
     PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
     PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
-    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}}}}}
+    PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
+    PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions."}
+    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. No local diagnostics or paths. A ready harness may include attention_accounts naming a proper subset of enrolled accounts that still need a fix, so a healthy account cannot erase a sibling's block. attention_count is the full size of that subset. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that still need a fix while this harness stays ready because another of its accounts can work. Only a proper subset is kept, at most 32 entries, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}}}}
+    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}}}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
-    PairingApproval: {"type": "object", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
-    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
@@ -7476,6 +8019,7 @@ components:
               id: {type: string, format: uuid}
               key: {type: string}
               position: {type: integer}
+              group: {type: string, enum: [features, fixes, other], description: Frozen ticket classification; absent on historical snapshots that did not capture it}
               updated_at: {type: [string, 'null'], format: date-time}
               fields: {type: [object, 'null'], description: Exact values of the five benefit fields only; unavailable members retain only their hide flag when readable}
               unavailable: {type: string}
@@ -7492,6 +8036,19 @@ components:
         hidden: {type: integer, minimum: 0}
         written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
         gaps: {type: array, items: {type: string}}
+        public_items:
+          type: array
+          description: Portable product notes with no tenant-local identifiers. When present, these are the embedded fallback instead of items. Tenant snapshots omit this field and retain precedence.
+          items:
+            type: object
+            required: [key, pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              key: {type: string}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification, including a group recorded at export when an older snapshot did not capture one. Omitted until then."}
         items:
           type: array
           items:
@@ -7500,6 +8057,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification when the snapshot captured it. When an older snapshot omitted it, the server fills features or fixes from the ticket's current classification only (a bug is a fix) and leaves the captured pill and benefit unchanged."}
               pill_en: {type: string}
               pill_de: {type: string}
               benefit_en: {type: string}
@@ -7580,10 +8138,10 @@ components:
               scope: {type: string}
               tickets: {type: array, items: {type: string}}
               at: {type: string, format: date-time}
-              group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. Omitted on the version bump and on older manifests, which derive the group from type."}
+              group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. A capture that already records a group keeps it. A commit ticket that capture does not name still takes features or fixes from the live bug or visible-benefit fact alone; Aeon attaches no live pill or benefit for that ticket. Omitted on the version bump and on older manifests, which derive the group from type."}
               linked_tickets:
                 type: array
-                description: "Additive. Current pill and benefit of each linked ticket, from the same batched lookup as group, so past releases follow ticket text without a new manifest. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Each carries its own group. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
+                description: "Additive. For Aeon, the frozen pill and benefit of each linked ticket from the selected snapshot; later ticket edits never rewrite history. Other products may opt into a live ticket source. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Each carries its own group. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
                 items:
                   type: object
                   required: [key, pill_en, pill_de, benefit_en, benefit_de]
@@ -7593,7 +8151,7 @@ components:
                     pill_de: {type: string}
                     benefit_en: {type: string}
                     benefit_de: {type: string}
-                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: fixes for a bug tag, type or kind, else features. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
+                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: the frozen capture when it has one, otherwise fixes for a live bug tag, type or kind and features for a visible benefit. Aeon never uses the live pill or benefit. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
         changes_omitted: {type: integer, minimum: 0}
         evidence:
           type: object
@@ -9307,10 +9865,21 @@ components:
             work_order_id: {type: string, format: uuid}
             submitted_by_principal_id: {type: string, format: uuid}
             created_at: {type: string, format: date-time}
+    CapacityWait:
+      type: object
+      required: [code, run_now_allowed]
+      description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
+      properties:
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state]}
+        until: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+        timezone: {type: string}
+        run_now_allowed: {type: boolean, description: Only schedule or reserve waits can be skipped; all safety fences still apply. A reserve wait means only Keep for you stands in the way; until is when the reserve is gone.}
     RunCreate:
       type: object
       required: [agent_principal_id, model_profile_id]
       properties:
+        capacity_override: {type: string, enum: [now], description: 'Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.'}
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: string, format: uuid}
         requested_account_id:
@@ -9327,7 +9896,11 @@ components:
       properties:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
-        reservation_ids: {type: array, minItems: 1, items: {type: string, format: uuid}}
+        reservation_ids: {type: array, items: {type: string, format: uuid}, description: Required and nonempty for a normal claim; empty for verification refusal.}
+        verification_unavailable:
+          type: string
+          enum: [adapter_unsupported, binding_incomplete, local_binding_missing]
+          description: Fail an owned unclaimed pairing verification without launching it. Requires its owning computer principal and enrolled daemon; managed and already claimed runs are rejected. Idempotent for the same refusal. Records verification_error=verification_unavailable and verification_reason, and releases reserved allowance.
     ProjectGroup:
       type: object
       required: [id, name, position, project_ids, created_by, created_at, updated_at]
@@ -9648,6 +10221,9 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
       properties:
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
+        limit_resets_at: {type: string, format: date-time}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -9677,9 +10253,11 @@ components:
           type: object
           description: Content-free attach status, present on attached session detail only
           properties:
+            mode: {type: string, const: lease, description: Metadata only; no conversation viewer}
             request_id: {type: string, format: uuid}
             owner_id: {type: string, format: uuid}
             state: {type: string, enum: [active, detached, unreachable]}
+            process_state: {type: string, const: confirmed_exited, description: Present only for a kernel-confirmed exit; absent means unconfirmed}
             lease_until: {type: [string, 'null'], format: date-time}
         host: {type: string}
         management_mode: {type: string, enum: [managed, unmanaged]}
@@ -9705,6 +10283,68 @@ components:
         eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
         inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
+        has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
+    TicketPlanning:
+      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Model names come from the model registry at read time and are never stored on the ticket. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
+      type: object
+      required: [route, tokens]
+      properties:
+        route:
+          description: The registry resolution of route_role and area. Null for epics and when unresolved.
+          type: [object, 'null']
+          required: [label, profile, harness, model, effort, revision]
+          properties:
+            label: {type: string, description: 'Display name such as "Codex astra · xhigh".'}
+            profile: {type: string, description: Profile slug.}
+            harness: {type: string}
+            model: {type: string}
+            effort: {type: string}
+            revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
+        route_gap:
+          description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
+          type: string
+          enum: [area, review_gate, registry]
+        tokens:
+          type: object
+          required: [spent, input, output, cached, sessions, unreported, estimated]
+          properties:
+            spent: {type: [integer, 'null'], description: 'Input plus output tokens over the node''s sessions and those of its open or done ticket and task children and grandchildren (cached input is part of input). Null when nothing was reported.'}
+            input: {type: integer, minimum: 0}
+            output: {type: integer, minimum: 0}
+            cached: {type: integer, minimum: 0}
+            sessions: {type: integer, minimum: 0}
+            unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
+            calibration:
+              description: The rate behind a ticket's estimate.
+              type: object
+              required: [basis, tickets, tokens_per_hour]
+              properties:
+                basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
+                tickets: {type: integer, minimum: 0}
+                tokens_per_hour: {type: integer, minimum: 0}
+                any_route: {type: boolean}
+        cost:
+          description: USD decimal strings, plus the integer micro-dollars of each cost sort key. Present only when the caller holds harness.read on the row's project. Billing and calibration costs also require harness.read on each source project.
+          type: object
+          required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
+          properties:
+            list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
+            list_estimated: {type: [string, 'null'], description: 'The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
+            list_unpriced: {type: boolean, description: Some usage or the route's model has no list price.}
+            paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
+            paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
+            paid_unknown: {type: boolean, description: Some usage or the route's harness has no billing on record.}
+            plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
+            list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
+            paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        children:
+          description: 'Epics only: open and done ticket and task children, and how many are estimated.'
+          type: object
+          required: [total, estimated]
+          properties:
+            total: {type: integer, minimum: 0}
+            estimated: {type: integer, minimum: 0}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
@@ -9890,6 +10530,9 @@ components:
       type: object
       required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
       properties:
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other]}
+        limit_resets_at: {type: string, format: date-time}
         run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
@@ -9944,6 +10587,11 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
+        verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
+        capacity_override: {type: string, enum: ['', now]}
+        capacity_handoff: {type: boolean, description: 'Server-created vendor-stop retry. The owning daemon must prove the prior attempt has stopped and retain its recorded workspace and branch before launching.'}
+        wait: {allOf: [{$ref: '#/components/schemas/CapacityWait'}], description: 'Also present on a failed vendor-limited run awaiting automatic continuation. At most 20 minutes to reset waits on the same account; longer stops retry on the next eligible account on the same daemon. A terminal stop never bypasses a person pin, grant, budget, pairing or admission check.'}
         purpose: {type: string, enum: [managed, pairing_verification]}
         verification_policy: {type: string, enum: [read_only], description: Present only for pairing_verification; local adapter must enforce this policy.}
         verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
@@ -9988,7 +10636,9 @@ components:
         turn_count_delta: {type: integer, minimum: 0}
         effective_model: {type: string}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
-        error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused]}
+        error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
+        limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
         git_commits:
           type: array
           maxItems: 20
@@ -10054,7 +10704,7 @@ components:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
         version: {type: string, minLength: 1, maxLength: 64}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
-        family: {type: string, enum: [openai, anthropic, xai, cursor]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, unknown]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
@@ -10087,6 +10737,54 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+    CapacityEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, samples]
+      properties:
+        kind: {type: string, enum: [runs, tokens, limit_hits, drift]}
+        samples: {type: integer, minimum: 1}
+    CapacityLearning:
+      type: object
+      description: Tenant-local observations only. Suggestions never change a schedule without a person saving it. No paths or vendor text.
+      required: [windows, tokens, cost_micros, runs, limit_hits]
+      properties:
+        tokens: {type: integer, minimum: 0, description: "Observed managed and token-only session consumption in the current known cycle, or since observation began."}
+        cost_micros: {type: integer, minimum: 0}
+        runs: {type: integer, minimum: 0}
+        limit_hits: {type: integer, minimum: 0}
+        presence_until: {type: string, format: date-time}
+        away_suggested: {type: boolean}
+        sleeps_at_night: {type: boolean}
+        suggested_hours:
+          type: object
+          required: [start, end, days]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5}
+            end: {type: number, minimum: 0.5, maximum: 24}
+            days: {type: integer, minimum: 5}
+        correction:
+          type: object
+          required: [points, at]
+          properties:
+            points: {type: number, description: Positive means the estimate was too optimistic.}
+            at: {type: string, format: date-time}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [window_kind, bucket, run_count, work_days]
+            properties:
+              window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+              bucket: {type: string}
+              run_count: {type: integer, minimum: 0}
+              run_percent: {type: number, minimum: 0, maximum: 100}
+              hold_percent: {type: number, minimum: 1, maximum: 25}
+              plus_minus: {type: number, minimum: 0}
+              percent_per_million_tokens: {type: number, minimum: 0}
+              percent_per_hour: {type: number, minimum: 0}
+              auto_reserve_percent: {type: number, minimum: 10, maximum: 60}
+              work_days: {type: integer, minimum: 0}
     CapacityReading:
       type: object
       additionalProperties: false
@@ -10103,14 +10801,18 @@ components:
         ordinary_usage_allowed: {type: boolean, description: Vendor authority; false forbids dispatch even when percent remains}
         run_id: {type: string, format: uuid}
         phase: {type: string, enum: [start, update, end]}
+        plus_minus: {type: number, minimum: 0, maximum: 100, description: Uncertainty in percentage points; display only at three points or more.}
+        evidence: {$ref: '#/components/schemas/CapacityEvidence'}
     CapacitySchedule:
       type: object
       additionalProperties: false
       required: [timezone, week, off_days, nights, model, night, shifts, blocks]
       properties:
         timezone: {type: string, description: IANA timezone; defaults to the person profile timezone}
-        override_until: {type: string, format: date-time, description: Sprint expires at this reset; populated by the server from the earliest current reset in scope.}
-        override: {type: string, enum: ["", sprint, hold], description: Sprint uses remaining quota until reset; Hold prevents measured-capacity routing. Manual windows remain explicit overrides.}
+        override_until: {type: string, format: date-time, description: 'Sprint expires at this reset, populated by the server from the earliest current reset in scope. Away requires it (its date); Hold may carry it (a dated hold). The override ends at this instant.'}
+        override: {type: string, enum: ["", sprint, hold, away], description: 'Sprint uses remaining quota until reset; Hold prevents measured-capacity routing; Away (user scope) is a Sprint bounded by override_until, across resets, with no reserve. Manual windows and the Advanced limit still cap on top.'}
+        reserve: {type: string, enum: ["", auto, fixed, off], description: 'Keep for you (AEON-375): how much of every window agents leave the person while they work, shrinking as a reset comes close (R_eff = R x min(1, H_you/H_ref)). Omitted or empty inherits the next scope up; on the user scope it means auto (30% until learned). off reproduces release 11 pacing.'}
+        reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: The fixed reserve level R; present only with reserve fixed.}
         week:
           type: array
           minItems: 7
@@ -10155,9 +10857,10 @@ components:
       additionalProperties: false
       required: [scope, schedule]
       properties:
-        scope: {type: string, enum: [user, pool, account]}
+        scope: {type: string, enum: [user, pool, account, group]}
         pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
         account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid, description: Set when scope is group. The schedule sits between the account and the vendor pool.}
         schedule:
           anyOf:
             - {$ref: '#/components/schemas/CapacitySchedule'}
@@ -10170,7 +10873,7 @@ components:
         usable_hours: {type: number}
         percent_per_hour: {type: number}
         suggested_today_percent: {type: number, description: Remaining share of the current schedule day}
-        available_now_percent: {type: number, description: Enforced remaining allowance in the active schedule band; zero outside work bands unless Sprint is active.}
+        available_now_percent: {type: number, description: 'Enforced remaining allowance in the active schedule band: min(paced share, remaining - reserve_effective_percent). Zero outside work bands unless Sprint or Away is active.'}
         budget_percent: {type: number}
         used_today_percent: {type: number, description: Observed usage since the schedule boundary when usage_today_known is true; otherwise since the first sample available in the period}
         tonight_percent: {type: number}
@@ -10180,15 +10883,58 @@ components:
         allow_off: {type: boolean}
         unused: {type: boolean}
         ahead: {type: boolean}
+        reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
+        reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
+        drift_percent: {type: number, minimum: 0, description: Pessimistic usage since an aging reading; already subtracted from available_now_percent.}
+        would_expire_percent: {type: number, minimum: 0, description: Remaining capacity the learned throughput cannot consume in scheduled hours.}
+        reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
+    CapacityRouting:
+      type: object
+      required: [rank, available_slots]
+      properties:
+        rank: {type: integer, minimum: 0, description: One-based server order within the harness; zero means currently ineligible.}
+        available_slots: {type: integer, minimum: 0, description: Additional runs that fit all windows and the concurrency limit right now.}
+        resets_at: {type: string, format: date-time, description: Soonest current weekly or monthly reset; falls back to a shorter window only when no long window exists.}
+        cap_percent: {type: number, minimum: 0, description: Smallest normalized available cap across all binding windows.}
+        same_quota_as: {type: string, format: uuid, description: Set on an extra door of a quota whose slots are already counted on another account.}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+    CapacityNext:
+      type: object
+      required: [harness, accounts, parallel_runs]
+      properties:
+        harness: {type: string}
+        parallel_runs: {type: integer, minimum: 0}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        accounts:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/CapacityRouting'}
+              - type: object
+                required: [account_id, account_label, daemon_id, harness]
+                properties:
+                  account_id: {type: string, format: uuid}
+                  account_label: {type: string}
+                  daemon_id: {type: string}
+                  harness: {type: string}
     AccountCapacity:
       type: object
       required: [account_id, schedule, windows]
       properties:
         account_id: {type: string, format: uuid}
+        routing: {$ref: '#/components/schemas/CapacityRouting'}
+        learning: {$ref: '#/components/schemas/CapacityLearning'}
         ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
+        awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+        group_id: {type: string, format: uuid}
+        group_name: {type: string}
+        host_label: {type: string}
+        hosts: {type: array, items: {type: string}, description: Host chips when several doors share one quota. Slots are not summed across those doors.}
+        same_quota_as: {type: string, format: uuid, description: The freshest door of this quota. Windows for the single gauge come from that door.}
         windows:
           type: array
           items:
@@ -10202,6 +10948,62 @@ components:
               freshness: {type: string, enum: [fresh, aging, stale, expired]}
               usage_today_known: {type: boolean, description: False when no exact schedule-boundary observation exists; never infers daily usage from tokens}
               pacing: {$ref: '#/components/schemas/CapacityPacing'}
+        limit:
+          description: The account's Advanced limit (AEON-384) with what it counted this period. Absent when none is set.
+          allOf:
+            - {$ref: '#/components/schemas/AccountLimitRule'}
+            - type: object
+              required: [used, period_end]
+              properties:
+                used: {type: number, minimum: 0, description: Measured usage plus outstanding estimates in the owner calendar period; percent retains positive deltas across vendor resets.}
+                period_end: {type: string, format: date-time, description: When the period ends and the count starts again.}
+        cost_limit_supported: {type: boolean, description: True only when this account reports priced run usage; only then may cost_micros limits be set.}
+        spend_month_usd: {type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'List-price spend this local month, in dollars, for an account whose usage is billed by API key. Absent for subscriptions. An estimate, not a billed charge.'}
+    AccountGroup:
+      type: object
+      required: [id, harness, name, exclusive, account_ids, project_ids]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountGroupWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountTicketPin:
+      type: object
+      additionalProperties: false
+      required: [ticket_id, harness]
+      properties:
+        ticket_id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid}
+    AccountUse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, daemon_id, harness, label, host_label, quota_fingerprint]
+            properties:
+              account_id: {type: string, format: uuid}
+              daemon_id: {type: string}
+              harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+              label: {type: string}
+              host_label: {type: string}
+              quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
     AgentAccountWrite:
       type: object
       required: [account_key, harness, daemon_id, label]
@@ -10217,6 +11019,11 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
+            reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+            quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+            statusline_enabled: {type: boolean}
+            statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
             id: {type: string, format: uuid}
             registered_by_principal_id: {type: string, format: uuid}
             state: {type: string, enum: [available, draining, unavailable]}
@@ -10225,11 +11032,32 @@ components:
             created_at: {type: string, format: date-time}
             plan: {type: string}
             host_label: {type: string}
+            provider: {type: string, description: Pi provider fixed by the approved local enrollment.}
+            model: {type: string, description: Pi provider model ID for new runs.}
+            model_status: {type: string, enum: [known, unknown, unchecked]}
+            model_data_note: {type: boolean, description: Stealth or free OpenRouter model; may log prompts and outputs.}
+            openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
+            group_id: {type: string, format: uuid}
+            group_name: {type: string}
             allowed_model_profile_ids:
               type: [array, 'null']
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
               items: {type: string, format: uuid}
             windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AccountSignals:
+      type: object
+      additionalProperties: false
+      required: [reading_support, quota_fingerprint]
+      properties:
+        reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Empty until a stable non-email vendor account ID is verified.}
+    StatuslineConsent:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        plan: {type: string, maxLength: 240, readOnly: true}
     AgentAccountMetadataWrite:
       type: object
       additionalProperties: false
@@ -10266,6 +11094,7 @@ components:
       type: object
       required: [id, label, plan, registered_by_principal_id, state, last_probe_at, last_probe_ok, available, unavailable_reasons, remaining_fraction, windows, models, default_model_profile_id]
       properties:
+        wait: {$ref: '#/components/schemas/CapacityWait'}
         id: {type: string, format: uuid}
         label: {type: string}
         plan: {type: string}
@@ -10304,6 +11133,16 @@ components:
                     effort: {type: string}
                     model_profile_id: {type: string, format: uuid}
                     version: {type: string}
+    OpenRouterCredits:
+      type: object
+      additionalProperties: false
+      required: [observed_at]
+      description: Safe local GET /api/v1/key projection. Missing amounts are unknown; these are dollar credits, not a renewable capacity window.
+      properties:
+        observed_at: {type: string, format: date-time}
+        usage: {type: [number, 'null'], minimum: 0}
+        limit: {type: [number, 'null'], minimum: 0}
+        remaining: {type: [number, 'null'], minimum: 0}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -10312,7 +11151,35 @@ components:
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
+        openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
         failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
+    AccountLimitProperties:
+      type: object
+      required: [amount, unit, period]
+      description: 'Let agents use at most <amount> <unit> of this account per <period>.'
+      properties:
+        amount: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000, description: At most 100 for percent. Money is in cost_micros.}
+        unit: {type: string, enum: [percent, runs, requests, tokens, cost_micros]}
+        period: {type: string, enum: [day, week, month], description: 'Local calendar day, week (Monday first) or month of the account owner''s schedule timezone.'}
+    AccountLimitWrite:
+      type: object
+      additionalProperties: false
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
+      properties:
+        amount: {}
+        unit: {}
+        period: {}
+    AccountLimitRule:
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
+        - type: object
+          required: [id, account_id, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            account_id: {type: string, format: uuid}
+            from_window_id: {type: string, format: uuid, description: Present when made from a manual window with Make this repeat.}
+            created_at: {type: string, format: date-time}
     AllowanceWindowWrite:
       type: object
       required: [starts_at, ends_at, unit, allowance, pace_model]
@@ -10342,6 +11209,7 @@ components:
             used: {type: integer, format: int64}
             reserved: {type: integer, format: int64}
             provisional: {type: boolean, description: "True when this window has no measured usage for its unit, or at least one settled reservation lacked measured usage. Zero-valued legacy telemetry is treated as unknown."}
+            set_by_you: {type: boolean, description: 'True for a manual window set by a person (the old Settings form, pairing or the CLI), which caps on top of readings. Absent for windows read from the vendor. Removed windows are not listed.'}
     AccountRouteRequest:
       type: object
       required: [run_id, daemon_id, account_ids, estimated_units]
@@ -10440,7 +11308,21 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. Omitted for other errors.
+          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+        children:
+          type: array
+          description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
+          items:
+            type: object
+            required: [id, key, kind]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              kind: {type: string}
+        fields:
+          type: array
+          description: Schema fields that are missing or invalid for the target kind. Extra fields the schema does not declare are kept and are not listed.
+          items: {type: string}
     Principal:
       type: object
       required: [id, tenant_id, kind, name, roles]
@@ -10841,7 +11723,7 @@ components:
             type: string
         field_schema:
           type: object
-          description: JSON Schema for fields
+          description: JSON Schema for fields. Optional issue_family boolean marks an issue kind. When it is absent, epic, ticket and task, and kinds that use those icons, are the issue family.
     KindWrite:
       type: object
       required: [slug, label, short_prefix, icon, field_schema]
@@ -10914,7 +11796,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space.", enum: [status, priority, assignee, title, parent, tags]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
@@ -11069,6 +11951,16 @@ components:
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
+        kind_id:
+          type: string
+          format: uuid
+          description: The current kind is a no-op and is not written. A different kind returns 409 kind_change_not_allowed and changes nothing else.
+        type:
+          type: string
+          description: Kind slug. The current slug is a no-op. A different slug returns 409 kind_change_not_allowed and changes nothing else.
+        kind:
+          type: string
+          description: Kind slug. Same rules as type.
     TagPatch:
       type: object
       minProperties: 1
@@ -11077,6 +11969,12 @@ components:
         name: {type: string, minLength: 1}
         color: {type: string, enum: [gray, slate, blue, indigo, purple, pink, red, orange, yellow, green, teal, cyan]}
         description: {type: string}
+    ConvertNode:
+      type: object
+      additionalProperties: false
+      required: [to_kind]
+      properties:
+        to_kind: {type: string, description: "Target kind slug. Both kinds must be issue-family kinds in the tenant configuration."}
     MoveNode:
       type: object
       required: [parent_id]
@@ -11149,6 +12047,8 @@ components:
               properties:
                 name: {type: string}
                 key: {type: string}
+            planning:
+              $ref: '#/components/schemas/TicketPlanning'
     TreeEntry:
       type: object
       required: [node, depth]
@@ -11235,6 +12135,36 @@ components:
         undo_of:
           type: [integer, 'null']
           format: int64
+        node_changes:
+          type: array
+          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          items:
+            $ref: '#/components/schemas/NodeChange'
+    NodeChange:
+      type: object
+      description: AEON-326. One node change, derived from an event the reader may read. Clients refetch the node through GET /nodes/{nodeId} (or their list) to see values.
+      required: [id, project_id, change, fields, revision]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: [string, 'null']
+          format: uuid
+          description: The node's project now; null outside every project
+        change:
+          type: string
+          enum: [created, updated, deleted]
+          description: A restored node reads as created
+        fields:
+          type: array
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          items:
+            type: string
+        revision:
+          type: [string, 'null']
+          format: date-time
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes
     EventPage:
       type: object
       required: [items, next_after]
@@ -11458,7 +12388,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (rung of the route role: scout, mechanical, build, build-hard, review-gate, then area; no role last), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

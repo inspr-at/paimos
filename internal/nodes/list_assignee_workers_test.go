@@ -147,7 +147,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	}
 
 	// About 300 tickets and enough live sessions that a per-row sequential scan
-	// would show up. The lateral should probe harness_sessions_ticket_eta.
+	// would show up. The lateral should probe a ticket index: the partial
+	// harness_sessions_ticket_eta, or harness_sessions_ticket_node (AEON-329).
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state, parent_id, position)
             SELECT $1, 'BULK-'||g, $2, 'Bulk '||g, 'new', $3, g FROM generate_series(1, 300) g`, p.TenantID, ticket.ID, root.ID); err != nil {
@@ -220,8 +221,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 			}
 		}
 	}
-	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") {
-		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (seq loops %.0f, indexes %v)", seqLoops, indexes)
+	if seqLoops > 1 || (!slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node")) {
+		t.Fatalf("assignee sort did not probe a ticket session index (seq loops %.0f, indexes %v)", seqLoops, indexes)
 	}
 }
 
@@ -314,7 +315,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 	}
 	// The two open rows are probed while ordering. The page is stored people.
 	// A probe of all 300 before paging is at least 300 loops; the page stays well under that.
-	if seqLoops > 1 || !slices.Contains(indexes, "harness_sessions_ticket_eta") || indexLoops < 40 || indexLoops >= 300 {
+	if seqLoops > 1 || (!slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node")) || indexLoops < 40 || indexLoops >= 300 {
 		t.Fatalf("stored-person leads were not limited to the page (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
 	}
 }
@@ -519,8 +520,8 @@ func explainAssigneeProbesAt(t *testing.T, p tenant.Principal, rootID string, an
 		t.Fatal(err)
 	}
 	indexLoops, seqLoops, indexes := harnessProbeStats(planRaw)
-	if !slices.Contains(indexes, "harness_sessions_ticket_eta") {
-		t.Fatalf("assignee sort did not probe harness_sessions_ticket_eta (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
+	if !slices.Contains(indexes, "harness_sessions_ticket_eta") && !slices.Contains(indexes, "harness_sessions_ticket_node") {
+		t.Fatalf("assignee sort did not probe a ticket session index (index loops %.0f, seq %.0f, indexes %v)", indexLoops, seqLoops, indexes)
 	}
 	t.Logf("assignee sort probes: %.0f index loops, %.0f seq (indexes %v)", indexLoops, seqLoops, indexes)
 	return indexLoops, seqLoops
@@ -538,7 +539,8 @@ func harnessProbeStats(planRaw string) (indexLoops, seqLoops float64, indexes []
 			if n["Relation Name"] == "harness_sessions" {
 				if name, ok := n["Index Name"].(string); ok {
 					indexes = append(indexes, name)
-					if name == "harness_sessions_ticket_eta" {
+					// Both indexes probe the same ticket key; 0996 also covers stopped sessions.
+					if name == "harness_sessions_ticket_eta" || name == "harness_sessions_ticket_node" {
 						if loops, ok := n["Actual Loops"].(float64); ok {
 							indexLoops += loops
 						}

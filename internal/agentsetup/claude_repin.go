@@ -177,6 +177,7 @@ func (e *Engine) ApplyClaudeRepin(ctx context.Context, plan ClaudeRepinPlan) (st
 		return "", err
 	}
 	c.NodePath, c.ClaudeSDKPath, c.ClaudeRepinID = next.NodePath, next.SDKPath, id
+	c.RecordAttachIdentities()
 	raw, _ = json.Marshal(c)
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return "", errors.New("repin recorded but runtime update incomplete; rerun repin")

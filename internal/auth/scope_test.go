@@ -46,6 +46,15 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 	project := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	for _, tc := range []struct{ method, path, want string }{
 		{"GET", "/api/projects", "nodes.read"},
+		{"GET", "/api/releases", "releases.read"},
+		{"HEAD", "/api/releases", "releases.read"},
+		{"GET", "/api/releases/260929113854.0.0", "releases.read"},
+		{"HEAD", "/api/releases/260929113854.0.0", "releases.read"},
+		{"POST", "/api/releases", ""},
+		{"DELETE", "/api/releases/260929113854.0.0", ""},
+		{"GET", "/api/releases/260929113854.0.0/presentation", ""},
+		{"PUT", "/api/releases/260929113854.0.0/presentation", ""},
+		{"DELETE", "/api/releases/260929113854.0.0/presentation", ""},
 		{"GET", project + "/messages/listen", "inbox.read"},
 		{"GET", "/api/inbox/messages/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/receipt", "inbox.receipt"},
 		{"POST", project + "/messages", "inbox.send"},

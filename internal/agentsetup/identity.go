@@ -17,6 +17,17 @@ import (
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
+// CodexChatGPTLogin identifies a confirmed local ChatGPT login whose account
+// response has no email. It must never satisfy a named account's identity pin.
+const CodexChatGPTLogin = "ChatGPT login"
+
+func CodexAccountMatches(expected, email string) bool {
+	if expected == CodexChatGPTLogin {
+		return email == ""
+	}
+	return strings.TrimSpace(expected) != "" && strings.EqualFold(strings.TrimSpace(expected), strings.TrimSpace(email))
+}
+
 // CodexIdentity uses only the documented account/read RPC. It starts no
 // thread, turn, tool or model and never opens the vendor's auth/config files.
 func CodexIdentity(ctx context.Context, path, home string) (string, error) {
@@ -85,7 +96,7 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (strin
 			Email string `json:"email"`
 		} `json:"account"`
 	}
-	if json.Unmarshal(raw, &result) != nil || result.Account == nil || result.Account.Type != "chatgpt" || !safeLabel.MatchString(result.Account.Email) {
+	if json.Unmarshal(raw, &result) != nil || result.Account == nil || result.Account.Type != "chatgpt" || result.Account.Email != "" && (!safeLabel.MatchString(result.Account.Email) || strings.TrimSpace(result.Account.Email) == "") {
 		return "", errors.New("Codex subscription identity unavailable")
 	}
 	return strings.TrimSpace(result.Account.Email), nil

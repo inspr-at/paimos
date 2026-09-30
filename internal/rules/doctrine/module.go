@@ -5,15 +5,16 @@
 // repositories it indexes and the commit each is pinned to. Rules are indexed
 // straight from the blobs at that commit with the AEON-250 importer grammar.
 // The only doctrine bytes Aeon holds are a cache keyed by that commit, which
-// the database empties when the pin moves. Nothing here edits doctrine;
-// proposing a change is a pull request (AEON-319). TL;DRs for these rules
-// live in git next to each file and are only displayed.
+// the database empties when the pin moves. Proposals edit the owning git
+// repository through a PR (AEON-319), never this cache. TL;DRs live in git
+// next to each file and are changed in the same proposal as their rule.
 package doctrine
 
 import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -33,22 +34,45 @@ import (
 
 // Options configure the server side. CredentialsDir is
 // AEON_DOCTRINE_CREDENTIALS_DIR; Client allows test transport injection.
+// GuardKey is the server secret for per-tenant HMAC of the private quotation
+// guard. It is copied, never logged, and never written to the database.
 type Options struct {
-	CredentialsDir string
-	Client         *http.Client
+	CredentialsDir    string
+	Client            *http.Client
+	App               AppConfig
+	GuardKey          []byte
+	BinaryAllowlist   map[string]string
+	Analysis          AnalysisPolicy
+	AnalysisLearnings AnalysisLearnings
 }
 
 // Module serves the doctrine layer.
 type Module struct {
-	pool        *pgxpool.Pool
-	credentials Credentials
-	client      *http.Client
+	pool              *pgxpool.Pool
+	credentials       Credentials
+	client            *http.Client
+	app               AppConfig
+	guardMaster       []byte
+	binaryAllowlist   map[string]string
+	analysis          AnalysisPolicy
+	analysisLearnings AnalysisLearnings
 }
 
 var _ httpapi.Module = (*Module)(nil)
 
 func New(pool *pgxpool.Pool, opts Options) *Module {
-	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client}
+	var key []byte
+	if len(opts.GuardKey) >= 32 {
+		key = append([]byte(nil), opts.GuardKey...)
+	}
+	return &Module{pool: pool, credentials: Credentials{Dir: opts.CredentialsDir}, client: opts.Client, app: opts.App, guardMaster: key, binaryAllowlist: maps.Clone(opts.BinaryAllowlist), analysis: opts.Analysis.defaults(), analysisLearnings: opts.AnalysisLearnings}
+}
+
+func (m *Module) guardKey(tenantID string) []byte {
+	if m == nil {
+		return nil
+	}
+	return deriveGuardKey(m.guardMaster, tenantID)
 }
 
 // fetchTimeout bounds one resolve or index against the repository host.
@@ -56,6 +80,12 @@ const fetchTimeout = 45 * time.Second
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rules/doctrine", m.handle(m.layer))
+	mux.HandleFunc("GET /api/rules/doctrine/proposals", m.handle(m.listProposals))
+	mux.HandleFunc("GET /api/rules/doctrine/analysis", m.handle(m.listFindings))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals", m.handle(m.propose))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/refresh", m.handle(m.refreshProposal))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/approve", m.handle(m.approveProposal))
+	mux.HandleFunc("POST /api/rules/doctrine/proposals/{proposalId}/pins", m.handle(m.reportPin))
 	mux.HandleFunc("POST /api/rules/doctrine/sources", m.handle(m.create))
 	mux.HandleFunc("PUT /api/rules/doctrine/sources/{sourceId}", m.handle(m.update))
 	mux.HandleFunc("DELETE /api/rules/doctrine/sources/{sourceId}", m.handle(m.remove))
@@ -92,6 +122,10 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 			writeFailure(w, fail(400, "invalid_request", "invalid source UUID"))
 			return
 		}
+		if id := r.PathValue("proposalId"); id != "" && (!workorders.UUID(id) || strings.ToLower(id) != id) {
+			writeFailure(w, fail(400, "invalid_request", "invalid proposal UUID"))
+			return
+		}
 		if m.pool == nil {
 			writeFailure(w, fail(503, "unavailable", "the doctrine layer is unavailable"))
 			return
@@ -99,6 +133,15 @@ func (m *Module) handle(fn func(*http.Request, tenant.Principal) (any, error)) h
 		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		out, err := fn(r, p)
 		if err != nil {
+			// A transaction timeout can follow a successful external write.
+			// Never promise "nothing changed" for a proposal operation.
+			if strings.HasPrefix(r.URL.Path, "/api/rules/doctrine/proposals") {
+				var known *failure
+				var decode *workorders.Error
+				if !errors.As(err, &known) && !errors.As(err, &decode) && !errors.Is(err, authz.ErrForbidden) && !errors.Is(err, errNoSource) && !errors.Is(err, ErrCredential) && !errors.Is(err, ErrGit) {
+					err = fail(503, "outcome_unknown", "The proposal outcome was not confirmed. Refresh, or retry the identical request UUID and input; GitHub may have accepted it.")
+				}
+			}
 			writeFailure(w, err)
 			return
 		}
@@ -136,7 +179,9 @@ func writeFailure(w http.ResponseWriter, err error) {
 // Layer is the git-backed doctrine layer: every configured repository at its
 // pinned commit.
 type Layer struct {
-	Sources []SourceView `json:"sources"`
+	Sources                 []SourceView `json:"sources"`
+	ProposalsEnabled        bool         `json:"proposals_enabled,omitempty"`
+	ProposalsDisabledReason string       `json:"proposals_disabled_reason,omitempty"`
 }
 
 // SourceView is one repository at its pin. State is ready (indexed at the
@@ -187,12 +232,22 @@ func view(s Source, files []File) SourceView {
 // ---------- Handlers ----------
 
 func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	if m.analysisAuthorized(ctx, p) && (permission == "rules.read" || permission == "rules.write") {
+		return db.InTenant(db.AllProjects(ctx, "doctrine outcome analysis"), m.pool, p.TenantID, fn)
+	}
 	if permission == "settings.manage" && p.Kind != tenant.Person {
 		return authz.ErrForbidden
 	}
 	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true), set_config('statement_timeout','10s',true)`); err != nil {
 			return err
+		}
+		// Proposal mutations serialize with workspace access changes. Check
+		// authority after taking the same tenant lock used by role writers.
+		if permission == "rules.write" || permission == "rules.publish" {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+				return err
+			}
 		}
 		scope := authz.Scope{}
 		if permission == "rules.read" {
@@ -238,7 +293,12 @@ func (m *Module) load(ctx context.Context, p tenant.Principal, permission string
 	if err != nil {
 		return Layer{}, err
 	}
-	out := Layer{Sources: []SourceView{}}
+	out := Layer{Sources: []SourceView{}, ProposalsEnabled: m.app.configured() && p.TenantID == m.app.TenantID && len(m.guardMaster) >= 32}
+	if len(m.guardMaster) < 32 && p.Kind == tenant.Person {
+		if err := m.tx(ctx, p, "settings.manage", func(pgx.Tx) error { return nil }); err == nil {
+			out.ProposalsDisabledReason = missingGuardReason
+		}
+	}
 	for _, item := range all {
 		out.Sources = append(out.Sources, view(item.source, item.files))
 	}
@@ -485,7 +545,13 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}); err != nil {
 		return
 	}
-	files, skipped, fetchErr := m.fetch(ctx, p.TenantID, s)
+	files, skipped, corpus, fetchErr := m.fetch(ctx, p.TenantID, s)
+	// Resolving main is an index operation, never a prerequisite fetched on a
+	// refusing proposal. A failed refresh removes the exemption cache only.
+	var main *publicMainSnapshot
+	if fetchErr == nil && s.Repository == publicRepository && s.Visibility == "public" {
+		main = m.readPublicMain(ctx, p.TenantID, s)
+	}
 	err := m.tx(ctx, p, "settings.manage", func(tx pgx.Tx) error {
 		current, err := getSource(ctx, tx, id, true)
 		if err != nil {
@@ -495,9 +561,18 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 			return nil // the pin moved meanwhile; that change indexes itself
 		}
 		if fetchErr != nil {
+			if err := storePublicMain(ctx, tx, p.TenantID, s, nil); err != nil {
+				return err
+			}
 			return recordIndexError(ctx, tx, id, safeMessage(fetchErr))
 		}
 		if err := storeIndex(ctx, tx, p.TenantID, s, files, skipped); err != nil {
+			return err
+		}
+		if err := storeGuardCorpus(ctx, tx, p.TenantID, s, corpus); err != nil {
+			return err
+		}
+		if err := storePublicMain(ctx, tx, p.TenantID, s, main); err != nil {
 			return err
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "doctrine.indexed", After: map[string]any{
@@ -510,14 +585,132 @@ func (m *Module) index(ctx context.Context, p tenant.Principal, id string) {
 	}
 }
 
-func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, error) {
+func (m *Module) fetch(ctx context.Context, tenantID string, s Source) ([]File, []Skip, []byte, error) {
 	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
-	return Fetch(ctx, reader, s.Repository, s.Commit, s.Paths)
+	files, skipped, err := Fetch(ctx, reader, s.Repository, s.Commit, s.Paths)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// The visible index follows the configured paths. The quotation guard does
+	// not: a public proposal is checked against every file at the pin.
+	if s.Repository != privateRepository || s.Visibility != "private" || len(m.guardMaster) < 32 {
+		return files, skipped, nil, nil
+	}
+	corpus, err := readPrivateCorpus(ctx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return files, skipped, corpus, nil
+}
+
+// EnsurePrivateGuards rebuilds a private quotation guard that is missing or
+// uses an older normalizer/policy or was keyed with a different server secret. A failed rebuild leaves the
+// doctrine index readable and public proposals refused until a later success.
+// It does not log the key or any doctrine text.
+func (m *Module) EnsurePrivateGuards(ctx context.Context) {
+	if m == nil || m.pool == nil || len(m.guardMaster) < 32 {
+		slog.Info("doctrine guard rebuild skipped", "reason", "no guard key")
+		return
+	}
+	rows, err := m.pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		slog.Error("doctrine guard rebuild", "err", err)
+		return
+	}
+	var tenants []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			tenants = append(tenants, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		slog.Error("doctrine guard rebuild", "err", err)
+		return
+	}
+	for _, tenantID := range tenants {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := m.ensureTenantGuard(ctx, tenantID); err != nil && ctx.Err() == nil {
+			slog.Error("doctrine guard rebuild", "tenant", tenantID, "err", err)
+		}
+	}
+}
+
+func (m *Module) ensureTenantGuard(ctx context.Context, tenantID string) error {
+	var ids []string
+	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		sources, err := listSources(ctx, tx)
+		if err != nil {
+			return err
+		}
+		key := m.guardKey(tenantID)
+		for _, s := range sources {
+			if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+				continue
+			}
+			raw, err := loadGuardCorpus(ctx, tx, s)
+			if err != nil {
+				return err
+			}
+			if corpus, err := unmarshalGuard(raw, key, m.binaryAllowlist); err == nil && !corpus.empty() {
+				continue
+			}
+			ids = append(ids, s.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := m.rebuildGuard(ctx, tenantID, id); err != nil && ctx.Err() == nil {
+			slog.Error("doctrine guard rebuild", "tenant", tenantID, "source", id, "err", err)
+		}
+	}
+	return nil
+}
+
+func (m *Module) rebuildGuard(ctx context.Context, tenantID, id string) error {
+	var s Source
+	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		s, err = getSource(ctx, tx, id, false)
+		return err
+	}); err != nil {
+		return err
+	}
+	if s.Repository != privateRepository || s.Visibility != "private" || s.IndexedAt == nil || s.CredentialRef == "" {
+		return nil
+	}
+	reader, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	if err != nil {
+		return err
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	corpus, err := readPrivateCorpus(fetchCtx, reader, s.Repository, s.Commit, m.guardKey(tenantID), m.binaryAllowlist)
+	cancel()
+	if err != nil {
+		return err
+	}
+	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		current, err := getSource(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		if current.Commit != s.Commit || current.IndexedAt == nil {
+			return nil
+		}
+		return storeGuardCorpus(ctx, tx, tenantID, current, corpus)
+	})
 }
 
 // safeMessage is what a failed fetch records: the repository or credential

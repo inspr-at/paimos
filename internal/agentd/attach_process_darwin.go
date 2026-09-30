@@ -32,8 +32,8 @@ func attachProcInfo(pid, flavor int, buf []byte) (int, error) {
 func observeAttachProcess(pid int) (attachObservation, error) {
 	fail := errors.New("kernel process identity unavailable")
 	first, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
-	if err != nil || first.Proc.P_pid != int32(pid) || first.Proc.P_stat == 5 {
-		return attachObservation{}, fmt.Errorf("%w: sysctl %v", fail, err)
+	if err := checkAttachDarwinProcess(pid, first, err, func() error { return unix.Kill(pid, 0) }); err != nil {
+		return attachObservation{}, err
 	}
 	session, err := unix.Getsid(pid)
 	if err != nil || session < 1 {
@@ -72,4 +72,19 @@ func observeAttachProcess(pid int) (attachObservation, error) {
 		return attachObservation{}, fail
 	}
 	return attachObservation{Process: attachwatch.Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Started: fmt.Sprintf("%d:%d", first.Proc.P_starttime.Sec, first.Proc.P_starttime.Usec), Executable: executable, CWD: cwd}, Parent: int(first.Eproc.Ppid), Session: session, TTY: first.Eproc.Tdev != -1}, nil
+}
+
+func checkAttachDarwinProcess(pid int, first *unix.KinfoProc, err error, exists func() error) error {
+	// An empty/mismatched result (including SysctlKinfoProc's EIO) is not
+	// proof of exit. Confirm absence with signal 0, an existence check only.
+	if err != nil || first == nil || first.Proc.P_pid != int32(pid) {
+		if errors.Is(exists(), syscall.ESRCH) {
+			return errAttachExited
+		}
+		return fmt.Errorf("kernel process identity unavailable: sysctl PID mismatch or error: %v", err)
+	}
+	if first.Proc.P_stat == 5 {
+		return errAttachExited
+	}
+	return nil
 }

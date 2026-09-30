@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -69,13 +70,13 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	if h.VersionScheme == "" {
 		h.VersionScheme = SchemeCalVer2
 	}
-	tags, err := listTags(git)
-	if err != nil {
-		return History{}, err
-	}
 	reserved := map[string]bool{}
 	for _, v := range head.UnpublishedReservations {
 		reserved[strings.TrimPrefix(v, "v")] = true
+	}
+	tags, err := listTags(git, reserved)
+	if err != nil {
+		return History{}, err
 	}
 
 	// Oldest first, so each release knows the one before it.
@@ -162,6 +163,15 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		})
 	}
 	Sort(h.Releases)
+	if raw, err := os.ReadFile(filepath.Join(opts.Repo, ProductNotesPath)); err == nil {
+		bundle, err := ReadProductNotes(raw)
+		if err != nil {
+			return History{}, err
+		}
+		h = withProductNotes(h, bundle)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return History{}, fmt.Errorf("read product notes: %w", err)
+	}
 	if opts.GitHub != nil {
 		if err := opts.GitHub.enrich(ctx, opts.Repository, h.Releases); err != nil {
 			for i := range h.Releases {
@@ -190,8 +200,8 @@ func coordinateTime(v string) *time.Time {
 	return &t
 }
 
-func listTags(git func(...string) (string, error)) ([]tagRef, error) {
-	out, err := git("for-each-ref", "--sort=refname", "--format=%(refname:short)%1f%(objecttype)%1f%(taggerdate:iso-strict)%1f%(*objectname)%1f%(contents)%1e", "refs/tags/v*")
+func listTags(git func(...string) (string, error), reserved map[string]bool) ([]tagRef, error) {
+	out, err := git("for-each-ref", "--sort=refname", "--format=%(refname:short)%1f%(objecttype)%1f%(taggerdate:iso-strict)%1f%(*objectname)%1f%(objectname)%1f%(committerdate:iso-strict)%1f%(contents)%1e", "refs/tags/v*")
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
@@ -201,16 +211,30 @@ func listTags(git func(...string) (string, error)) ([]tagRef, error) {
 		if record == "" {
 			continue
 		}
-		f := strings.SplitN(record, "\x1f", 5)
-		if len(f) < 5 || f[1] != "tag" {
-			continue // only annotated tags are releases
+		f := strings.SplitN(record, "\x1f", 7)
+		if len(f) < 7 || (f[1] != "tag" && f[1] != "commit") {
+			continue
 		}
 		version := strings.TrimPrefix(f[0], "v")
 		if f[0] != "v"+version || !ValidVersion(version) {
 			continue
 		}
-		t := tagRef{name: f[0], version: version, commit: f[3], message: f[4]}
-		if at, err := time.Parse(time.RFC3339, f[2]); err == nil {
+		t := tagRef{name: f[0], version: version, commit: f[3], message: f[6]}
+		date := f[2]
+		if f[1] == "commit" {
+			// Historical lightweight tags count only when their committed release
+			// metadata agrees. Never treat a commit message as a tag annotation:
+			// Build takes the channel and sequence from this version.json.
+			var atTag versionFile
+			raw, err := git("show", t.name+":version.json")
+			if err != nil || json.Unmarshal([]byte(raw), &atTag) != nil || strings.TrimPrefix(atTag.Version, "v") != version || reserved[version] || slices.ContainsFunc(atTag.UnpublishedReservations, func(v string) bool {
+				return strings.TrimPrefix(v, "v") == version
+			}) {
+				continue
+			}
+			t.commit, t.message, date = f[4], "", f[5]
+		}
+		if at, err := time.Parse(time.RFC3339, date); err == nil {
 			at = at.UTC()
 			t.tagged = &at
 		}

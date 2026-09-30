@@ -523,7 +523,7 @@ const shots: Shot[] = [
   } },
   { screen: 'start-agent', state: 'accounts-card', setup: async page => { await mockStartAgent(page, { catalog: 'two-hosts' }) }, act: async page => {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts and pacing' })).toContainText('5-hour')
+    await expect(page.locator('#agent-accounts').locator('.account').first()).toBeVisible()
   } },
   // 5. Connected computers and pairing
   { screen: 'pairing', state: 'nix-guide', setup: mockAnonymousGuide, act: async page => {
@@ -568,11 +568,12 @@ const shots: Shot[] = [
     await page.waitForTimeout(300)
   } },
   { screen: 'pairing', state: 'review', setup: pairingSetup, act: pairingReview },
-  { screen: 'pairing', state: 'ongoing-limits', setup: pairingSetup, act: async page => {
+  { screen: 'pairing', state: 'ongoing-use', setup: pairingSetup, act: async page => {
     await pairingReview(page)
     await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
-    await page.getByRole('radio', { name: /Set ongoing limits/ }).check()
-    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toBeVisible()
+    await expect(page.getByRole('radio', { name: /Let agents use these accounts/ })).toBeChecked()
+    await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connect computer', exact: true }).scrollIntoViewIfNeeded()
   } },
   { screen: 'pairing', state: 'setting-up', setup: pairingSetup, act: async page => {
     await pairingReview(page)

@@ -146,7 +146,9 @@ onBeforeUnmount(() => {
 }
 .worker-lead:hover, .worker-more:hover { background: var(--row-hover); }
 .worker-lead:focus-visible, .worker-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.as-cue .worker-lead { height: 20px; padding: 0 6px 0 1px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+.as-cue { flex-shrink: 0; min-width: max-content; max-width: none; }
+.as-cue .worker-lead { flex-shrink: 0; min-width: max-content; max-width: none; height: 20px; padding: 0 6px 0 1px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
+.as-cue .worker-name { flex-shrink: 0; min-width: max-content; overflow: visible; text-overflow: clip; }
 .as-cue .worker-lead:focus-visible { box-shadow: inset 0 0 0 1px var(--chip-line), var(--focus-ring); }
 .worker-pop { position: fixed; z-index: 80; width: min(280px, calc(100vw - 16px)); max-height: min(320px, calc(100vh - 16px)); overflow: auto; padding: 6px; }
 .worker-pop ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }

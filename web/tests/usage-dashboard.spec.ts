@@ -35,7 +35,11 @@ test('nothing reported yet: capacity now, then done, agent time and waste — no
   const claude = band(page).locator('[data-pool="claude"]')
   await expect(claude.locator('.reset')).toHaveText('resets 16:40 · 5-hour')
   await expect(claude.locator('.sentence')).toContainText('Today: use up to ~10% of Claude (4% so far)')
-  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', 'Claude: 37% left, 4% of ~10% used today')
+  // The same Keep for you segment and clause as the Agents desk (AEON-375).
+  await expect(claude.getByRole('meter')).toHaveAttribute('aria-label', 'Claude: 37% left, 30% kept for you, 4% of ~10% used today')
+  await expect(claude.locator('.sentence')).toContainText('Its 5-hour window keeps ~16% for you until 16:40.')
+  await expect(claude.locator('.g-yours')).toBeVisible()
+  await expect(band(page).locator('.band-foot')).toContainText('kept for you')
   const codex = band(page).locator('[data-pool="codex"]')
   await expect(codex.locator('.plan-name')).toHaveText('3 accounts · Pro · weekly')
   await expect(codex.locator('.reset')).toHaveText('resets tomorrow 18:02')

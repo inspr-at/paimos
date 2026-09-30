@@ -58,7 +58,7 @@ var seedModels = []seedModel{
 }
 
 func catalogProfiles() []seedProfile {
-	var out []seedProfile
+	out := []seedProfile{{Slug: "pi-openrouter-space-bunny-alpha-off", Version: CatalogVersion, Harness: "pi", Family: "unknown", Model: "openrouter/stealth/space-bunny-alpha", Effort: "off", Tier: "standard"}}
 	for _, model := range seedModels {
 		for _, effort := range model.Efforts {
 			out = append(out, seedProfile{

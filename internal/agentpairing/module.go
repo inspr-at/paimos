@@ -26,6 +26,7 @@ import (
 )
 
 type Module struct {
+	ignoredHarnessReport  sync.Once
 	pool                  *pgxpool.Pool
 	origin, defaultTenant string
 	mu                    sync.Mutex
@@ -412,7 +413,7 @@ func (m *Module) proof(w http.ResponseWriter, r *http.Request, reconcile bool) {
 			if err = finalizeDrain(r.Context(), tx, *rec.ComputerID); err != nil {
 				return err
 			}
-			if err = cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
+			if err = m.cleanup(r.Context(), tx, *rec.ComputerID, in); err != nil {
 				return err
 			}
 		} else if rec.State == "approved" {

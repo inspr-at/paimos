@@ -359,7 +359,10 @@ test('quick create shows unset priority and epic as dimmed values', async ({ pag
 })
 
 test('a selected row hides its parent chip rather than clipping it under the row actions', async ({ page }) => {
-  await mockWork(page, fixtures())
+  // The panel lookup wins the race with the list page. They resolve to the
+  // same store object, so the later page must still establish the row cursor.
+  await mockWork(page, fixtures(), { hold: call => call.method === 'GET' && call.path === '/api/nodes' && !call.query.get('q')
+    ? { until: new Promise(resolve => setTimeout(resolve, 200)) } : undefined })
   await page.goto('/p/PHAROS/PHAROS-11')
   const row = page.locator('#row-n-1')
   await expect(row.locator('.row-actions')).toBeVisible()

@@ -17,7 +17,7 @@ import (
 // histories, and a bulk change as a whole. A later edit or move closes the
 // stale undo path.
 func UndoHandlers() map[string]events.UndoFunc {
-	return map[string]events.UndoFunc{evNodeMoved: undoMove, evNodeProjectMoved: undoProjectMove, evNodeBulkChanged: undoBulk}
+	return map[string]events.UndoFunc{evNodeMoved: undoMove, evNodeProjectMoved: undoProjectMove, evNodeBulkChanged: undoBulk, evNodeKindChanged: undoKindChange}
 }
 
 func undoMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {

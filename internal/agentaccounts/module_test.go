@@ -48,6 +48,27 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestIntegratedGroupAndLimitDeleteRoutes(t *testing.T) {
+	mux := http.NewServeMux()
+	New(nil).Mount(mux)
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/api/agent-accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/limit", http.StatusUnauthorized},
+		{"/api/agent-accounts/groups/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", http.StatusUnauthorized},
+		{"/api/agent-accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/unsupported", http.StatusNotFound},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, tc.path, nil))
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
+
 func useDB(t *testing.T) {
 	t.Helper()
 	setupOnce.Do(func() { setupErr = setupDB() })

@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -133,18 +134,112 @@ func (s *Store) LockNamed(name string) (*os.File, error) {
 	return s.lockNamed(name)
 }
 func (s *Store) lockNamed(name string) (*os.File, error) {
-	f, err := s.open(name, unix.O_RDWR|unix.O_CREAT)
-	if err != nil {
-		return nil, err
+	return s.lockNamedWithFlock(name, unix.Flock)
+}
+
+// The injectable syscall keeps EINTR and replacement races testable without a
+// process-global hook. Lock files are permanent: never unlink or rename them.
+func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (*os.File, error) {
+	if !validName(name) || s.root == nil {
+		return nil, ErrUnsafePath
 	}
-	if unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
+	for attempt := 0; attempt < 4; attempt++ {
+		fd, err := s.openLockFile(name)
+		if err != nil {
+			if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EISDIR) {
+				return nil, fmt.Errorf("open lock %s: %w: %w", name, ErrUnsafePath, err)
+			}
+			return nil, fmt.Errorf("open lock %s: %w", name, err)
+		}
+		f := os.NewFile(uintptr(fd), "private-lock")
+		var st unix.Stat_t
+		if err := unix.Fstat(fd, &st); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("stat lock %s: %w", name, err)
+		}
+		if !privateArtifact(&st, unix.S_IFREG) {
+			f.Close()
+			return nil, fmt.Errorf("validate lock %s: %w", name, ErrUnsafePath)
+		}
+		for {
+			err = flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+			if !errors.Is(err, unix.EINTR) {
+				break
+			}
+		}
+		if err != nil {
+			f.Close()
+			if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+				return nil, ErrBusy
+			}
+			return nil, fmt.Errorf("flock %s: %w", name, err)
+		}
+		if err = s.verifyLock(name, f); err == nil {
+			return f, nil
+		}
 		f.Close()
-		return nil, ErrBusy
+		if !errors.Is(err, ErrCollision) {
+			return nil, err
+		}
 	}
-	return f, nil
+	return nil, fmt.Errorf("lock %s changed during acquisition: %w", name, ErrCollision)
+}
+
+func (s *Store) openLockFile(name string) (int, error) {
+	if runtime.GOOS == "darwin" {
+		// Darwin can return ENOENT when two O_CREAT|O_NOFOLLOW opens race
+		// to create the same file, even though its directory still exists.
+		// Serialize only openat on a fresh descriptor of the pinned directory.
+		// Closing it releases this short creation guard before the lifetime
+		// file flock; an actual open failure is still an error, never ErrBusy.
+		guard, err := unix.Openat(int(s.root.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return -1, fmt.Errorf("open creation guard: %w", err)
+		}
+		defer unix.Close(guard)
+		for {
+			err = unix.Flock(guard, unix.LOCK_EX)
+			if !errors.Is(err, unix.EINTR) {
+				break
+			}
+		}
+		if err != nil {
+			return -1, fmt.Errorf("lock creation guard: %w", err)
+		}
+	}
+	return unix.Openat(int(s.root.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+}
+
+// verifyLock requires the retained descriptor to still identify the named,
+// private lock inode. An orphaned descriptor does not authorize cleanup.
+func (s *Store) verifyLock(name string, lock *os.File) error {
+	if !validName(name) || s.root == nil || lock == nil {
+		return ErrUnsafePath
+	}
+	var held, named unix.Stat_t
+	if err := unix.Fstat(int(lock.Fd()), &held); err != nil {
+		return fmt.Errorf("stat held lock %s: %w", name, err)
+	}
+	if err := unix.Fstatat(int(s.root.Fd()), name, &named, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return fmt.Errorf("lock %s disappeared: %w", name, ErrCollision)
+		}
+		return fmt.Errorf("stat named lock %s: %w", name, err)
+	}
+	if held.Dev != named.Dev || held.Ino != named.Ino {
+		return fmt.Errorf("lock %s was replaced: %w", name, ErrCollision)
+	}
+	if !privateArtifact(&held, unix.S_IFREG) || !privateArtifact(&named, unix.S_IFREG) {
+		return fmt.Errorf("validate held lock %s: %w", name, ErrUnsafePath)
+	}
+	return nil
 }
 
 func (s *Store) open(name string, flags int) (*os.File, error) {
+	return s.openFile(name, flags, false)
+}
+
+func (s *Store) openFile(name string, flags int, snapshotRead bool) (*os.File, error) {
 	if !validName(name) || s.root == nil {
 		return nil, ErrUnsafePath
 	}
@@ -157,17 +252,31 @@ func (s *Store) open(name string, flags int) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), "private-file")
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0777 != 0600 || int(st.Uid) != os.Getuid() || st.Nlink != 1 {
+	if unix.Fstat(fd, &st) != nil {
+		f.Close()
+		return nil, ErrUnsafePath
+	}
+	// Atomic replacement can unlink the snapshot after openat, before fstat.
+	// Its opened inode remains a consistent read-only snapshot. No other read
+	// or mutation accepts an unlinked file; hardlinks still fail closed.
+	if snapshotRead && name == snapshotName && flags == unix.O_RDONLY && st.Nlink == 0 {
+		st.Nlink = 1
+	}
+	if !privateArtifact(&st, unix.S_IFREG) {
 		f.Close()
 		return nil, ErrUnsafePath
 	}
 	return f, nil
 }
 
-func (s *Store) Read(name string, max int64) ([]byte, error) {
+func (s *Store) readSnapshot() ([]byte, error) { return s.readFile(snapshotName, 1<<20, true) }
+
+func (s *Store) Read(name string, max int64) ([]byte, error) { return s.readFile(name, max, false) }
+
+func (s *Store) readFile(name string, max int64, snapshotRead bool) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, err := s.open(name, unix.O_RDONLY)
+	f, err := s.openFile(name, unix.O_RDONLY, snapshotRead)
 	if err != nil {
 		return nil, err
 	}

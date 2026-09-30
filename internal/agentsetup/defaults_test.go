@@ -5,6 +5,7 @@ package agentsetup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,28 @@ func TestStateLocationRejectsRepositoryBeforeCreatingParents(t *testing.T) {
 	}
 	if err := ValidateStateLocation(filepath.Join(physicalTemp(t), "state"), physicalTemp(t)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBeginRejectsPrivateStoreInsideHomebrewShapedRepository(t *testing.T) {
+	e, api, _, opts, exec := engineFixture(t)
+	prefix := filepath.Join(physicalTemp(t), "homebrew")
+	if err := os.MkdirAll(filepath.Join(prefix, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(filepath.Join(prefix, "aeon-state"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	e.Store = store
+	if _, err := e.Begin(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "private setup state must be outside project repositories") {
+		t.Fatal("private store inside Homebrew-shaped repository accepted", err)
+	}
+	if api.createCount != 0 || len(exec.calls) != 0 {
+		t.Fatal("unsafe private store reached pairing or service preflight")
+	}
+	if _, err := store.Read(snapshotName, 1<<20); !os.IsNotExist(err) {
+		t.Fatal("unsafe private store persisted pairing state", err)
 	}
 }

@@ -19,36 +19,41 @@ import (
 )
 
 type Run struct {
-	Purpose                   string     `json:"purpose"`
-	VerificationTask          string     `json:"verification_task,omitempty"`
-	MaxDurationSeconds        int        `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string     `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed bool       `json:"repository_mutation_allowed"`
-	ID                        string     `json:"id"`
-	OrderID                   string     `json:"work_order_id"`
-	AgentID                   string     `json:"agent_principal_id"`
-	ProfileID                 *string    `json:"model_profile_id"`
-	AccountID                 *string    `json:"account_id"`
-	RequestedAccountID        *string    `json:"requested_account_id"`
-	Outcome                   *string    `json:"outcome"`
-	DurationMS                *int64     `json:"duration_ms"`
-	ActiveMS                  *int64     `json:"active_ms"`
-	OutcomeDetail             *string    `json:"outcome_detail"`
-	RetryOfRunID              *string    `json:"retry_of_run_id"`
-	Status                    string     `json:"status"`
-	RequestedModel            *string    `json:"requested_model"`
-	EffectiveModel            *string    `json:"effective_model"`
-	ModelEvidence             string     `json:"model_evidence"`
-	InputTokens               int64      `json:"input_tokens"`
-	OutputTokens              int64      `json:"output_tokens"`
-	CachedInputTokens         int64      `json:"cached_input_tokens"`
-	ReasoningTokens           int64      `json:"reasoning_tokens"`
-	Cost                      int64      `json:"cost_micros"`
-	StartedAt                 *time.Time `json:"started_at"`
-	EndedAt                   *time.Time `json:"ended_at"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	DaemonID                  *string    `json:"-"`
-	Generation                *string    `json:"-"`
+	VerificationError         string                      `json:"verification_error,omitempty"`
+	VerificationReason        string                      `json:"verification_reason,omitempty"`
+	CapacityHandoff           bool                        `json:"capacity_handoff,omitempty"`
+	CapacityOverride          string                      `json:"capacity_override"`
+	Wait                      *agentaccounts.CapacityWait `json:"wait,omitempty"`
+	Purpose                   string                      `json:"purpose"`
+	VerificationTask          string                      `json:"verification_task,omitempty"`
+	MaxDurationSeconds        int                         `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string                      `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed bool                        `json:"repository_mutation_allowed"`
+	ID                        string                      `json:"id"`
+	OrderID                   string                      `json:"work_order_id"`
+	AgentID                   string                      `json:"agent_principal_id"`
+	ProfileID                 *string                     `json:"model_profile_id"`
+	AccountID                 *string                     `json:"account_id"`
+	RequestedAccountID        *string                     `json:"requested_account_id"`
+	Outcome                   *string                     `json:"outcome"`
+	DurationMS                *int64                      `json:"duration_ms"`
+	ActiveMS                  *int64                      `json:"active_ms"`
+	OutcomeDetail             *string                     `json:"outcome_detail"`
+	RetryOfRunID              *string                     `json:"retry_of_run_id"`
+	Status                    string                      `json:"status"`
+	RequestedModel            *string                     `json:"requested_model"`
+	EffectiveModel            *string                     `json:"effective_model"`
+	ModelEvidence             string                      `json:"model_evidence"`
+	InputTokens               int64                       `json:"input_tokens"`
+	OutputTokens              int64                       `json:"output_tokens"`
+	CachedInputTokens         int64                       `json:"cached_input_tokens"`
+	ReasoningTokens           int64                       `json:"reasoning_tokens"`
+	Cost                      int64                       `json:"cost_micros"`
+	StartedAt                 *time.Time                  `json:"started_at"`
+	EndedAt                   *time.Time                  `json:"ended_at"`
+	CreatedAt                 time.Time                   `json:"created_at"`
+	DaemonID                  *string                     `json:"-"`
+	Generation                *string                     `json:"-"`
 }
 
 // UsageRecorder lets the account module settle its own allowance projections
@@ -84,6 +89,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"GET /api/runs", "run.read", false, 200, m.list},
 		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
 		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
+		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
 		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
@@ -102,12 +108,15 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason)
 
+	if v.VerificationReason != "" {
+		v.VerificationError = "verification_unavailable"
+	}
 	v.RepositoryMutationAllowed = true
 	if v.Purpose == "pairing_verification" {
 		v.VerificationTask = agentpairing.VerificationTask
@@ -155,9 +164,17 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	if p.Kind == tenant.Agent && v.AgentID != p.ID {
 		return nil, workorders.Fail(403, "run belongs to another agent")
 	}
-	return v, nil
+	if v.Status == "queued" && v.Purpose == "managed" {
+		v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+	} else if v.Status == "failed" {
+		v.Wait, err = vendorWait(r.Context(), tx, v)
+	}
+	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if err := retryVendorStops(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
 	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
 		return nil, err
 	}
@@ -175,9 +192,7 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
   WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND q.state='redeemed'
   AND (agent_runs.requested_account_id IS NULL OR e.account_id=agent_runs.requested_account_id)
   AND (((q.details->>'platform')||'/'||(q.details->>'arch')||'/'||a.harness=ANY($3::text[]) AND e.verification_run_id=agent_runs.id AND e.verification_claimed_at IS NULL AND e.verification_expires_at>clock_timestamp())
-   OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL AND EXISTS(
-    SELECT 1 FROM account_allowance_windows w WHERE w.account_id=e.account_id AND NOT w.pairing_verification
-     AND w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp())))))
+   OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
 	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets())
@@ -193,20 +208,33 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// The daemon poll is agent-only and does not compute per-run wait.
+	// People read that advisory on the run list and the run itself.
+	return out, nil
 }
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Agent   string  `json:"agent_principal_id"`
-		Profile string  `json:"model_profile_id"`
-		Account *string `json:"requested_account_id"`
-		Retry   *string `json:"retry_of_run_id"`
+		Agent            string  `json:"agent_principal_id"`
+		Profile          string  `json:"model_profile_id"`
+		Account          *string `json:"requested_account_id"`
+		Retry            *string `json:"retry_of_run_id"`
+		CapacityOverride string  `json:"capacity_override"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
 	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) {
 		return nil, workorders.Fail(400, "agent and model profile required")
+	}
+	if in.CapacityOverride != "" && in.CapacityOverride != "now" {
+		return nil, workorders.Fail(400, "invalid capacity override")
+	}
+	if in.CapacityOverride != "" && p.Kind != tenant.Person {
+		return nil, workorders.Fail(403, "only a person can run now once")
 	}
 	ctx := r.Context()
 	o, err := workorders.Load(ctx, tx, r.PathValue("workOrderId"), true)
@@ -245,7 +273,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride))
 	if err != nil {
 		return nil, err
 	}
@@ -287,11 +315,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		Daemon       string   `json:"daemon_id"`
 		Generation   string   `json:"daemon_generation"`
 		Reservations []string `json:"reservation_ids"`
+		Refusal      string   `json:"verification_unavailable"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !identifier(in.Daemon) || !identifier(in.Generation) || len(in.Reservations) == 0 || len(in.Reservations) > 100 {
+	if !identifier(in.Daemon) || !identifier(in.Generation) || (len(in.Reservations) == 0 && in.Refusal == "") || len(in.Reservations) > 100 {
 		return nil, workorders.Fail(400, "daemon, generation and reservations required")
 	}
 	seen := map[string]bool{}
@@ -308,6 +337,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
+	}
+	if in.Refusal != "" {
+		if len(in.Reservations) != 0 {
+			return nil, workorders.Fail(400, "refusal must not claim reservations")
+		}
+		return refuseVerification(ctx, tx, p, v, in.Daemon, in.Generation, in.Refusal)
 	}
 	if v.AccountID == nil {
 		return nil, workorders.Fail(409, "account reservation required")
@@ -337,10 +372,16 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
-	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,w.account_id::text,w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
+ (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
+  SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
+   ON ledger.tenant_id=door.tenant_id AND ledger.harness=door.harness
+   AND door.quota_fingerprint<>'' AND ledger.quota_fingerprint=door.quota_fingerprint
+  WHERE door.id=$2::uuid AND ledger.id=w.account_id
+   AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
   AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
-	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID)
+	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -348,14 +389,14 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	valid := true
 	active := true
 	for rows.Next() {
-		var id, state, account string
-		var current bool
-		if err = rows.Scan(&id, &state, &account, &current); err != nil {
+		var id, state string
+		var current, quotaMatches bool
+		if err = rows.Scan(&id, &state, &quotaMatches, &current); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		count++
-		valid = valid && seen[id] && account == *v.AccountID
+		valid = valid && seen[id] && quotaMatches
 		active = active && state == "active" && current
 	}
 	rows.Close()

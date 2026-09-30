@@ -3,8 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import {
-  accountPlan, daysLabel, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, setGlobalMode, sourceLine, todayCell, toggleAccountMode, when, whenFull,
-  type AccountRow, type CapacitySchedule, type GaugeMode, type Override, type PoolView,
+  accountPlan, daysLabel, daysSummary, gauge as gaugeOf, gaugeModeFor, nightLabel, pct, poolSentence, reserveLabel, reserveLevel, sameAccountCopy, usingNow, clone, putSchedule, setGlobalMode, sourceLine, timeLabel, todayCell, toggleAccountMode, when, whenFull, workStart,
+  type AccountRow, type CapacitySchedule, type CapacityWindow, type GaugeMode, type Override, type PoolView,
 } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
 import { useAgents } from '../../stores/agents'
@@ -12,15 +12,17 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import CapacityGauge from './CapacityGauge.vue'
+import CapacityLearning from './CapacityLearning.vue'
 import CapacityLegend from './CapacityLegend.vue'
 import HarnessMark from './HarnessMark.vue'
+import KeepEditor, { type KeepDraft } from './KeepEditor.vue'
 import PlanSentence from './PlanSentence.vue'
 import ScheduleEditor from './ScheduleEditor.vue'
 
-// The accounts agents work on, per vendor pool: what is left, today's share and
-// where to stop tonight, one plan sentence per pool, and the two simple pacing
-// controls (work days, nights) with a gear each for the deep editors. Sign-ins,
-// names and which accounts agents may use live in Settings → Accounts.
+// The accounts agents work on, per vendor pool: what is left, what is kept for
+// you, today's share and where to stop tonight, one plan sentence per pool, and
+// the pacing controls (work days, Keep for you, nights) with a popover each.
+// Sign-ins, names and which accounts agents may use live in Settings → Accounts.
 const capacity = useCapacity()
 const agents = useAgents()
 const session = useSession()
@@ -33,6 +35,7 @@ const pools = computed(() => capacity.pools)
 const card = ref<HTMLElement>()
 
 // ---------- Rows ----------
+const piModelOf = (id: string) => { const a = agents.accounts.find(a => a.id === id); return a?.harness === 'pi' ? a.model ?? '' : '' }
 const planOf = (row: AccountRow) => accountPlan(row, now.value)
 const sentence = (pool: PoolView) => poolSentence(pool, now.value)
 const modeOf = (row: AccountRow): GaugeMode => gaugeModeFor(capacity.gauge, row.id)
@@ -48,13 +51,17 @@ const DOT_TIP: Record<AccountRow['state'], (row: AccountRow) => string> = {
 function gaugeLabel(row: AccountRow) {
   const plan = planOf(row)
   const g = gaugeOf(row, plan)
-  const base = `${row.name}: ${Math.round(figure(row))}% ${modeOf(row)}`
+  const kept = g.yours >= 0.5 ? `, ${pct(g.yours)} kept for you` : ''
+  const base = `${row.name}: ${Math.round(figure(row))}% ${modeOf(row)}${kept}`
   return plan && g.tick !== null ? `${base}, today's share ${pct(plan.budget)}, ${pct(plan.used)} used today` : base
 }
+/** What the 5-hour window keeps for you now, when it keeps something. */
+const fiveKept = (w: CapacityWindow) => { const k = Math.min(w.remaining_percent, w.pacing.reserve_effective_percent ?? 0); return k >= 0.5 ? pct(k) : '' }
+const anyKept = computed(() => pools.value.some(p => p.rows.some(r => (planOf(r)?.reserve ?? 0) >= 0.5)))
 function fiveLine(row: AccountRow) {
   if (!row.five) return ''
   const n = Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent)
-  return `5-hour window ${n}% ${modeOf(row)} · resets ${when(row.five.reading.resets_at, now.value)}`
+  return `5-hour window ${n}% ${modeOf(row)}${fiveKept(row.five) ? ` · keeps ${fiveKept(row.five)} for you` : ''} · resets ${when(row.five.reading.resets_at, now.value)}`
 }
 function toggleMode(row: AccountRow) { capacity.setGauge(toggleAccountMode(capacity.gauge, row.id)) }
 function setGlobal(mode: GaugeMode) { capacity.setGauge(setGlobalMode(capacity.gauge, mode)) }
@@ -85,14 +92,15 @@ function daysKey(event: KeyboardEvent) {
 }
 
 // ---------- Editors ----------
-const editor = ref<{ kind: 'week' | 'night'; gear: HTMLElement } | null>(null)
-const editorRef = ref<InstanceType<typeof ScheduleEditor>>()
+type EditorKind = 'week' | 'night' | 'keep'
+const editor = ref<{ kind: EditorKind; gear: HTMLElement } | null>(null)
+const editorRef = ref<{ root?: HTMLElement | null; dirty: () => boolean; focusTitle: () => void }>()
 const editorStyle = ref<Record<string, string>>({})
 const sheet = ref(false)
 const saving = ref(false)
 const phoneQuery = typeof window !== 'undefined' ? window.matchMedia('(max-width: 720px)') : null
-async function openEditor(kind: 'week' | 'night', event: Event) {
-  const gear = (event.currentTarget as HTMLElement).closest<HTMLElement>('.setting')?.querySelector<HTMLElement>('.gear') ?? (event.currentTarget as HTMLElement)
+async function openEditor(kind: EditorKind, event: Event) {
+  const gear = (event.currentTarget as HTMLElement).closest<HTMLElement>('.setting')?.querySelector<HTMLElement>('.gear, .keep-btn') ?? (event.currentTarget as HTMLElement)
   if (editor.value?.kind === kind) { closeEditor(); return }
   closeMenu()
   sheet.value = !!phoneQuery?.matches
@@ -110,12 +118,19 @@ function position() {
   const el = editorRef.value?.root
   if (!editor.value || !card.value || !el) return
   const box = card.value.getBoundingClientRect(), g = editor.value.gear.getBoundingClientRect(), w = el.offsetWidth
-  editorStyle.value = { top: `${g.bottom - box.top + 8}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px` }
+  // Fit the room below the control (the app footer takes the last 56 px); a tall
+  // editor scrolls inside, with its footer in view.
+  editorStyle.value = { top: `${g.bottom - box.top + 8}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(440, window.innerHeight - g.bottom - 64)}px` }
 }
+// On a phone the trigger sits in the inert page. Remember it and focus only
+// after the sheet has unmounted and that inert is gone (see the sheet watch).
+let sheetReturn: HTMLElement | null = null
 function closeEditor(focus = true) {
   const gear = editor.value?.gear
+  const onSheet = sheet.value && !!editor.value
   editor.value = null
   editorStyle.value = {}
+  if (onSheet) { sheetReturn = focus ? gear ?? null : null; return }
   if (focus) gear?.focus({ preventScroll: true })
 }
 async function saveEditor(next: CapacitySchedule) {
@@ -123,6 +138,49 @@ async function saveEditor(next: CapacitySchedule) {
   try { await capacity.saveSchedule(next); closeEditor(); toast("Saved. Today's plan follows the new schedule.") }
   catch (e) { toast(e instanceof Error ? e.message : 'The schedule did not save. Please try again.', { tone: 'error' }) }
   finally { saving.value = false }
+}
+
+// ---------- Keep for you ----------
+const keepLabel = computed(() => {
+  const auto = !schedule.value.reserve || schedule.value.reserve === 'auto'
+  const levels = capacity.rows.flatMap(row => row.learning?.windows.map(w => w.auto_reserve_percent).filter((n): n is number => !!n) ?? [])
+  return auto && levels.length ? 'Auto · learned' : reserveLabel(schedule.value)
+})
+async function useHours(row: AccountRow) {
+  const hours = row.learning?.suggested_hours
+  if (!mayManage.value || !hours || !row.schedule) return
+  const next = clone(row.schedule)
+  next.week = next.week.map(d => d.on ? { ...d, start: hours.start, end: hours.end } : d)
+  await run(async () => { await putSchedule({ scope: 'account', account_id: row.id, schedule: next }); await capacity.load() }, `Saved ${row.name}'s work hours.`)
+}
+async function saveKeep(draft: KeepDraft) {
+  saving.value = true
+  try {
+    await capacity.saveKeep(draft)
+    closeEditor()
+    toast(draft.away ? `Saved. Agents use everything until ${when(draft.away, now.value)}.` : draft.reserve === 'off' ? 'Saved. Agents may use everything.' : "Saved. Agents leave you room while you work.")
+  } catch (e) { toast(e instanceof Error ? e.message : 'Keep for you did not save. Please try again.', { tone: 'error' }) }
+  finally { saving.value = false }
+}
+const endAway = () => void run(() => capacity.endAway(), 'Welcome back. Agents follow your plan again.')
+
+// ---------- The one-time plan card ----------
+const cardClosed = ref(false)
+const planCard = computed(() => {
+  if (!mayManage.value || cardClosed.value || !capacity.loaded || !capacity.schedulesLoaded || !pools.value.length || capacity.reserveConfirmed) return null
+  const s = schedule.value
+  const on = s.week.filter(d => d.on)
+  const hours = on.every(d => d.start === on[0].start && d.end === on[0].end) ? `${timeLabel(on[0].start)}–${timeLabel(on[0].end)}` : 'in your hours'
+  const level = reserveLevel(s)
+  return capacity.hasUserSchedule
+    ? { title: 'New:', text: `agents now leave you room while you work, about ${level}% of every limit.`, secondary: 'Turn off', primary: 'Keep' }
+    : { title: "Here's the plan.", text: `Agents work alongside you ${daysSummary(s.week)}, ${hours}, pace each account to its reset, and leave you about ${level}% of every limit while you work.`, secondary: 'Change', primary: 'Looks right' }
+})
+function cardPrimary() { void run(() => capacity.confirmReserve('auto'), 'Saved. Agents leave you room while you work.') }
+function cardSecondary() {
+  if (capacity.hasUserSchedule) { void run(() => capacity.confirmReserve('off'), 'Turned off. Agents may use everything.'); return }
+  cardClosed.value = true
+  void nextTick(() => card.value?.querySelector<HTMLElement>('.days [aria-checked="true"], .days button')?.focus())
 }
 
 // ---------- Sprint / Hold menu ----------
@@ -147,14 +205,29 @@ function closeMenu(focus = false) {
   menu.value = null
   if (focus && id) card.value?.querySelector<HTMLElement>(`[data-menu="${id}"]`)?.focus()
 }
+/** The pool's own override; Away comes from your own schedule and ends in the header. */
+const ownOverride = (pool: PoolView): Override => (pool.override === 'away' ? '' : pool.override)
 function menuItems(pool: PoolView) {
   // The server ends a Sprint at the pool's earliest limiting reset (5-hour windows included).
   const reset = pool.sprintEnd
+  const own = ownOverride(pool)
   const items: { value: Override; icon: 'play' | 'bolt' | 'pause'; title: string; desc: string }[] = []
-  if (pool.override) items.push({ value: '', icon: 'play', title: 'Back to the plan', desc: 'Pace by your work week again.' })
-  if (pool.override !== 'sprint') items.push({ value: 'sprint', icon: 'bolt', title: 'Sprint until reset', desc: reset ? `Agents may use everything left until ${when(reset, now.value)}.` : 'Agents may use everything left until the next reset.' })
-  if (pool.override !== 'hold') items.push({ value: 'hold', icon: 'pause', title: 'Hold', desc: `Agents leave ${pool.name} alone until you resume. Running steps finish.` })
+  if (own) items.push({ value: '', icon: 'play', title: 'Back to the plan', desc: 'Pace by your work week again.' })
+  if (own !== 'sprint') items.push({ value: 'sprint', icon: 'bolt', title: 'Sprint until reset', desc: reset ? `Agents may use everything left until ${when(reset, now.value)}.` : 'Agents may use everything left until the next reset.' })
+  if (own !== 'hold') items.push({ value: 'hold', icon: 'pause', title: 'Hold', desc: `Agents leave ${pool.name} alone. Running steps finish.` })
   return items
+}
+/** Hold for 2 hours, until tomorrow's hours, or until you resume. */
+function holdOptions() {
+  const later = new Date(Math.floor((now.value + 2 * 3600e3) / 60_000) * 60_000).toISOString()
+  const tomorrow = new Date(workStart(schedule.value, now.value, 1)).toISOString()
+  // "tomorrow 08:00" or "Mon 08:00": the day in the label, the time as the hint.
+  const [day, time] = when(tomorrow, now.value).split(' ')
+  return [
+    { label: 'For 2 hours', hint: `until ${when(later, now.value)}`, name: 'Hold for 2 hours', until: later },
+    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now.value)}`, until: tomorrow },
+    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
+  ]
 }
 function menuKeys(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(true); return }
@@ -164,11 +237,12 @@ function menuKeys(event: KeyboardEvent) {
   const i = buttons.indexOf(document.activeElement as HTMLElement)
   buttons[(i + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
 }
-function setOverride(pool: PoolView, value: Override) {
+function setOverride(pool: PoolView, value: Override, until?: string) {
   const id = pool.id
   closeMenu()
-  const done = value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.` : value === 'hold' ? `Holding ${pool.name}. Running steps finish.` : `${pool.name} follows your work week again.`
-  void run(() => capacity.setPoolOverride(id, value), done).then(() => nextTick(() => card.value?.querySelector<HTMLElement>(`[data-menu="${id}"]`)?.focus({ preventScroll: true })))
+  const done = value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
+    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now.value)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
+  void run(() => capacity.setPoolOverride(id, value, until), done).then(() => nextTick(() => card.value?.querySelector<HTMLElement>(`[data-menu="${id}"]`)?.focus({ preventScroll: true })))
 }
 
 // ---------- Phone sheet: the page behind it is inert ----------
@@ -189,7 +263,14 @@ function setBackground(off: boolean) {
     }
   }
 }
-watch(() => !!editor.value && sheet.value, async open => { await nextTick(); setBackground(false); if (open) setBackground(true) })
+watch(() => !!editor.value && sheet.value, async open => {
+  await nextTick()
+  setBackground(false)
+  const back = sheetReturn
+  sheetReturn = null
+  if (open) setBackground(true)
+  else if (back?.isConnected) back.focus({ preventScroll: true })
+})
 onBeforeUnmount(() => setBackground(false))
 
 // ---------- Outside clicks ----------
@@ -197,7 +278,7 @@ function outside(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (!target.isConnected) return
   if (menu.value && !menuEl.value?.contains(target) && !target.closest('[data-menu]')) closeMenu()
-  if (editor.value && !sheet.value && !editorRef.value?.root?.contains(target) && !target.closest('.gear, .days') && !editorRef.value?.dirty()) closeEditor(false)
+  if (editor.value && !sheet.value && !editorRef.value?.root?.contains(target) && !target.closest('.gear, .days, .keep-btn') && !editorRef.value?.dirty()) closeEditor(false)
 }
 onMounted(() => { document.addEventListener('click', outside, true); window.addEventListener('resize', position) })
 onBeforeUnmount(() => { document.removeEventListener('click', outside, true); window.removeEventListener('resize', position) })
@@ -209,6 +290,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
       <div class="cap-title">
         <h2 id="cap-title">Accounts</h2>
         <span v-if="capacity.ready.total" class="cap-meta">{{ capacity.ready.live }} of {{ capacity.ready.total }} ready</span>
+        <span v-if="capacity.away" class="away-chip" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
+          Away until {{ when(capacity.away, now) }}
+          <button v-if="mayManage" type="button" aria-label="Back now: end Away" data-tip="Back now" :disabled="busy" @click="endAway"><AppIcon name="close" :size="12" /></button>
+        </span>
       </div>
       <div class="settings" role="group" aria-label="Pacing">
         <div class="setting days">
@@ -224,6 +309,14 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
           <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'week'" aria-label="Customize work week" :data-tip="mayManage ? 'Customize work week' : manageTip" :disabled="!mayManage" @click="openEditor('week', $event)"><AppIcon name="gear" :size="15" /></button>
         </div>
         <span class="divider" aria-hidden="true" />
+        <div class="setting keep">
+          <span id="keep-lbl" class="lbl">Keep for you</span>
+          <button
+            class="keep-btn" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'keep'" aria-labelledby="keep-lbl keep-val" :disabled="!mayManage"
+            :data-tip="mayManage ? 'How much of every limit agents leave you while you work' : manageTip" @click="openEditor('keep', $event)"
+          ><span id="keep-val">{{ keepLabel }}</span><AppIcon name="chevron" :size="14" /></button>
+        </div>
+        <span class="divider" aria-hidden="true" />
         <div class="setting nights">
           <span id="nights-lbl" class="lbl" @click="toggleNights">Agents at night</span>
           <button class="tog" type="button" role="switch" :aria-checked="schedule.nights" aria-labelledby="nights-lbl" :disabled="!mayManage || busy" :data-tip="mayManage ? undefined : manageTip" @click="toggleNights" />
@@ -233,6 +326,13 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
       </div>
       <RouterLink v-if="mayManage" class="manage add-account" to="/settings/accounts#add-account" aria-label="Add an account" data-tip="Add an account on a paired machine"><AppIcon name="plus" :size="15" /><span>Add<span class="long"> an account</span></span></RouterLink>
       <RouterLink class="manage" to="/settings/accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use"><AppIcon name="sliders" :size="15" /><span>Manage<span class="long"> accounts</span></span></RouterLink>
+      <div v-if="planCard" class="plan-card" role="region" aria-label="The plan">
+        <p><b>{{ planCard.title }}</b> {{ planCard.text }}</p>
+        <span class="pc-actions">
+          <button class="btn" type="button" :disabled="busy" @click="cardSecondary">{{ planCard.secondary }}</button>
+          <button class="btn primary" type="button" :disabled="busy" @click="cardPrimary">{{ planCard.primary }}</button>
+        </span>
+      </div>
     </div>
 
     <p v-if="capacity.loaded && !pools.length" class="empty">No accounts yet. Sign in to a harness on a connected computer and it appears here.</p>
@@ -241,10 +341,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
     <div v-for="pool in pools" :key="pool.id" class="pool" :data-pool="pool.id">
       <div class="pool-info">
         <div class="pool-head">
-          <span class="vendor"><HarnessMark :harness="pool.id" :size="16" /></span>
+          <span class="vendor"><HarnessMark :harness="pool.mark || pool.id" :size="16" /></span>
           <span class="pool-name">{{ pool.name }}</span>
           <span v-if="pool.plan" class="pool-plan" :title="pool.plan">{{ pool.plan }}</span>
-          <span v-if="pool.override" class="override" :class="{ hold: pool.override === 'hold' }">
+          <span v-if="ownOverride(pool)" class="override" :class="{ hold: pool.override === 'hold' }">
             {{ pool.override === 'hold' ? 'On hold' : 'Sprint' }}
             <button v-if="mayManage" type="button" aria-label="Back to the plan" data-tip="Back to the plan" @click="setOverride(pool, '')"><AppIcon name="close" :size="12" /></button>
           </span>
@@ -257,21 +357,25 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
       </div>
       <ul class="accts">
         <li v-for="row in pool.rows" :key="row.id" class="acct" :class="{ dim: row.state !== 'live' && row.state !== 'unread', ahead: planOf(row)?.ahead }" :data-account="row.id">
-          <div class="acct-name">
+          <div class="acct-name" :class="{ 'has-pi-model': piModelOf(row.id) }">
             <span class="dot" :class="row.state" :data-tip="DOT_TIP[row.state](row)"><span class="sr-only">{{ DOT_TIP[row.state](row) }}</span></span>
             <span class="nm" :title="row.name">{{ row.name }}</span>
-            <span v-if="row.host" class="chip host" :title="row.host">{{ row.host }}</span>
+            <span v-if="piModelOf(row.id)" class="pi-model-caption" :title="piModelOf(row.id)">{{ piModelOf(row.id) }}</span>
+            <span v-if="usingNow(row, now)" class="presence" title="You're using this account" aria-label="You're using this account"><AppIcon name="user" :size="13" /></span>
+            <span v-for="host in (row.hosts.length ? row.hosts : row.host ? [row.host] : [])" :key="host" class="chip host">{{ host }}</span>
+            <p v-if="sameAccountCopy(row.hosts)" class="same-quota">{{ sameAccountCopy(row.hosts) }}</p>
           </div>
           <div class="gauge-cell">
-            <CapacityGauge
+            <CapacityGauge v-if="!row.sharedQuotaName && (row.primary || !row.learning)"
               :gauge="row.primary ? gaugeOf(row, planOf(row)) : null" :left="row.primary?.remaining_percent" :value="figure(row)" :used="modeOf(row) === 'used'"
-              :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
+              :estimated="row.primary?.reading.source === 'estimate'" :label="gaugeLabel(row)" :ahead="!!planOf(row)?.ahead" :dim="row.state !== 'live' && row.state !== 'unread'"
             />
-            <div v-if="row.five" class="win5" :data-tip="fiveLine(row)">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b> · resets {{ when(row.five.reading.resets_at, now) }}</div>
+            <div v-if="row.five" class="win5" :data-tip="fiveLine(row)">5-hour window <b>{{ Math.round(modeOf(row) === 'used' ? 100 - row.five.remaining_percent : row.five.remaining_percent) }}% {{ modeOf(row) }}</b><template v-if="fiveKept(row.five)"> · keeps <b>{{ fiveKept(row.five) }}</b> for you</template> · resets {{ when(row.five.reading.resets_at, now) }}</div>
           </div>
           <button
             v-if="row.primary" type="button" class="left" :aria-label="`${row.name}: ${Math.round(figure(row))}% ${modeOf(row)}. Show % ${modeOf(row) === 'left' ? 'used' : 'left'} for this account`"
             :data-tip="`Show % ${modeOf(row) === 'left' ? 'used' : 'left'} for ${row.name}`" @click="toggleMode(row)"
+            :class="{ kept: planOf(row)?.atReserve }"
           ><b>{{ Math.round(figure(row)) }}%</b><span>{{ modeOf(row) }}</span></button>
           <span v-else class="left" />
           <template v-for="cell in [todayCell(row, planOf(row))]" :key="cell.kind">
@@ -282,16 +386,18 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
             <span v-else-if="cell.kind === 'sprint'" class="today" data-tip="Sprint: everything left may be used before the reset"><b>{{ cell.text }}</b></span>
             <span v-else-if="cell.kind === 'ahead'" class="today ahead" :data-tip="`Plan for today ${cell.plan}; ${cell.used} already used`"><b>{{ cell.used }}</b> of {{ cell.plan }} · ahead</span>
             <span v-else-if="cell.kind === 'share'" class="today" :data-tip="cell.tip"><b>{{ cell.value }}</b> today</span>
+            <span v-else-if="cell.kind === 'reserve'" class="today kept" :data-tip="cell.tip">{{ cell.text }}</span>
             <span v-else class="today quiet" :data-tip="cell.text">{{ cell.text }}</span>
           </template>
           <span class="resets" :data-tip="row.primary ? whenFull(row.primary.reading.resets_at) : undefined">{{ row.primary ? `resets ${when(row.primary.reading.resets_at, now)}` : '' }}</span>
-          <span class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <span v-if="!row.sharedQuotaName" class="source" :title="sourceLine(row, now)">{{ sourceLine(row, now) }}</span>
+          <CapacityLearning class="row-learning" :learning="row.learning" :host="row.host" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(row)" @away="openEditor('keep', $event)" />
         </li>
       </ul>
     </div>
 
     <div v-if="pools.length" class="cap-foot">
-      <CapacityLegend />
+      <CapacityLegend :yours="anyKept" />
       <span class="fine">Your own use counts toward today's share too. Each account ends at 0% at its reset.</span>
       <span class="gauge-mode">
         <span id="gauge-mode-lbl" class="sr-only">Gauges show</span>
@@ -302,20 +408,38 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
     </div>
 
     <div v-if="menu" ref="menuEl" class="menu" role="menu" :aria-label="`${menu.pool.name}: sprint or hold`" :style="menu.style" @keydown="menuKeys">
-      <button v-for="item in menuItems(menu.pool)" :key="item.value" type="button" role="menuitem" @click="setOverride(menu.pool, item.value)">
-        <AppIcon :name="item.icon" :size="16" /><span class="t">{{ item.title }}</span><span class="d">{{ item.desc }}</span>
-      </button>
+      <template v-for="item in menuItems(menu.pool)" :key="item.value">
+        <button v-if="item.value !== 'hold'" type="button" role="menuitem" @click="setOverride(menu.pool, item.value)">
+          <AppIcon :name="item.icon" :size="16" /><span class="t">{{ item.title }}</span><span class="d">{{ item.desc }}</span>
+        </button>
+        <div v-else class="hold" role="group" aria-labelledby="hold-t">
+          <AppIcon :name="item.icon" :size="16" /><span id="hold-t" class="t">{{ item.title }}</span><span class="d">{{ item.desc }}</span>
+          <span class="hold-opts">
+            <button v-for="h in holdOptions()" :key="h.name" type="button" role="menuitem" :aria-label="h.name" @click="setOverride(menu.pool, 'hold', h.until)"><span>{{ h.label }}</span><span class="hint">{{ h.hint }}</span></button>
+          </span>
+        </div>
+      </template>
     </div>
 
-    <ScheduleEditor
-      v-if="editor && !sheet" ref="editorRef" :key="editor.kind" :kind="editor.kind" :schedule="schedule" :sheet="false" :now="now" :accounts="capacity.inputs" :pools="pools" :timezone="capacity.timezone" :saving="saving"
-      :style="editorStyle" @close="closeEditor()" @save="saveEditor"
-    />
+    <template v-if="editor && !sheet">
+      <KeepEditor
+        v-if="editor.kind === 'keep'" ref="editorRef" :schedule="schedule" :away="capacity.away" :pool-reserves="capacity.poolReserves" :sheet="false" :now="now" :accounts="capacity.inputs" :pools="pools"
+        :timezone="capacity.timezone" :saving="saving" :style="editorStyle" @close="closeEditor()" @save="saveKeep"
+      />
+      <ScheduleEditor
+        v-else ref="editorRef" :key="editor.kind" :kind="editor.kind === 'night' ? 'night' : 'week'" :schedule="schedule" :sheet="false" :now="now" :accounts="capacity.inputs" :pools="pools" :timezone="capacity.timezone" :saving="saving"
+        :style="editorStyle" @close="closeEditor()" @save="saveEditor"
+      />
+    </template>
     <Teleport to="body">
       <div v-if="editor && sheet" class="sheet-host">
         <div class="scrim" @click="closeEditor()" />
+        <KeepEditor
+          v-if="editor.kind === 'keep'" ref="editorRef" :schedule="schedule" :away="capacity.away" :pool-reserves="capacity.poolReserves" :sheet="true" :now="now" :accounts="capacity.inputs" :pools="pools"
+          :timezone="capacity.timezone" :saving="saving" @close="closeEditor()" @save="saveKeep"
+        />
         <ScheduleEditor
-          ref="editorRef" :key="editor.kind" :kind="editor.kind" :schedule="schedule" :sheet="true" :now="now" :accounts="capacity.inputs" :pools="pools" :timezone="capacity.timezone" :saving="saving"
+          v-else ref="editorRef" :key="editor.kind" :kind="editor.kind === 'night' ? 'night' : 'week'" :schedule="schedule" :sheet="true" :now="now" :accounts="capacity.inputs" :pools="pools" :timezone="capacity.timezone" :saving="saving"
           @close="closeEditor()" @save="saveEditor"
         />
       </div>
@@ -324,12 +448,18 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 </template>
 
 <style scoped>
+.pi-model-caption { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: 11px var(--mono); }
+.acct-name.has-pi-model { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 4px 9px; }
+.has-pi-model .dot { grid-area: 1 / 1; }
+.has-pi-model .nm { grid-area: 1 / 2; }
+.has-pi-model .host { grid-area: 1 / 3; }
+.has-pi-model .pi-model-caption { grid-area: 2 / 2 / 3 / -1; }
 .cap { padding: 0; z-index: 3; min-width: 0; container: cap / inline-size; }
 .cap-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; min-width: 0; padding: 14px 18px 14px 20px; border-bottom: 1px solid var(--line); }
 .cap-title { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
 .cap-title h2 { font-size: 19px; }
 .cap-meta { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.settings { display: flex; align-items: center; gap: 22px; min-width: 0; max-width: 100%; }
+.settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; min-width: 0; max-width: 100%; }
 .setting { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; }
 .setting .lbl { margin-right: 2px; }
 .setting.nights .lbl { cursor: pointer; }
@@ -353,6 +483,22 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .gear[aria-expanded="true"] { background: var(--row-selected); color: var(--teal-ink); }
 .gear:disabled { opacity: .45; cursor: default; }
 .gear:focus-visible { box-shadow: var(--focus-ring); }
+/* Keep for you: a quiet pill with the answer already filled in. */
+.keep-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 12px; border: 0; border-radius: 999px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.keep-btn svg { color: var(--ink-3); }
+@media (hover: hover) { .keep-btn:hover:not(:disabled) { background: var(--row-hover); } }
+.keep-btn[aria-expanded="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.keep-btn:disabled { opacity: .6; cursor: default; }
+.keep-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.away-chip { display: inline-flex; align-items: center; gap: 4px; align-self: center; height: 24px; padding: 0 2px 0 10px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.away-chip button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; }
+.away-chip button:hover { background: var(--row-hover); }
+.away-chip button:focus-visible { box-shadow: var(--focus-ring); }
+/* The one-time plan card: a subtle teal tint and a hairline ring, never an edge bar. */
+.plan-card { order: 10; flex-basis: 100%; display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; padding: 12px 14px 12px 16px; border-radius: 12px; background: color-mix(in srgb, var(--teal) 7%, var(--surface-raised)); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.plan-card p { flex: 1 1 420px; margin: 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
+.plan-card b { color: var(--ink); font-weight: 650; }
+.pc-actions { display: inline-flex; gap: 8px; margin-left: auto; }
 .manage { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .manage:hover { background: var(--row-hover); color: var(--ink); } }
 .manage:focus-visible { box-shadow: var(--focus-ring); }
@@ -382,12 +528,16 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .plan :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .plan.ahead :deep(.n) { color: var(--gold-ink); }
 
+.presence { display: inline-grid; place-items: center; color: var(--ink-2); flex: none; }
+.row-learning { grid-column: 1 / -1; }
 .accts { display: grid; gap: 2px; align-self: start; min-width: 0; margin: -6px 0 0; padding: 0; list-style: none; }
 .acct { display: grid; grid-template-columns: minmax(0, 180px) minmax(140px, 1fr) 72px minmax(0, 120px) 150px minmax(0, 180px); align-items: center; gap: 16px; min-height: 44px; min-width: 0; padding: 6px 10px; border-radius: var(--radius-row); }
 @media (hover: hover) { .acct:hover { background: var(--row-hover); } }
-.acct-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.acct-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; min-width: 0; }
 .acct-name .nm { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13.5px; font-weight: 600; }
 .host { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; line-height: 22px; text-overflow: ellipsis; }
+
+.same-quota { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-3); text-wrap: pretty; }
 .dot { position: relative; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .dot.live, .dot.unread { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
 .dot.offline, .dot.paused, .dot.unavailable { background: transparent; box-shadow: inset 0 0 0 1.6px var(--ink-3); }
@@ -396,6 +546,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 button.left { cursor: pointer; }
 @media (hover: hover) { button.left:hover { background: var(--row-hover); } }
 button.left:focus-visible { box-shadow: var(--focus-ring); }
+.left.kept b { color: var(--gold-ink); }
 .left b { color: var(--ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .left span { margin-left: 3px; color: var(--ink-3); font-size: 12px; }
 .today { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -405,6 +556,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .today .btn { height: 26px; max-width: 100%; padding: 0 10px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .resets { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .gauge-cell { min-width: 0; }
+.today.kept { color: var(--gold-ink); font-weight: 600; }
 .source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 .win5 { margin-top: 5px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -421,6 +573,12 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
 .menu button svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
 .menu .t { color: var(--ink); font-size: 13.5px; font-weight: 600; }
 .menu .d { color: var(--ink-3); font-size: 12px; line-height: 1.4; }
+.menu .hold { display: grid; grid-template-columns: 20px 1fr; gap: 2px 10px; padding: 9px 10px; }
+.menu .hold svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
+/* The three hold durations: compact rows under Hold, the time they end on the right. */
+.hold-opts { grid-column: 1 / -1; display: grid; gap: 1px; margin: 6px -4px 0 26px; }
+.menu .hold-opts button { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 0 10px; color: var(--ink); font-size: 13px; font-weight: 550; }
+.menu .hold-opts .hint { color: var(--ink-3); font-size: 12px; font-weight: 450; font-variant-numeric: tabular-nums; }
 .sheet-host { position: fixed; inset: 0; z-index: 80; }
 .scrim { position: absolute; inset: 0; background: var(--scrim); }
 @media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }
@@ -436,7 +594,8 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .acct { grid-template-columns: minmax(0, 150px) minmax(120px, 1fr) 68px minmax(0, 110px) 150px; }
   .source { display: none; }
 }
-@container cap (max-width: 640px) {
+@container cap (max-width: 1000px) {
+  .settings .divider { display: none; }
   .settings { flex-wrap: wrap; row-gap: 6px; }
   .setting { min-width: 0; max-width: 100%; }
 }
@@ -446,7 +605,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .cap-title { order: 1; flex: 1; margin: 0; }
   .manage { order: 2; height: 44px; margin-right: -6px; }
   .manage .long { display: none; }
-  .settings { order: 3; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; width: 100%; padding: 0 12px; border-radius: 12px; background: var(--surface-sunken); }
+  .settings { order: 4; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; width: 100%; padding: 0 12px; border-radius: 12px; background: var(--surface-sunken); }
   .settings .divider { display: none; }
   .setting { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "lbl ctl gear" "hint ctl gear"; align-items: center; column-gap: 6px; min-height: 60px; padding: 8px 0; white-space: normal; }
   .setting.days { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "lbl gear" "hint gear" "ctl ctl"; row-gap: 0; padding-bottom: 12px; }
@@ -458,6 +617,16 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .setting .lbl { grid-area: lbl; align-self: end; }
   .setting .cap-hint { grid-area: hint; align-self: start; min-width: 0; }
   .setting .seg, .setting .tog { grid-area: ctl; }
+  .setting.keep { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "lbl ctl"; min-height: 56px; }
+  .setting.keep .lbl { align-self: center; }
+  .keep-btn { grid-area: ctl; height: 40px; padding: 0 12px 0 14px; margin-right: -2px; }
+  .plan-card { order: 3; padding: 14px; }
+  .plan-card p { flex-basis: 100%; }
+  .pc-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin: 0; }
+  .pc-actions .btn { min-height: 44px; }
+  .cap-title { flex-wrap: wrap; row-gap: 6px; }
+  .menu .hold-opts button { min-height: 44px; }
+  .win5 { white-space: normal; }
   .setting .seg button { height: 38px; min-width: 44px; }
   .tog { width: 44px; height: 26px; }
   .tog::after { width: 20px; height: 20px; }
@@ -465,7 +634,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .pool { gap: 8px; padding: 14px 14px 12px; }
   .plan { padding-left: 0; }
   .pool-head .more { width: 44px; height: 44px; margin-right: -8px; }
-  .acct { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "gauge gauge" "today resets" "source source"; gap: 4px 10px; padding: 10px 0; border-radius: 0; }
+  .acct { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name left" "gauge gauge" "today resets" "source source" "learned learned"; gap: 4px 10px; padding: 10px 0; border-radius: 0; }
   .acct + .acct { box-shadow: 0 -1px 0 var(--line); }
   .acct:hover { background: transparent; }
   .acct-name { grid-area: name; }
@@ -473,6 +642,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .left { grid-area: left; }
   .today { grid-area: today; }
   .resets { grid-area: resets; text-align: right; color: var(--ink-3); font-size: 12.5px; }
+  .row-learning { grid-area: learned; }
   .source { grid-area: source; display: block; text-align: left; font-size: 11.5px; }
   .source:empty { display: none; }
   .today .btn { min-height: 36px; }

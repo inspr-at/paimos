@@ -26,14 +26,18 @@ type Shifts struct {
 type Schedule struct {
 	OverrideUntil *time.Time `json:"override_until,omitempty"`
 	Override      string     `json:"override,omitempty"`
-	Timezone      string     `json:"timezone"`
-	Week          []Day      `json:"week"`
-	OffDays       string     `json:"off_days"`
-	Nights        bool       `json:"nights"`
-	Model         string     `json:"model"`
-	Night         Night      `json:"night"`
-	Shifts        Shifts     `json:"shifts"`
-	Blocks        []float64  `json:"blocks"`
+	// Reserve is Keep for you: "" inherits (Auto on the person's own schedule),
+	// auto, fixed (ReservePercent, 10–80 in steps of 5) or off.
+	Reserve        string    `json:"reserve,omitempty"`
+	ReservePercent float64   `json:"reserve_percent,omitempty"`
+	Timezone       string    `json:"timezone"`
+	Week           []Day     `json:"week"`
+	OffDays        string    `json:"off_days"`
+	Nights         bool      `json:"nights"`
+	Model          string    `json:"model"`
+	Night          Night     `json:"night"`
+	Shifts         Shifts    `json:"shifts"`
+	Blocks         []float64 `json:"blocks"`
 }
 
 func Preset(days int) []Day {
@@ -66,7 +70,11 @@ func grid(v float64, end bool) bool {
 func rateOK(v float64) bool { return v == 0 || v == 1 || v >= .1 && v <= .9 }
 func (s Schedule) Validate() error {
 	bad := errors.New("invalid capacity schedule")
-	if s.Timezone == "" || (s.Override != "" && s.Override != "sprint" && s.Override != "hold") {
+	if s.Timezone == "" || (s.Override != "" && s.Override != "sprint" && s.Override != "hold" && s.Override != "away") {
+		return bad
+	}
+	// Away is a Sprint bounded by a date, so it needs that date.
+	if s.Override == "away" && s.OverrideUntil == nil || !validReserve(s.Reserve, s.ReservePercent) {
 		return bad
 	}
 	if _, err := time.LoadLocation(s.Timezone); err != nil {
@@ -227,6 +235,8 @@ func (s Schedule) Period(now time.Time) (time.Time, time.Time) {
 }
 
 type Pacing struct {
+	DriftPercent          float64    `json:"drift_percent,omitempty"`
+	WouldExpirePercent    float64    `json:"would_expire_percent,omitempty"`
 	AvailableNowPercent   float64    `json:"available_now_percent"`
 	UsableHours           float64    `json:"usable_hours"`
 	PercentPerHour        float64    `json:"percent_per_hour"`
@@ -240,11 +250,36 @@ type Pacing struct {
 	AllowOff              bool       `json:"allow_off"`
 	Unused                bool       `json:"unused"`
 	Ahead                 bool       `json:"ahead"`
+	// Keep for you: R, R_eff now, and when the reserve is gone (the end of the
+	// person's last work band before the reset). AvailableNowPercent already
+	// leaves R_eff of the window.
+	ReservePercent          float64    `json:"reserve_percent"`
+	ReserveEffectivePercent float64    `json:"reserve_effective_percent"`
+	ReserveUntil            *time.Time `json:"reserve_until,omitempty"`
+	// shareNow is what agents could take now without the reserve, set only
+	// when the reserve lowered it.
+	shareNow *float64
 }
+
+// ReserveBinds reports whether Keep for you, not the schedule, limits what
+// agents may take now, and what they could take without it.
+func (p Pacing) ReserveBinds() (float64, bool) {
+	if p.shareNow == nil {
+		return 0, false
+	}
+	return *p.shareNow, true
+}
+
 type PlanInput struct {
 	Now, Reset, WindowStart time.Time
 	Remaining, UsedToday    float64
-	Override                string // Empty, sprint, or hold. Overrides affect pacing, never vendor authority.
+	Override                string // Empty, sprint, hold or away. Overrides affect pacing, never vendor authority.
+	// WindowLength is the vendor window's length (H_ref); zero means unknown.
+	WindowLength time.Duration
+	// AutoReserve is the learned Auto level; zero means not learned yet (30%).
+	AutoReserve float64
+	// Observed throughput (percent/hour across available slots); zero disables learning.
+	Throughput float64
 }
 
 // Plan implements the approved schedule formula. UsedToday must be supplied
@@ -254,12 +289,9 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 		return Pacing{}, err
 	}
 	if in.Override == "" {
-		in.Override = s.Override
-		if in.Override == "sprint" && s.OverrideUntil != nil && !in.Now.Before(*s.OverrideUntil) {
-			in.Override = ""
-		}
+		in.Override = s.ActiveOverride(in.Now)
 	}
-	if math.IsNaN(in.Remaining) || math.IsNaN(in.UsedToday) || in.Remaining < 0 || in.UsedToday < 0 || in.Remaining+in.UsedToday > 100 || in.Reset.Sub(in.Now) > 367*24*time.Hour || in.Override != "" && in.Override != "hold" && in.Override != "sprint" {
+	if math.IsNaN(in.Remaining) || math.IsNaN(in.UsedToday) || in.Remaining < 0 || in.UsedToday < 0 || in.Remaining+in.UsedToday > 100 || in.Reset.Sub(in.Now) > 367*24*time.Hour || in.Override != "" && in.Override != "hold" && in.Override != "sprint" && in.Override != "away" {
 		return Pacing{}, errors.New("invalid pacing input")
 	}
 	if !in.Reset.After(in.Now) {
@@ -275,6 +307,17 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	}
 	p := Pacing{PeriodStart: a, PeriodEnd: b, UsedTodayPercent: in.UsedToday}
 	total, _ := s.weight(start, in.Reset, false)
+	// Use off-day hours for the excess that scheduled hours cannot consume.
+	// An explicit rest day remains a rest day; no learned throughput means the
+	// original pacing formula, including its reserve-off golden corpus.
+	if s.OffDays == "expire" && in.Throughput > 0 && !math.IsInf(in.Throughput, 0) {
+		scheduled, _ := s.weight(in.Now, in.Reset, false)
+		p.WouldExpirePercent = math.Max(0, in.Remaining-in.Throughput*scheduled)
+		if p.WouldExpirePercent > 0 {
+			p.AllowOff = true
+			total, _ = s.weight(start, in.Reset, true)
+		}
+	}
 	if total == 0 && s.OffDays == "expire" {
 		total, _ = s.weight(start, in.Reset, true)
 		p.AllowOff = total > 0
@@ -296,7 +339,9 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	if !in.Reset.After(b) && !(dayOff && s.OffDays == "rest") {
 		p.BudgetPercent = leftAtStart
 	}
-	if in.Override == "sprint" {
+	// Away is a Sprint bounded by a date: everything, across resets, until then.
+	literal := in.Override == "sprint" || in.Override == "away"
+	if literal {
 		p.BudgetPercent = leftAtStart
 	}
 	if in.Override == "hold" {
@@ -304,8 +349,17 @@ func Plan(in PlanInput, s Schedule) (Pacing, error) {
 	}
 	p.SuggestedTodayPercent = math.Max(0, p.BudgetPercent-in.UsedToday)
 	loc, _ := time.LoadLocation(s.Timezone)
-	if in.Override == "sprint" || s.rate(in.Now.In(loc), p.AllowOff) > 0 {
+	if literal || s.rate(in.Now.In(loc), p.AllowOff) > 0 {
 		p.AvailableNowPercent = p.SuggestedTodayPercent
+	}
+	// The runway reserve is a floor on top of the paced share. Sprint, Away and
+	// Run now once take everything; Hold already leaves agents nothing.
+	if p.ReservePercent = s.ReserveLevel(in.AutoReserve); p.ReservePercent > 0 && !literal {
+		p.ReserveEffectivePercent, p.ReserveUntil = s.Runway(in.Now, in.Reset, in.WindowLength, p.ReservePercent)
+		if capped := math.Max(0, math.Min(p.AvailableNowPercent, in.Remaining-p.ReserveEffectivePercent)); p.ReserveEffectivePercent > 0 && capped < p.AvailableNowPercent {
+			share := p.AvailableNowPercent
+			p.shareNow, p.AvailableNowPercent = &share, capped
+		}
 	}
 	p.Ahead = in.UsedToday > p.BudgetPercent+.5
 	p.Unused = in.Remaining > 0 && p.SuggestedTodayPercent == 0 && total == 0

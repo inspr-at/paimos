@@ -1,0 +1,322 @@
+{
+  "harnesses": [
+    "claude",
+    "codex",
+    "cursor",
+    "grok",
+    "pi"
+  ],
+  "reasons": [
+    "repin_pending",
+    "dependency_invalid",
+    "pin_missing",
+    "pin_partial",
+    "pin_drifted",
+    "pin_invalid",
+    "pin_unsafe",
+    "login_required",
+    "starting",
+    "harness_failed",
+    "cli_unavailable",
+    "profile_permissions",
+    "binding_missing",
+    "probe_pending",
+    "probe_timeout",
+    "probe_failed",
+    "capacity_capture",
+    "capacity_timeout",
+    "future_reason"
+  ],
+  "fixes": {
+    "claude": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness claude"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "cli_unavailable": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "dependency_invalid": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "harness_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "login_required": {
+        "kind": "login",
+        "command": "claude auth login"
+      },
+      "pin_drifted": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "pin_invalid": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "pin_missing": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "pin_partial": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "pin_unsafe": {
+        "kind": "repin",
+        "command": "aeon-agentd repin --harness claude"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "profile_permissions": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      }
+    },
+    "codex": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "cli_unavailable": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "dependency_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "harness_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "login_required": {
+        "kind": "login",
+        "command": "codex login"
+      },
+      "pin_drifted": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "pin_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "pin_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "pin_partial": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "pin_unsafe": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness codex"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "profile_permissions": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      }
+    },
+    "cursor": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "cli_unavailable": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "dependency_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "harness_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "login_required": {
+        "kind": "login",
+        "command": "cursor-agent login"
+      },
+      "pin_drifted": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "pin_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "pin_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "pin_partial": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "pin_unsafe": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness cursor"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "profile_permissions": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      }
+    },
+    "grok": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "cli_unavailable": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "dependency_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "harness_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "login_required": {
+        "kind": "login",
+        "command": "grok login"
+      },
+      "pin_drifted": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "pin_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "pin_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "pin_partial": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "pin_unsafe": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness grok"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "profile_permissions": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      }
+    },
+    "pi": {
+      "binding_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "capacity_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "cli_unavailable": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "dependency_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "harness_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "login_required": {
+        "kind": "login",
+        "command": "pi"
+      },
+      "pin_drifted": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "pin_invalid": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "pin_missing": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "pin_partial": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "pin_unsafe": {
+        "kind": "add_harness",
+        "command": "aeon-agentd add-harness --harness pi"
+      },
+      "probe_failed": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "probe_timeout": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      },
+      "profile_permissions": {
+        "kind": "restart",
+        "command": "aeon-agentd setup"
+      }
+    }
+  }
+}

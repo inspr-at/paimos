@@ -104,7 +104,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(dialog.getByText('PHAROS-11', { exact: true })).toBeVisible()
       const bulk = calls.filter(call => call.path === '/api/nodes/bulk')
       expect(bulk).toHaveLength(1)
-      expect(bulk[0].body).toEqual({ ids: ['n-2', 'n-3'], state: 'done' })
+      expect(bulk[0].body).toEqual({ ids: ['n-2', 'n-3'], state: 'done', if_unmodified_since: { 'n-2': expect.any(String), 'n-3': expect.any(String) } })
       await expect(page.getByText('2 tickets are now Done')).toBeVisible()
       if (width === 390) await page.keyboard.press('Escape')
       else await dialog.getByRole('button', { name: 'Not now' }).click()
