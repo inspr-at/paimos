@@ -516,6 +516,28 @@ func TestGuard(t *testing.T) {
 	}
 }
 
+// A later version never hides an earlier one that started too low: with
+// version 2 from 100 denying "Fresh Flyby" and version 3 from 200, published
+// release 111 (unrecorded, named "Fresh Flyby" under version 1) is renamed,
+// although it sits below the newest version's first sequence.
+func TestGuardEveryVersion(t *testing.T) {
+	v1 := mustParse(wordsFile)
+	if v1.Name(111) != "Fresh Flyby" {
+		t.Fatalf("Name(111) = %q, want Fresh Flyby under version 1", v1.Name(111))
+	}
+	v2 := wordsFile + "\nversion 2 from 100\ndeny Fresh Flyby\n"
+	l := mustParse(v2 + "version 3 from 200\n")
+	if l.Name(111) == "Fresh Flyby" {
+		t.Fatal("the overlay does not rename release 111")
+	}
+	if err := l.Guard([]Named{{Sequence: 111}}); err == nil {
+		t.Fatalf("release 111 renamed to %q passed", l.Name(111))
+	}
+	if err := mustParse(wordsFile + "\nversion 2 from 112\ndeny Fresh Flyby\nversion 3 from 200\n").Guard([]Named{{Sequence: 111}}); err != nil {
+		t.Fatalf("version 2 from 112: %v", err)
+	}
+}
+
 // minimal is a word list with the cycle A B C, a's lines for A and one
 // placeholder name for B and C.
 func minimal(a string) string {

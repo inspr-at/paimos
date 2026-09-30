@@ -371,9 +371,10 @@ func (l *Lists) denied(li, a, n, seq int) bool {
 
 // Guard fails when these lists would rename a release that already has a
 // sequence. A recorded name must still be its sequence's name. A release
-// without one cannot be checked by name, so once there is a version after 1,
-// the newest version must start above it: its "from S" must be above every
-// sequence reserved or published before it was added. Version 1 is exempt.
+// without one cannot be checked by name, so every version after 1 must start
+// above it, not just the newest: a version 2 whose "from S" was too low
+// renames it for good, whatever versions follow. Versions ascend, so that is
+// version 2's first sequence. Version 1 is exempt.
 func (l *Lists) Guard(named []Named) error {
 	for _, r := range named {
 		if r.Sequence < 1 {
@@ -383,8 +384,8 @@ func (l *Lists) Guard(named []Named) error {
 			if now := l.Name(r.Sequence); now != r.Name {
 				return fmt.Errorf("codename: release %d is %q but the lists now name it %q; never change a published name", r.Sequence, r.Name, now)
 			}
-		} else if l.version > 1 && r.Sequence >= l.latest() {
-			return fmt.Errorf("codename: version %d from %d would rename release %d, which has no recorded codename; start it above every reserved sequence", l.version, l.latest(), r.Sequence)
+		} else if l.version > 1 && r.Sequence >= l.froms[1] {
+			return fmt.Errorf("codename: version 2 from %d would rename release %d, which has no recorded codename; every version after 1 must start above every sequence reserved without one", l.froms[1], r.Sequence)
 		}
 	}
 	return nil
