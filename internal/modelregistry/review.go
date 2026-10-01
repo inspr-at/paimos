@@ -23,7 +23,11 @@ type ReviewRoute struct {
 // Profiles remain tenant policy; no model names or shell snippets are invented.
 func ResolveReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, author, projectID string, now time.Time) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}}
-	if !validFamily(author) {
+	author, err := NormalizeAuthorFamily(author)
+	if err != nil {
+		return out, fail(400, err.Error())
+	}
+	if author == "" {
 		return out, fail(400, "known author family required")
 	}
 	if err := ensureCatalog(ctx, tx, p); err != nil {

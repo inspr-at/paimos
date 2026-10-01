@@ -5678,7 +5678,7 @@ paths:
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
-        - {name: author_family, in: query, schema: {type: string}}
+        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai or cursor and aliases codex → openai, claude → anthropic, grok → xai. pi is ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
@@ -12452,6 +12452,7 @@ components:
       required: [role, ladder, owner_required, source]
       properties:
         role: {type: string}
+        author_family: {type: string, enum: ['', openai, anthropic, xai, cursor], description: Normalised author family used for exclusion; empty when none was supplied.}
         profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
         ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
         command_template: {type: string}

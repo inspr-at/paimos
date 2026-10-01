@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/modelregistry"
 )
 
 var (
@@ -38,6 +40,7 @@ type modelCandidate struct {
 
 type modelResolution struct {
 	Role            string           `json:"role"`
+	AuthorFamily    string           `json:"author_family"`
 	Profile         *modelProfile    `json:"profile"`
 	Ladder          []modelCandidate `json:"ladder"`
 	CommandTemplate string           `json:"command_template"`
@@ -50,13 +53,12 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if !modelRoles[role] {
 		return usagef("unknown model role %q", role)
 	}
-	author = strings.TrimSpace(author)
+	author, err := modelregistry.NormalizeAuthorFamily(author)
+	if err != nil {
+		return usagef("%s", err)
+	}
 	if role == "review-gate" && author == "" {
 		return usagef("review-gate requires --author-family")
-	}
-	if author != "" && author != "openai" && author != "anthropic" && author != "xai" && author != "cursor" {
-		// Families name the model's maker, not the harness (codex runs openai models).
-		return usagef("unknown author family %q: use openai, anthropic, xai or cursor", author)
 	}
 	harness = strings.TrimSpace(harness)
 	if harness != "" && !modelHarnesses[harness] {
@@ -95,6 +97,7 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 		}
 		out := map[string]any{
 			"role":             result.Role,
+			"author_family":    result.AuthorFamily,
 			"command_template": result.CommandTemplate,
 			"ladder":           ladder,
 			"owner_required":   result.OwnerRequired,
