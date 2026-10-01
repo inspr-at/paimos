@@ -226,7 +226,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Key dialog layout regression
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/key-layout.spec.ts --workers=1
+        run: |
+          npm run test:unit -- --maxWorkers=1
+          npx playwright test -c playwright.ui.config.ts tests/key-layout.spec.ts --workers=1
       - name: Start server and run smoke
         run: |
           set -euo pipefail
