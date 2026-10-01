@@ -97,7 +97,6 @@ test('light, dark and narrow settings evidence beside the approved fragment', as
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('region', { name: 'Status autopilot', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
-  await page.locator('.autopilot').screenshot({ path: `${folder}/status-autopilot-mobile.png` })
 })
 
 test('ticket Activity shows the autopilot reason, automatic filter and guarded Undo', async ({ page }) => {
