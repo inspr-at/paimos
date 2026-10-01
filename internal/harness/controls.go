@@ -114,7 +114,7 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err := m.expireControls(r, tx, p, s); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' ORDER BY sequence FOR UPDATE`, s.ID)
+	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' AND NOT(kind='stop' AND coalesce(value,'')='pause') ORDER BY sequence FOR UPDATE`, s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +241,9 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	c, err := scanControl(tx.QueryRow(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, id))
 	if err != nil {
 		return nil, err
+	}
+	if c.Kind == "stop" && c.Value == "pause" {
+		return nil, workorders.Fail(409, "pause completes only with a planned handover and stop reason paused")
 	}
 	if sessionRequest(c.Kind) && (c.ExpectedGeneration == nil || *c.ExpectedGeneration != s.ID) {
 		return nil, workorders.Fail(409, "wrong request generation")

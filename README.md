@@ -418,7 +418,60 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.9`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.10`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
+
+Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
+in contract 1.10. `pause.state` distinguishes requested, planned, paused,
+resume_requested, resumed and cancelled; the established phase values remain
+unchanged. `state=paused` selects resumable closed generations, including those
+older than 24 hours in `view=current`; existing stopped filters remain compatible.
+
+```sh
+aeon harness pause --project AEON --session SESSION_UUID --reason "Reboot"
+aeon harness pause --all --except KEEP_RUNNING_SESSION_UUID
+aeon harness resume --project AEON --all
+```
+
+A person needs `harness.control` and owns the registration (project owners/admins
+may control other registrations). An agent coordinator uses `--project`,
+`--coordinator-session` and its `--worker-lease-file` to control direct children.
+Global `--all` spans the person's visible authorized projects; `--project` narrows
+it. Batches return up to 200 items and `more`; repeat while `more` is true.
+Requests and the default ten-minute handover deadline persist in Postgres.
+The pause control uses the existing `stop` kind with `value=pause`; managed
+yield holds it aside so it cannot accidentally trigger an immediate signal.
+Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
+an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.
+Agentd forwards a heartbeat pause through its existing generation-fenced inbox
+when the adapter supports input, with the ordinary durable input receipt.
+
+The worker must plan a safe stopping point, finish or roll back the current
+step, commit WIP on its own branch, then submit a handover and exit cleanly:
+
+```sh
+aeon harness pause-plan --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --control-id CONTROL_UUID --handover-point "After the current commit"
+aeon harness mark-stopped --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --reason paused --handover-file HANDOVER_JSON_PATH
+```
+
+The handover JSON contains `state`, a nonempty `next_steps` array,
+`open_questions` (an empty array is valid), and `worktree_state` (`committed`,
+`clean` or `rolled_back`). `committed` requires `commit_sha`. Session storage,
+the bound-ticket comment, control completion and stopped generation are one
+transaction; a retry cannot duplicate the handover. Notes are public project
+content: never include credentials or private registration proofs.
+
+`resume` persists a launch recipe and full continuation brief. For one session,
+`--registration-file` may supply a fresh private reference and lease and create
+the successor atomically; ordinary `harness register --succeeds SESSION_UUID`
+and `run-heartbeat --succeeds` also consume that recipe. The successor keeps
+the principal, harness/model, branch/worktree and ticket, and receives the
+full handover in `continuation.brief` rather than truncating it to the short
+metadata label. Old run and process ownership are never reused. Resume paused
+coordinators before their paused children; the new coordinator adopts those
+children for continuation. Generation registration does not itself launch a
+vendor executable. Agentd automatic launch after login and a deadline executor
+are separate runtime integration: any hard stop must use the existing exact
+owned-process controls, and these HTTP endpoints never signal a process.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -1561,7 +1614,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.9`:
+The reporter contract is `harness-session/1.10`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

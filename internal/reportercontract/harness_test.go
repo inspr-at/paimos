@@ -81,6 +81,37 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 	}
 }
 
+func TestHarnessPauseAndContinuationAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range shape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		for _, field := range []string{"pause", "continuation"} {
+			if _, ok := props[field]; !ok || isRequired(body["required"].([]any), field) {
+				t.Fatalf("%s %s must be optional", op, field)
+			}
+			delete(props, field)
+		}
+	}
+	before, _ := json.Marshal(shape)
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.9", SHA256: "before-pause", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("pause addition: %s %v", bump, err)
+	}
+}
+
 // Compare the real response pin to its pre-finished shape, rather than only
 // checking a regenerated pin against itself. Both operations must stay additive.
 func TestHarnessFinishedResponseAdditionIsMinor(t *testing.T) {
