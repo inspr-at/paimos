@@ -388,10 +388,7 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 	}
 	f.call(t, guest, "POST", "/api/queue/reset", map[string]any{}, 200, &page)
 	global := f.queuePage(t)
-	if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, second, visible}) {
-		// FIFO is the original queue timestamp, not the previous manual order.
-		if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, visible, second}) {
-			t.Fatalf("project reset left hidden ranks: %+v", global)
-		}
+	if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, visible, second}) {
+		t.Fatalf("project reset left hidden ranks: %+v", global)
 	}
 }

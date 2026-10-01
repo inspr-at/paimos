@@ -4,6 +4,7 @@ package agentruns_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -129,6 +132,12 @@ func TestTicketQueueTerminalStateCancelsRunAndReservation(t *testing.T) {
 			e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
 			f.reserve(t, e.Run)
 			if state == "deleted" {
+				// The tree forbids deleting a parent with live children. Hide the
+				// generated work-order child first, as ordinary child deletion does.
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, e.Run.OrderID)
+					return err
+				})
 				f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
 			} else {
 				f.call(t, f.person, "PATCH", "/api/nodes/"+id, map[string]string{"state": state}, 200, nil)
@@ -224,6 +233,96 @@ func TestTicketQueueTwoAgentsClaimOneRunExactlyOnce(t *testing.T) {
 	}
 	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1 AND status='starting' AND agent_principal_id=$2`, id, f.agent.ID); n != 1 {
 		t.Fatal("run was not owned exactly once")
+	}
+}
+
+func TestTicketQueueReadsPollAndTelemetryDoNotTakeTreeLock(t *testing.T) {
+	f := setup(t)
+	run := f.claim(t, f.run(t, f.order(t, nil)))
+	ctx := tenant.WithPrincipal(t.Context(), f.person)
+	err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+			return err
+		}
+		for _, tc := range []struct {
+			p            tenant.Principal
+			method, path string
+			body         any
+		}{
+			{f.person, "GET", "/api/queue", nil},
+			{f.person, "GET", "/api/runs", nil},
+			{f.agent, "GET", "/api/runs/queued", nil},
+			{f.agent, "POST", "/api/runs/" + run.ID + "/telemetry", agentruns.Telemetry{Sequence: 1, Kind: "heartbeat"}},
+		} {
+			requestCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			body, _ := json.Marshal(tc.body)
+			r := httpRequest(requestCtx, tc.p, tc.method, tc.path, string(body))
+			r.Header.Set(agentruns.DaemonHeader, "daemon-test")
+			r.Header.Set(agentruns.GenerationHeader, "generation-1")
+			if tc.p.ID == f.agent.ID {
+				r.Header.Set("Authorization", "Bearer "+f.token)
+			}
+			w := httptest.NewRecorder()
+			f.mux.ServeHTTP(w, r)
+			cancel()
+			if w.Code != 200 {
+				t.Errorf("%s %s waited for tree lock: %d", tc.method, tc.path, w.Code)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+type rejectQueueCloseEvent struct{}
+
+func (rejectQueueCloseEvent) WriteEvent(context.Context, pgx.Tx, nodes.Event) error {
+	return errors.New("test node event failure")
+}
+
+func TestTicketQueueTerminalCancellationRollsBackWithTicket(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, rejectQueueCloseEvent{}).Mount(f.mux)
+	f.queueAccount(t, 1000000)
+	id := f.ticket(t, "open", "high", nil)
+	e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	f.reserve(t, e.Run)
+	f.call(t, f.person, "PATCH", "/api/nodes/"+id, map[string]string{"state": "cancelled"}, 500, nil)
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, e.Run.ID); n != 1 {
+		t.Fatal("failed patch cancelled work")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, e.Run.ID); n != 1 {
+		t.Fatal("failed patch released capacity")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'`, id); n != 0 {
+		t.Fatal("failed patch retained removal audit")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state='open'`, id); n != 1 {
+		t.Fatal("failed patch changed ticket")
+	}
+}
+
+func TestTicketQueueBulkArchiveCancelsOnlyQueuedWork(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	f.queueAccount(t, 1000000)
+	queued := f.ticket(t, "open", "high", nil)
+	active := f.ticket(t, "open", "high", nil)
+	q := f.addQueue(t, queued, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	f.reserve(t, q.Run)
+	a := f.addQueue(t, active, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	f.claim(t, a.Run)
+	f.call(t, f.person, "POST", "/api/nodes/bulk", map[string]any{"ids": []string{queued, active}, "state": "archived"}, 200, nil)
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='cancelled'`, q.Run.ID); n != 1 {
+		t.Fatal("bulk archive kept queued work")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='starting'`, a.Run.ID); n != 1 {
+		t.Fatal("bulk archive cancelled started work")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=ANY($1::uuid[]) AND type='queue.removed'`, []string{queued, active}); n != 1 {
+		t.Fatal("bulk removal audit was not exactly once")
 	}
 }
 
