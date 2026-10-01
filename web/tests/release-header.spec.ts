@@ -204,6 +204,44 @@ test('Pretty dock separators use the muted ink in both themes and after a live t
   expect(colors[2]).toBe(colors[0])
 })
 
+test('resting Pretty hours and minutes clear AA contrast in both themes and after a live theme change', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' })
+  await open(page)
+  await leave(page)
+  const button = sheet(page).locator('.status-dock .version-copy')
+  const time = button.locator('.version-pretty > .hh, .version-pretty > .mi')
+  await expect(time).toHaveCount(2)
+  // Axe cannot resolve the dock's gradient/backdrop-filter. Check its rendered
+  // ink and retained segment weight against representative dock backdrops.
+  const luminance = (rgb: number[]) => {
+    const linear = rgb.map(value => {
+      const channel = value / 255
+      return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
+    })
+    return .2126 * linear[0]! + .7152 * linear[1]! + .0722 * linear[2]!
+  }
+  const colors: string[] = []
+  for (const colorScheme of ['light', 'dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(button).toHaveAttribute('data-version-view', 'pretty')
+    const ink = await button.evaluate(el => getComputedStyle(el).color)
+    colors.push(ink)
+    const foreground = ink.match(/[\d.]+/g)!.map(Number)
+    const background = colorScheme === 'light' ? [251, 250, 246] : [24, 48, 52]
+    for (const segment of await time.all()) {
+      await expect(segment).toHaveCSS('color', ink)
+      await expect(segment).toHaveCSS('opacity', '0.8')
+      const opacity = Number(await segment.evaluate(el => getComputedStyle(el).opacity))
+      const composited = background.map((channel, index) => Math.round(foreground[index]! * opacity + channel * (1 - opacity)))
+      expect(composited).toEqual(colorScheme === 'light' ? [76, 98, 98] : [194, 205, 202])
+      const values = [luminance(composited), luminance(background)].sort((a, b) => b - a)
+      expect((values[0]! + .05) / (values[1]! + .05)).toBeGreaterThanOrEqual(4.5)
+    }
+  }
+  expect(colors[0]).not.toBe(colors[1])
+  expect(colors[2]).toBe(colors[0])
+})
+
 test('an outdated page says so in the status line, under the codename the server runs', async ({ page }) => {
   const olderOf = (h: ReturnType<typeof releaseHistory>) => h.releases.find(r => r.state === 'published' && r.version < h.current)!
   const history = await open(page, { running: h => olderOf(h).version })

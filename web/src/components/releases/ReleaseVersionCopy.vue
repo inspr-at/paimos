@@ -72,6 +72,8 @@ onBeforeUnmount(() => {
 .version-layers { display: inline-grid; align-items: center; }
 .version-layers > span { grid-area: 1 / 1; }
 .version-pretty { color: var(--ink-2); }
+/* Keep the renderer's 80% time weight legible on the glass dock. */
+.version-pretty :deep(.hh), .version-pretty :deep(.mi) { color: var(--ink); }
 /* The renderer supplies an inline separator colour; the dock uses its theme ink. */
 .version-pretty :deep(.separator) { color: var(--ink-2) !important; }
 .version-canonical { color: var(--ink); }
