@@ -53,6 +53,9 @@ jobs:
       # Maintenance database only. This user is the image superuser, so tests may CREATE DATABASE.
       AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
       AEON_GO_SHARD_COUNT: ${{ strategy.job-total }}
+      # Four-shard reruns may retain the Mac layout on hosted hardware. Never
+      # replay test results from the self-hosted runner's persistent GOCACHE.
+      GOFLAGS: ${{ strategy.job-total == 4 && '-count=1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -63,13 +66,14 @@ jobs:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go.sum
-      - name: Locate Go build and test cache
+      - name: Locate Go build cache
         id: go-cache-path
         run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-      # setup-go's dependency snapshot is immutable. Refresh test results per
-      # source revision and shard, restoring the branch first, then main.
+      # setup-go's dependency snapshot is immutable. Refresh compiled artifacts
+      # per source revision and shard, restoring the branch first, then main.
+      # GOCACHE also holds test results; all shard tests bypass those below.
       # GitHub scopes PR writes to refs/pull/N/merge; main cannot restore them.
-      - name: Persist Go build and test cache
+      - name: Persist Go build cache
         id: go-cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -86,12 +90,17 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
           fi
       - name: Test this shard
+        env:
+          # Applies to every go test child, including PR and merge-group runs.
+          # External scripts and database images are outside Go's test cache id.
+          GOFLAGS: -count=1
         run: |
           set -euo pipefail
           go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           cached=$(grep -cE '^ok[[:space:]].*\(cached\)$' "$RUNNER_TEMP/go-test.log" || true)
           packages=$(grep -cE '^ok[[:space:]]' "$RUNNER_TEMP/go-test.log" || true)
           printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
+          test "$cached" -eq 0
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in
@@ -353,7 +362,7 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       - name: Checker and migration runner SQL splitter parity
-        run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$'
+        run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
       - name: Previous binary on the candidate schema
         env:
           PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}

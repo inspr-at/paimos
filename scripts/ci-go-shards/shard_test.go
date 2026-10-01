@@ -258,9 +258,11 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				Matrix map[string]string `yaml:"matrix"`
 			} `yaml:"strategy"`
 			Steps []struct {
-				Uses string         `yaml:"uses"`
-				Run  string         `yaml:"run"`
-				With map[string]any `yaml:"with"`
+				Name string
+				Uses string            `yaml:"uses"`
+				Run  string            `yaml:"run"`
+				With map[string]any    `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -282,14 +284,18 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			t.Fatalf("matrix missing %s", guard)
 		}
 	}
-	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "" {
-		t.Fatal("shard commands must use the selected count and allow test caching")
+	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
+		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
 	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
 		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
 	}
 	foundCache := false
+	foundFreshTests := false
 	for _, step := range job.Steps {
+		if step.Name == "Test this shard" {
+			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, `test "$cached" -eq 0`)
+		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
 			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
@@ -318,7 +324,89 @@ func TestWorkflowShardLayouts(t *testing.T) {
 		}
 	}
 	if !foundCache {
-		t.Fatal("missing explicit rolling Go build and test cache")
+		t.Fatal("missing explicit rolling Go build cache")
+	}
+	if !foundFreshTests {
+		t.Fatal("all shard layouts and events must execute fresh tests and reject cached success")
+	}
+}
+
+// A child script is deliberately outside Go's test-result cache inputs. The
+// workflow must still notice a failing script when only that script changes.
+func TestWorkflowShardRerunsChangedChildScript(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string
+				Env  map[string]string
+			}
+		}
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var flags string
+	for _, step := range workflow.Jobs["go-test"].Steps {
+		if step.Name == "Test this shard" {
+			flags = step.Env["GOFLAGS"]
+		}
+	}
+	for name, plan := range map[string]shardPlan{
+		"whole":      {whole: []string{"./p"}},
+		"named":      {runs: []namedRun{{path: "./p", names: []string{"TestChild"}}}},
+		"catch-all":  {runs: []namedRun{{path: "./p", names: []string{"TestOther"}, skip: true}}},
+		"empty-skip": {runs: []namedRun{{path: "./p", skip: true}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, "p"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for path, source := range map[string]string{
+				"go.mod":   "module example.com/child\n\ngo 1.26.0\n",
+				"child.sh": "exit 0\n",
+				"p/child_test.go": `package p
+import ("os/exec"; "testing")
+func TestChild(t *testing.T) {
+	if err := exec.Command("sh", "../child.sh").Run(); err != nil {
+		t.Fatal("child script changed:", err)
+	}
+}
+`,
+			} {
+				if err := os.WriteFile(filepath.Join(dir, path), []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			commands, err := plan.commandArgs()
+			if err != nil || len(commands) != 1 {
+				t.Fatalf("commands=%v err=%v", commands, err)
+			}
+			run := func() ([]byte, error) {
+				cmd := exec.Command("go", commands[0]...)
+				cmd.Dir = dir
+				cmd.Env = append(withoutEnvPrefix(os.Environ(), "GOFLAGS="), "GOFLAGS="+flags)
+				return cmd.CombinedOutput()
+			}
+			if out, err := run(); err != nil {
+				t.Fatalf("first execution: %v\n%s", err, out)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "child.sh"), []byte("exit 1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run()
+			if err == nil || !strings.Contains(string(out), "child script changed:") {
+				t.Fatalf("changed child must execute and fail, err=%v\n%s", err, out)
+			}
+		})
 	}
 }
 
