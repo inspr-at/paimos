@@ -49,7 +49,8 @@ const (
 )
 
 type planningView struct {
-	Route *planningRoute `json:"route"`
+	Snapshot *planningSnapshot `json:"estimate_snapshot,omitempty"`
+	Route    *planningRoute    `json:"route"`
 	// RouteGap says why a role has no model: "area" (no area set),
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
@@ -565,9 +566,16 @@ func sortMicros(spent, est *big.Int) *string {
 	return &s
 }
 
+// planPrice freezes the exact row used to price the resolved route.
+type planPrice struct {
+	Version               *int64
+	Input, Output, Cached *string
+}
+
 // planRoute is one resolved role, shared by every row with that role. view
 // is nil when the registry selected nothing.
 type planRoute struct {
+	price    *planPrice
 	view     *planningRoute
 	key      routeKey
 	mixPrice *float64
@@ -789,6 +797,10 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			return nil, err
 		}
 	}
+	snapshots, err := loadPlanningSnapshots(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
 	own := map[string]planRow{}
 	children := map[string][]planRow{}
 	for _, r := range rows {
@@ -804,7 +816,17 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			continue
 		}
 		m := money[item.ID]
-		if view := pl.view(self, children[item.ID], usage[item.ID], visible(item), &m); view != nil {
+		view := pl.view(self, children[item.ID], usage[item.ID], visible(item), &m)
+		if snap := snapshots[item.ID]; snap != nil {
+			if view == nil {
+				view = &planningView{}
+			}
+			if !visible(item) || !cost(snap.CostProject) {
+				snap.hideCost()
+			}
+			view.Snapshot = snap
+		}
+		if view != nil {
 			out[item.ID] = view
 		}
 	}
@@ -960,10 +982,14 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 			route.view = &planningRoute{Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort)}
 			var in, outRate, cached *float64
-			err := tx.QueryRow(ctx, `SELECT input_usd_per_million::float8, output_usd_per_million::float8, cached_input_usd_per_million::float8
-                FROM model_prices WHERE model=$1 ORDER BY version DESC LIMIT 1`, p.Model).Scan(&in, &outRate, &cached)
+			price := &planPrice{}
+			err := tx.QueryRow(ctx, `SELECT input_usd_per_million::float8, output_usd_per_million::float8, cached_input_usd_per_million::float8, version, input_usd_per_million::text, output_usd_per_million::text, cached_input_usd_per_million::text
+                FROM model_prices WHERE model=$1 ORDER BY version DESC LIMIT 1`, p.Model).Scan(&in, &outRate, &cached, &price.Version, &price.Input, &price.Output, &price.Cached)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, err
+			}
+			if err == nil {
+				route.price = price
 			}
 			if in != nil && outRate != nil && cached != nil {
 				v := mixPricePerToken(*in, *outRate, *cached)

@@ -58,6 +58,19 @@ func TestMeUnauthorized(t *testing.T) {
 	}
 }
 
+func TestStatusErrorRetainsAttachCauseWithoutChangingMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"project, ticket or harness enrollment changed","code":"conflict","attach_refusal":"ticket_not_visible"}`))
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "fixture").Do(t.Context(), "POST", "/api/agent-pairing/attach", nil, nil)
+	se, ok := err.(*StatusError)
+	if !ok || se.Status != 409 || se.Message != "project, ticket or harness enrollment changed" || se.AttachRefusal != "ticket_not_visible" {
+		t.Fatal("additive cause or existing message lost")
+	}
+}
+
 func TestDoPostsJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

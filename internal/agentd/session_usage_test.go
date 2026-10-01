@@ -26,6 +26,35 @@ func usageSnapshot(input int64, final bool) sessionusage.UsageReport {
 	return sessionusage.UsageReport{Model: "model-a", InputTokens: &input, OutputTokens: &output, CachedInputTokens: &cached, Provisional: !final, BillingMode: "unknown"}
 }
 
+func TestSessionUsageVerifiedBillingSurvivesProjection(t *testing.T) {
+	for _, mode := range []string{"subscription", "api", "unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			var got sessionusage.UsageReport
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write([]byte(`{"usage":{}}`))
+			}))
+			defer server.Close()
+			reporter := newSessionUsageReporter(NewRemote(server.URL, "synthetic-key"), syntheticSession, func() bool { return false }, func() {})
+			reporter.billing, reporter.accountID, reporter.plan = mode, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "Synthetic plan"
+			input := usageSnapshot(100, true)
+			input.BillingMode = "api" // Adapter metadata is ignored even when known.
+			reporter.submit(input)
+			if err := finishUsageTest(t, reporter); err != nil {
+				t.Fatal(err)
+			}
+			if got.BillingMode != mode || got.AccountID == nil || *got.AccountID != reporter.accountID {
+				t.Fatalf("projection: %+v", got)
+			}
+			if (got.SubscriptionLabel != nil) != (mode == "subscription") {
+				t.Fatalf("plan projection: %+v", got)
+			}
+		})
+	}
+}
+
 func finishUsageTest(t *testing.T, r *sessionUsageReporter) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
