@@ -65,7 +65,7 @@ onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
         <dl><dt>Computer</dt><dd>{{ review.attach.snapshot.host }}</dd><dt>Agent</dt><dd>{{ review.attach.snapshot.harness }}</dd><dt>Workspace</dt><dd>{{ review.attach.snapshot.process.cwd }}</dd><dt>Process</dt><dd>{{ review.attach.snapshot.process.executable }} · PID {{ review.attach.snapshot.process.pid }}</dd><dt>Project</dt><dd>{{ review.attach.snapshot.project_id }}</dd><dt>Ticket</dt><dd>{{ review.attach.snapshot.ticket_id }}</dd></dl>
         <p>{{ review.attach.snapshot.mode === 'lease' ? 'Links this process to its ticket. It does not read the transcript or send input.' : 'Lets Aeon read this terminal transcript and, when permitted, send input to the session.' }}</p>
         <p v-if="review.attach.consent_mode === 'local_auth'">After approving here, confirm with Touch ID on the paired Mac. Phone verification does not replace that confirmation.</p>
-        <RouterLink :to="`/p/${review.attach.snapshot.project_id}/${review.attach.snapshot.ticket_id}`">Open ticket context</RouterLink>
+        <RouterLink to="/agents">Open session context</RouterLink>
       </template>
       <p>Expires <time :datetime="expires">{{ new Date(expires).toLocaleString() }}</time></p>
     </article>

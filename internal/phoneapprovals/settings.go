@@ -264,7 +264,7 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	encrypted, err := seal(m.vault, b)
+	encrypted, err := seal(m.vault, b, subscriptionAAD(p.TenantID, p.ID))
 	if err != nil {
 		respond(w, nil, err)
 		return

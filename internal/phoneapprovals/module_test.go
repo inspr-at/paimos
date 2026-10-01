@@ -317,6 +317,39 @@ func TestPhoneQuietHoursAndSubscriptionValidation(t *testing.T) {
 	}
 }
 
+func TestPhoneOriginAndVAPIDContact(t *testing.T) {
+	options := &webpush.Options{Subscriber: "mailto:ops@example.test"}
+	m := New(nil, nil, testOrigin, make([]byte, 32), options)
+	if m.wa == nil || m.vapid == nil || m.vapid.Subscriber != "ops@example.test" || options.Subscriber != "mailto:ops@example.test" {
+		t.Fatal("VAPID contact normalization changed configuration or ceremony availability")
+	}
+	if New(nil, nil, "http://remote.example", make([]byte, 32), options).wa != nil {
+		t.Fatal("insecure remote origin enabled passkeys")
+	}
+	if New(nil, nil, testOrigin, nil, options).vapid != nil {
+		t.Fatal("push enabled without a vault key")
+	}
+	if err := validateDecision(Decision{Decision: "approved", Hash: strings.Repeat("g", 64)}); err == nil {
+		t.Fatal("nonhex content hash accepted")
+	}
+	if err := validateDecision(Decision{Decision: "approved", Hash: strings.Repeat("a", 64), Reason: strings.Repeat("a", 4001)}); err == nil {
+		t.Fatal("overlong reason accepted")
+	}
+	aad := subscriptionAAD("tenant-a", "person-a")
+	ciphertext, err := seal(m.vault, []byte("test subscription"), aad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, err := open(m.vault, ciphertext, aad); err != nil || string(plain) != "test subscription" {
+		t.Fatal("subscription encryption did not round-trip")
+	}
+	for _, wrong := range [][]byte{subscriptionAAD("tenant-b", "person-a"), subscriptionAAD("tenant-a", "person-b")} {
+		if _, err := open(m.vault, ciphertext, wrong); err == nil {
+			t.Fatal("subscription ciphertext crossed a tenant or person")
+		}
+	}
+}
+
 func TestPhoneRegistrationRequiresVerifiedPlatformCeremony(t *testing.T) {
 	f := fixtureFor(t)
 	f.exec(t, `DELETE FROM phone_passkeys`)

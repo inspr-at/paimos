@@ -149,12 +149,15 @@ func (m *Module) dispatchTenant(ctx context.Context, tenantID string) error {
 					return err
 				}
 				for _, d := range candidates {
+					if counts[r.p.ID] >= 10 {
+						break
+					}
 					_, err = tx.Exec(ctx, `INSERT INTO phone_push_deliveries(tenant_id,kind,request_id,person_id,subscription_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, tenantID, n.kind, n.id, r.p.ID, d.subscription)
 					if err != nil {
 						return err
 					}
 					// Claim under a row lock without holding a DB transaction across HTTP.
-					tag, err := tx.Exec(ctx, `UPDATE phone_push_deliveries SET retry_at=now()+interval '2 minutes',attempts=attempts+1 WHERE tenant_id=$1 AND kind=$2 AND request_id=$3 AND subscription_id=$4 AND sent_at IS NULL AND retry_at<=now() AND attempts<5`, tenantID, n.kind, n.id, d.subscription)
+					tag, err := tx.Exec(ctx, `UPDATE phone_push_deliveries SET retry_at=now()+interval '10 minutes',attempts=attempts+1 WHERE tenant_id=$1 AND kind=$2 AND request_id=$3 AND subscription_id=$4 AND sent_at IS NULL AND retry_at<=now() AND attempts<5`, tenantID, n.kind, n.id, d.subscription)
 					if err != nil {
 						return err
 					}
@@ -215,7 +218,7 @@ func (m *Module) deliver(ctx context.Context, d delivery) error {
 	if err != nil || !valid {
 		return err
 	}
-	b, err := open(m.vault, d.encrypted)
+	b, err := open(m.vault, d.encrypted, subscriptionAAD(d.tenant, d.person))
 	if err != nil {
 		return nil
 	}

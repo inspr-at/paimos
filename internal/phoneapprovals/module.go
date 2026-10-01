@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/go-webauthn/webauthn/protocol"
@@ -60,6 +61,8 @@ func New(pool *pgxpool.Pool, pairing *agentpairing.Module, publicURL string, vau
 	}
 	if vapid != nil && m.vault != nil && m.wa != nil {
 		options := *vapid
+		// webpush-go prefixes bare email addresses with mailto: itself.
+		options.Subscriber = strings.TrimPrefix(options.Subscriber, "mailto:")
 		options.HTTPClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		options.TTL = 60
 		m.vapid = &options
@@ -344,7 +347,7 @@ type DecisionProof struct {
 }
 
 func validateDecision(d Decision) error {
-	if (d.Decision != "approved" && d.Decision != "denied") || len(d.Reason) > 16000 || strings.ContainsRune(d.Reason, 0) || len(d.Hash) != 64 {
+	if (d.Decision != "approved" && d.Decision != "denied") || utf8.RuneCountInString(d.Reason) > 4000 || strings.ContainsRune(d.Reason, 0) || len(d.Hash) != 64 || strings.Trim(d.Hash, "0123456789abcdef") != "" {
 		return fail(400, "invalid decision")
 	}
 	return nil
@@ -488,16 +491,19 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func seal(a cipher.AEAD, b []byte) ([]byte, error) {
+func subscriptionAAD(tenantID, personID string) []byte {
+	return []byte("aeon.phone.push.v1\x00" + tenantID + "\x00" + personID)
+}
+func seal(a cipher.AEAD, b, aad []byte) ([]byte, error) {
 	n := make([]byte, a.NonceSize())
 	if _, err := rand.Read(n); err != nil {
 		return nil, err
 	}
-	return a.Seal(n, n, b, []byte("aeon.phone.push.v1")), nil
+	return a.Seal(n, n, b, aad), nil
 }
-func open(a cipher.AEAD, b []byte) ([]byte, error) {
+func open(a cipher.AEAD, b, aad []byte) ([]byte, error) {
 	if len(b) < a.NonceSize() {
 		return nil, errors.New("invalid ciphertext")
 	}
-	return a.Open(nil, b[:a.NonceSize()], b[a.NonceSize():], []byte("aeon.phone.push.v1"))
+	return a.Open(nil, b[:a.NonceSize()], b[a.NonceSize():], aad)
 }

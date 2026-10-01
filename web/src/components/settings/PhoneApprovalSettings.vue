@@ -16,7 +16,6 @@ function applySettings(value: PhoneSettings) {
     quiet.value = prefs.quiet_start !== prefs.quiet_end
     start.value = minuteTime(prefs.quiet_start); end.value = minuteTime(prefs.quiet_end)
     zone.value = prefs.time_zone; escalation.value = prefs.escalation_minutes
-    if (!value.subscriptions.length) zone.value = Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 function load() {
   error.value = ''
