@@ -95,7 +95,8 @@ export interface ModelCell { text: string; tip: string; state: 'none' | 'planned
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
 }
-function shortModel(route: PlanningRoute): string { return route.label.split(' · ')[0]! }
+function shortModelLabel(label: string): string { return label.split(' · ')[0]!.replace(/\bgpt-\d+(?:\.\d+)?-/, '') }
+function shortModel(route: PlanningRoute): string { return shortModelLabel(route.label) }
 function planLine(row: PlanningRow): string {
   const route = plannedRoute(row)
   return route ? `Planned: ${route.label} (${route.model})` : 'No model planned: set a role and area'
@@ -107,7 +108,7 @@ export function modelCell(row: PlanningRow): ModelCell {
   const models = row.kind_slug === 'epic' ? [] : row.planning?.models ?? []
   if (models.length) {
     const first = models[0]!, more = models.length - 1
-    return { text: first.label, harness: first.harness, state: 'measured', more,
+    return { text: shortModelLabel(first.label), harness: first.harness, state: 'measured', more,
       label: `${first.label}, measured${more ? `, and ${more} more model${more === 1 ? '' : 's'}` : ''}`,
       tip: ['Used, per session:', ...usedLines(models), planLine(row)].join('\n') }
   }

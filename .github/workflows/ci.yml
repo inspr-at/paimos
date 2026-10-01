@@ -160,6 +160,8 @@ jobs:
         run: npm run lint
       - working-directory: web
         run: npm run build
+      - name: Install shells for account command tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
       - working-directory: web
         run: npm run test:unit
       - working-directory: web

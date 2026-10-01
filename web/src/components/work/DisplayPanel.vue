@@ -13,7 +13,7 @@ defineProps<{
   filters: ListFilters
   view: 'list' | 'outline' | 'journey'
   density: 'comfortable' | 'compact'
-  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   grouped?: boolean
   headerGraph?: boolean
 }>()
@@ -57,7 +57,7 @@ const emit = defineEmits<{
         <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
       </div>
     </div>
-    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
     <div class="section">
       <label class="switch">
         <input type="checkbox" :checked="headerGraph !== false" @change="emit('headerGraph', ($event.target as HTMLInputElement).checked)" />
