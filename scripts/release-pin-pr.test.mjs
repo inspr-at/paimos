@@ -227,7 +227,13 @@ test("real CLI verifier binds the image and provenance; its output never enters 
   t.after(() => { process.env.PATH = previousPath; });
   const f = fixture(); delete f.dependencies.verify;
   await assert.rejects(proposePin(env(), { write: true }, f.dependencies), /image attestation verification failed/);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), attestationArgs(version, digest, sourceCommit));
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
+    "attestation", "verify", `oci://ghcr.io/inspr-at/aeon@${digest}`, "--repo", "inspr-at/paimos",
+    "--signer-workflow", "inspr-at/paimos/.github/workflows/release.yml",
+    "--cert-identity", `https://github.com/inspr-at/paimos/.github/workflows/release.yml@refs/tags/v${version}`,
+    "--signer-digest", sourceCommit, "--source-ref", `refs/tags/v${version}`,
+    "--source-digest", sourceCommit, "--deny-self-hosted-runners",
+  ]);
   assert.equal(f.calls.some(call => call.path?.startsWith(`/repos/${TARGET}/`)), false);
 });
 

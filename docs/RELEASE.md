@@ -534,7 +534,8 @@ repository/tag-push invocation, an annotated tag resolving directly to the
 workflow's source commit, and that commit's ancestry on current source main.
 It independently runs `gh attestation verify` for the index digest, binding
 `inspr-at/paimos/.github/workflows/release.yml`, the exact source tag and commit,
-and `--deny-self-hosted-runners`. Missing attestations, lightweight/off-main
+the exact tag-scoped certificate identity and signer commit, and
+`--deny-self-hosted-runners`. Missing attestations, lightweight/off-main
 tags and failed or ambiguous API reads fail closed before any target write.
 It rejects older versions and conflicting digests for an existing coordinate.
 

@@ -60,6 +60,8 @@ async function github(token, method, path, body) {
 export function attestationArgs(version, digest, commit) {
   return ["attestation", "verify", `oci://${IMAGE}@${digest}`, "--repo", SOURCE,
     "--signer-workflow", `${SOURCE}/.github/workflows/release.yml`,
+    "--cert-identity", `https://github.com/${SOURCE}/.github/workflows/release.yml@refs/tags/v${version}`,
+    "--signer-digest", commit,
     "--source-ref", `refs/tags/v${version}`, "--source-digest", commit,
     "--deny-self-hosted-runners"];
 }
