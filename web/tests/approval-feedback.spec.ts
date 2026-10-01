@@ -16,9 +16,10 @@ const world: AgentWorld = {
     'n-a1': { key: 'AEON-1', title: 'Aeon foundation' }, 'n-5': { key: 'PHAROS-15', title: 'Beacon health probes' }, 'n-6': { key: 'PHAROS-16', title: 'Retire the old dashboard' },
   },
 }
-async function setup(page: Page, options: AgentMockOptions & { only?: string } = {}) {
+async function setup(page: Page, options: AgentMockOptions & { only?: string; emptyHistory?: boolean } = {}) {
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData(world)
+  if (options.emptyHistory) data.approvals = data.approvals.filter(a => !a.decision && Date.parse(a.expires_at) > Date.now())
   // One request and nothing else waiting: deciding it empties Needs you.
   if (options.only) {
     data.approvals = data.approvals.filter(a => a.decision || Date.parse(a.expires_at) <= Date.now() || a.scope === options.only)
@@ -112,9 +113,52 @@ test.describe('with motion', () => {
     await expect(decidedCount(page)).toHaveText('5')
   })
 
-  test('deciding the last request folds Needs you away without a jump and focuses Decided', async ({ page }) => {
+  for (const mode of ['approve', 'deny'] as const) test(`first ${mode} with empty history never shifts content down and keeps scroll and focus`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 640 })
-    await setup(page, { only: 'nodes.read' })
+    const { data } = await setup(page, { emptyHistory: true })
+    const release = await holdDecisions(page)
+    await openAgents(page)
+    const item = card(page, idOf(data, mode === 'approve' ? 'run.claim' : 'harness.control'))
+    await item.getByRole('button', { name: mode === 'approve' ? 'Approve' : 'Deny', exact: true }).click()
+    const main = page.locator('#main')
+    await main.evaluate(el => { el.scrollTop = 80 })
+    await expect.poll(() => main.evaluate(el => el.scrollTop)).toBe(80)
+    await page.keyboard.press('Enter')
+    await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+    const before = await page.evaluate(() => {
+      const section = document.querySelector<HTMLElement>('.agents-page .main-col > .queue')!
+      const next = section.nextElementSibling as HTMLElement
+      const main = document.getElementById('main')!
+      const probe = { samples: [] as { top: number; scroll: number }[], active: true }
+      ;(window as unknown as { approvalLayoutProbe: typeof probe }).approvalLayoutProbe = probe
+      const sample = () => {
+        probe.samples.push({ top: next.getBoundingClientRect().top + main.scrollTop, scroll: main.scrollTop })
+        if (probe.active) requestAnimationFrame(sample)
+      }
+      sample()
+      return probe.samples[0]!.top
+    })
+    release()
+    await expect(settled(page)).toBeVisible()
+    await expect(card(page, idOf(data, mode === 'approve' ? 'nodes.read' : 'run.claim'))).toBeFocused()
+    await expect(decidedCount(page)).toHaveText('0')
+    await expect(settled(page)).toHaveCount(0)
+    await expect(decidedCount(page)).toHaveText('1')
+    await expect(card(page, idOf(data, mode === 'approve' ? 'nodes.read' : 'run.claim'))).toBeFocused()
+    const samples = await page.evaluate(() => {
+      const probe = (window as unknown as { approvalLayoutProbe: { samples: { top: number; scroll: number }[]; active: boolean } }).approvalLayoutProbe
+      probe.active = false
+      return probe.samples
+    })
+    // Confirmation only shrinks the card: introducing the first footer must never
+    // push what follows down, even for a single frame before the card fits itself.
+    expect(Math.max(...samples.map(sample => sample.top)) - before).toBeLessThanOrEqual(1.5)
+    expect(samples.every(sample => sample.scroll === 80)).toBe(true)
+  })
+
+  for (const emptyHistory of [false, true]) test(`deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history)`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 640 })
+    await setup(page, { only: 'nodes.read', emptyHistory })
     await openAgents(page)
     await expect(queue(page).locator('.items > li')).toHaveCount(1)
     const id = (await queue(page).locator('[data-row^="a:"]').getAttribute('data-row'))!.slice(2)
@@ -140,7 +184,7 @@ test.describe('with motion', () => {
     await expect(queue(page)).toHaveCount(0)
     const decided = page.getByRole('region', { name: 'Decided requests' }).getByRole('button', { name: /^Decided/ })
     await expect(decided).toBeFocused()
-    await expect(decided.locator('.mono')).toHaveText('5')
+    await expect(decided.locator('.mono')).toHaveText(emptyHistory ? '1' : '5')
     const tops = await page.evaluate(async () => {
       await new Promise(resolve => setTimeout(resolve, 150))
       const w = window as unknown as { tops: number[]; sampling: boolean }
@@ -152,6 +196,7 @@ test.describe('with motion', () => {
     // with no single-frame jump and no snap when the card was removed.
     const moved = tops[0] - tops[tops.length - 1]
     expect(Math.abs(moved - (before.height + before.gap))).toBeLessThanOrEqual(1.5)
+    expect(Math.max(...tops) - tops[0]).toBeLessThanOrEqual(1.5)
     const steps = tops.slice(1).map((top, index) => tops[index] - top)
     expect(steps.filter(step => step > 0.5).length).toBeGreaterThanOrEqual(6)
     expect(Math.max(...steps)).toBeLessThan(moved * 0.5)

@@ -316,7 +316,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
       </li>
     </ul>
 
-    <footer v-if="loaded && history.length" class="history">
+    <!-- Reserve Decided's space before the first answer, so confirmation cannot
+         insert a footer below a card whose original height is still held (AEON-505). -->
+    <footer v-if="loaded" class="history">
       <button ref="decidedToggle" type="button" class="history-toggle" :aria-expanded="showHistory" aria-controls="approval-history" @click="showHistory = !showHistory">
         <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span :key="ticks" class="mono" :class="{ tick: ticks }">{{ decided.length }}</span>
       </button>
