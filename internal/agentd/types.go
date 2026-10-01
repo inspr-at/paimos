@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	Codex  = "codex"
-	Claude = "claude"
-	Pi     = "pi"
-	Cursor = "cursor"
-	Grok   = "grok"
+	Codex    = "codex"
+	Claude   = "claude"
+	Pi       = "pi"
+	Cursor   = "cursor"
+	Grok     = "grok"
+	Gemini   = "gemini"
+	OpenCode = "opencode"
 )
 
 var (

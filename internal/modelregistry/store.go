@@ -66,7 +66,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return ensureAdditionalCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
 		return err
@@ -75,7 +75,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return ensureAdditionalCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -180,7 +180,7 @@ func validateProfile(in profileWrite) error {
 	if in.Version == "" || len(in.Version) > 64 || strings.ContainsAny(in.Version, "\x00\r\n") {
 		return fail(http.StatusBadRequest, "invalid version")
 	}
-	if !validHarness(in.Harness) || (!validFamily(in.Family) && !(in.Harness == "pi" && in.Family == "unknown")) || !validTier(in.Tier) {
+	if !validHarness(in.Harness) || (!validFamily(in.Family) && !((in.Harness == "pi" || in.Harness == "opencode") && in.Family == "unknown")) || !validTier(in.Tier) {
 		return fail(http.StatusBadRequest, "invalid harness, family or tier")
 	}
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {

@@ -165,7 +165,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
@@ -310,7 +310,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("--subscription-label requires subscription billing")
 	}
 	switch o.UsageSource {
-	case "", "claude", "codex", "cursor", "grok":
+	case "", "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usagef("invalid --usage-source")
 	}

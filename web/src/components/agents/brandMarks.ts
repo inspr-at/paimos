@@ -105,7 +105,16 @@ const pi: BrandMark = {
   ],
 }
 
-export const BRAND_MARKS = { openai, anthropic, google, cursor, grok, xai, pi } as const
+// OpenCode brand-kit square mark, v1.14.48. Outer path geometry is unchanged;
+// the source background/shadow is omitted for a currentColor outline.
+// https://github.com/anomalyco/opencode/blob/v1.14.48/packages/console/app/src/asset/brand/opencode-logo-dark-square.svg
+// OpenCode trademark. Cropped to the ink, before the source's 30px translation.
+const opencode: BrandMark = {
+  viewBox: '0 0 240 300', width: 11.2,
+  paths: ['M180 60H60V240H180V60ZM240 300H0V0H240V300Z'],
+}
+
+export const BRAND_MARKS = { openai, anthropic, google, cursor, grok, xai, pi, opencode } as const
 
 export type BrandId = keyof typeof BRAND_MARKS
 
@@ -115,6 +124,8 @@ const HARNESS_BRAND: Record<string, BrandId> = {
   pi: 'pi',
   cursor: 'cursor',
   grok: 'grok',
+  gemini: 'google',
+  opencode: 'opencode',
 }
 
 export function harnessBrand(harness: string): BrandId | null {

@@ -466,7 +466,7 @@ func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind 
 }
 func validHarness(v string) bool {
 	switch v {
-	case "codex", "claude", "pi", "cursor", "grok":
+	case "codex", "claude", "pi", "cursor", "grok", "gemini", "opencode":
 		return true
 	}
 	return false

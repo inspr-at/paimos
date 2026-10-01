@@ -37,7 +37,7 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	return nil
 }
 
-const help = "session-usage-parse --source codex|cursor --session-id UUID --source-session-id ID (--from-start | --checkpoint-file PATH) [--model ID] [--final] [--billing-mode unknown|api|subscription] [--subscription-label TEXT] [--account-id UUID] [--account-label TEXT]; stdin is a complete metadata-only capture from session start; deltas require stable record identities"
+const help = "session-usage-parse --source codex|cursor|gemini|opencode --session-id UUID --source-session-id ID (--from-start | --checkpoint-file PATH) [--model ID] [--final] [--billing-mode unknown|api|subscription] [--subscription-label TEXT] [--account-id UUID] [--account-label TEXT]; stdin is a complete metadata-only capture from session start; deltas require stable record identities"
 
 func parseArgs(args []string) (Options, string, error) {
 	var opt Options

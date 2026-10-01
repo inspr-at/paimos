@@ -127,7 +127,7 @@ func messagingProject(ctx context.Context, tx pgx.Tx, project string) error {
 	return nil
 }
 
-var messageAddressRE = regexp.MustCompile(`^(paimos|codex|claude|pi|cursor|grok|grok_bot):([a-z][a-z0-9_-]{0,63})$`)
+var messageAddressRE = regexp.MustCompile(`^(paimos|codex|claude|pi|cursor|grok|grok_bot|gemini|opencode):([a-z][a-z0-9_-]{0,63})$`)
 var cloudSessionRE = regexp.MustCompile(`^(session|cse)_[A-Za-z0-9_-]{1,128}$`)
 
 // resolveAddress never trusts an attribution header. A registered address is
@@ -237,7 +237,7 @@ func validateCompatTarget(ctx context.Context, in *targetInput) error {
 		if len(in.Ref) > 256 || strings.ContainsAny(in.Ref, "\r\n") {
 			return badRequest("invalid target reference")
 		}
-	case "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor":
+	case "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "agentd_gemini", "agentd_opencode":
 		kind, harness, steer = "agentd_session", strings.TrimPrefix(in.Adapter, "agentd_"), in.Adapter != "agentd_cursor"
 		var ref struct {
 			Socket    string `json:"socket"`

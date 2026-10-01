@@ -168,11 +168,11 @@ type Discovery struct {
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
 var safeVersion = regexp.MustCompile(`(?:^|[[:space:]])v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+.][a-zA-Z0-9.-]+)?)(?:$|[[:space:]])`)
 
-// Available offers only accounts identified by the vendor's read-only status
-// command. A failed or missing sign-in never becomes an enrollment candidate.
+// Available offers vendor-confirmed accounts and explicitly labelled local
+// profiles. Gemini/OpenCode authentication is checked when the session starts.
 func (d Discovery) Available(ctx context.Context, accountContext string) []Candidate {
 	var candidates []Candidate
-	for _, harness := range []string{"claude", "codex", "cursor", "grok"} {
+	for _, harness := range []string{"claude", "codex", "cursor", "grok", "gemini", "opencode"} {
 		if ctx.Err() != nil {
 			break
 		}
@@ -196,6 +196,8 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	case "cursor":
 		name = "cursor-agent"
 		authArgs = []string{"status", "--format", "json"}
+	case "gemini", "opencode":
+		c.Home = d.Home // The vendor profile retains its own .gemini/XDG layout.
 	case "grok":
 		return d.detectGrok(ctx, accountContext)
 	case "pi":
@@ -235,6 +237,9 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, err
 	}
 	childEnv := harnesslaunch.Environment(os.Environ(), c.Node.Path)
+	if harness == "gemini" || harness == "opencode" {
+		childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
+	}
 	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv, Dir: probeDir}
 	if harness == "pi" {
 		c.PiNode, c.Node = c.Node, harnesslaunch.Node{}
@@ -253,7 +258,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 			if err != nil {
 				return c, err
 			}
-			childEnv = harnesslaunch.Environment(os.Environ(), c.Node.Path)
+			if harness == "gemini" || harness == "opencode" {
+				childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
+			} else {
+				childEnv = harnesslaunch.Environment(os.Environ(), c.Node.Path)
+			}
 			versionCommand.Env = childEnv
 			raw, err = d.Executor.Run(ctx, versionCommand)
 		}
@@ -266,6 +275,20 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, fmt.Errorf("%w; harness version not recognized", harnesslaunch.ErrStart)
 	}
 	c.Version = string(match[1])
+	if harness == "gemini" || harness == "opencode" {
+		// Neither CLI has a quota-neutral person-identity status command.
+		// Pair the local profile, never claim an email or read credentials.
+		profile, err := openDirectory(c.Home, false, true)
+		if err != nil {
+			return c, err
+		}
+		profile.Close()
+		if accountContext != "" && accountContext != "local-profile" {
+			return c, errors.New("select the vendor local profile, not a person identity")
+		}
+		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in checked at launch)", "local_profile"
+		return c, nil
+	}
 	if harness == "pi" {
 		probe := d.PiProvider
 		if probe == nil {

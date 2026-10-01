@@ -17,7 +17,7 @@ import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
 
-export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode'
 export interface MetadataChange {
   field: 'display_label' | 'model' | 'reasoning_effort'
   previous_value: string | null

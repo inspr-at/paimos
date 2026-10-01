@@ -7,6 +7,12 @@
       "sourceCommit": "17d9dc7975cfccf77744ed69cb66c9d2e86d68fe",
       "ticket": "AEON-397",
       "reason": "Contract behavior change already merged before policy integration: the replacement reservation guard requires person-confirmed quota_pool_fingerprint instead of self-reported quota_fingerprint. Existing accounts start unconfirmed, so new/reactivated shared-pool holds stop until a person confirms; existing active holds may still release/settle. This is not expand-safe and previous-binary read probes do not prove quota-write compatibility. AEON-415 draft PR #71 exposes this exact-byte exception for coordinator review; owner acceptance of the rollout or a staged follow-up migration is required before release."
+    },
+    {
+      "file": "1088_more_harnesses.sql",
+      "sha256": "afbdb07b599df13861df3b47b8f36537772e3e1e5e744e62379f3edf98ffce73",
+      "ticket": "AEON-452",
+      "reason": "Replace existing harness/family CHECK enumerations with supersets for Gemini CLI and OpenCode. Preserve every existing value, unknown-family pi policy, RLS policy, column and row. DROP CONSTRAINT is outside the static expand-safe allowlist; this exact-byte draft CI exception requires coordinator acceptance before merge/release and previous-binary compatibility measurement. No release authority is granted by this worker."
     }
   ]
 }

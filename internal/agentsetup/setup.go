@@ -271,12 +271,12 @@ func validateOptions(o Options) error {
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		return ErrUnsafePath
 	}
-	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 5 {
-		return errors.New("select one to five signed-in harness accounts and a computer name")
+	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 7 {
+		return errors.New("select one to seven ready harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
-		if seen[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
+		if seen[c.Harness] || !candidateReady(c) || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
 			return errors.New("one explicitly identified signed-in account is required per harness")
 		}
 		seen[c.Harness] = true
@@ -758,7 +758,7 @@ func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 // env-node launcher has no interpreter pin. A native wrapper is not unpinned.
 func UnpinnedEnrollment(a RuntimeAccount) bool {
 	switch a.Harness {
-	case "codex", "cursor", "pi":
+	case "codex", "cursor", "pi", "gemini", "opencode":
 	default:
 		return false
 	}
@@ -848,4 +848,9 @@ func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error
 		}
 	}
 	return false
+}
+
+// Local-profile harnesses establish authentication at session/new, not discovery.
+func candidateReady(c Candidate) bool {
+	return c.Login == "signed_in" || c.Login == "local_profile" && (c.Harness == "gemini" || c.Harness == "opencode")
 }

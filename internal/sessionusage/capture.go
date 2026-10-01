@@ -98,7 +98,7 @@ func checkSourceIdentity(fields map[string]json.RawMessage, opt Options) error {
 		}
 	}
 	for _, g := range groups {
-		for _, k := range []string{"session_id", "sessionId", "thread_id", "threadId"} {
+		for _, k := range []string{"session_id", "sessionId", "sessionID", "thread_id", "threadId"} {
 			if raw, ok := g[k]; ok {
 				id, err := parseString(raw)
 				if err != nil || id != opt.SourceSessionID {

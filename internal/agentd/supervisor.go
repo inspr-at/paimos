@@ -953,7 +953,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi)
+	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Gemini || profile.Harness == OpenCode)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {

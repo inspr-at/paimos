@@ -966,7 +966,7 @@ const SETUP_ERROR_COPY: Record<string, string> = {
 }
 
 function harnessDisplayName(harness: string): string {
-  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi' } as Record<string, string>)[harness] ?? harness
+  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi', gemini: 'Gemini CLI', opencode: 'OpenCode' } as Record<string, string>)[harness] ?? harness
 }
 
 function verificationRefusalText(item: { harness: string; verification_reason?: string }): string {
@@ -1025,7 +1025,7 @@ function harnessCode(value: unknown): string | undefined {
 const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
 
 function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
-  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return
+  if (!['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode'].includes(harness)) return
   // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
   if (PIN_REASONS.includes(reason ?? '')) {
     return harness === 'claude'
@@ -1681,7 +1681,7 @@ function parseView(data: unknown): PairingView {
     view.harness_statuses = {}
     // Keep future code tokens visible without inventing readiness. Never carry
     // arbitrary diagnostics into the public computer projection.
-    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode']) {
       const status = harnessCode(statuses[harness])
       if (status) view.harness_statuses[harness] = status
     }
@@ -1689,7 +1689,7 @@ function parseView(data: unknown): PairingView {
   if (record.harness_details != null) {
     const details = asRecord(record.harness_details, 'harness_details')
     view.harness_details = {}
-    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode']) {
       const raw = details[harness]
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const item = raw as Record<string, unknown>
