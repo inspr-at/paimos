@@ -63,8 +63,8 @@ briefing visit. The database clock establishes the window alongside the first
 event page; only complete successful log reads advance the saved server cutoff.
 Denied logs, failed logs and log pagination limits retain the earlier cutoff.
 Pending approvals, held requests, journey actions and usage are separate current
-snapshots: their page limits or failures do not freeze completed log windows. Very old visits are
-bounded to 366 days. Preferences use the existing tenant/person-scoped store;
+snapshots: their page limits or failures do not freeze completed log windows.
+Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
 there is no new activity tracking or generated narrative.
 
 Usage requires `harness.read`. Its API list value is approximate, includes
@@ -74,8 +74,8 @@ estimated figures and Paid semantics; account budget windows describe current
 reported usage. Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
 links appear only after successful reads. Merge reports are requested in each
-project with `harness.read`. Journey next actions use one batch snapshot query. This slice delivers the
-in-app briefing; e-mail, push and spoken delivery remain future work.
+project with `harness.read`. Journey next actions use one batch snapshot query.
+This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
 
 ## Develop
 

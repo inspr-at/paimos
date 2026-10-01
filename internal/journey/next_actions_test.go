@@ -4,6 +4,7 @@ package journey_test
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 	f := newFixture(t)
 	ids := []string{}
 	for i, state := range []string{"new", "accepted", "planning", "building", "candidate", "deploying", "refused", "access", "released", "imported"} {
-		project := f.node(t, "project", "BAT-"+string(rune('A'+i)), state)
+		project := f.node(t, "project", "BAT-"+strconv.Itoa(100+i), state)
 		ids = append(ids, project)
 		if state == "new" {
 			continue
@@ -26,8 +27,8 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 			continue
 		}
 		if state == "imported" {
-			f.node(t, "ticket", "BAT-IMPORTED", "Imported work")
-			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE key='BAT-IMPORTED' AND tenant_id=$2`, project, f.tenant); err != nil {
+			f.node(t, "ticket", "BAT-999", "Imported work")
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE key='BAT-999' AND tenant_id=$2`, project, f.tenant); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO events(tenant_id,id,actor_principal_id,node_id,type,after) VALUES($1,900,$2,$3,'import.node_created','{}')`, f.tenant, f.person.ID, project); err != nil {
@@ -41,9 +42,9 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		release := f.release(t, project, "BAT-R"+string(rune('A'+i)), 1)
-		f.ticket(t, project, release, "BAT-T"+string(rune('A'+i)), "1.25", false, false)
-		f.setTicketState(t, "BAT-T"+string(rune('A'+i)), "done")
+		release := f.release(t, project, "BAT-"+strconv.Itoa(200+i), 1)
+		f.ticket(t, project, release, "BAT-"+strconv.Itoa(300+i), "1.25", false, false)
+		f.setTicketState(t, "BAT-"+strconv.Itoa(300+i), "done")
 		if state != "planning" {
 			f.setReleaseState(t, release, state)
 		}

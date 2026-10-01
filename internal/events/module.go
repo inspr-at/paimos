@@ -156,7 +156,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 			window := briefingWindow{}
 			var body []byte
 			err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
-			 window AS MATERIALIZED (
+			 bounds AS MATERIALIZED (
 			 SELECT greatest(coalesce($2::timestamptz,at-interval '24 hours'),at-interval '366 days') AS start,
 			        greatest(at,coalesce($2::timestamptz,at)) AS finish,
 			        $2::timestamptz IS NULL AS first,
@@ -167,7 +167,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 			          FROM events WHERE tenant_id=$1 AND at>=start AND at<finish AND type NOT LIKE 'quote.%'
 			            AND ($3::text[] IS NULL OR type=ANY($3))
 			          ORDER BY at,id LIMIT $4) e),'[]'::jsonb)
-			 FROM window`, p.TenantID, bounds.since, bounds.types, limit+1).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
+			 FROM bounds`, p.TenantID, bounds.since, bounds.types, limit+1).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
 			if err != nil {
 				return err
 			}
