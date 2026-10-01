@@ -78,7 +78,7 @@ paths:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
         - {name: after, in: query, schema: {type: integer, minimum: 0, maximum: 9007199254740991, default: 0}}
-        - {name: ids, in: query, schema: {type: string}, description: Comma-separated host sequences; takes precedence over after. Fetch all cited sources, turns, summary leaves and design inputs by their sequences.}
+        - {name: ids, in: query, schema: {type: string}, description: "Comma-separated host sequences; takes precedence over after. Fetch all cited sources, turns, summary leaves and design inputs by their sequences."}
       responses:
         "200":
           description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
@@ -7599,7 +7599,7 @@ components:
           oneOf:
             - {$ref: "#/components/schemas/AithemaRecordDocument"}
             - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
-        bytes: {type: string, description: Exact submitted UTF-8 JSON, including whitespace and numeric spelling.}
+        bytes: {type: string, description: "Exact submitted UTF-8 JSON, including whitespace and numeric spelling."}
     AithemaJournalAck:
       oneOf:
         - {$ref: "#/components/schemas/AithemaRecordDocument"}
