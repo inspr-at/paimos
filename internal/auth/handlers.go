@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -165,6 +166,10 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display, claims.EmailVerified, payload.Invite)
+	if errors.Is(err, errImportedNotMember) {
+		fail("imported_account", "tenant_membership")
+		return
+	}
 	if errors.Is(err, errNotMember) {
 		fail("not_member", "tenant_membership")
 		return
@@ -257,7 +262,7 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, errorJSON{Error: notMemberSentence})
 			return
 		}
-		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, strings.ToLower(email), email, email)
+		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, identity.FoldEmailASCII(email), email, email)
 		if err != nil {
 			writeInternal(w)
 			return

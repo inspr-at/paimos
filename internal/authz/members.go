@@ -85,7 +85,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 		out.Provisioner = &provisionerCapability{Name: provisioner.Name()}
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.kind,p.name,p.description,p.email,p.status,p.roles,
+		rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.kind,p.name,p.description,coalesce(nullif(p.email,''),i.email),p.status,p.roles,
           i.issuer,coalesce(pp.avatar_original_hash,''),br.id::text,br.key,br.name,
           (SELECT max(s.last_seen_at) FROM sessions s WHERE s.tenant_id=p.tenant_id AND s.principal_id=p.id),
           (SELECT count(*) FROM agent_keys k WHERE k.tenant_id=p.tenant_id AND k.principal_id=p.id AND k.revoked_at IS NULL),
@@ -98,7 +98,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
           LEFT JOIN personal_profiles pp ON pp.tenant_id=p.tenant_id AND pp.principal_id=p.id
           LEFT JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='workspace'
           LEFT JOIN roles br ON br.tenant_id=b.tenant_id AND br.id=b.role_id
-          WHERE p.tenant_id=$1::uuid ORDER BY p.kind DESC,p.name,p.id`, p.TenantID)
+          WHERE p.tenant_id=$1::uuid AND p.linked_to IS NULL ORDER BY p.kind DESC,p.name,p.id`, p.TenantID)
 		if err != nil {
 			return err
 		}

@@ -288,6 +288,7 @@ export interface ActivityChange { field: ChangeField; from: string | null; to: s
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
   author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
+  automatic_change?: import('./statusAutopilot').AutomaticChange
   body_markdown?: string; changes?: ActivityChange[]
 }
 const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }

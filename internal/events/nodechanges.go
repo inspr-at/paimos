@@ -31,13 +31,14 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
+	"status_autopilot.changed": true, "status_autopilot.undone": true,
 	"node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
 	"node.project_moved": true, "node.deleted": true, "node.bulk_changed": true,
 }
 
 // The node attributes a change names, in this order; custom fields follow
 // as fields.<name>. Timestamps and event annotations are not attributes.
-var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "human_check", "parent_id", "position", "deleted_at"}
+var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "human_check", "parent_id", "position", "deleted_at", "status_autopilot"}
 
 type snapshotObject map[string]json.RawMessage
 

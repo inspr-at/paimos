@@ -31,6 +31,8 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
 	"GET /api/usage/dashboard":                    true,
+	"GET /api/settings/status-autopilot":          true,
+	"GET /api/status-autopilot/changes":           true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,
