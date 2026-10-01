@@ -64,6 +64,7 @@ type Record struct {
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string `json:"launch_state,omitempty"`
 	ClaimRoute    *Route `json:"claim_route,omitempty"`
+	RouteReleased bool   `json:"route_released,omitempty"`
 	AccountID     string `json:"account_id,omitempty"`
 	ExecutionMode string `json:"execution_mode,omitempty"`
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
@@ -667,9 +668,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 		entry.mu.Lock()
 		retry = entry.record.State == "claim_pending"
+		routeReleased := entry.record.RouteReleased
 		entry.mu.Unlock()
 		if !retry {
 			return nil
+		}
+		if routeReleased {
+			run.AccountID = ""
 		}
 	}
 	profiles, err := s.api.Profiles(ctx)
@@ -821,9 +826,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	var route Route
 	if entry != nil {
 		entry.mu.Lock()
-		route = *entry.record.ClaimRoute
+		if !entry.record.RouteReleased {
+			route = *entry.record.ClaimRoute
+		}
 		entry.mu.Unlock()
-	} else {
+	}
+	if route.AccountID == "" {
 		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
 		if err != nil {
 			return err
@@ -867,6 +875,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		s.mu.Lock()
 		s.runs[run.ID] = entry
 		s.mu.Unlock()
+	} else {
+		entry.mu.Lock()
+		next := entry.record
+		next.ClaimRoute, next.AccountID, next.RouteReleased = &route, route.AccountID, false
+		if err := s.journal.Put(next); err != nil {
+			entry.mu.Unlock()
+			return err
+		}
+		entry.record = next
+		entry.mu.Unlock()
 	}
 	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))

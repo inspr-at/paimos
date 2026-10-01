@@ -114,6 +114,25 @@ every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
+Matching login fingerprints are hints. In Settings → Accounts, open an account
+and choose **Pool with…**, then confirm the named accounts use the same vendor
+login. Only those confirmed accounts share readings, holds and parallel slots;
+confirmation replaces the pool with exactly the named accounts, leaving unnamed
+previous members separate. Later enrollments require their own confirmation.
+The dialog names every current member plus the account being added, so adding
+a third account keeps the existing pair. **Remove … from pool** and **Stop sharing
+quota** explicitly name every remaining member; the last pair returns to separate
+readings and limits. A changed fingerprint clears that account's confirmation.
+Existing accounts
+start unconfirmed after migration 1054; prior holds can still settle or release.
+The person-only API is `PUT /api/agent-accounts/quota-pool` (`account.manage`).
+Ticket pins require edit permission in the ticket's visible project. If a queued
+account leaves its routing group, routing releases its old hold and slot before
+choosing a current member or returning a visible wait. Claims also release obsolete
+quota or group holds before returning a conflict; a daemon that has already
+journaled the route observes the unreserved queued run and routes again. Group
+edits replace only visible project memberships and preserve hidden project fences.
+
 Capacity learning uses tenant-local readings and usage only (AEON-388,
 migration 1020). Three matching run samples enable a decaying p75 hold; five
 observed work days enable an Auto reserve normalized to the window's usable
@@ -142,7 +161,8 @@ does not enforce their consumption.
 A terminal vendor-limit failure waits on its account when the reset is within
 20 minutes. Longer stops create one linked retry on the next eligible account
 at the next daemon poll, preserving the work order and any person-selected
-account fence. The original session records the handoff. The local daemon
+account fence and run-level group target through consecutive handoffs. The
+original session records the handoff. The local daemon
 requires proof that the previous process stopped and the same recorded workspace
 and branch before continuing. No eligible account means a visible vendor wait;
 Run now once is never inherited by an automatic retry. Account holds remain
@@ -183,7 +203,17 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.6`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing fields and required payloads are unchanged.
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.7`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.7 adds `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`.
+
+Reporter pins identify response schemas by their `METHOD /path status` labels.
+`RequiredBump` treats a new required response property as a minor addition:
+the server supplies it, and existing harness clients ignore extra response fields.
+Components also referenced by any request body, including through nested schema
+or reusable request-body references, retain request rules throughout their
+expanded subtree. Pins store this provenance separately from the response hash.
+New required properties on these shared components still require a major bump.
+Changed existing properties, newly requiring an existing optional property, and adding a required
+property to a previously closed response schema also remain major changes.
 
 Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
 
@@ -321,7 +351,7 @@ stop only the matching model; account-wide denials still apply. Known denied
 windows are reported at 100%; missing bounds remain unknown. Accounts publish
 `reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
 email, token or local path. Missing verified IDs leave the fingerprint empty.
-Doors with the same fingerprint share allowance windows, outstanding reservations
+Doors explicitly confirmed together share allowance windows, outstanding reservations
 and vendor denials within the tenant; group membership and schedules stay on each
 door. Reservations and launch validation recheck project fences and ticket pins.
 Settings displays `aeon use <harness> <account-id>` so labels containing spaces or
@@ -1260,7 +1290,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.6`:
+The reporter contract is `harness-session/1.7`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

@@ -79,7 +79,23 @@ func (s *Supervisor) reconcileUnlaunched(ctx context.Context, entry *owned) erro
 	if err != nil {
 		return errClaimUnconfirmed
 	}
-	if run.ID != record.RunID || run.WorkOrderID != record.WorkOrderID || run.AgentPrincipalID != record.PrincipalID || run.AccountID != record.AccountID {
+	if run.ID != record.RunID || run.WorkOrderID != record.WorkOrderID || run.AgentPrincipalID != record.PrincipalID {
+		return ErrScope
+	}
+	if run.Status == "queued" && run.AccountID == "" && record.ExecutionMode == "managed" && record.Generation == s.generation {
+		// A server-observed release invalidates the route, never launch evidence.
+		// Keep the prior binding until a new validated route is durably stored.
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		next := entry.record
+		next.RouteReleased = true
+		if err := s.journal.Put(next); err != nil {
+			return err
+		}
+		entry.record = next
+		return nil
+	}
+	if run.AccountID != record.AccountID {
 		return ErrScope
 	}
 	switch run.Status {
