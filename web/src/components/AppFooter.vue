@@ -129,7 +129,7 @@ const sizingVersion = '260101000000.0.0'
 const codename = computed(() => version.value?.codename || codenameOf(value.value))
 const count = computed(() => session.identity ? releases.newCount : 0)
 const label = computed(() => {
-  const running = value.value ? `, ${releaseAria(codename.value, value.value)}` : ''
+  const running = version.failed ? ', version unavailable' : value.value ? `, ${releaseAria(codename.value, value.value)}` : ''
   const fresh = count.value === null ? ', new releases since your last visit' : count.value ? `, ${count.value} new since your last visit` : ''
   return `Release history${running}${fresh}`
 })
@@ -153,7 +153,9 @@ const label = computed(() => {
           </span>
           <span v-if="version.failed" class="fallback">Version unavailable</span>
         </span>
-        <span v-if="count !== 0" class="new-badge" aria-hidden="true">{{ count === null ? 'New' : `${count} new` }}</span>
+        <span class="badge-slot" aria-hidden="true">
+          <span v-if="count !== 0" class="new-badge">{{ count === null ? 'New' : `${count} new` }}</span>
+        </span>
       </span>
     </button>
     <span v-else class="version-plain">
@@ -205,9 +207,12 @@ const label = computed(() => {
 .pill-version { color: var(--ink); font-size: 12px; line-height: 1; }
 .pill-skeleton { position: absolute; left: 0; right: 0; height: 8px; }
 .fallback { position: absolute; left: 0; font-family: var(--font); font-size: 11.5px; }
+/* Reserve the count before either response arrives, and after releases are seen.
+   Three count digits fit; longer counts keep their full accessible label. */
+.badge-slot { width: calc(7ch + 16px); flex-shrink: 0; margin-right: -5px; font: 700 10px/1 var(--mono); letter-spacing: .02em; }
 .new-badge {
-  display: inline-flex; align-items: center; flex-shrink: 0; height: 17px; margin-right: -5px; padding: 0 7px; border-radius: 999px;
-  background: var(--gold-2); color: #3a2804; font: 700 10px/1 var(--mono); letter-spacing: .02em; box-shadow: 0 0 0 1px rgba(154, 107, 18, .35);
+  display: block; box-sizing: border-box; width: 100%; height: 17px; padding: 0 7px; border-radius: 999px; overflow: hidden; text-overflow: ellipsis; text-align: center;
+  background: var(--gold-2); color: #3a2804; line-height: 17px; box-shadow: 0 0 0 1px rgba(154, 107, 18, .35);
 }
 .version-plain { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; min-width: 112px; font-size: 12px; color: var(--ink); }
 @media (max-width: 600px) {
@@ -216,7 +221,7 @@ const label = computed(() => {
   .footer-name { font-size: 9px; letter-spacing: .18em; }
   .pill-face { height: 30px; gap: 6px; }
   .release-slot { gap: 6px; }
-  .footer-codename { flex-basis: 64px; width: 64px; font-size: 11px; }
+  .footer-codename { flex-basis: 48px; width: 48px; font-size: 11px; }
   .pill-version { font-size: 11.5px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }

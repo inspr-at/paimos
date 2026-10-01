@@ -118,6 +118,7 @@ test('unknown count says New; failed versions still open history', async ({ page
   await page.route('**/api/version', route => route.fulfill({ status: 503 }))
   await page.reload()
   await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
+  await expect(pill(page)).toHaveAccessibleName('Release history, version unavailable')
   await pill(page).click()
   await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
 })
@@ -156,8 +157,10 @@ for (const width of [1440, 390, 320]) {
       const before = await bounds(pill(page))
       const flowBefore = await bounds(chip)
       release()
-      if (failed) await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
-      else {
+      if (failed) {
+        await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
+        await expect(pill(page)).toHaveAccessibleName('Release history, version unavailable, 3 new since your last visit')
+      } else {
         await expect(version(page)).toBeVisible()
         await expect(pill(page).locator('.footer-codename')).toHaveText('An exceptionally long release codename')
         await expect(version(page)).not.toHaveAttribute('aria-hidden')
@@ -201,6 +204,67 @@ for (const width of [1440, 390, 320]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
     })
   }
+}
+
+// Neither response has arrived at the first measurement. The stored last visit
+// only becomes countable after /version, then history resolves "New" to "3 new".
+for (const width of [1440, 390, 320]) {
+  test(`badge loading and marking seen keep the release and flow fixed at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const history = await setup(page, { flow: true, fresh: true })
+    let releaseVersion!: () => void
+    let releaseHistory!: () => void
+    const versionHeld = new Promise<void>(resolve => { releaseVersion = resolve })
+    const historyHeld = new Promise<void>(resolve => { releaseHistory = resolve })
+    await page.route('**/api/version', async route => {
+      await versionHeld
+      await route.fulfill({ json: { version: history.current, scheme: 'inspr-calendar-v2', codename: 'Lucky Lune' } })
+    })
+    await page.route('**/api/releases**', async route => {
+      await historyHeld
+      await route.fulfill({ json: history })
+    })
+    await page.goto('/p/PHAROS')
+    const chip = page.locator('footer.app-footer .journey-chip')
+    const badge = pill(page).locator('.new-badge')
+    await expect(chip).toBeVisible()
+    await expect(pill(page).locator('.name-skeleton')).toBeVisible()
+    await expect(badge).toHaveCount(0)
+    await page.evaluate(async () => {
+      await document.fonts.ready
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    })
+    const before = await bounds(pill(page))
+    const flowBefore = await bounds(chip)
+    async function staysPut() {
+      const after = await bounds(pill(page))
+      expect(Math.abs(after.width - before.width)).toBeLessThan(1)
+      expect(Math.abs(after.x - before.x)).toBeLessThan(1)
+      await expect.poll(async () => Math.abs((await bounds(chip)).x - flowBefore.x)).toBeLessThan(1)
+      expect(Math.abs((await bounds(chip)).width - flowBefore.width)).toBeLessThan(1)
+      await insideFooter(page)
+    }
+    releaseVersion()
+    await expect(badge).toHaveText('New')
+    await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}, new releases since your last visit`)
+    await staysPut()
+    releaseHistory()
+    await expect(badge).toHaveText('3 new')
+    await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}, 3 new since your last visit`)
+    await staysPut()
+    await pill(page).click()
+    const dialog = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+    await expect(dialog).toBeVisible()
+    await expect(badge).toHaveCount(0)
+    await dialog.getByRole('button', { name: 'Close release history', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    await pill(page).evaluate(el => el.blur())
+    await page.mouse.move(1, 1)
+    await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
+    await expect(chip).toBeVisible()
+    await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}`)
+    await staysPut()
+  })
 }
 
 for (const named of [false, true]) {
