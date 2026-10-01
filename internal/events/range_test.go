@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -61,5 +62,81 @@ func TestEventBriefingRange(t *testing.T) {
 	var page page
 	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != 2 {
 		t.Fatalf("HTTP range %d %s %v", w.Code, w.Body.String(), err)
+	}
+}
+
+// These assertions exercise the HTTP contract, including timestamp/ID order
+// differing from append order. The legacy ID stream remains unchanged.
+func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
+	d, p, _ := fixture(t)
+	now := time.Now().UTC()
+	ats := []time.Time{now.Add(-time.Hour), now.Add(-3 * time.Hour), now.Add(-time.Hour)}
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		for _, at := range ats {
+			if _, err := Append(t.Context(), tx, p, Change{Type: "test.changed", At: &at}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(d.App).(*module)
+	call := func(query string) map[string]json.RawMessage {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/events?"+query, nil)
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), p))
+		w := httptest.NewRecorder()
+		m.list(w, req)
+		if w.Code != 200 {
+			t.Fatalf("snapshot HTTP %d: %s", w.Code, w.Body.String())
+		}
+		var got map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	first := call("briefing=true&type=test.changed&limit=1")
+	var window struct {
+		From, To      time.Time
+		First, Capped bool
+	}
+	if err := json.Unmarshal(first["window"], &window); err != nil {
+		t.Fatalf("no database window: %v", err)
+	}
+	if !window.First || window.To.Before(now) || window.To.After(time.Now().Add(time.Second)) || window.To.Sub(window.From) != 24*time.Hour {
+		t.Fatalf("invalid window %+v", window)
+	}
+	var rows []Event
+	_ = json.Unmarshal(first["items"], &rows)
+	if len(rows) != 1 || rows[0].ID != 2 {
+		t.Fatalf("not timestamp ordered: %+v", rows)
+	}
+	ids := []int64{rows[0].ID}
+	page := first
+	for i := 0; i < 2; i++ {
+		var cursor string
+		_ = json.Unmarshal(page["next_cursor"], &cursor)
+		if cursor == "" {
+			t.Fatal("missing time cursor")
+		}
+		page = call("from=" + url.QueryEscape(window.From.Format(time.RFC3339Nano)) + "&to=" + url.QueryEscape(window.To.Format(time.RFC3339Nano)) + "&cursor=" + url.QueryEscape(cursor) + "&type=test.changed&limit=1")
+		_ = json.Unmarshal(page["items"], &rows)
+		if len(rows) != 1 {
+			t.Fatal("lost page")
+		}
+		ids = append(ids, rows[0].ID)
+	}
+	if ids[0] != 2 || ids[1] != 1 || ids[2] != 3 {
+		t.Fatalf("skipped or repeated timestamp tie: %v", ids)
+	}
+	future := now.Add(2 * time.Hour)
+	got := call("briefing=true&since=" + url.QueryEscape(future.Format(time.RFC3339Nano)))
+	if err := json.Unmarshal(got["window"], &window); err != nil {
+		t.Fatal(err)
+	}
+	if window.First || !window.From.Equal(future) || !window.To.Equal(future) {
+		t.Fatalf("backward clock replay: %+v", window)
 	}
 }
