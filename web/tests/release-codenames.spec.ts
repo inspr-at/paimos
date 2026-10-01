@@ -134,7 +134,11 @@ for (const width of [320, 390, 600, 1600]) {
   test(`the list version is right-aligned and wraps only when needed at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await open(page)
-    if (width <= 760) await sheet(page).getByRole('button', { name: 'All releases' }).click()
+    if (width <= 760) {
+      // Phone detail hides the grid, but keeps its selected row for Back.
+      await expect(sheet(page).getByRole('row', { selected: true, includeHidden: true })).toHaveCount(1)
+      await sheet(page).getByRole('button', { name: 'All releases' }).click()
+    }
     const row = options(page).first()
     const name = row.locator('.rn-name')
     const version = row.locator('.row-version')
