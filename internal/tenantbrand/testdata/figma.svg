@@ -1,0 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:f="http://www.figma.com/figma/ns" viewBox="0 0 160 40" role="img" aria-label="Acme" focusable="false" data-name="Logo" f:version="1">
+<defs><linearGradient id="ink"><stop offset="0" stop-color="#0b6e6e"/><stop offset="1" stop-color="#e30613"/></linearGradient></defs>
+<path d="M0 0h40v40H0z" fill="url(#ink)" data-name="Mark"/><text x="44" y="28" font-size="24">Acme</text>
+</svg>

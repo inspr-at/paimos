@@ -475,7 +475,11 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 	p.limitVendor = Pi
 	pp := &piProcess{wireProcess: p, provider: provider, model: model, effort: r.Profile.Effort, queue: queue,
 		scope: piHeldQueue{TenantID: r.TenantID, PrincipalID: r.PrincipalID, RunID: r.Run.ID, Generation: r.Generation}}
+	usage := &piUsageTracker{}
 	p.setOnEvent(func(raw json.RawMessage) {
+		if ev, ok := usage.event(raw); ok {
+			observe(ev)
+		}
 		var frame struct {
 			Type string `json:"type"`
 		}
@@ -588,6 +592,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
 	var costMicros int64
+	usageSeen := false
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
@@ -613,13 +618,22 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				observe(limitEvent(hit))
 			}
 			var result struct {
-				StopReason string `json:"stopReason"`
+				StopReason string                     `json:"stopReason"`
+				Usage      map[string]json.RawMessage `json:"usage"`
 			}
-			// A Cursor prompt result is only a stop reason. It carries no token
-			// usage; cost arrives separately as a usage_update.
+			// Current ACP builds send a stop reason and separate cost updates.
+			// Accept token usage only if the result carries the complete known
+			// Cursor turn schema; context used/size is never token throughput.
 			if len(frame.Error) > 0 && string(frame.Error) != "null" || json.Unmarshal(frame.Result, &result) != nil || result.StopReason != "end_turn" {
 				cp.finish(errors.New("Cursor ACP prompt failed"))
 			} else {
+				if !usageSeen {
+					if report, ok := sessionusage.CursorPromptUsage(result.Usage, r.Profile.Model); ok {
+						usageSeen = true
+						observe(AdapterEvent{Kind: "usage", SessionUsage: &report, InputTokensDelta: usageCount(report.InputTokens),
+							OutputTokensDelta: usageCount(report.OutputTokens), CachedInputTokensDelta: usageCount(report.CachedInputTokens), ReasoningTokensDelta: usageCount(report.ReasoningTokens)})
+					}
+				}
 				cp.finish(nil)
 			}
 			return
