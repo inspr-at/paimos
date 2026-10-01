@@ -15,9 +15,30 @@ export interface AttachReview {
     process: { pid: number; uid: number; started: string; executable: string; cwd: string }
   }
 }
+// What the person sees for a request that has not become a session yet. A client
+// clock past the server's expiry counts as expired right away; the next poll agrees.
+export type AttachOutcome = 'waiting' | 'approved' | 'expired' | 'cancelled'
+export function attachOutcome(review: Pick<AttachReview, 'state' | 'expires_at'>, now: number): AttachOutcome | null {
+  const past = Date.parse(review.expires_at) <= now
+  switch (review.state) {
+    case 'pending': return past ? 'expired' : 'waiting'
+    case 'approved': return past ? 'expired' : 'approved'
+    case 'unreachable': return 'expired'
+    case 'detached': return 'cancelled'
+    default: return null
+  }
+}
+export async function listPendingAttach(signal?: AbortSignal): Promise<AttachReview[]> {
+  const res = await api('/agent-pairing/attach/pending', { signal })
+  if (!res.ok) throw new Error('Attach requests unavailable.')
+  const body = await res.json() as { requests?: AttachReview[] }
+  return Array.isArray(body.requests) ? body.requests : []
+}
+export { attachCodeFromHash, formatAttachCode } from './attachLink.ts'
+
 export async function attachAction(path: string, body?: object, signal?: AbortSignal): Promise<AttachReview> {
   const res = await api(`/agent-pairing/attach${path}`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })
-  if (!res.ok) throw new Error(res.status === 429 ? 'Too many attempts. Try again in ten minutes.' : res.status === 403 ? 'Only the paired computer’s owner can approve this watch.' : res.status === 409 ? 'The consent setting or request changed. Close this review and enter the code again.' : res.status === 410 ? 'This request ended. Start a new attach in the terminal.' : 'Attach unavailable. Check the code and try again.')
+  if (!res.ok) throw new Error(res.status === 429 ? 'Too many attempts. Try again in ten minutes.' : res.status === 403 ? 'Only the paired computer’s owner can approve this watch.' : res.status === 409 ? 'The consent setting or request changed. Close this review and open it again.' : res.status === 410 ? 'This request ended. Start a new attach in the terminal.' : 'Attach unavailable. Check the code and try again.')
   return res.json() as Promise<AttachReview>
 }
 // Defense in depth for a malicious or stale relay. Payloads remain plain text;

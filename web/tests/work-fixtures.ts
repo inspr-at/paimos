@@ -287,6 +287,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (method === 'PUT') { data.preferences[key] = (body as { value: Record<string, unknown> }).value; return route.fulfill({ json: { key, value: data.preferences[key], updated_at: new Date(now).toISOString() } }) }
       return route.fulfill({ json: { key, value: data.preferences[key] ?? null, updated_at: null } })
     }
+    // ---------- Attach requests waiting on /agents: none unless a spec registers its own route ----------
+    if (path === '/api/agent-pairing/attach/pending' && method === 'GET') return route.fulfill({ json: { requests: [] } })
     // ---------- Events (attachment removals and their undo) ----------
     if (path === '/api/events' && method === 'GET') {
       const after = Number(query.get('after') ?? 0)

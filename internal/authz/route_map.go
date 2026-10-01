@@ -18,6 +18,20 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// Aithema delegates authentication to the journal module: a public outer
+	// declaration never bypasses its JWT, exact capability or transaction fence.
+	"POST /api/aithema/journal/sessions/{sid}/records":   "public",
+	"POST /api/aithema/journal/sessions/{sid}/snapshots": "public",
+	"POST /api/aithema/journal/sessions/{sid}/op.result": "public",
+	"GET /api/aithema/journal/sessions/{sid}/records":    "public",
+	"GET /api/aithema/journal/sessions/{sid}/cursor":     "public",
+	"GET /api/aithema/journal/sessions/{sid}/authority":  "public",
+	"POST /api/aithema/ledger/sessions/{sid}/admit":      "public",
+	"POST /api/aithema/ledger/sessions/{sid}/claim":      "public",
+	"POST /api/aithema/ledger/sessions/{sid}/settle":     "public",
+	"POST /api/aithema/ledger/sessions/{sid}/recover":    "public",
+	"GET /api/aithema/ledger/sessions/{sid}/holds":       "public",
+
 	"GET /api/nodes/{nodeId}/reviews":                                                   "work_orders.read",
 	"POST /api/nodes/{nodeId}/reviews":                                                  "work_orders.write",
 	"DELETE /api/agent-accounts/{accountId}/{resource}":                                 "account.manage",
@@ -38,6 +52,7 @@ var RoutePermissions = map[string]string{
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
 	"POST /api/agent-pairing/attach/lookup":                                             "account.manage",
+	"GET /api/agent-pairing/attach/pending":                                             "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/approve":                                "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/revoke":                                 "account.manage",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch":                  "harness.watch",
@@ -465,6 +480,11 @@ var RoutePermissions = map[string]string{
 	"PUT /api/quotes/{quoteId}/profile":                                                         "quotes.write",
 	"GET /api/settings/eta-interval":                                                            "settings.manage",
 	"PUT /api/settings/eta-interval":                                                            "settings.manage",
+	"GET /api/settings/brand":                                                                   "settings.manage",
+	"PUT /api/settings/brand":                                                                   "settings.manage",
+	"PUT /api/settings/brand/logo/{variant}":                                                    "settings.manage",
+	"DELETE /api/settings/brand/logo/{variant}":                                                 "settings.manage",
+	"GET /api/brand/logo/{variant}":                                                             "profile.read|profile.portal_read",
 	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",

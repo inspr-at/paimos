@@ -28,6 +28,7 @@ import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
+import AttachPending from '../components/agents/AttachPending.vue'
 
 // Markus's desk for agents: a compact live line under the title, what waits on him
 // (only when something does), the accounts with today's plan, then every session
@@ -47,6 +48,8 @@ const updatedAge = computed(() => agents.sessionsUpdatedAt === null ? '' : `${Ma
 const freshnessTip = computed(() => [live.value ? 'Connected to live updates' : 'Refreshing every 20 seconds', updatedFull.value ? `last update ${updatedFull.value}` : ''].filter(Boolean).join(' · '))
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
+const attachDialog = ref<InstanceType<typeof AttachApproval>>()
+const attachPending = ref<InstanceType<typeof AttachPending>>()
 const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
 const pairingAccess = computed(() => pairingPermissions({
   permissions: [...myPermissions()],
@@ -275,7 +278,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <RouterLink class="context-link" to="/agents/usage">Usage</RouterLink>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys</RouterLink>
         </div>
-        <AttachApproval />
+        <AttachApproval ref="attachDialog" @changed="attachPending?.refresh()" />
         <RouterLink v-if="showConnect" class="btn connect" to="/agents/register-agent"><AppIcon name="monitor" :size="15" />Connect your machine</RouterLink>
         <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
       </div>
@@ -285,6 +288,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
          page does not jump as each read lands. -->
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
+        <AttachPending ref="attachPending" :now="agents.now" @review="request => attachDialog?.show(request)" />
         <ApprovalQueue
           v-if="agents.loaded && waiting"
           ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"

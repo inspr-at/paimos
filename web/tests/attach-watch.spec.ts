@@ -145,6 +145,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
     let approved = false
     await page.route('**/api/agent-pairing/attach/**', async route => {
+      if (route.request().method() === 'GET') return route.fallback()
       expect(route.request().url()).not.toContain('123456789')
       if (route.request().url().endsWith('/lookup')) {
         expect(route.request().postDataJSON()).toEqual({ user_code: '123456789' })
@@ -242,6 +243,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
     let approvals = 0
     await page.route('**/api/agent-pairing/attach/**', async route => {
+      if (route.request().method() === 'GET') return route.fallback()
       expect(route.request().url()).not.toContain('123456789')
       if (route.request().url().endsWith('/lookup')) {
         expect(route.request().postDataJSON()).toEqual({ user_code: '123456789' })
