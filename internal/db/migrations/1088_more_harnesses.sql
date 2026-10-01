@@ -22,6 +22,10 @@ ALTER TABLE account_groups ADD CONSTRAINT account_groups_harness_check
 ALTER TABLE account_ticket_pins DROP CONSTRAINT account_ticket_pins_harness_check;
 ALTER TABLE account_ticket_pins ADD CONSTRAINT account_ticket_pins_harness_check
     CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode'));
+ALTER TABLE inbox_message_targets DROP CONSTRAINT inbox_message_targets_adapter_check;
+ALTER TABLE inbox_message_targets ADD CONSTRAINT inbox_message_targets_adapter_check
+    CHECK (adapter IN ('codex','agentd_codex','agentd_claude','agentd_pi','agentd_cursor',
+        'agentd_gemini','agentd_opencode','grok_bot_routine','claude_resume','claude_channel'));
 ALTER TABLE rule_served_manifests DROP CONSTRAINT rule_served_manifests_harness_check;
 ALTER TABLE rule_served_manifests ADD CONSTRAINT rule_served_manifests_harness_check
     CHECK (harness IN ('claude-code','codex','grok','pi','cursor','gemini','opencode'));

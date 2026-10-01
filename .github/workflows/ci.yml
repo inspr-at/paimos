@@ -195,6 +195,10 @@ jobs:
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
+
+      - name: Additional harness brands and pairing vocabulary
+        working-directory: web
+        run: node --experimental-strip-types --test tests/brandMarks.test.ts tests/agent-pairing.test.ts
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
