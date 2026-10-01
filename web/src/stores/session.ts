@@ -5,6 +5,7 @@ import { api, getSession, sessionEnded, type Identity } from '../lib/api'
 import { restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
+import { resetPositions } from '../lib/position'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -24,6 +25,7 @@ export const useSession = defineStore('session', () => {
     requiresSignIn.value = true
     error.value = ''
     revokePermissions()
+    resetPositions()
   }
 
   async function refresh() {
@@ -43,6 +45,7 @@ export const useSession = defineStore('session', () => {
       if (same) void accessChanged()
       else {
         clearPermissions()
+        resetPositions()
         if (session.identity) void refreshPermissions()
       }
       devMode.value = session.devMode

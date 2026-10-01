@@ -175,6 +175,7 @@ type Session struct {
 	Activity                                                        string            `json:"activity"`
 	ActivitySequence                                                int64             `json:"activity_sequence"`
 	Revision                                                        int64             `json:"revision"`
+	RowVersion                                                      int64             `json:"row_version,omitempty"`
 	HeartbeatAt                                                     *time.Time        `json:"heartbeat_at"`
 	StoppedAt                                                       *time.Time        `json:"stopped_at"`
 	StopReason                                                      *string           `json:"stop_reason"`
@@ -323,12 +324,15 @@ func normalizeActivityNote(raw string) (string, bool) {
 	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
 }
 
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,aeon_session_finished(stopped_at,stop_reason,progress_pct)`
+// row_version is the row's own revision (AEON-449): a trigger bumps it inside every
+// statement that changes the row, so of two copies the larger is the newer one.
+// revision, by contrast, is an optimistic-lock token only some writers advance.
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct)`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.Finished)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished)
 	if err != nil {
 		return s, err
 	}
@@ -386,7 +390,8 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 		return nil
 	}
 	if existing.vendorRefDigest == nil {
-		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL`, existing.ID, vendor); err != nil {
+		// The body names the row it was made from: keep its version current.
+		if err := tx.QueryRow(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL RETURNING row_version`, existing.ID, vendor).Scan(&existing.RowVersion); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return registrationConflict(err)
 		}
 		existing.vendorRefDigest = vendor
@@ -730,7 +735,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		owner = p.ID
 	}
 	if owner != "" {
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text`, s.ID, owner).Scan(&s.ownerID); err != nil {
+		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
 			return nil, err
 		}
 	}

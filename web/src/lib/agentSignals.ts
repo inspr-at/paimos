@@ -64,7 +64,7 @@ export interface StateEvidence {
   // The server's answer to "did it complete its job": always sent, false included, also
   // where stop_reason is withheld. The only input to Done; nothing here derives it.
   finished: boolean
-  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
+  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: readonly AttentionReason[]
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
