@@ -174,6 +174,7 @@
 2 2052 github.com/inspr-at/paimos/internal/harness TestManagedDeliveryFailureNotifiesSenderOnce
 2 3094 github.com/inspr-at/paimos/internal/harness TestManualReparentPermissionsAndUndo
 2 2377 github.com/inspr-at/paimos/internal/harness TestModelPricesThroughProductionAuth
+2 0 github.com/inspr-at/paimos/internal/harness TestModelReportsRequireWorkerLeaseAndStayInHarness
 2 4588 github.com/inspr-at/paimos/internal/harness TestProvenanceReportsReplaceOnlyTheKindsTheyCarry
 2 2577 github.com/inspr-at/paimos/internal/harness TestRebindClearsEstimate
 2 2168 github.com/inspr-at/paimos/internal/harness TestRecoveryAuthorizationFencingHistoryAndRetry
@@ -212,6 +213,7 @@
 2 2608 github.com/inspr-at/paimos/internal/intake
 2 16 github.com/inspr-at/paimos/internal/localjournal
 2 6749 github.com/inspr-at/paimos/internal/modelregistry
+2 0 github.com/inspr-at/paimos/internal/modelreport
 2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
 2 1256 github.com/inspr-at/paimos/internal/nodes TestConcurrentMovesPrecondition
 2 1819 github.com/inspr-at/paimos/internal/nodes TestConvertIssueKindMatrix

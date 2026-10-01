@@ -101,6 +101,7 @@
 2 2035 github.com/inspr-at/paimos/internal/harness TestLiveDisplayLabelIsNotThePrincipalName
 2 1835 github.com/inspr-at/paimos/internal/harness TestLostContactStaysClosedWhenRemovedOrReplaced
 2 3278 github.com/inspr-at/paimos/internal/harness TestManagedForceStopHumanConfirmationAndGenerationFences
+2 0 github.com/inspr-at/paimos/internal/harness TestModelReportsRequireWorkerLeaseAndStayInHarness
 2 3512 github.com/inspr-at/paimos/internal/harness TestRecoveryRevokesUsageWithoutErasingStoppedSettlement
 2 1434 github.com/inspr-at/paimos/internal/harness TestRegistrationLabelValidation
 2 1927 github.com/inspr-at/paimos/internal/harness TestRemovalSaysWhetherTheCallerMayUndo
@@ -108,11 +109,11 @@
 2 2252 github.com/inspr-at/paimos/internal/harness TestSessionAcceptsFullAccountCatalogLabels
 2 1868 github.com/inspr-at/paimos/internal/harness TestSessionReadMarkerAcceptsLinkedUnboundReplies
 2 5305 github.com/inspr-at/paimos/internal/harness TestSettingsCompletionUsesDatabaseClockUnderSkew
-2 0 github.com/inspr-at/paimos/internal/harness TestStampSessionEtaBoundary
 2 2569 github.com/inspr-at/paimos/internal/harness TestThrottledHeartbeatAndStateEvidence
 2 2477 github.com/inspr-at/paimos/internal/harness TestUsageConcurrentCumulativeReports
-2 0 github.com/inspr-at/paimos/internal/harness TestUsageRateValidation
+2 0 github.com/inspr-at/paimos/internal/harness TestUsageExactCost
 2 2294 github.com/inspr-at/paimos/internal/harness TestUsageRejectsInvalidAndUnauthorized
+2 0 github.com/inspr-at/paimos/internal/harness TestUsageTransition
 2 2511 github.com/inspr-at/paimos/internal/harness TestVendorSessionBinding
 2 6 github.com/inspr-at/paimos/internal/harnesslaunch
 2 6218 github.com/inspr-at/paimos/internal/importer/offers
@@ -120,12 +121,12 @@
 2 4683 github.com/inspr-at/paimos/internal/inbox TestInboxReceipt
 2 2585 github.com/inspr-at/paimos/internal/inbox TestManagedDeliveryReroutesToFrozenSimpleFallback
 2 2683 github.com/inspr-at/paimos/internal/inbox TestManagedSettlementUsesTheOneFailurePath
-2 0 github.com/inspr-at/paimos/internal/inbox TestMessagingAdapterValidation
 2 2610 github.com/inspr-at/paimos/internal/inbox TestPageStampsOnlyReturnedRows
 2 2781 github.com/inspr-at/paimos/internal/inbox TestPullDropsAMessageFailedAfterItWasSelected
 2 2415 github.com/inspr-at/paimos/internal/inbox TestStreamCarriesSessionMessagesAndMarksListening
 2 2488 github.com/inspr-at/paimos/internal/inbox TestSweeperIsASingleRunner
 2 2659 github.com/inspr-at/paimos/internal/inbox TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline
+2 0 github.com/inspr-at/paimos/internal/inbox TestWebhookPolicy
 2 16 github.com/inspr-at/paimos/internal/localjournal
 2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
 2 230 github.com/inspr-at/paimos/internal/nodes TestConvertWritesOneEventAndUndo
@@ -257,21 +258,22 @@
 4 2819 github.com/inspr-at/paimos/internal/harness TestRulesReceiptBoundedHistoryAndOldReplay
 4 2327 github.com/inspr-at/paimos/internal/harness TestRulesReceiptContextCredentialAndGenerationFencing
 4 1977 github.com/inspr-at/paimos/internal/harness TestSessionAttentionVisibilityAndMessageProjectIsolation
+4 0 github.com/inspr-at/paimos/internal/harness TestStampSessionEtaBoundary
 4 1843 github.com/inspr-at/paimos/internal/harness TestThrottledCoordinatorResolution
-4 0 github.com/inspr-at/paimos/internal/harness TestUsageExactCost
+4 0 github.com/inspr-at/paimos/internal/harness TestUsageRateValidation
 4 2319 github.com/inspr-at/paimos/internal/harness TestUsageRejectsMalformedJSON
-4 0 github.com/inspr-at/paimos/internal/harness TestUsageTransition
 4 2494 github.com/inspr-at/paimos/internal/harness TestUsageUnknownAndLatePricing
 4 3195 github.com/inspr-at/paimos/internal/inbox TestCompletionBeatsSweeperUnderConcurrency
 4 2537 github.com/inspr-at/paimos/internal/inbox TestExactSessionLeavesOutBroadcasts
 4 2707 github.com/inspr-at/paimos/internal/inbox TestHeldResolutionEventFailureLeavesPending
 4 2561 github.com/inspr-at/paimos/internal/inbox TestLegacyHealIsOneTime
+4 0 github.com/inspr-at/paimos/internal/inbox TestMessagingAdapterValidation
 4 2610 github.com/inspr-at/paimos/internal/inbox TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion
 4 2634 github.com/inspr-at/paimos/internal/inbox TestSessionMessagesIsolationAndLegacyWire
 4 2512 github.com/inspr-at/paimos/internal/inbox TestUnboundReceiptsAckHealAndBlockedDeadline
-4 0 github.com/inspr-at/paimos/internal/inbox TestWebhookPolicy
 4 97514 github.com/inspr-at/paimos/internal/journey
 4 6749 github.com/inspr-at/paimos/internal/modelregistry
+4 0 github.com/inspr-at/paimos/internal/modelreport
 4 212 github.com/inspr-at/paimos/internal/nodes TestConvertDropsFieldsOutsideAClosedSchema
 4 1819 github.com/inspr-at/paimos/internal/nodes TestConvertIssueKindMatrix
 4 265 github.com/inspr-at/paimos/internal/nodes TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants

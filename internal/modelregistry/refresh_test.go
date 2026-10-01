@@ -25,6 +25,21 @@ func inRegistry(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	}
 }
 
+func grantModelReporter(t *testing.T, p, agent tenant.Principal) {
+	t.Helper()
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'model_reporter','Model reporter') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['models.read','models.report','models.refresh','models.manage'])`, p.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace') ON CONFLICT (tenant_id,principal_id) WHERE scope_type='workspace' DO UPDATE SET role_id=EXCLUDED.role_id`, p.TenantID, agent.ID, role)
+		return err
+	})
+}
+
 func registryRoutes(t *testing.T, p tenant.Principal) []Route {
 	t.Helper()
 	var out []Route
@@ -406,9 +421,11 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "proposal-policy", "person", "Owner", []string{"admin"})
 	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
+	grantModelReporter(t, p, worker)
 	before := registryRoutes(t, p)
 	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
+	decode[RefreshResult](t, &worker, "POST", "/api/models/refresh", "{}", 200)
 	o := Observation{EvidenceID("pending-grok"), "grok", "grok-next", "xhigh", "advertised"}
 	raw, _ := json.Marshal([]Observation{o})
 	result := decode[ReportResult](t, &worker, "POST", "/api/models/reports", string(raw), 200)
