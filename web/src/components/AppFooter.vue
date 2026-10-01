@@ -123,6 +123,9 @@ const releases = useReleases()
 const session = useSession()
 void version.load()
 const value = computed(() => version.value?.version ?? '')
+// Layout only: the pinned Pretty renderer uses tabular digits, so this hidden
+// stamp reserves exactly the running version's resting width before it arrives.
+const sizingVersion = '260101000000.0.0'
 const codename = computed(() => version.value?.codename || codenameOf(value.value))
 const count = computed(() => session.identity ? releases.newCount : 0)
 const label = computed(() => {
@@ -142,14 +145,22 @@ const label = computed(() => {
     <button v-if="session.identity" type="button" class="version-pill" :aria-label="label" data-tip="Release history" @click="emit('releases')">
       <span class="pill-face">
         <AppIcon name="history" :size="13" />
-        <span v-if="codename" class="footer-codename" lang="en">{{ codename }}</span>
-        <span v-if="version.failed" class="fallback">Version unavailable</span>
-        <CalendarVersion v-else-if="value" :value="value" class="pill-version" />
-        <span v-else class="skeleton pill-skeleton" />
+        <span class="release-slot">
+          <span class="footer-codename" lang="en"><template v-if="codename">{{ codename }}</template><span v-else-if="!value && !version.failed" class="skeleton name-skeleton" aria-hidden="true" /></span>
+          <span class="version-value">
+            <CalendarVersion :value="value || sizingVersion" :rest="!value" :aria-hidden="!value || undefined" class="pill-version" :class="{ pending: !value }" />
+            <span v-if="!value && !version.failed" class="skeleton pill-skeleton" aria-hidden="true" />
+          </span>
+          <span v-if="version.failed" class="fallback">Version unavailable</span>
+        </span>
         <span v-if="count !== 0" class="new-badge" aria-hidden="true">{{ count === null ? 'New' : `${count} new` }}</span>
       </span>
     </button>
-    <span v-else class="version-plain"><CalendarVersion v-if="value" :value="value" /></span>
+    <span v-else class="version-plain">
+      <CalendarVersion :value="value || sizingVersion" :rest="!value" :aria-hidden="!value || undefined" :class="{ pending: !value }" />
+      <span v-if="version.failed" class="fallback">Version unavailable</span>
+      <span v-else-if="!value" class="skeleton pill-skeleton" aria-hidden="true" />
+    </span>
   </footer>
 </template>
 
@@ -185,25 +196,28 @@ const label = computed(() => {
 @media (hover: hover) { .version-pill:hover .pill-face { color: var(--teal-ink); background: var(--btn-bg-hover); box-shadow: 0 0 0 1px var(--glass-rim), 0 4px 12px -6px rgba(32, 60, 61, .3); } }
 .version-pill:active .pill-face { background: var(--row-selected); }
 .version-pill:focus-visible .pill-face { box-shadow: var(--focus-ring); }
-.footer-codename { min-width: 0; max-width: 128px; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1 var(--font); }
-.pill-face > svg, .pill-version, .fallback, .pill-skeleton { flex-shrink: 0; }
+.release-slot { position: relative; display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.footer-codename { flex: 0 1 100px; width: 100px; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1 var(--font); }
+.name-skeleton { display: block; width: 100%; height: 8px; }
+.version-value { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; }
+.pending { visibility: hidden; }
+.pill-face > svg, .pill-version { flex-shrink: 0; }
 .pill-version { color: var(--ink); font-size: 12px; line-height: 1; }
-/* As wide as a calendar version in the pill, so the pill keeps its size when the version lands. */
-.pill-skeleton { width: 94px; height: 8px; }
-.fallback { font-family: var(--font); font-size: 11.5px; }
+.pill-skeleton { position: absolute; left: 0; right: 0; height: 8px; }
+.fallback { position: absolute; left: 0; font-family: var(--font); font-size: 11.5px; }
 .new-badge {
   display: inline-flex; align-items: center; flex-shrink: 0; height: 17px; margin-right: -5px; padding: 0 7px; border-radius: 999px;
   background: var(--gold-2); color: #3a2804; font: 700 10px/1 var(--mono); letter-spacing: .02em; box-shadow: 0 0 0 1px rgba(154, 107, 18, .35);
 }
-.version-plain { font-size: 12px; color: var(--ink); }
+.version-plain { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; min-width: 112px; font-size: 12px; color: var(--ink); }
 @media (max-width: 600px) {
   .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }
   .app-footer.hidden { transform: translateY(100%); }
   .footer-name { font-size: 9px; letter-spacing: .18em; }
   .pill-face { height: 30px; gap: 6px; }
-  .footer-codename { max-width: 80px; font-size: 11px; }
+  .release-slot { gap: 6px; }
+  .footer-codename { flex-basis: 64px; width: 64px; font-size: 11px; }
   .pill-version { font-size: 11.5px; }
-  .pill-skeleton { width: 90px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }
 </style>
