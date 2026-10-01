@@ -5,7 +5,7 @@
 // "ready", a missing reading is said once with Check now, and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
-import { describeEnrollmentStatus, describeHarnessFix, platformCaption, type PairingView } from './agentPairing.ts'
+import { agentUpdateAdvice, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
   HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
@@ -21,6 +21,8 @@ export interface Readiness {
   command?: string
   /** A longer sentence for the tooltip and screen readers. */
   tip?: string
+  /** One short sentence the state and command alone do not say (from the computer's report). */
+  hint?: string
 }
 export type CapacityCell =
   | { kind: 'bar'; left: number; resets: string; window: string; five: number | null; gauge: Gauge; dim: boolean; source: string; label: string; note: string }
@@ -47,6 +49,8 @@ export interface ComputerCard {
   status: { text: string; tone: Tone; live: boolean } | null
   caption: string
   agent: string
+  /** The computer's helper needs an update before new work starts there. */
+  advice: string
   notice: ComputerNotice | null
   accounts: AccountLine[]
   /** Draw the bar key: only when a bar is shown on this card. */
@@ -198,15 +202,23 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
   const byId = new Map(input.rows.map(r => [r.id, r]))
   const line = (row: AccountRow, computer: PairingView | null): AccountLine => {
     const state = readiness(row, computer, now)
+    // The harness hint, but not its "n of m accounts" summary: each row says its own state.
+    const hint = computer && !state.kind.match(/^(offline|paused|setup)$/) ? describeHarnessHint(computer, row.harness) : ''
+    if (hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
     const shared = row.sameQuotaAs && byId.has(row.sameQuotaAs) && byId.get(row.sameQuotaAs)!.primary ? byId.get(row.sameQuotaAs)! : null
     const sharedWith = shared ? `${shared.name}${shared.host && shared.host !== row.host ? ` on ${shared.host}` : ''}` : ''
     return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
   }
   const cards: ComputerCard[] = live.map(computer => {
-    const accounts = input.rows.filter(r => owner.get(r.id) === computer).map(r => line(r, computer))
+    const own = input.rows.filter(r => owner.get(r.id) === computer)
+    // An account the pairing names but the account list does not (no access to it,
+    // or not read yet) still shows, judged by its computer alone.
+    const known = new Set(own.map(r => r.id))
+    const fromPairing = computer.enrollments.filter(e => e.state !== 'revoked' && !known.has(e.account_id)).map(e => enrollmentRow(e, computer))
+    const accounts = [...own, ...fromPairing].map(r => line(r, computer))
     return {
       key: computer.computer_id!, name: computer.computer_name, computer, status: computerStatus(computer, now), caption: computerCaption(computer),
-      agent: computer.agent_release?.version ? `aeon-agentd · ${computer.agent_release.version}` : '',
+      agent: computer.agent_release?.version ? `aeon-agentd · ${computer.agent_release.version}` : '', advice: agentUpdateAdvice(computer),
       notice: offlineNotice(computer, now), accounts, legend: accounts.some(a => a.capacity.kind === 'bar' && a.capacity.gauge.tick !== null),
       offline: computer.computer_state === 'connected' && computer.connectivity === 'offline',
     }
@@ -220,7 +232,7 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
     if (same) { same.accounts.push(...accounts); same.legend ||= accounts.some(a => a.capacity.kind === 'bar' && a.capacity.gauge.tick !== null); continue }
     const offline = rows.every(r => r.state === 'offline')
     cards.push({
-      key: `host:${host}`, name: host, computer: null, status: offline ? { text: 'Offline', tone: 'warn', live: false } : null, caption: '', agent: '', notice: null,
+      key: `host:${host}`, name: host, computer: null, status: offline ? { text: 'Offline', tone: 'warn', live: false } : null, caption: '', agent: '', advice: '', notice: null,
       accounts, legend: accounts.some(a => a.capacity.kind === 'bar' && a.capacity.gauge.tick !== null), offline,
     })
   }
@@ -228,6 +240,15 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
   for (const card of cards) card.accounts.sort((a, b) => order(a.vendor) - order(b.vendor) || a.identity.localeCompare(b.identity))
   const attention = (c: ComputerCard) => (c.offline || c.accounts.some(a => a.readiness.tone === 'warn') ? 0 : 1)
   return cards.sort((a, b) => attention(a) - attention(b) || a.name.localeCompare(b.name))
+}
+
+/** An account known only from its computer's pairing: no reading, no routing. */
+function enrollmentRow(e: PairingEnrollment, computer: PairingView): AccountRow {
+  return {
+    id: e.account_id, name: e.label, host: computer.computer_name, harness: e.harness, state: 'unread', primary: null, five: null, schedule: null, plan: '',
+    limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '', hosts: [computer.computer_name], sameQuotaAs: '',
+    ...(e.state === 'draining' ? { disconnecting: true } : {}),
+  }
 }
 
 /** The header pill: "2 of 2 ready", "0 of 2 ready · mbp2607 offline". */

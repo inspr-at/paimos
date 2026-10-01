@@ -375,6 +375,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
           <div class="c-id">
             <p class="c-name-line"><span class="c-name">{{ card.name }}</span><span v-if="card.agent" class="c-agent">{{ card.agent }}</span></p>
             <p v-if="card.caption" class="c-caption">{{ card.caption }}</p>
+            <p v-if="card.advice" class="c-advice" role="status">{{ card.advice }}</p>
           </div>
           <div class="c-side">
             <span v-if="card.status" class="pill" :class="card.status.tone"><span class="dot" :class="{ live: card.status.live }" aria-hidden="true" />{{ card.status.text }}</span>
@@ -406,6 +407,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
             <div role="cell" class="acct-ready">
               <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
               <button v-if="line.readiness.command" type="button" class="fix" :data-tip="`Copies ${line.readiness.command} to run on ${card.name}`" @click="copy(line.readiness.command, card.name)"><AppIcon name="copy" :size="13" />{{ line.readiness.command }}</button>
+              <p v-if="line.readiness.hint" class="r-hint">{{ line.readiness.hint }}</p>
             </div>
             <div role="cell" class="acct-cap">
               <div v-if="line.capacity.kind === 'bar'" class="meter">
@@ -580,6 +582,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .c-name { color: var(--ink); font: 700 18px/1.2 var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .c-agent { padding: 5px 8px; border-radius: 7px; background: var(--surface-sunken); color: var(--ink-2); font: 500 11px/1 var(--mono); white-space: nowrap; }
 .c-caption { margin: 3px 0 0; color: var(--ink-3); font-size: 13px; overflow-wrap: anywhere; }
+.c-advice { margin: 4px 0 0; color: var(--gold-ink); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.r-hint { margin: 0; max-width: 100%; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .c-side { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .more { width: 36px; height: 36px; color: var(--ink-2); }
 .notice { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--gold) 11%, transparent); color: var(--ink); }
