@@ -153,7 +153,7 @@ func (e *Engine) SyncFences(ctx context.Context) error {
 		return errors.New("computer enrollment unavailable")
 	}
 	proof := e.proof(s)
-	proof.Progress = &SetupProgress{State: "provisioning"}
+	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	if e.Local != nil {
 		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
 			proof.Progress = observedProgress(s.View, local)
@@ -693,7 +693,7 @@ func pinBlocked(c RuntimeConfig, accountID string) bool {
 
 func observedProgress(v View, local LocalStatus) *SetupProgress {
 	local = enrollmentReadiness(v, local)
-	p := &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses, HarnessDetails: local.HarnessDetails}
+	p := reportRelease(v, &SetupProgress{State: "provisioning", HarnessStatuses: local.HarnessStatuses, HarnessDetails: local.HarnessDetails})
 	// A runtime hold or pin block is not an installation failure. Setup stays
 	// complete even when every harness is held; per-harness details carry the
 	// reason and fix. Harnesses that are only starting prove nothing yet.

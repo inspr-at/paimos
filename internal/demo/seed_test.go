@@ -3,26 +3,39 @@
 package demo
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/journey"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestDemoSeedRefusesOutsideDev(t *testing.T) {
-	t.Setenv("AEON_ENV", "prod")
-	if _, err := Seed(t.Context(), nil, "lumen-demo"); err == nil {
-		t.Fatal("prod seed was allowed")
-	}
-	t.Setenv("AEON_ENV", "")
-	if err := Run(t.Context(), nil, []string{"seed", "--tenant", "lumen-demo"}, nil); err == nil {
-		t.Fatal("unset AEON_ENV was allowed")
+	for _, environment := range []string{"prod", "", "staging", "DEV", "dev "} {
+		t.Run("environment="+environment, func(t *testing.T) {
+			t.Setenv("AEON_ENV", environment)
+			const want = "aeon demo seed is allowed only when AEON_ENV=dev"
+			if _, err := Seed(t.Context(), nil, "lumen-demo"); err == nil || err.Error() != want {
+				t.Fatalf("Seed did not guard before the database: %v", err)
+			}
+			if err := Run(t.Context(), nil, []string{"seed", "--tenant", "lumen-demo"}, nil); err == nil || err.Error() != want {
+				t.Fatalf("Run did not guard before the database: %v", err)
+			}
+		})
 	}
 }
 
@@ -50,15 +63,16 @@ func TestDemoSeedTwice(t *testing.T) {
 	tickets := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`)
 	kinds := scalar(t, database, first.TenantID, `SELECT count(DISTINCT k.slug) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
 	knowledge := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
-	agents := scalar(t, database, first.TenantID, `SELECT count(*) FROM principals WHERE kind='agent' AND name IN ('Lumen Scribe','Harbor Clerk')`)
+	agents := scalar(t, database, first.TenantID, `SELECT count(*) FROM principals WHERE kind='agent' AND name IN ('Lumen Scribe','Harbor Clerk','Glass Scout')`)
 	sessions := scalar(t, database, first.TenantID, `SELECT count(*) FROM harness_sessions`)
 	finished := scalar(t, database, first.TenantID, `SELECT count(*) FROM agent_runs WHERE status='completed' AND started_at IS NOT NULL AND ended_at IS NOT NULL`)
 	pending := scalar(t, database, first.TenantID, `SELECT count(*) FROM approval_requests a WHERE NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.tenant_id=a.tenant_id AND d.request_id=a.id)`)
 	hours := scalar(t, database, first.TenantID, `SELECT count(*) FROM time_entries`)
 	rates := scalar(t, database, first.TenantID, `SELECT count(*) FROM cost_unit_rates WHERE internal_amount=80.00 AND bill_amount=140.00 AND currency='EUR'`)
-	if kinds != 5 || knowledge < 8 || agents != 2 || sessions < 1 || finished < 1 || pending < 1 || hours < 3 || rates != 1 || tickets < 40 {
+	if kinds != 5 || knowledge < 8 || agents != 3 || sessions != 3 || finished != 3 || pending < 1 || hours < 3 || rates != 1 || tickets < 40 {
 		t.Fatalf("kinds %d knowledge %d agents %d sessions %d finished %d pending %d hours %d rates %d tickets %d", kinds, knowledge, agents, sessions, finished, pending, hours, rates, tickets)
 	}
+	assertCaptureState(t, database, first.TenantID)
 	second, err := Seed(ctx, database.App, "lumen-demo")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +92,12 @@ func TestDemoSeedTwice(t *testing.T) {
 }
 
 func TestDemoInterruptedRunRollsBackAndRetryConverges(t *testing.T) {
+	for _, step := range []string{"agents", "work"} {
+		t.Run(step, func(t *testing.T) { interruptedSeed(t, step) })
+	}
+}
+
+func interruptedSeed(t *testing.T, interruptAt string) {
 	t.Setenv("AEON_ENV", "dev")
 	database := dbtest.Open(t)
 	ctx := t.Context()
@@ -87,7 +107,7 @@ func TestDemoInterruptedRunRollsBackAndRetryConverges(t *testing.T) {
 	}
 	baseline := seedRows(t, database, tenantID)
 	_, err = seedWithHook(ctx, database.App, "retry-demo", func(step string) error {
-		if step == "agents" {
+		if step == interruptAt {
 			return errors.New("injected interruption")
 		}
 		return nil
@@ -160,6 +180,18 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 		`SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb)::text FROM principals t`,
 		`SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb)::text FROM events t`,
 	}
+	// Compare every seed-owned ledger too: a no-op replay must not refresh
+	// probes, allowance windows, approvals, journeys or historical evidence.
+	for _, table := range []string{
+		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
+		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
+		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
+		"intake_sources", "intake_drafts", "intake_citations", "intake_draft_acceptances",
+		"time_entries", "cost_unit_rates",
+	} {
+		queries = append(queries, `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb)::text FROM `+table+` t`)
+	}
 	rows := make([]string, len(queries))
 	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
 		for i, query := range queries {
@@ -173,6 +205,214 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 		t.Fatal(err)
 	}
 	return rows
+}
+
+// Assert through the same reads used by the UI: rows alone do not prove that
+// the launch cascade, journey gate and historical session can be displayed.
+func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
+	t.Helper()
+	var admin tenant.Principal
+	var ticket, glass, project, sessionID, scribeID string
+	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		admin.TenantID, admin.Kind = tenantID, tenant.Person
+		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='NGLASS-1'`).Scan(&glass); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT s.id::text,s.project_id::text,s.ticket_node_id::text,s.agent_principal_id::text FROM harness_sessions s WHERE s.harness='codex'`).Scan(&sessionID, &project, &ticket, &scribeID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := newAPI(t.Context(), database.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHarnessMix(t, api, admin)
+	view, err := (&seeder{api: api, admin: admin}).journeyView(glass)
+	if err != nil || view.Stage != "requirements" || view.RequirementsScope == "" {
+		t.Fatalf("pending journey: %+v, error %v", view, err)
+	}
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.id=a.resource_id AND n.tenant_id=a.tenant_id WHERE n.key='NGLASS-1' AND a.scope LIKE 'journey.requirements.%' AND a.expires_at>now() AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.request_id=a.id AND d.tenant_id=a.tenant_id)`); n != 1 {
+		t.Fatal("missing pending revision-bound gate")
+	}
+	var gateView journey.Journey
+	if err := api.do(admin, "", http.MethodGet, "/api/projects/"+glass+"/journey", nil, http.StatusOK, &gateView, nil); err != nil {
+		t.Fatal(err)
+	}
+	gateVisible := false
+	for _, stage := range gateView.Stages {
+		if stage.Key == "requirements" && stage.GateOfferID != nil && stage.GateOfferState == "pending" && stage.GateScope == view.RequirementsScope {
+			gateVisible = true
+		}
+	}
+	if !gateVisible {
+		t.Fatal("GateApprovals has no pending requirements offer")
+	}
+	var session harness.Session
+	path := "/api/projects/" + project + "/harness-sessions/" + sessionID
+	if err := api.do(admin, "", http.MethodGet, path, nil, http.StatusOK, &session, nil); err != nil {
+		t.Fatal(err)
+	}
+	if session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem {
+		t.Fatal("session should have completed evidence, an end and no fake heartbeat or problem")
+	}
+	var provenance harness.ProvenancePage
+	if err := api.do(admin, "", http.MethodGet, path+"/provenance", nil, http.StatusOK, &provenance, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(provenance.Revisions) != 1 || provenance.Revisions[0].RecordedBy != scribeID || len(provenance.Revisions[0].Items) != 1 {
+		t.Fatal("historical instruction provenance missing")
+	}
+	item := provenance.Revisions[0].Items[0]
+	instructions := "Review the fictional lantern label. Ask a person before changing the release.\n"
+	digest := sha256.Sum256([]byte(instructions))
+	if item.LogicalName != "lantern-review/SKILL.md" || item.ContentSHA256 == nil || *item.ContentSHA256 != hex.EncodeToString(digest[:]) || item.ByteSize == nil || *item.ByteSize != int64(len(instructions)) {
+		t.Fatal("provenance does not match the authored fictional instructions")
+	}
+	code, activity, err := api.call(admin, "", http.MethodGet, "/api/nodes/"+ticket+"/activity", nil, nil)
+	if err != nil || code != http.StatusOK {
+		t.Fatalf("activity status %d error %v", code, err)
+	}
+	for _, text := range []string{"Ivo Quill", "Nia Frost", "Lumen Scribe", "I work on this", "/agents/" + sessionID, *session.RunID} {
+		if !strings.Contains(string(activity), text) {
+			t.Fatalf("linked ticket activity lacks %q", text)
+		}
+	}
+}
+
+// Exercise StartAgentDialog's exact data source and the Agents list. Each
+// enrollment must expose a pin for its own harness, not the first global pin.
+func assertHarnessMix(t *testing.T, api *api, admin tenant.Principal) {
+	t.Helper()
+	want := map[string]struct{ agent, label string }{
+		"codex":  {"Lumen Scribe", "Lumen desk"},
+		"claude": {"Harbor Clerk", "Harbor desk"},
+		"grok":   {"Glass Scout", "North Glass desk"},
+	}
+	var profiles []modelregistry.Profile
+	if err := api.do(admin, "", http.MethodGet, "/api/models", nil, http.StatusOK, &profiles, nil); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]modelregistry.Profile{}
+	for _, profile := range profiles {
+		byID[profile.ID] = profile
+		if profile.Slug == "demo-grok-history" {
+			matches := slices.ContainsFunc(profiles, func(source modelregistry.Profile) bool {
+				return source.Enabled && source.Harness == "cursor" && source.Family == "xai" &&
+					source.Model == profile.Model && source.Effort == profile.Effort && source.Version == profile.Version && source.Tier == profile.Tier
+			})
+			if !matches {
+				t.Fatal("demo Grok pin does not reuse an enabled xAI registry pin")
+			}
+		}
+	}
+	var catalog agentaccounts.Catalog
+	if err := api.do(admin, "", http.MethodGet, "/api/agent-accounts/catalog?role=build", nil, http.StatusOK, &catalog, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Hosts) != 1 || catalog.Hosts[0].Label != "Demo workstation" || len(catalog.Hosts[0].Harnesses) != len(want) {
+		t.Fatalf("StartAgentDialog must offer all three harnesses on the demo host: %+v", catalog)
+	}
+	accounts := map[string]agentaccounts.CatalogAccount{}
+	for _, harness := range catalog.Hosts[0].Harnesses {
+		expected, ok := want[harness.Harness]
+		if !ok || len(harness.Accounts) != 1 {
+			t.Fatalf("unexpected demo harness or account count: %s", harness.Harness)
+		}
+		account := harness.Accounts[0]
+		if account.Label != expected.label || !account.Available || len(account.Models) != 1 || len(account.Models[0].Efforts) != 1 {
+			t.Fatalf("missing fictional account, availability or explicit model grant: %+v", account)
+		}
+		model := account.Models[0]
+		effort := model.Efforts[0]
+		profile := byID[effort.ProfileID]
+		if !profile.Enabled || profile.Harness != harness.Harness || profile.Model != model.Model || profile.Effort != effort.Effort || profile.Version != effort.Version {
+			t.Fatalf("%s account has a mismatched registry profile", harness.Harness)
+		}
+		if _, exists := accounts[harness.Harness]; exists {
+			t.Fatalf("duplicate harness %s", harness.Harness)
+		}
+		accounts[harness.Harness] = account
+	}
+	var page struct {
+		Items []harness.SessionSummary `json:"items"`
+	}
+	if err := api.do(admin, "", http.MethodGet, "/api/harness-sessions?view=current", nil, http.StatusOK, &page, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != len(want) {
+		t.Fatalf("Agents list has %d sessions, want three", len(page.Items))
+	}
+	seen := map[string]bool{}
+	for _, item := range page.Items {
+		expected, ok := want[item.Harness]
+		account := accounts[item.Harness]
+		if !ok || seen[item.Harness] || item.Agent == nil || item.Agent.Name != expected.agent || item.AgentPrincipalID != account.RegisteredBy {
+			t.Fatalf("Agents list missing a distinct fictional agent for %s", item.Harness)
+		}
+		seen[item.Harness] = true
+		var session harness.Session
+		if err := api.do(admin, "", http.MethodGet, "/api/projects/"+item.ProjectID+"/harness-sessions/"+item.ID, nil, http.StatusOK, &session, nil); err != nil {
+			t.Fatal(err)
+		}
+		model := account.Models[0]
+		if session.RunID == nil || session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem {
+			t.Fatalf("%s session must have completed evidence and no fabricated heartbeat or problem", item.Harness)
+		}
+		if session.AccountLabel == nil || *session.AccountLabel != expected.label || session.Model == nil || *session.Model != model.Model || session.ReasoningEffort == nil || *session.ReasoningEffort != model.Efforts[0].Effort {
+			t.Fatalf("%s session account/model must match its enrollment", item.Harness)
+		}
+	}
+}
+
+func TestDemoProfileSelectsEnabledHarness(t *testing.T) {
+	profiles := []modelregistry.Profile{
+		{ID: "unrelated", Harness: "pi", Enabled: true},
+		{ID: "disabled", Harness: "claude", Enabled: false},
+		{ID: "claude-pin", Harness: "claude", Enabled: true},
+		{ID: "codex-pin", Harness: "codex", Enabled: true},
+		{ID: "grok-pin", Harness: "grok", Enabled: true},
+	}
+	for _, harness := range []string{"codex", "claude", "grok"} {
+		profile, err := (&seeder{}).demoProfile(profiles, harness)
+		if err != nil || profile.ID != harness+"-pin" {
+			t.Fatalf("%s: profile %+v, error %v", harness, profile, err)
+		}
+	}
+	if _, err := (&seeder{}).demoProfile(profiles[:2], "claude"); err == nil {
+		t.Fatal("missing enabled harness must fail")
+	}
+}
+
+func TestDemoMissingHarnessRollsBack(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	database := dbtest.Open(t)
+	tenantID, err := tenantbootstrap.Create(t.Context(), database.App, "missing-harness-demo", "Missing Harness Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An incomplete registry must not borrow another harness's profile or
+	// commit Scribe's completed history before finding Claude unavailable.
+	// Pins are immutable, so create this state rather than updating a pin.
+	err = db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+			VALUES($1::uuid,'demo-enabled-codex','1','codex','openai','test-model','high','standard',true),
+			      ($1::uuid,'demo-disabled-claude','1','claude','anthropic','test-model','high','standard',false)`, tenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := seedRows(t, database, tenantID)
+	if _, err := Seed(t.Context(), database.App, "missing-harness-demo"); err == nil || err.Error() != "no enabled claude model profile" {
+		t.Fatalf("missing registry harness: %v", err)
+	}
+	if after := seedRows(t, database, tenantID); !slices.Equal(before, after) {
+		t.Fatal("missing harness left partial seed resources")
+	}
 }
 
 func scalar(t *testing.T, database *dbtest.DB, tenantID, query string) int {

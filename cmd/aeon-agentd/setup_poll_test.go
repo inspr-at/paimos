@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -147,31 +148,38 @@ func (a versionGuideAPI) Guide(ctx context.Context) (agentsetup.Guide, error) {
 	return a.guide, a.err
 }
 
-func TestStatusVersionMismatchIsAdvisoryAndBoundToInstance(t *testing.T) {
+func TestStatusVersionWindowIsAdvisoryAndBoundToInstance(t *testing.T) {
 	old := version.Version
-	version.Version = "260929113854.0.0"
 	t.Cleanup(func() { version.Version = old })
 	const origin = "https://pairing.example.test"
+	policy := agentcompat.Supported()
+	otherProtocol := policy
+	otherProtocol.Protocol = "pairing-v2"
 	for _, tc := range []struct {
-		name, serverVersion, instance, want string
-		err                                 error
+		name, helper, protocol, instance, want string
+		policy                                 *agentcompat.Policy
+		err                                    error
 	}{
-		{"same", version.Version, origin, "matching", nil},
-		{"different", "260928113854.0.0", origin, "mismatch", nil},
-		{"unpublished", "dev", origin, "unavailable", nil},
-		{"legacy guide", "", origin, "unavailable", nil},
-		{"other instance", "260928113854.0.0", "https://other.example.test", "unavailable", nil},
-		{"offline", version.Version, origin, "unavailable", errors.New("fixture offline")},
+		{"floor", policy.MinVersion, policy.Protocol, origin, "compatible", &policy, nil},
+		{"newer than server", "261002072608.0.0", policy.Protocol, origin, "compatible", &policy, nil},
+		{"below minimum", "260930072608.0.0", policy.Protocol, origin, "update_required", &policy, nil},
+		{"protocol mismatch", policy.MinVersion, otherProtocol.Protocol, origin, "protocol_mismatch", &otherProtocol, nil},
+		{"development", "dev", policy.Protocol, origin, "unknown", &policy, nil},
+		{"legacy guide", policy.MinVersion, policy.Protocol, origin, "unavailable", nil, nil},
+		{"other instance", policy.MinVersion, policy.Protocol, "https://other.example.test", "unavailable", &policy, nil},
+		{"offline", policy.MinVersion, policy.Protocol, origin, "unavailable", &policy, errors.New("fixture offline")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			api := versionGuideAPI{guide: agentsetup.Guide{InstanceURL: tc.instance, Protocol: "pairing-v1", Version: tc.serverVersion}, err: tc.err}
+			version.Version = tc.helper
+			api := versionGuideAPI{guide: agentsetup.Guide{InstanceURL: tc.instance, Protocol: tc.protocol, Version: "261001072608.0.0", AgentCompatibility: tc.policy}, err: tc.err}
 			p := setupVersionStatus(t.Context(), api, origin, agentsetup.Progress{Stage: "connected", Action: "Original status."})
 			if p.VersionStatus != tc.want || p.Stage != "connected" || !strings.HasPrefix(p.Action, "Original status.") {
-				t.Fatal("version advisory changed lifecycle status")
+				t.Fatalf("version advisory changed lifecycle status: %+v", p)
 			}
 			var out bytes.Buffer
-			if err := printSetupProgress(&out, false, p); err != nil || strings.Contains(out.String(), "versions differ") != (tc.want == "mismatch") {
-				t.Fatal("version warning missing or invented")
+			needsUpdate := tc.want == "update_required" || tc.want == "protocol_mismatch"
+			if err := printSetupProgress(&out, false, p); err != nil || strings.Contains(out.String(), "Update aeon-agentd to at least "+policy.MinVersion) != needsUpdate {
+				t.Fatal("version advice missing or invented")
 			}
 		})
 	}
