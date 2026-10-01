@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
 import { brand } from '../../lib/brand'
+import { attachCopy } from '../../lib/attachCopy'
 import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attachLink'
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
@@ -13,6 +14,7 @@ import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
 const agents = useAgents()
+const copy = attachCopy()
 // A decision changes what /agents lists as waiting; the page refreshes it.
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
@@ -88,7 +90,7 @@ function show(result: AttachReview) {
 defineExpose({ show })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
-  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return Promise.resolve() }
+  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = copy.invalidCode; return Promise.resolve() }
   return lookups.run(({ after, signal }) => {
     busy.value = true; error.value = ''
     return after(attachAction('/lookup', { user_code: normalized }, signal), present)
@@ -123,16 +125,19 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 
 <template>
   <template v-if="allowed">
-    <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />Attach session</button>
+    <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
     <dialog ref="dialog" aria-labelledby="attach-title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
-      <header><h2 id="attach-title">{{ !review || metadataOnly ? 'Attach a running session' : 'Watch a running session' }}</h2><button class="close" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button></header>
+      <header><h2 id="attach-title">{{ !review || metadataOnly ? copy.attachTitle : copy.watchTitle }}</h2><button class="close" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button></header>
       <form v-if="!review" @submit.prevent="lookup">
-        <p>Enter the code from <code>aeon-agentd attach</code> on your paired computer.</p>
-        <label for="attach-code">Attach code</label>
+        <p>{{ copy.pairingHelp }}</p>
+        <p>{{ copy.codeHelp }}</p>
+        <label for="attach-code">{{ copy.codeLabel }}</label>
         <input id="attach-code" ref="codeInput" v-model="code" inputmode="numeric" autocomplete="off" placeholder="123 456 789" maxlength="15" :disabled="busy" />
-        <footer><button type="submit" class="btn primary" :disabled="busy">{{ busy ? 'Checking…' : 'Review session' }}</button></footer>
+        <footer><button type="submit" class="btn primary" :disabled="busy">{{ busy ? copy.checking : copy.review }}</button></footer>
       </form>
       <template v-else>
+        <p v-if="review.state === 'pending' || review.state === 'approved' || review.state === 'active'" class="link-status"><AppIcon name="check" :size="14" />{{ copy.computerPaired }} · {{ review.state === 'active' ? copy.sessionLinked : copy.sessionUnlinked }}</p>
+        <p v-if="review.state === 'pending'">{{ copy.linkHelp }}</p>
         <p class="request-warning">Requested by a process on {{ review.snapshot.host }}. <strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong></p>
         <p class="host">{{ review.snapshot.host }} <span>· {{ review.snapshot.harness }}</span></p>
         <dl>
@@ -180,6 +185,7 @@ input { box-sizing: border-box; width: 100%; padding: 12px; font: 22px/1.3 ui-mo
 .request-warning { padding: 12px 14px; border-radius: 10px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
 .request-warning strong { display: block; font-weight: 600; }
 .local-step { font-weight: 500; }
+.link-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-2); }
 .host { font-size: 16px; font-weight: 600; }
 .host span, dt, .limits { color: var(--ink-2); font-weight: 400; }
 dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px 12px; font-size: 13px; line-height: 1.5; }

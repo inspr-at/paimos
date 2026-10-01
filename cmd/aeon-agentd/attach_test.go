@@ -138,3 +138,20 @@ func TestAttachStateLines(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachWordingSeparatesComputerAndSession(t *testing.T) {
+	for _, tc := range []struct{ language, paired, unlinked, linked, next string }{
+		{"en", "Computer paired", "This session not yet linked", "This session linked", "approve in the browser window"},
+		{"de", "Computer gekoppelt", "Diese Sitzung ist noch nicht verknüpft", "Diese Sitzung ist verknüpft", "Freigabe im Browserfenster"},
+	} {
+		words := attachWording(tc.language)
+		for _, want := range []string{tc.paired, tc.unlinked} {
+			if !strings.Contains(words.Unlinked, want) {
+				t.Fatalf("%s preview hides pairing versus session: %q", tc.language, words.Unlinked)
+			}
+		}
+		if !strings.Contains(words.Linked, tc.linked) || !strings.Contains(words.Next, tc.next) || !strings.Contains(words.Next, "Touch ID") {
+			t.Fatalf("%s hides activation or the next approval step", tc.language)
+		}
+	}
+}

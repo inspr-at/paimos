@@ -1289,6 +1289,13 @@ emits target fields.
 
 ### Attach a running session (AEON-352)
 
+Computer pairing connects agentd to Aeon once. Linking a running session to a
+ticket is a separate approval for that process. The attach CLI and review show
+**Computer paired · This session not yet linked** until activation; pairing does
+not grant permission to share conversation text. `aeon-agentd attach --language de`
+shows the pairing/session distinction and next-step guidance in German;
+the browser uses English or German for that guidance according to its language.
+
 From a separate interactive terminal on a paired computer, run
 `aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
 **Watch the conversation** is the default; the transcript must be a resolvable

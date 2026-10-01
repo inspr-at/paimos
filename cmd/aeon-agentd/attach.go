@@ -104,17 +104,18 @@ func startupAttachIdentities(c agentsetup.RuntimeConfig) map[string]agentsetup.A
 func attachCommand(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("attach", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
-	var root string
+	var root, language string
 	in := agentd.AttachLocalRequest{Operation: "preview"}
 	f.StringVar(&root, "setup-root", "", "paired local setup root")
+	f.StringVar(&language, "language", "en", "attach wording language: en or de")
 	f.IntVar(&in.PID, "pid", 0, "running harness PID")
 	f.StringVar(&in.Harness, "harness", "", "paired harness name")
 	f.StringVar(&in.ProjectID, "project-id", "", "project UUID")
 	f.StringVar(&in.TicketID, "ticket-id", "", "ticket UUID")
 	f.StringVar(&in.Transcript, "transcript", "", "physical transcript file path for the default conversation watch")
 	f.BoolVar(&in.StatusOnly, "status-only", false, "report status without reading or sharing conversation text")
-	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) {
-		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only]")
+	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) || language != "en" && language != "de" {
+		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only] [--language en|de]")
 	}
 	// Never read confirmation from stdin, an agent pipe, a flag or fetched text.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -152,6 +153,9 @@ func attachCommand(args []string, out io.Writer) error {
 		_, _ = client.Attach(op, agentd.AttachLocalRequest{Operation: "detach", ID: localID})
 	}()
 	p := view.Snapshot.Process
+	words := attachWording(language)
+	fmt.Fprintln(tty, words.Unlinked)
+	fmt.Fprintln(tty, words.PairingHelp)
 	verb, confirmation := "Attach", "ATTACH"
 	if !in.StatusOnly {
 		verb, confirmation = "Watch", "WATCH"
@@ -164,7 +168,8 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
 	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
-	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
+	fmt.Fprintln(tty, words.Next)
+	fmt.Fprintf(tty, "%s — type %s: ", words.LocalCheck, confirmation)
 	answer, err := readAttachAnswer(ctx, reader)
 	if err != nil {
 		return err
@@ -198,6 +203,9 @@ func attachCommand(args []string, out io.Writer) error {
 				return errors.New(next.Reason)
 			}
 			if next.State != previous {
+				if next.State == "active" {
+					fmt.Fprintln(out, words.Linked)
+				}
 				fmt.Fprintln(out, attachStateLine(next.State, next.ConsentMode, in.StatusOnly))
 				previous = next.State
 			}

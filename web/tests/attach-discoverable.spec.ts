@@ -71,12 +71,14 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   await expect(row).toContainText('Claude on Markus’s MacBook')
   await page.screenshot({ path: `${shots}/single-waiting.png` })
   await expect(row).toContainText('Wants to watch the conversation')
+  await expect(row).toContainText('Computer paired · This session not yet linked')
   await expect(row).toContainText(/Expires in [89]m/)
   expect(posts).toEqual([])
   await row.getByRole('button', { name: 'Review' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Watch a running session' })).toBeVisible()
   await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
+  await expect(dialog).toContainText('Pairing your computer does not link a session.')
   await expect(dialog).toContainText('PDF worker image')
   // Reviewing is not approving: nothing was sent, and there is no code to type.
   expect(posts).toEqual([])
@@ -190,6 +192,29 @@ test('a link with anything but nine digits opens nothing', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
   await page.waitForTimeout(400)
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('German pairing guidance still only prefills the approval code', async ({ browser }) => {
+  const page = await browser.newPage({ locale: 'de-AT' })
+  try {
+    await setup(page)
+    const sent: string[] = []
+    await page.route('**/api/agent-pairing/attach/**', route => {
+      if (route.request().method() === 'GET') return route.fallback()
+      sent.push(route.request().url())
+      return route.fulfill({ json: request('r-de', 'pending') })
+    })
+    await page.goto('/agents#attach=123456789')
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: 'Eine laufende Sitzung verknüpfen' })).toBeVisible()
+    await expect(dialog).toContainText('Verknüpfe jede laufende Sitzung separat mit ihrem Ticket.')
+    await expect(dialog.getByLabel('Verknüpfungscode')).toHaveValue('123 456 789')
+    await expect.poll(() => new URL(page.url()).hash).toBe('')
+    expect(sent).toEqual([])
+    await dialog.getByRole('button', { name: 'Sitzung prüfen' }).click()
+    await expect(dialog).toContainText('Computer gekoppelt · Diese Sitzung ist noch nicht verknüpft')
+    expect(sent).toHaveLength(1)
+  } finally { await page.close() }
 })
 
 test('a person who cannot attach gets no dialog from the link, and the code leaves the address bar', async ({ page }) => {

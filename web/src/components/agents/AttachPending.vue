@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { attachOutcome, listPendingAttach, metadataOnlyAttach, type AttachOutcome, type AttachReview } from '../../lib/attachWatch'
+import { attachCopy } from '../../lib/attachCopy'
 import { can, onAccessChange } from '../../lib/authz'
 import { duration } from '../../lib/agentState'
 import { HARNESS_NAME } from '../../lib/capacity'
@@ -18,6 +19,7 @@ const props = defineProps<{ now: number }>()
 const emit = defineEmits<{ review: [request: AttachReview] }>()
 
 const session = useSession()
+const copy = attachCopy()
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 // Whose list this is. Every read runs in the identity scope (one person, one
 // workspace, one generation): an answer for anyone else is dropped, never shown.
@@ -80,6 +82,7 @@ const firstWaiting = computed(() => rows.value.findIndex(row => row.outcome === 
         </span>
         <p class="text">
           <strong class="what" :title="row.what">{{ row.what }}</strong>
+          <span v-if="row.outcome === 'waiting' || row.outcome === 'approved'" class="detail">{{ copy.computerPaired }} · {{ copy.sessionUnlinked }}</span>
           <span class="detail">{{ row.detail }}</span>
         </p>
         <div v-if="row.outcome !== 'approved'" class="side">
