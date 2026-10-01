@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AccessError, agentDeactivatePoints, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, groupPermissions, inviteRoles,
+  AccessError, agentDeactivatePoints, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, groupPermissions, inviteRoles,
   isLastOwner, permissionLabel, projectRolesOf, projectSummary, splitAgents, validEmail, workspaceRolesOf, type Agent, type Permission, type Role,
 } from '../src/lib/access.ts'
 
@@ -71,6 +71,21 @@ test('errors carry the server’s reason and field', () => {
 })
 
 const agent = (name: string, extra: Partial<Agent> = {}): Agent => ({ principal_id: name, name, has_avatar: false, workspace_role: null, key_count: 0, last_seen_at: null, service: false, ...extra })
+
+test('rotation and codes cap private or absent roles without promoting project grants', () => {
+  const privateRole = role('private', 'agent_worker', ['nodes.read'], false)
+  const projectRole = role('project', 'member', ['nodes.read', 'nodes.delete', 'audit.read'])
+  const projectBinding = { project_id: 'p', project_key: 'P', project_title: 'Project', role: { id: projectRole.id, key: projectRole.key, name: projectRole.name } }
+  const worker = agent('worker', { workspace_role: { id: privateRole.id, key: privateRole.key, name: privateRole.name }, project_roles: [projectBinding] })
+  const roles = [privateRole, projectRole]
+  assert.equal(agentScopeCeiling(worker, roles, registry), null)
+  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, true)!], ['nodes.read'])
+  assert.deepEqual([...agentScopeCeiling(agent('unbound'), roles, registry, true)!], [])
+  assert.equal(agentScopeCeiling(agent('new'), roles, registry), null)
+  const projectOnly = agent('project-only', { project_roles: [projectBinding] })
+  assert.deepEqual([...agentScopeCeiling(projectOnly, roles, registry, true)!], ['nodes.read', 'nodes.delete'])
+  assert.deepEqual([...agentScopeCeiling(agent('stale', { workspace_role: { id: 'missing', key: 'missing', name: 'Missing' } }), roles, registry, true)!], [])
+})
 
 test('agents split into working, deactivated and internal; a server without status knows only working ones', () => {
   const groups = splitAgents([agent('a'), agent('b', { status: 'deactivated' }), agent('c', { status: 'active' }), agent('System', { service: true }), agent('d', { status: 'deactivated', connected_computer: false })])

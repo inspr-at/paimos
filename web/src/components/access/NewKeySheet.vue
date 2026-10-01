@@ -30,7 +30,7 @@ const term = ref('')
 // A scope can go on the key when I hold it and the agent's role allows it; the
 // rest show, disabled, with the reason.
 const mine = computed(() => myPermissions())
-const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry))
+const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry, !!props.rotateKey))
 const codeCeiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry, true))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.

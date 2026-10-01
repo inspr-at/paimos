@@ -453,15 +453,23 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 	var rec keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		rec, err = m.createAgentKeyTx(ctx, tx, p, name, principalID, scopes, expires)
+		rec, err = m.issueAgentKeyTx(ctx, tx, p, name, principalID, scopes, expires, agentKeyCreate)
 		return err
 	})
 	return rec, err
 }
 
-// createAgentKeyTx is shared by creation and atomic rotation; all grant and
-// creator-ceiling checks remain on this path. The caller owns db.InTenant.
-func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
+type agentKeyOperation uint8
+
+const (
+	agentKeyCreate agentKeyOperation = iota
+	agentKeyRotate
+)
+
+// issueAgentKeyTx shares identity, actor and key-insert checks. Only creation
+// may configure an agent binding; rotation validates existing grants without
+// writing roles, permissions or bindings. The caller owns db.InTenant.
+func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time, operation agentKeyOperation) (keyRecord, error) {
 	if scopes == nil {
 		scopes = []string{}
 	}
@@ -560,8 +568,14 @@ func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		if err := pairedIdentity(ctx, tx, principalID); err != nil {
 			return err
 		}
-		if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
-			return err
+		if operation == agentKeyRotate {
+			if err := checkRotationScopesTx(ctx, tx, p, principalID, scopes); err != nil {
+				return err
+			}
+		} else {
+			if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
+				return err
+			}
 		}
 		for attempt := 0; attempt < 5; attempt++ {
 			prefix, err := prefixFor(p.TenantID)
@@ -866,8 +880,40 @@ func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id stri
 	return m.rotateAgentKeyWithScopes(ctx, p, id, expires, nil)
 }
 
+func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, agentID string, scopes []string) error {
+	if actor.Kind != tenant.Person || actor.ID == "" {
+		return authz.ErrForbidden
+	}
+	creator, err := authz.EffectiveTx(ctx, tx, actor, "")
+	if err != nil {
+		return err
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: actor.ID}
+	effective, err := authz.EffectiveTx(ctx, tx, agent, "")
+	if err != nil {
+		return err
+	}
+	ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, agent)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		permission, known := authz.Lookup(scope)
+		if !known || !permission.AgentGrantable || !slices.Contains(creator.Workspace.Permissions, scope) || !slices.Contains(ceiling, scope) {
+			return authz.ErrForbidden
+		}
+		// A generated workspace role has the same ceiling as a shared role.
+		// Project and self-service grants must never be promoted into it.
+		// Coordinator rules.read remains derived from live project access.
+		if effective.Workspace.Role != nil && workspaceRolePermission(scopes, scope) && !slices.Contains(effective.Workspace.Permissions, scope) {
+			return authz.ErrForbidden
+		}
+	}
+	return nil
+}
+
 // A nil proposal preserves scopes; an explicit set (including empty) changes
-// only the replacement, under the same live creation checks and transaction.
+// only the replacement. Both recheck live grants without configuring roles.
 func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principal, id string, expires *time.Time, proposed []string) (keyRecord, error) {
 	var replacement keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -895,20 +941,7 @@ func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principa
 		if err != nil {
 			return authz.ErrForbidden
 		}
-		if proposed != nil {
-			// A scope proposal is not approval to extend even an auto-managed
-			// agent role. Require its live ceiling before the creation path.
-			ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: old.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent})
-			if err != nil {
-				return err
-			}
-			for _, scope := range scopes {
-				if !slices.Contains(ceiling, scope) {
-					return authz.ErrForbidden
-				}
-			}
-		}
-		replacement, err = m.createAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires)
+		replacement, err = m.issueAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires, agentKeyRotate)
 		if err != nil {
 			return err
 		}

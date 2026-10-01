@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -349,5 +350,198 @@ func TestKeyRotationConcurrentConfirmation(t *testing.T) {
 	keys, events := keyCounts(t, m, owner)
 	if keys != beforeKeys+1 || events != beforeEvents+2 {
 		t.Fatal("concurrent confirmation created multiple replacements")
+	}
+}
+
+// Snapshot only access metadata, never keys or credentials. Comparing the
+// complete tenant catches an implicit role/binding as well as an extension.
+func rotationAccessSnapshot(t *testing.T, m *Module, p tenant.Principal) string {
+	t.Helper()
+	var snapshot string
+	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+			'roles', (SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id) FROM roles r),
+			'permissions', (SELECT jsonb_agg(to_jsonb(rp) ORDER BY rp.role_id,rp.permission) FROM role_permissions rp),
+			'bindings', (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.id) FROM role_bindings b))::text`).Scan(&snapshot)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func rotationProjectBinding(t *testing.T, m *Module, owner tenant.Principal, agentID string) {
+	t.Helper()
+	ctx := dbtest.Seed(t.Context())
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		var projectID string
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id)
+			SELECT $1::uuid,'ROT-1','Rotation project','active',id FROM node_kinds WHERE slug='project'
+			RETURNING id::text`, owner.TenantID).Scan(&projectID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+			SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE key='member'`, owner.TenantID, agentID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		proposed []string
+	}{
+		{"project-write", []string{"nodes.write"}},
+		{"self-kinds", []string{"kinds.read"}},
+		{"self-profile", []string{"profile.write"}},
+		{"preserved-scopes", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, owner := keyFixture(t)
+			old := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "project-rotator", "scopes": []string{"nodes.read", "nodes.write", "kinds.read", "profile.write"}}))
+			rotationProjectBinding(t, m, owner, old.PrincipalID)
+			ctx := dbtest.Seed(t.Context())
+			if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE role_id IN
+					(SELECT role_id FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace') AND permission<>'nodes.read'`, old.PrincipalID)
+				if err != nil {
+					return err
+				}
+				var configured bool
+				if err := tx.QueryRow(ctx, `SELECT agent_access_configured FROM principals WHERE id=$1::uuid`, old.PrincipalID).Scan(&configured); err != nil {
+					return err
+				}
+				if configured {
+					return errors.New("fixture must exercise an unconfigured agent")
+				}
+				ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: old.PrincipalID, TenantID: owner.TenantID, Kind: tenant.Agent})
+				if err != nil {
+					return err
+				}
+				for _, permission := range []string{"nodes.write", "kinds.read", "profile.write"} {
+					if !slices.Contains(ceiling, permission) {
+						return errors.New("fixture lacks the project or self-service grant")
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// This actor may manage keys and holds the proposed permissions, but
+			// has no roles.manage or approval to extend the workspace role.
+			editor := keyScopeEditor(t, m, owner, "keys.manage", "nodes.read", "nodes.write", "kinds.read", "profile.write")
+			before := rotationAccessSnapshot(t, m, owner)
+			beforeKeys, beforeEvents := keyCounts(t, m, owner)
+			body := map[string]any{"rotate_key_id": old.ID}
+			if tc.proposed != nil {
+				body["rotation_scopes"] = tc.proposed
+			}
+			if w := keyRequest(m, editor, body); w.Code != http.StatusForbidden {
+				t.Fatalf("project/self permission promotion status = %d, want 403", w.Code)
+			}
+			if rotationAccessSnapshot(t, m, owner) != before {
+				t.Fatal("rejected rotation changed roles, permissions or bindings")
+			}
+			keys, events := keyCounts(t, m, owner)
+			if keys != beforeKeys || events != beforeEvents {
+				t.Fatal("rejected rotation left a replacement or audit event")
+			}
+			listed, err := m.listAgentKeys(ctx, owner.TenantID)
+			if err != nil || len(listed) != 1 || listed[0].RevokedAt != nil || !slices.Equal(listed[0].Scopes, old.Scopes) {
+				t.Fatal("rejected rotation changed or revoked the original key")
+			}
+		})
+	}
+}
+
+func TestRotationWithoutWorkspaceBindingNeverCreatesRole(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		old      []string
+		proposed []string
+		project  bool
+		status   int
+	}{
+		{"explicit-empty", []string{"nodes.read"}, []string{}, false, http.StatusCreated},
+		{"preserved-empty", []string{}, nil, false, http.StatusCreated},
+		{"preserved-without-grant", []string{"nodes.read"}, nil, false, http.StatusForbidden},
+		{"project-proposal", []string{"nodes.read"}, []string{"nodes.write"}, true, http.StatusCreated},
+		{"preserved-project", []string{"nodes.write"}, nil, true, http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, owner := keyFixture(t)
+			old := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "unbound-rotator", "scopes": tc.old}))
+			sibling := decodeKey(t, keyRequest(m, owner, map[string]any{"principal_id": old.PrincipalID, "scopes": []string{"models.read"}}))
+			ctx := dbtest.Seed(t.Context())
+			if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+				// Remove the private binding and role, so recreation cannot merely
+				// fail on its unique key. Role permissions cascade with the role.
+				_, err := tx.Exec(ctx, `WITH removed AS
+					(DELETE FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace' RETURNING role_id)
+					DELETE FROM roles WHERE id IN (SELECT role_id FROM removed)`, old.PrincipalID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.project {
+				rotationProjectBinding(t, m, owner, old.PrincipalID)
+			}
+			// models.read is deliberately absent: rotation must not regrant the
+			// baseline to an existing sibling key through a new workspace role.
+			editor := keyScopeEditor(t, m, owner, "keys.manage", "nodes.read", "nodes.write")
+			before := rotationAccessSnapshot(t, m, owner)
+			beforeKeys, beforeEvents := keyCounts(t, m, owner)
+			body := map[string]any{"rotate_key_id": old.ID}
+			if tc.proposed != nil {
+				body["rotation_scopes"] = tc.proposed
+			}
+			w := keyRequest(m, editor, body)
+			if w.Code != tc.status {
+				t.Fatalf("unbound rotation status = %d, want %d", w.Code, tc.status)
+			}
+			if rotationAccessSnapshot(t, m, owner) != before {
+				t.Fatal("rotation created or changed roles, permissions or bindings")
+			}
+			keys, events := keyCounts(t, m, owner)
+			if tc.status == http.StatusCreated {
+				next := decodeKey(t, w)
+				want := tc.old
+				if tc.proposed != nil {
+					want = tc.proposed
+				}
+				if next.PrincipalID != old.PrincipalID || !slices.Equal(next.Scopes, want) || keys != beforeKeys+1 || events != beforeEvents+2 {
+					t.Fatal("rotation changed scopes or failed to commit only replacement and revocation")
+				}
+			} else if keys != beforeKeys || events != beforeEvents {
+				t.Fatal("rejected rotation left key or audit changes")
+			}
+			if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+				var workspaceBindings int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace'`, old.PrincipalID).Scan(&workspaceBindings); err != nil {
+					return err
+				}
+				if workspaceBindings != 0 {
+					return errors.New("rotation restored a workspace binding")
+				}
+				err := authz.RequireTx(ctx, tx, tenant.Principal{ID: old.PrincipalID, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: sibling.Scopes, KeyCreatorID: owner.ID}, "models.read", authz.Scope{})
+				if !errors.Is(err, authz.ErrForbidden) {
+					return errors.New("rotation re-enabled model discovery for another key")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRotationPreservesCoordinatorDerivedReadsWithoutRoleWrites(t *testing.T) {
+	m, owner := keyFixture(t)
+	old := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "coordinator-rotator", "scopes": authz.CoordinatorKeyScopes}))
+	before := rotationAccessSnapshot(t, m, owner)
+	next := decodeKey(t, keyRequest(m, owner, map[string]any{"rotate_key_id": old.ID}))
+	if !slices.Equal(next.Scopes, old.Scopes) || rotationAccessSnapshot(t, m, owner) != before {
+		t.Fatal("rotation lost coordinator scopes or changed role grants")
 	}
 }

@@ -93,6 +93,47 @@ test('Rotate uses a proposed set only when the operator confirms', async ({ page
   expect(world.keys[0]!.scopes).toEqual(['knowledge.read'])
 })
 
+test('Rotate caps a generated private role and cannot restore its project-only grant', async ({ page }) => {
+  const world = await open(page, world => {
+    const viewer = world.roles.find(r => r.key === 'viewer')!
+    const privateRole = { ...viewer, id: 'role-private', key: `agent_${DEPLOYER.replace(/-/g, '')}`, name: 'Agent deployer', builtin: false, permissions: ['nodes.read'] }
+    world.roles.push(privateRole)
+    const target = world.agents.find(a => a.principal_id === DEPLOYER)!
+    target.workspace_role = privateRole.id
+    world.bindings.push({ principal_id: DEPLOYER, project_id: 'p-pharos', role_id: 'role-member' })
+    world.keys.find(k => k.id === 'k2')!.scopes = ['nodes.write']
+  })
+  const row = agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' })
+  await row.getByRole('button', { name: /^Rotate key/ }).click()
+  const sheet = page.getByRole('dialog', { name: 'Rotate key for pharos-deployer' })
+  await expect(sheet.getByRole('alert')).toContainText('The original scopes exceed')
+  await expect(sheet.getByRole('button', { name: 'Rotate key', exact: true })).toBeDisabled()
+  await sheet.getByLabel('Scope code', { exact: true }).fill(encodeScopeCode(['nodes.read', 'nodes.write']))
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).not.toBeChecked()
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+  expect(world.calls.filter(c => c.method === 'POST')).toHaveLength(0)
+  await sheet.getByRole('button', { name: 'Rotate key', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
+  expect(world.calls.filter(c => c.method === 'POST').at(-1)!.body).toMatchObject({ rotate_key_id: 'k2', rotation_scopes: ['nodes.read'] })
+  expect(world.roles.find(r => r.id === 'role-private')!.permissions).toEqual(['nodes.read'])
+})
+
+test('an agent without live roles cannot select scopes by code', async ({ page }) => {
+  const world = await open(page, world => {
+    const target = world.agents.find(a => a.principal_id === DEPLOYER)!
+    target.workspace_role = null
+    world.bindings = world.bindings.filter(b => b.principal_id !== DEPLOYER)
+  })
+  await agent(page).getByRole('button', { name: 'New key' }).click()
+  const sheet = page.getByRole('dialog', { name: 'New key for pharos-deployer' })
+  await sheet.getByLabel('Scope code', { exact: true }).fill(encodeScopeCode(['nodes.read', 'nodes.write']))
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).not.toBeChecked()
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).not.toBeChecked()
+  await expect(sheet).toContainText('beyond pharos-deployer’s role')
+  expect(world.calls.filter(c => c.method === 'POST')).toHaveLength(0)
+})
+
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) test(`scope proposals fit ${width}px in ${theme}`, async ({ page }, testInfo) => {
   const errors = watchErrors(page)
   await page.emulateMedia({ colorScheme: theme })
