@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
+import { codenameOf } from '../../lib/codenames'
 import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
@@ -519,12 +520,15 @@ const KINDS = [
                 </span>
                 <span class="main">
                   <span class="line1">
-                    <ReleaseName :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
-                    <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
-                    <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
-                    <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
-                    <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag">From</span>
-                    <span v-if="r.version === compareTo" class="tag end-tag">To</span>
+                    <span class="row-identity">
+                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
+                      <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
+                      <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
+                      <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
+                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag">From</span>
+                      <span v-if="r.version === compareTo" class="tag end-tag">To</span>
+                    </span>
+                    <ReleaseVersionCopy :value="r.version" class="row-version" @click.stop />
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
                   <template v-else>
@@ -698,8 +702,13 @@ const KINDS = [
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .main { display: grid; gap: 3px; min-width: 0; }
 .line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.row-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
 .row-name { font-size: 14px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
-.row-name.calendar-version { font-size: 12.5px; font-weight: 400; }
+.row-name :deep(.rn-name) { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+/* The name and badges stay together; the fixed-width reveal can wrap as a unit. */
+.row-version { flex: none; margin-left: auto; }
+.row-version :deep(.version-copy) { margin: 0; }
+.row-version :deep(.version-layers) { justify-items: end; }
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }

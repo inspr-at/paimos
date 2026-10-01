@@ -1033,6 +1033,12 @@ canonical value, including `.0.0`, and announces “Version copied”. This char
 crossfade is an Aeon presentation layer over the pinned renderer and its shared
 timing and opacity helpers; the vendor bundle remains unchanged.
 
+Release list rows keep the codename and its badges visible while a separate
+Pretty version sits at the right of the heading. That version uses the same
+crossfade and canonical copy feedback as the dock; copying keeps the current
+selection and address. When the heading is too narrow, the version wraps below
+the codename and stays right-aligned.
+
 The connect screen keeps Connect available when a selection mixes verifiable
 and unverifiable harnesses. Clicking it offers **Connect without verification**
 for the whole selection or **Leave them out** to keep only the verifiable

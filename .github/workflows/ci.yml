@@ -158,14 +158,36 @@ jobs:
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
       - working-directory: web
         run: npm run lint
-      # AEON-488: the dock adapter, version/header and release-entry regressions
+      # AEON-488: the dock adapter, list, version/header and release-entry regressions
       # run on hosted CI, keeping browser suites off the operator workstation.
       - working-directory: web
-        run: npx vitest run tests/version-crossfade.unit.test.ts --maxWorkers=1
+        run: npm run test:unit
       - working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Capture the round-6 release list for comparison
+        working-directory: web
+        env:
+          RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
+          RELEASE_LIST_SHOT_LABEL: before
+        run: |
+          # Render the immutable prior UI with the current screenshot fixture.
+          # Restore the current sources even when capture fails.
+          git fetch --no-tags --depth=1 origin 900c24ebef0d6188f300e13b56d1e5f53b7ac54d
+          trap 'git show HEAD:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue; git show HEAD:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue' EXIT
+          git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue
+          git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue
+          npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
       - working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
+        env:
+          RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
+      - name: Upload release list comparison screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aeon-488-release-list-comparison
+          path: ${{ runner.temp }}/aeon-release-list-shots
+          if-no-files-found: error
       - working-directory: web
         run: npm run build
 
