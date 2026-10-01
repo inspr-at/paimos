@@ -84,7 +84,10 @@ func TestPlanningListHoverFixture(t *testing.T) {
 			}
 			continue
 		}
-		if p.Cost.ListUnpriced || p.Cost.PaidUnknown {
+		// HOVER-6 has a token estimate but no priced/billed route. Estimate
+		// warnings remain independent of the session's absent usage row.
+		unpricedEstimate := item.Key == "HOVER-6"
+		if p.Cost.ListUnpriced != unpricedEstimate || p.Cost.PaidUnknown != unpricedEstimate {
 			t.Fatalf("%s session without usage changed billing flags: %+v", item.Key, p.Cost)
 		}
 		if item.Key == "HOVER-3" {

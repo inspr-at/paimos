@@ -25,7 +25,9 @@ describe('server list payload planning hovers', () => {
   it('has no cost lower bound until a list value is measured', () => {
     for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) {
       const r = serverRow(key)
-      expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: false, paid_unknown: false, billing_modes: [] })
+      // HOVER-6's estimate has no priced/billed route; absent usage still
+      // contributes no billing mode and its empty hover has no lower bound.
+      expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: key === 'HOVER-6', paid_unknown: key === 'HOVER-6', billing_modes: [] })
       expect(listCostCell(r)).toMatchObject({ state: 'none', tip: 'Billing not reported yet' })
     }
   })
