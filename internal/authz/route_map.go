@@ -52,6 +52,7 @@ var RoutePermissions = map[string]string{
 	"PUT /api/me/security/session-watching":                                             "profile.write",
 	"POST /api/agent-pairing/attach":                                                    "harness.worker",
 	"POST /api/agent-pairing/attach/lookup":                                             "account.manage",
+	"GET /api/agent-pairing/attach/pending":                                             "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/approve":                                "account.manage",
 	"POST /api/agent-pairing/attach/{requestId}/revoke":                                 "account.manage",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch":                  "harness.watch",

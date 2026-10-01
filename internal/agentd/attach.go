@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -79,6 +80,9 @@ type AttachLocalView struct {
 	State       string               `json:"state"`
 	Code        string               `json:"user_code,omitempty"`
 	SessionID   *string              `json:"session_id,omitempty"`
+	// ExpiresAt is the server's expiry of a request that waits for approval; the
+	// helper uses it to say how long the code stays valid.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 func NewAttachManager(c AttachConfig) (*AttachManager, error) {
@@ -95,7 +99,12 @@ func NewAttachManager(c AttachConfig) (*AttachManager, error) {
 	return &AttachManager{cfg: c, observe: observeAttachProcess, ancestry: observeAttachProcessIdentity, signature: inspectAttachSignature, sessions: make(map[string]*localAttach)}, nil
 }
 func (m *AttachManager) localView(id string, s *localAttach) AttachLocalView {
-	return AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	v := AttachLocalView{ConsentMode: s.view.ConsentMode, ID: id, Origin: m.cfg.Origin, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), State: s.view.State, Code: s.view.UserCode, SessionID: s.view.SessionID}
+	if !s.view.ExpiresAt.IsZero() {
+		expires := s.view.ExpiresAt
+		v.ExpiresAt = &expires
+	}
+	return v
 }
 func (m *AttachManager) request(s *localAttach, id, operation string) attachwatch.DeviceRequest {
 	return attachwatch.DeviceRequest{LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: operation, RequestID: id, ComputerID: m.cfg.ComputerID, Snapshot: s.snapshot, Digest: s.snapshot.Digest(), Sequence: s.sequence}
@@ -232,7 +241,7 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 		view, err := m.cfg.Exchange(ctx, m.request(s, in.ID, "request"))
 		if err != nil {
 			m.end(ctx, in.ID, s)
-			return AttachLocalView{}, errors.New("paired instance refused attach")
+			return AttachLocalView{}, attachRefusal(err)
 		}
 		if view.Digest != s.snapshot.Digest() || view.RequestID != in.ID || view.Snapshot != s.snapshot {
 			m.end(ctx, in.ID, s)
@@ -365,6 +374,17 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	s.touched = time.Now()
 	return m.localView(in.ID, s), nil
 }
+
+// A full waiting list is something the person can fix in the browser, so the
+// helper names it; every other refusal stays generic and leaks nothing.
+func attachRefusal(err error) error {
+	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusTooManyRequests && status.Message == attachwatch.LiveLimitMessage {
+		return fmt.Errorf("%d attach requests already wait for approval in Aeon; approve or decline one there or let one expire, then run attach again", attachwatch.LiveMax)
+	}
+	return errors.New("paired instance refused attach")
+}
+
 func (m *AttachManager) serve(w http.ResponseWriter, r *http.Request, token string) {
 	if !authorized(r, token) {
 		http.Error(w, "unauthorized", 403)

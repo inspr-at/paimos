@@ -1244,9 +1244,12 @@ checks also probe running installed vendor binaries; a harness with no running
 process is reported as skipped, while fixture signature checks still run.
 
 Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
-or `ATTACH` as shown, then enter its nine-digit code under **Agents → Attach
-session** on the paired instance. The approval screen shows the selected mode.
-The computer owner approves the exact snapshot; the code expires in ten minutes.
+or `ATTACH` as shown. The helper then says where to approve: the page, the menu
+entry, the nine-digit code and how long it lives, plus a link
+(`/agents#attach=<code>`) that only fills the code in. **Agents** also lists the
+waiting request (computer, harness, expiry) with a **Review** button, and says so
+when it was approved, expired or cancelled. The approval screen shows the selected
+mode. The computer owner approves the exact snapshot; the code expires in ten minutes.
 Both modes require a consent digest and single-use approval (repeat approval
 returns 409). Keep the terminal open: peer-checked polls renew a 60-second lease.
 Revocation, identity changes and lease expiry require a fresh approval. A stopped

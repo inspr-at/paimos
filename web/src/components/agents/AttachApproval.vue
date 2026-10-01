@@ -1,17 +1,30 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
 import { brand } from '../../lib/brand'
+import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attachLink'
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
 const agents = useAgents()
+// A decision changes what /agents lists as waiting; the page refreshes it.
+const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
+// Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
+// person who followed a link, before permissions are known, and to decisions that
+// must finish after the dialog closes; `dialogScope` to the visible review while
+// that person may manage accounts. Identity changes drop both scopes.
+const link = useIdentityScope()
+const dialogScope = useIdentityScope(() => allowed.value)
+const lookups = dialogScope.lane()
+const decisions = dialogScope.lane()
+const labelReads = dialogScope.lane()
 const dialog = ref<HTMLDialogElement>()
 const codeInput = ref<HTMLInputElement>()
 const code = ref('')
@@ -25,39 +38,87 @@ const busy = ref(false)
 const error = ref('')
 const project = ref('')
 const ticket = ref('')
-let operation: AbortController | undefined
-function close() { operation?.abort(); operation = undefined; dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = '' }
-async function open() { close(); dialog.value?.showModal(); await nextTick(); codeInput.value?.focus() }
-async function lookup() {
+// Approval waits until the person can read which project and ticket it covers.
+const labelsReady = ref(false)
+function close() {
+  dialogScope.reset()
+  dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = ''; labelsReady.value = false
+}
+function open() {
+  close(); dialog.value?.showModal()
+  void dialogScope.run(({ after }) => after(nextTick(), () => { codeInput.value?.focus() }))
+}
+// The link `aeon-agentd attach` prints only fills the code in; the person still
+// reviews and approves. The router took it off the address bar and holds it in memory
+// for the person it arrived for; waiting for permissions is part of the same scope, so
+// a person who replaced them meanwhile never gets it.
+function followLink() {
+  if (!identity.identity) return Promise.resolve()
+  const linked = takeAttachCode(link.owner.value)
+  if (!linked) return Promise.resolve()
+  return link.run(({ after }) => after(ensurePermissions(), permissions => {
+    if (permissions !== 'known' || !allowed.value) return
+    return after(nextTick(), () => { open(); code.value = formatAttachCode(linked) })
+  }))
+}
+onMounted(followLink)
+const stopLink = onAttachCode(followLink)
+watch(() => !!identity.identity, followLink)
+// Names are a convenience; approval binds the immutable IDs in the snapshot. A name
+// that cannot be read is replaced by the ID itself. Loading never shares a lane
+// with a decision, so deciding cannot cancel the names.
+function loadLabels(result: AttachReview) {
+  labelsReady.value = false; project.value = ''; ticket.value = ''
+  const named = (names: PromiseSettledResult<{ key: string; title: string }>[]) => {
+    project.value = names[0].status === 'fulfilled' ? names[0].value.title : result.snapshot.project_id
+    ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : result.snapshot.ticket_id
+    labelsReady.value = true
+  }
+  void labelReads.run(({ after }) => after(Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)]), named), {
+    failed: () => named([{ status: 'rejected', reason: undefined }, { status: 'rejected', reason: undefined }]),
+  })
+}
+function present(result: AttachReview) { review.value = result; code.value = ''; loadLabels(result) }
+// Review a request the page already lists: same review, same digests, no code to type.
+function show(result: AttachReview) {
+  if (!allowed.value) return
+  close(); dialog.value?.showModal()
+  present(result)
+}
+defineExpose({ show })
+function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
-  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return }
-  operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
-  try {
-    const result = await attachAction('/lookup', { user_code: normalized }, controller.signal)
-    if (operation !== controller || controller.signal.aborted) return
-    review.value = result; code.value = ''
-    // Names are a convenience; approval binds the immutable IDs in the snapshot.
-    const names = await Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)])
-    if (operation !== controller || controller.signal.aborted) return
-    project.value = names[0].status === 'fulfilled' ? names[0].value.title : 'Selected project'
-    ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : 'Selected ticket'
-  } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Attach unavailable.' }
-  finally { if (operation === controller) busy.value = false }
+  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return Promise.resolve() }
+  return lookups.run(({ after, signal }) => {
+    busy.value = true; error.value = ''
+    return after(attachAction('/lookup', { user_code: normalized }, signal), present)
+  }, {
+    failed: e => { error.value = e instanceof Error ? e.message : 'Attach unavailable.' },
+    settled: () => { busy.value = false },
+  })
 }
-async function decide(revoke = false) {
-  if (!allowed.value || !review.value || busy.value) return
-  operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
-  try {
-    const result = await attachAction(`/${encodeURIComponent(review.value.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: review.value.request_digest, ...(review.value.consent_digest ? { consent_digest: review.value.consent_digest } : {}) }, controller.signal)
-    // Approving attaches the session, revoking detaches it: both change the session list, even if this dialog closed meanwhile.
-    void agents.afterWrite()
-    if (operation === controller && !controller.signal.aborted) review.value = result
-  } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Could not update this watch.' }
-  finally { if (operation === controller) busy.value = false }
+function decide(revoke = false) {
+  if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return Promise.resolve()
+  const current = review.value
+  return decisions.run(({ after: forDialog }) => {
+    busy.value = true; error.value = ''
+    return link.run(({ after, signal }) => after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
+      // The POST and its body belong to the person, not the dialog: closing the
+      // review cannot cancel an accepted write's canonical session/pending reads.
+      // A changed identity still aborts it; only a live dialog uses its body.
+      void agents.afterWrite()
+      emit('changed')
+      return forDialog(result, current => { review.value = current })
+    }))
+  }, {
+    failed: e => { error.value = e instanceof Error ? e.message : 'Could not update this watch.' },
+    settled: () => { busy.value = false },
+  })
 }
-watch(() => [identity.identity?.tenant.id, identity.identity?.principal.id, allowed.value], close)
+// The same person refreshing their session keeps the review; a different person, workspace or right closes it.
+watch(() => `${identity.identity?.tenant.id}/${identity.identity?.principal.id}/${allowed.value}`, close)
 const stopAccess = onAccessChange(() => close())
-onBeforeUnmount(() => { close(); stopAccess() })
+onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 </script>
 
 <template>
@@ -76,8 +137,8 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <p class="host">{{ review.snapshot.host }} <span>· {{ review.snapshot.harness }}</span></p>
         <dl>
           <dt>Mode</dt><dd class="mode">{{ metadataOnly ? 'Status only (no conversation text)' : 'Watch the conversation' }}</dd>
-          <dt>Project</dt><dd :title="review.snapshot.project_id">{{ project }}</dd>
-          <dt>Ticket</dt><dd :title="review.snapshot.ticket_id">{{ ticket }}</dd>
+          <dt>Project</dt><dd :title="review.snapshot.project_id" :class="{ quiet: !labelsReady }">{{ labelsReady ? project : 'Loading…' }}</dd>
+          <dt>Ticket</dt><dd :title="review.snapshot.ticket_id" :class="{ quiet: !labelsReady }">{{ labelsReady ? ticket : 'Loading…' }}</dd>
           <dt>Folder</dt><dd class="path">{{ review.snapshot.process.cwd }}</dd>
           <dt>Process</dt><dd>PID {{ review.snapshot.process.pid }} · UID {{ review.snapshot.process.uid }}</dd>
           <dt>Executable</dt><dd class="path">{{ review.snapshot.process.executable }}</dd>
@@ -99,7 +160,7 @@ onBeforeUnmount(() => { close(); stopAccess() })
         <p v-if="strict && review.state === 'approved'" role="status">Waiting for confirmation on {{ review.snapshot.host }}. Nothing is shared until you confirm there.</p>
         <p v-else-if="review.state === 'approved' || review.state === 'active'" role="status">{{ metadataOnly ? 'Approved. Keep the attach terminal open to report session status.' : 'Approved. Keep the attach terminal open to share new turns.' }}</p>
         <p v-else-if="review.state !== 'pending'" role="status">This watch ended. Start a new attach in your terminal to resume.</p>
-        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : metadataOnly ? 'Allow attach' : 'Allow live watch' }}</button></footer>
+        <footer v-if="review.state === 'pending'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">Decline</button><button class="btn primary" type="button" :disabled="busy || localUnavailable || !labelsReady" @click="decide()">{{ busy ? 'Saving…' : strict ? 'Allow and confirm on Mac' : metadataOnly ? 'Allow attach' : 'Allow live watch' }}</button></footer>
         <footer v-else-if="review.state === 'approved' || review.state === 'active'"><button class="btn" type="button" :disabled="busy" @click="decide(true)">{{ metadataOnly ? 'Detach session' : 'Revoke watch' }}</button></footer>
       </template>
       <p v-if="error" role="alert">{{ error }}</p>
@@ -124,6 +185,7 @@ input { box-sizing: border-box; width: 100%; padding: 12px; font: 22px/1.3 ui-mo
 dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 9px 12px; font-size: 13px; line-height: 1.5; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .mode { font-weight: 600; }
+dd.quiet { color: var(--ink-3); }
 .path { font: 12px/1.6 ui-monospace, monospace; }
 summary::-webkit-details-marker { display: none; }
 summary::marker { content: ""; }

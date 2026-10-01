@@ -269,7 +269,40 @@ is serialized with exchanges and cannot transfer an earlier approval to a new ke
 The pairing fence permits exactly this additional route.
 The nine-digit code identifies a ten-minute request;
 owner lookup accepts at most ten attempts per tenant in ten minutes. Codes and
-proofs never go in URLs.
+proofs never go in request URLs or query strings. The one exception is the link
+the attach helper prints on the person's own terminal, `/agents#attach=<code>`:
+a fragment is never sent to a server or a referrer. The router removes it from the
+address bar before anything else runs, so it never reaches a sign-in return address
+or a report, and keeps it in memory only until the Agents page fills the lookup field
+with it (exactly nine digits, else ignored). A session that ended drops it, and opening
+the link looks up and approves nothing.
+
+Attach reads and decisions stay with the tenant, person and authentication
+generation that started them. Each continuation checks that scope in the same
+synchronous turn as applying its answer. Starting sign-in or sign-out also
+invalidates other tabs through a random authentication-change marker (no code,
+cookie or identity in browser storage). Those tabs drop attach codes, reviews,
+permissions and outstanding answers while retaining drafts; sign in explicitly
+to resume there, even when the same person signs out and back in elsewhere.
+Closing a review leaves its submitted decision bound to that identity: an accepted
+response finishes decoding and refreshes both the pending requests and canonical
+session lists even after the dialog closes. A changed identity still aborts and
+drops the old response; it cannot update the next person's lists or review.
+
+`GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
+their requests that are not a session yet, waiting ones first: every pending or
+approved request until it expires, however many newer ones ended after it, then up to four ended in the last fifteen minutes, detached (declined or
+cancelled) and unreachable (expired; an unpolled request past its expiry is reported
+so without changing the row). Each item is the immutable snapshot and digests lookup returns,
+so the owner can review and approve it without typing a code, with every
+existing approval check. It never returns the code, the Touch ID challenge or a
+session, changes no row and needs no origin header; /agents polls it while visible.
+Nothing that waits is ever cut off: a person may have at most 32 requests waiting or
+approved at once, and a new request beyond that is refused with HTTP 429, error code
+`attach_live_limit`, which the helper prints in plain words. Declining, approving into a
+session or letting one expire frees a slot; a retry of an existing request is still
+answered. This bound is about what the person has to review, apart from the ten-minute
+creation windows per tenant and per computer.
 
 The person's **Settings → Personal → Security → Session watching** setting is
 stored server-side in `person_watch_security`, scoped to that person and tenant.

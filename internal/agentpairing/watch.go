@@ -97,6 +97,7 @@ func (m *Module) mountWatch(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/me/security/session-watching", m.person("profile.write", m.watchSecurity))
 	mux.HandleFunc("POST /api/agent-pairing/attach", m.attachDevice)
 	mux.HandleFunc("POST /api/agent-pairing/attach/lookup", m.person("account.manage", m.attachLookup))
+	mux.HandleFunc("GET /api/agent-pairing/attach/pending", m.person("account.manage", m.attachPending))
 	mux.HandleFunc("POST /api/agent-pairing/attach/{requestId}/approve", m.person("account.manage", m.attachApprove))
 	mux.HandleFunc("POST /api/agent-pairing/attach/{requestId}/revoke", m.person("account.manage", m.attachRevoke))
 	mux.HandleFunc("GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch", m.attachStream)
@@ -290,6 +291,19 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			if !errors.Is(e, pgx.ErrNoRows) {
 				return e
+			}
+			// Admission bound: the pending list shows up to attachwatch.LiveMax
+			// waiting or approved requests per person, so none is admitted past it
+			// (an existing request above is answered first, so a retry still works).
+			// The limits above are fixed windows per tenant and per computer; only
+			// this bound is about what a person has to look at. The pairing lock
+			// held here makes the count and the insert one step.
+			var live int
+			if err = tx.QueryRow(ctx, `SELECT count(*) FROM harness_attach_requests WHERE owner_id=$1 AND session_id IS NULL AND state IN ('pending','approved') AND expires_at>clock_timestamp()`, owner).Scan(&live); err != nil {
+				return err
+			}
+			if live >= attachwatch.LiveMax {
+				return fail(429, attachwatch.LiveLimitCode, attachwatch.LiveLimitMessage)
 			}
 			num, e := rand.Int(rand.Reader, big.NewInt(1000000000))
 			if e != nil {
