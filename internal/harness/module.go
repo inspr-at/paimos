@@ -157,6 +157,8 @@ type Session struct {
 	Host                                                            string            `json:"host"`
 	DisplayLabel                                                    *string           `json:"display_label"`
 	Model                                                           *string           `json:"model"`
+	ModelRaw                                                        *string           `json:"model_raw,omitempty"`
+	ModelProfileID                                                  *string           `json:"model_profile_id,omitempty"`
 	ReasoningEffort                                                 *string           `json:"reasoning_effort"`
 	AccountLabel                                                    *string           `json:"account_label"`
 	HarnessVersion                                                  *string           `json:"harness_version"`
@@ -327,12 +329,12 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct)`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),model_raw,model_profile_id::text`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.ModelRaw, &s.ModelProfileID)
 	if err != nil {
 		return s, err
 	}
@@ -726,7 +728,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor))
+	identity, err := resolveModelIdentity(ctx, tx, in.Harness, in.Model, in.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID))
 	if err != nil {
 		return nil, registrationConflict(err)
 	}
@@ -1096,7 +1102,35 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=coalesce($6,model),reasoning_effort=coalesce($7,reasoning_effort),account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, in.Model, in.ReasoningEffort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label))
+	modelRaw, identity := s.ModelRaw, modelIdentity{s.Model, s.ReasoningEffort, s.ModelProfileID}
+	if in.Model != nil || in.ReasoningEffort != nil {
+		model, effort := s.Model, s.ReasoningEffort
+		if in.Model != nil {
+			model, modelRaw = in.Model, in.Model
+		} else if modelRaw == nil {
+			// Unresolved legacy rows may still hold an effort suffix in model.
+			// Preserve that original string before normalizing the identity.
+			modelRaw = s.Model
+		}
+		if in.ReasoningEffort != nil {
+			effort = in.ReasoningEffort
+		} else if in.Model != nil {
+			// Prefer a newly reported suffix, otherwise keep the existing effort
+			// as previous clients expect from a model-only heartbeat.
+			derived, e := resolveModelIdentity(ctx, tx, s.Harness, model, nil)
+			if e != nil {
+				return nil, e
+			}
+			if derived.Effort != nil {
+				effort = derived.Effort
+			}
+		}
+		identity, err = resolveModelIdentity(ctx, tx, s.Harness, model, effort)
+		if err != nil {
+			return nil, err
+		}
+	}
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=$6,reasoning_effort=$7,account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14,model_raw=$15,model_profile_id=$16 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label, modelRaw, identity.ProfileID))
 	if err != nil {
 		return nil, err
 	}

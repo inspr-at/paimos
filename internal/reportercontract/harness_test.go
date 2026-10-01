@@ -122,6 +122,41 @@ func TestHarnessFinishedResponseAdditionIsMinor(t *testing.T) {
 	}
 }
 
+func TestHarnessModelIdentityAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var beforeShape map[string]any
+	if err := json.Unmarshal(now.Shape, &beforeShape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range beforeShape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		for _, key := range []string{"model_raw", "model_profile_id"} {
+			property, ok := props[key].(map[string]any)
+			if !ok || isRequired(body["required"], key) || !reflect.DeepEqual(property["type"], []any{"string", "null"}) {
+				t.Fatalf("%s %s must be optional and nullable", op, key)
+			}
+			delete(props, key)
+		}
+	}
+	before, err := json.Marshal(beforeShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.8", SHA256: "before-model-identity", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("model identity addition: %s %v", bump, err)
+	}
+}
+
 // Compare pins from the real OpenAPI operations, including the request side of
 // components expanded into the response. A new request requirement is breaking
 // even when the same component also appears in a server response.
