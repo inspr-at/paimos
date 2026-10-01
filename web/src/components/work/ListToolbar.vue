@@ -26,7 +26,7 @@ const props = defineProps<{
   view: TicketView | 'journey' | 'knowledge'
   knowledgeView?: 'entries' | 'graph'
   // The table's columns for the Display menu's picker.
-  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   facetLoading?: boolean
   headerGraph?: boolean
 }>()
