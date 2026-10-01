@@ -15,34 +15,41 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
-	EstimateHours   *float64 `json:"estimate_hours,omitempty"`
-	EstimateSource  string   `json:"estimate_source,omitempty"`
-	EstimateBy      string   `json:"estimate_by,omitempty"`
-	EstimateAt      string   `json:"estimate_at,omitempty"`
-	PillEN          string   `json:"pill_en,omitempty"`
-	PillDE          string   `json:"pill_de,omitempty"`
-	BenefitEN       string   `json:"benefit_en,omitempty"`
-	BenefitDE       string   `json:"benefit_de,omitempty"`
-	Hide            bool     `json:"hide_from_release_notes,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
-	IssueKey        string   `json:"issue_key"`
-	Title           string   `json:"title"`
-	Type            string   `json:"type"`
-	Status          string   `json:"status"`
-	Priority        string   `json:"priority"`
-	RouteRole       string   `json:"route_role,omitempty"`
-	RouteRoleSource string   `json:"route_role_source,omitempty"`
-	RouteRoleBy     string   `json:"route_role_by,omitempty"`
-	RouteRoleAt     string   `json:"route_role_at,omitempty"`
-	Area            string   `json:"area,omitempty"`
-	AreaSource      string   `json:"area_source,omitempty"`
-	AreaBy          string   `json:"area_by,omitempty"`
-	AreaAt          string   `json:"area_at,omitempty"`
-	Description     string   `json:"description,omitempty"`
-	ID              string   `json:"id"`
-	Assignee        string   `json:"assignee,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
-	Comments        []string `json:"comments,omitempty"`
+	EstimateHours       *float64 `json:"estimate_hours,omitempty"`
+	EstimateSource      string   `json:"estimate_source,omitempty"`
+	EstimateBy          string   `json:"estimate_by,omitempty"`
+	EstimateAt          string   `json:"estimate_at,omitempty"`
+	PillEN              string   `json:"pill_en,omitempty"`
+	PillDE              string   `json:"pill_de,omitempty"`
+	BenefitEN           string   `json:"benefit_en,omitempty"`
+	BenefitDE           string   `json:"benefit_de,omitempty"`
+	Hide                bool     `json:"hide_from_release_notes,omitempty"`
+	Warnings            []string `json:"warnings,omitempty"`
+	IssueKey            string   `json:"issue_key"`
+	Title               string   `json:"title"`
+	Type                string   `json:"type"`
+	Status              string   `json:"status"`
+	Priority            string   `json:"priority"`
+	RouteRole           string   `json:"route_role,omitempty"`
+	RouteRoleSource     string   `json:"route_role_source,omitempty"`
+	RouteRoleBy         string   `json:"route_role_by,omitempty"`
+	RouteRoleAt         string   `json:"route_role_at,omitempty"`
+	Area                string   `json:"area,omitempty"`
+	AreaSource          string   `json:"area_source,omitempty"`
+	AreaBy              string   `json:"area_by,omitempty"`
+	AreaAt              string   `json:"area_at,omitempty"`
+	RouteRoleConfirmed  *bool    `json:"route_role_confirmed,omitempty"`
+	AreaConfirmed       *bool    `json:"area_confirmed,omitempty"`
+	Complexity          string   `json:"complexity,omitempty"`
+	ComplexitySource    string   `json:"complexity_source,omitempty"`
+	ComplexityBy        string   `json:"complexity_by,omitempty"`
+	ComplexityAt        string   `json:"complexity_at,omitempty"`
+	ComplexityConfirmed *bool    `json:"complexity_confirmed,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	ID                  string   `json:"id"`
+	Assignee            string   `json:"assignee,omitempty"`
+	Tags                []string `json:"tags,omitempty"`
+	Comments            []string `json:"comments,omitempty"`
 }
 
 type issueInput struct {
@@ -82,24 +89,31 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 	return issueView{
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
-		IssueKey:        n.Key,
-		Title:           n.Title,
-		Type:            kinds.slug(n.KindID),
-		Status:          n.State,
-		Priority:        fieldString(fields, "priority"),
-		RouteRole:       fieldString(fields, "route_role"),
-		RouteRoleSource: fieldString(fields, "route_role_source"),
-		RouteRoleBy:     fieldString(fields, "route_role_by"),
-		RouteRoleAt:     fieldString(fields, "route_role_at"),
-		Area:            fieldString(fields, "area"),
-		AreaSource:      fieldString(fields, "area_source"),
-		AreaBy:          fieldString(fields, "area_by"),
-		AreaAt:          fieldString(fields, "area_at"),
-		Description:     n.Body,
-		ID:              n.ID,
-		Assignee:        fieldString(fields, "assignee"),
-		Tags:            fieldStrings(fields, "tags"),
-		Comments:        comments,
+		IssueKey:            n.Key,
+		Title:               n.Title,
+		Type:                kinds.slug(n.KindID),
+		Status:              n.State,
+		Priority:            fieldString(fields, "priority"),
+		RouteRole:           fieldString(fields, "route_role"),
+		RouteRoleSource:     fieldString(fields, "route_role_source"),
+		RouteRoleBy:         fieldString(fields, "route_role_by"),
+		RouteRoleAt:         fieldString(fields, "route_role_at"),
+		Area:                fieldString(fields, "area"),
+		AreaSource:          fieldString(fields, "area_source"),
+		AreaBy:              fieldString(fields, "area_by"),
+		AreaAt:              fieldString(fields, "area_at"),
+		RouteRoleConfirmed:  fieldBoolPointer(fields, "route_role_confirmed"),
+		AreaConfirmed:       fieldBoolPointer(fields, "area_confirmed"),
+		Complexity:          fieldString(fields, "complexity"),
+		ComplexitySource:    fieldString(fields, "complexity_source"),
+		ComplexityBy:        fieldString(fields, "complexity_by"),
+		ComplexityAt:        fieldString(fields, "complexity_at"),
+		ComplexityConfirmed: fieldBoolPointer(fields, "complexity_confirmed"),
+		Description:         n.Body,
+		ID:                  n.ID,
+		Assignee:            fieldString(fields, "assignee"),
+		Tags:                fieldStrings(fields, "tags"),
+		Comments:            comments,
 	}
 }
 
@@ -119,6 +133,9 @@ func (rt *runtime) printIssue(v issueView) error {
 	}
 	if v.Area != "" {
 		fmt.Fprintf(rt.stdout, "  area:     %s\n", routeProvenance(v.Area, v.AreaSource))
+	}
+	if v.Complexity != "" {
+		fmt.Fprintf(rt.stdout, "  complexity: %s\n", routeProvenance(v.Complexity, v.ComplexitySource))
 	}
 	if v.Description != "" {
 		desc := clipRunes(v.Description, 160, "…")
@@ -379,6 +396,7 @@ type issuePatch struct {
 	RemoveTag      []string
 	RouteRole      string
 	Area           string
+	Complexity     string
 }
 
 // noteKindUpdate refuses a different kind before any write. The same kind is a
@@ -422,9 +440,9 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	if !issueKinds[kinds.slug(n.KindID)] {
 		return rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
-	if in.RouteRole != "" || in.Area != "" {
+	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
 		if slug := kinds.slug(n.KindID); slug != "ticket" && slug != "task" {
-			return usagef("--role and --area apply to tickets and tasks")
+			return usagef("--role, --area and --complexity apply to tickets and tasks")
 		}
 	}
 	fields := fieldMap(n.Fields)
@@ -444,8 +462,8 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		fields["priority"] = p
 		changedFields = true
 	}
-	if in.RouteRole != "" || in.Area != "" {
-		applyRouteFields(fields, in.RouteRole, in.Area)
+	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
+		applyRouteFields(fields, in.RouteRole, in.Area, in.Complexity)
 		changedFields = true
 	}
 	if a := strings.TrimSpace(in.Assignee); a != "" {
@@ -959,4 +977,11 @@ func firstLine(s string) string {
 func htmlEscape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
 	return r.Replace(s)
+}
+
+func fieldBoolPointer(fields map[string]any, key string) *bool {
+	if value, ok := fields[key].(bool); ok {
+		return &value
+	}
+	return nil
 }
