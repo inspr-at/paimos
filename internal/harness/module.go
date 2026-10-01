@@ -56,6 +56,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -745,6 +746,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
+	if s.TicketNodeID != nil {
+		if err = nodes.CapturePlanningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+			return nil, err
+		}
+	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
 		return nil, err
 	}
@@ -1007,6 +1013,11 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
 	if err != nil {
 		return nil, err
+	}
+	if s.TicketNodeID != nil && !same(before.TicketNodeID, s.TicketNodeID) {
+		if err = nodes.CapturePlanningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+			return nil, err
+		}
 	}
 	return s, record(ctx, tx, p, s, "bound", before, s)
 }

@@ -12048,7 +12048,7 @@ components:
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
         has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
     TicketPlanning:
-      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Model names come from the model registry at read time and are never stored on the ticket. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
+      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
       type: object
       required: [route, tokens]
       properties:
@@ -12101,6 +12101,7 @@ components:
             plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
           description: 'Epics only: open and done ticket and task children, and how many are estimated.'
           type: object
@@ -12108,6 +12109,34 @@ components:
           properties:
             total: {type: integer, minimum: 0}
             estimated: {type: integer, minimum: 0}
+    TicketEstimateSnapshot:
+      type: object
+      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into in_progress in a work episode. Later estimates do not overwrite it. Leaving in_progress closes the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the ticket project.'
+      required: [id, started_at, source, estimate_hours, estimated_tokens, route, rate_basis]
+      properties:
+        id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        source: {type: string, enum: [session, status]}
+        estimate_hours: {type: [number, 'null']}
+        estimated_tokens: {type: [integer, 'null']}
+        estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
+        route: {$ref: '#/components/schemas/TicketPlanning/properties/route'}
+        rate_basis:
+          type: object
+          required: [basis, tickets, tokens_per_hour]
+          properties:
+            basis: {type: string, enum: [default, median]}
+            tickets: {type: integer, minimum: 0}
+            tokens_per_hour: {type: integer, minimum: 0}
+            any_route: {type: boolean}
+            list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
+            price_version: {type: [integer, 'null']}
+            input_usd_per_million: {type: [string, 'null']}
+            output_usd_per_million: {type: [string, 'null']}
+            cached_input_usd_per_million: {type: [string, 'null']}
+            cached_mix: {type: number}
+            input_mix: {type: number}
+            output_mix: {type: number}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
@@ -12818,6 +12847,7 @@ components:
             last_probe_at: {type: [string, 'null'], format: date-time}
             last_probe_ok: {type: [boolean, 'null']}
             created_at: {type: string, format: date-time}
+            billing_mode: {type: string, enum: [unknown, api, subscription], default: unknown, description: Person-declared billing for this account.}
             plan: {type: string}
             host_label: {type: string}
             provider: {type: string, description: Pi provider fixed by the approved local enrollment.}
@@ -12851,6 +12881,7 @@ components:
       additionalProperties: false
       required: [label, plan, host_label, allowed_model_profile_ids]
       properties:
+        billing_mode: {type: string, enum: [unknown, api, subscription], description: 'Person with account.manage only. Omission preserves the saved value; unknown is the initial value. Never inferred from the account label or plan name.'}
         label: {type: string, minLength: 1, maxLength: 128}
         plan: {type: string, maxLength: 128}
         host_label: {type: string, maxLength: 128}
@@ -13022,6 +13053,8 @@ components:
         account_id: {type: string, format: uuid}
         account_key: {type: string}
         account_label: {type: string}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: string}
         daemon_id: {type: string}
         reservations:
           type: array
