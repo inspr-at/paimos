@@ -266,11 +266,17 @@ The Model cell shows the leading used model plus a count of other models, with
 planned versus used details grouped by model in its hover: effort, session count,
 running state and token totals, without session IDs. The planned comparison uses
 the work-start route, comparing base model keys with embedded effort removed.
-Only a single used model adds “as used” or “a different model ran”; mixed-model
-hovers end with the planned label alone. Usage without a planned route says
+Only a single used model adds “as used” when its harness and base model match
+and every session effort equals the planned effort. A different harness or base
+model adds “a different model ran”; an effort-only mismatch or mixed models
+leave the planned label alone. Usage without a planned route says
 “No model planned: no role set”. Session roles identify workers or coordinators,
 so they do not imply that a run was a review. Running Tokens/Cost hovers put
-measured usage before the snapshot estimate and its percentage. Column fitting
+measured usage before the snapshot estimate and its percentage. A running token
+session line reads “1 session running”; the Model line retains “1 session, running”.
+Before usage is reported, Tokens names the running session count and the display
+model when a single model ran. Calibration appears only on the pre-session
+estimate and names the short model without effort. Column fitting
 measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 

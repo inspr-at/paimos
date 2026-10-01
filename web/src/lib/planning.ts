@@ -104,8 +104,10 @@ function planLine(row: PlanningRow, models: PlanningModel[] = []): string {
   const route = plannedRoute(row)
   if (!route) return models.length ? 'No model planned: no role set' : 'No model planned: set a role and area'
   const used = models.length === 1 ? models[0] : undefined
-  const asUsed = used && used.harness === route.harness && sessionModelKey(used.model) === sessionModelKey(route.model)
-  const suffix = used ? asUsed ? ', as used' : ' (a different model ran)' : models.length ? '' : ` (${route.model})`
+  const sameModel = used && used.harness === route.harness && sessionModelKey(used.model) === sessionModelKey(route.model)
+  let suffix = models.length ? '' : ` (${route.model})`
+  if (used && !sameModel) suffix = ' (a different model ran)'
+  else if (used && used.sessions.every(session => session.effort === route.effort)) suffix = ', as used'
   return `Planned: ${route.label}${suffix}`
 }
 function usedLines(models: PlanningModel[]): string[] {
@@ -131,7 +133,7 @@ export function modelCell(row: PlanningRow): ModelCell {
       label: `${shortModel(route)}, estimated (planned)`,
       tip: [planLine(row), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].join('\n') }
   }
-  let reason = 'No model planned: Set a role and area'
+  let reason = 'No model planned: set a role and area'
   if (row.kind_slug === 'epic') reason = 'Epics take no model; their tickets do'
   else if (roleOf(row)) switch (row.planning?.route_gap) {
     case 'area': reason = `${roleArea(row)}\nSet an area to resolve the model`; break
@@ -178,8 +180,8 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const est = snap ? snap.estimated_tokens : tokens.estimated
   const hours = snap ? snap.estimate_hours : est !== null && cal.tokens_per_hour > 0 ? est / cal.tokens_per_hour : null
   const rate = `${formatTokenCount(cal.tokens_per_hour)}/h`
-  const route = plannedRoute(row)?.label
-  const on = cal.any_route || !route ? 'on any route' : `on ${route}`
+  const route = plannedRoute(row)
+  const on = cal.any_route || !route ? 'on any route' : `on ${shortModel(route)}`
   const times = hours !== null ? `${Number(hours.toFixed(2))}h at ${rate}` : rate
   return cal.basis === 'median'
     ? `${times}: median of the last ${cal.tickets} finished tickets ${on}`
@@ -196,12 +198,17 @@ export function tokensCell(row: PlanningRow): FigureCell {
       ? [`Measured so far ${formatTokenCount(spent)}`, est !== null ? `estimated ~${formatTokenCount(est)}${delta(spent, est, true)}` : '']
       : [est !== null ? `Estimated ~${formatTokenCount(est)}` : '', `measured ${formatTokenCount(spent)}${delta(spent, est, false)}`]
     lines.push([...comparison, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.label : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
-    lines.push(`${tokens!.sessions} session${tokens!.sessions === 1 ? '' : 's'}${live ? ', running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
+    lines.push(`${tokens!.sessions} session${tokens!.sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
     if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
   else lines.push(tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
+  if (spent === null && live) {
+    const count = tokens?.running ?? tokens?.sessions ?? 1
+    const models = row.planning?.models ?? []
+    lines.push(`${count} session${count === 1 ? '' : 's'} running${models.length === 1 ? ` on ${models[0]!.label}` : ''}`)
+  }
   if (tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
-  if (tokens && est !== null) { const basis = basisLine(tokens, row); if (basis) lines.push(basis) }
+  if (tokens && spent === null && !tokens.sessions && !live && est !== null) { const basis = basisLine(tokens, row); if (basis) lines.push(basis) }
   return figure(row, spent, est, formatTokenCount, lines.join('\n'), ' tokens')
 }
 

@@ -84,6 +84,52 @@ test('Cursor Grok hovers match profile keys and explain runs without a planned r
   await expect(page.locator('.tooltip')).toHaveText('Used: Cursor grok-4.7 · xhigh · 1 session, running\nNo model planned: no role set')
 })
 
+test('planning hovers match effort, running usage and pre-session calibration', async ({ page }) => {
+  const data = world()
+  const estimate = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  estimate.tokens.calibration = { basis: 'median', tickets: 12, tokens_per_hour: 800_000 }
+  const live = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
+  live.route = { ...route, label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
+  live.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7-high', sessions: [{ id: 's-high', effort: 'high', role: 'worker', running: true, tokens: 1_100_000 }] }]
+  live.tokens.calibration = estimate.tokens.calibration
+  const unreported = planning(null, null, 1)
+  unreported.route = null
+  unreported.tokens.sessions = 1
+  unreported.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 's-no-usage', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
+  data.nodes.find(n => n.key === 'PHAROS-14')!.planning = unreported
+  const empty = planning(null, null)
+  empty.route = null
+  data.nodes.find(n => n.key === 'PHAROS-15')!.planning = empty
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const estimated = row(page, 'PHAROS-11').locator('.c-tokens .plan-figure')
+  const estimateTip = 'Estimated ~2.4M tokens · no agent session yet\n3h at 800k/h: median of the last 12 finished tickets on Codex sol'
+  await expect(estimated).toHaveAttribute('data-tip', estimateTip)
+  await estimated.hover()
+  await expect(page.locator('.tooltip')).toHaveText(estimateTip)
+  const model = row(page, 'PHAROS-12').locator('.plan-model')
+  const modelTip = 'Used: Cursor grok-4.7 · high · 1 session, running\nPlanned: Cursor grok-4.7 · xhigh'
+  await expect(model).toHaveAttribute('data-tip', modelTip)
+  await model.hover()
+  await expect(page.locator('.tooltip')).toHaveText(modelTip)
+  const running = row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')
+  await expect(running).toHaveAttribute('data-tip', /\n1 session running · input 1,100,000 \(880,000 cached\) · output 0/)
+  await expect(running).not.toHaveAttribute('data-tip', /median of|default .*until/)
+  await expect(row(page, 'PHAROS-13').locator('.c-tokens .plan-figure')).not.toHaveAttribute('data-tip', /median of|default .*until/)
+  const missingUsage = row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')
+  const usageTip = 'Usage not reported yet\n1 session running on Cursor grok-4.7'
+  await expect(missingUsage).toHaveText('—')
+  await expect(missingUsage).toHaveAccessibleDescription(usageTip)
+  await missingUsage.hover()
+  await expect(page.locator('.tooltip')).toHaveText(usageTip)
+  const noModel = row(page, 'PHAROS-15').locator('.plan-model')
+  const emptyTip = 'No agent session yet\nNo model planned: set a role and area'
+  await expect(noModel).toHaveAttribute('data-tip', emptyTip)
+  await noModel.hover()
+  await expect(page.locator('.tooltip')).toHaveText(emptyTip)
+})
+
 test('empty saved ticks persist after toggles, narrow desktop layout and reload', async ({ page }) => {
   const data = fixtures(); data.preferences['list:p-pharos'] = { visible: ['status'] }
   await mockWork(page, data)
