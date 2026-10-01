@@ -6,6 +6,19 @@ import { api, getSession, sessionEnded } from '../src/lib/api.ts'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch; sessionEnded.blocked = false })
 
+test('a model request can use a bounded longer timeout without retrying a write', async () => {
+  const timeouts: number[] = []
+  const originalTimeout = AbortSignal.timeout
+  AbortSignal.timeout = (ms: number) => { timeouts.push(ms); return originalTimeout(ms) }
+  let calls = 0
+  globalThis.fetch = async () => { calls++; throw new Error('offline') }
+  try {
+    await assert.rejects(api('/settings/model-provider/test', { method: 'POST' }, 35_000), /No connection/)
+    assert.deepEqual(timeouts, [35_000])
+    assert.equal(calls, 1)
+  } finally { AbortSignal.timeout = originalTimeout }
+})
+
 function respond(body: unknown, status = 200) {
   sessionEnded.blocked = false
   globalThis.fetch = async () => new Response(JSON.stringify(body), {

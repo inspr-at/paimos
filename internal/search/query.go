@@ -46,7 +46,7 @@ func (m *Module) search(ctx context.Context, p tenant.Principal, in queryInput) 
 		}
 		cur = &decoded
 	}
-	vector, model := m.queryVector(ctx, in.Q)
+	vector, model := m.queryVector(ctx, p.TenantID, in.Q)
 	var ranked []scored
 	nodes := map[string]nodeJSON{}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -83,11 +83,19 @@ func (m *Module) search(ctx context.Context, p tenant.Principal, in queryInput) 
 	return pageJSON{Items: items, NextCursor: next}, nil
 }
 
-func (m *Module) queryVector(ctx context.Context, q string) ([]float32, string) {
-	if m.provider == nil || m.provider.Model() == "" {
+func (m *Module) queryVector(ctx context.Context, tenantID, q string) ([]float32, string) {
+	provider := m.provider
+	if m.resolve != nil {
+		var err error
+		provider, err = m.resolve(ctx, tenantID)
+		if err != nil {
+			return nil, ""
+		}
+	}
+	if provider == nil || provider.Model() == "" {
 		return nil, ""
 	}
-	vecs, err := m.provider.Embed(ctx, []string{q})
+	vecs, err := provider.Embed(ctx, []string{q})
 	if err != nil || len(vecs) != 1 {
 		slog.Warn("search embedding unavailable", "err", err)
 		return nil, ""
@@ -96,7 +104,7 @@ func (m *Module) queryVector(ctx context.Context, q string) ([]float32, string) 
 		slog.Warn("search embedding rejected", "err", err)
 		return nil, ""
 	}
-	return vecs[0], m.provider.Model()
+	return vecs[0], provider.Model()
 }
 
 func queryRanked(ctx context.Context, tx pgx.Tx, q string, vector []float32, model, kind, state string) ([]scored, error) {

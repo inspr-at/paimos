@@ -10,6 +10,7 @@ import {
 import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
 import { brand } from '../../lib/brand'
+import { attachCopy } from '../../lib/attachCopy'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -19,6 +20,7 @@ import HarnessMark from './HarnessMark.vue'
 const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean; refreshToken?: number }>()
 const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
 const agents = useAgents()
+const copy = computed(() => attachCopy(brand.value.short_name))
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -269,6 +271,8 @@ function assign(error: unknown, fallback: string) {
       <button v-if="permissions.canListComputers" type="button" class="icon-btn sm flat" :disabled="refreshing" :aria-label="refreshing ? 'Refreshing computers' : 'Refresh computers'" :data-tip="refreshing ? 'Refreshing…' : 'Refresh'" @click="load"><AppIcon name="refresh" :size="15" /></button>
       <RouterLink v-if="permissions.canApprove && !embedded" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
     </header>
+
+    <p v-if="active.length" class="muted">{{ copy.pairingHelp }}</p>
 
     <p v-if="state === 'loading'" class="muted">Loading paired computers…</p>
     <p v-else-if="state === 'error'" class="problem" role="alert">{{ message }} <button type="button" class="btn sm" @click="load">Try again</button></p>

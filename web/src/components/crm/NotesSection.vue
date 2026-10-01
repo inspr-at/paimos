@@ -52,7 +52,7 @@ async function generateProposal() {
   try {
     const response = await api(`/crm/organisations/${encodeURIComponent(props.customer.id)}/note-ai/generate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: props.customer.revision }),
-    })
+    }, 35_000)
     if (!response.ok) {
       const body = await response.json().catch(() => ({})) as { message?: string }
       throw new Error(body.message || 'AI note rewriting is unavailable. The notes were not changed.')

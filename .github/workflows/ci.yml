@@ -161,6 +161,19 @@ jobs:
       - working-directory: web
         run: npm run build
 
+      - name: Session linking unit checks
+        working-directory: web
+        run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
+      - name: Install browser for session linking regressions
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Session linking, approval and security regressions
+        working-directory: web
+        env:
+          ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
+          ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts --workers=2
+
   release-check:
     runs-on: ubuntu-latest
     steps:
@@ -243,6 +256,9 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
+      - name: Test workspace model provider controls
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/model-provider.spec.ts --workers=1
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:
