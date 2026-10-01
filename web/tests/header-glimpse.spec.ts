@@ -437,7 +437,8 @@ for (const scheme of ['light', 'dark'] as const) {
     for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
-      await mockTicketGraph(page)
+      const world = await mockTicketGraph(page)
+      world.work.preferences['developer-ui'] = { show_flow_controls: true }
       await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
       const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
       mkdirSync(dir, { recursive: true })
