@@ -1074,16 +1074,24 @@ select those specs; source, shared fixtures, configuration, deleted specs and CI
 control changes conservatively select every UI spec. Selection does not query a
 mutable diff after loading specs. GitHub seals the paths, immutable event base,
 Git/path hashes, coverage requirement and both CI-script hashes in step outputs.
-The workflow verifies the scripts before execution; each Playwright invocation
-verifies and requires a copy of the hashed guard bytes. Later Git checks compare
+Immediately after `npm ci`, before typecheck/build/unit tests/browser installation,
+the verified Python sealer downloads the three Playwright lockfile tarballs,
+checks their SHA-512 integrity, compares installed code with their bytes, and seals
+the SHA-256 manifest into a separate runner step output. The lockfile and sealer
+hashes are bound to the pre-Node snapshot. The workflow verifies the scripts before
+execution; each direct Node Playwright invocation verifies the full sealed code
+manifest and requires a copy of the hashed guard bytes. The preload also checks
+the exact source passed to Node's CommonJS compiler, closing a check/read race.
+Later Git checks compare
 against sealed outputs rather than writable scratch files.
 The job summary lists selected tests. UI/spec changes and full-suite events
 require a non-empty selection and an unambiguous list total. Non-empty runs must
 produce a completed JSON test report matching that count. The Node preload locks
-`exit` and `kill`, guards every `reallyExit` replacement, and retains private
-startup stack formatting, rejecting process
-termination from repository code outside `node_modules` (including modules
-outside `web/tests` and `web/src`). Only non-UI PRs may accept no selected specs.
+`exit` and `kill`, guards every `reallyExit` replacement, and retains private raw
+stack CallSites. Evaluated frames are rejected even with a forged source URL and
+an asynchronous timer. Termination is allowed only through Node builtins, the
+preload itself, and real Playwright paths whose bytes match the sealed manifest;
+other `node_modules` paths grant no exemption. Only non-UI PRs may accept no selected specs.
 Other CI events, including `merge_group`, run the complete UI suite without changed
 file or spec filters, with two workers and zero retries. The full sharded main/nightly
 lane and quarantine remain owned by AEON-410 (draft PR #29); this change does not

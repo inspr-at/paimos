@@ -57,6 +57,8 @@ PY
     printf 'selected_specs=%s\n' "$selected_specs"
     printf 'script_hash=%s\n' "$(hash < scripts/ci-web-tests.sh)"
     printf 'guard_hash=%s\n' "$(hash < scripts/ci-web-exit-guard.cjs)"
+    printf 'seal_hash=%s\n' "$(hash < scripts/ci-web-seal.py)"
+    printf 'lock_hash=%s\n' "$(hash < web/package-lock.json)"
   } >> "$GITHUB_OUTPUT"
   exit 0
 fi
@@ -124,15 +126,33 @@ check_guard() {
       echo 'CI exit guard changed after snapshot' >&2; return 1;
     }
 }
+check_playwright() {
+  python3 -I - "$repo/web" "${PLAYWRIGHT_MANIFEST:-}" <<'PY'
+import hashlib, json, re, sys
+from pathlib import Path
+root = Path(sys.argv[1]).resolve()
+manifest = json.loads(sys.argv[2])
+if not isinstance(manifest, dict) or 'node_modules/@playwright/test/cli.js' not in manifest:
+    raise ValueError('Invalid sealed Playwright manifest')
+for relative, digest in manifest.items():
+    if not re.fullmatch(r'node_modules/(?:@playwright/test|playwright|playwright-core)/.+\.(?:js|cjs|mjs|json)', relative) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise ValueError('Invalid sealed Playwright entry')
+    path = root / relative
+    if path.is_symlink() or path.resolve() != path or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise ValueError('Playwright code changed after seal: ' + relative)
+PY
+}
 cp "$repo/scripts/ci-web-exit-guard.cjs" "$snapshot/guard.cjs"
 cd "$repo/web"
 readonly node_options="--require=\"$snapshot/guard.cjs\""
 # Non-PR events, especially merge_group, snapshot every UI spec.
 list="$snapshot/list"
 check_guard
-if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" npx playwright test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
+check_playwright
+if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" node node_modules/@playwright/test/cli.js test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
   check_inputs
   check_guard
+  check_playwright
 else
   cat "$list" >&2
   exit 1
@@ -157,9 +177,11 @@ if [ "$total" -eq 0 ]; then
 fi
 report="$snapshot/result.json"
 check_guard
-if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" npx playwright test "${args[@]}" --reporter=json > "$report"; then
+check_playwright
+if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" node node_modules/@playwright/test/cli.js test "${args[@]}" --reporter=json > "$report"; then
   check_inputs
   check_guard
+  check_playwright
 else
   cat "$report" >&2
   exit 1

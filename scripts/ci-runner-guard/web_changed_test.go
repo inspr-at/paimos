@@ -2,6 +2,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,9 +34,24 @@ func webSelection(t *testing.T) (string, string) {
 		t.Fatal("PR selection requires full history without persisted credentials")
 	}
 	var snapshot, run string
+	sealed := false
 	for index, value := range steps {
 		step := mapping(value)
 		command, _ := step["run"].(string)
+		if step["id"] == "playwright-seal" {
+			if sealed || step["if"] != nil || step["working-directory"] != "web" ||
+				!strings.Contains(command, "npm ci\n") || !strings.Contains(command, "python3 -I ../scripts/ci-web-seal.py") ||
+				mapping(step["env"])["SNAPSHOT_SEAL_HASH"] != "${{ steps.snapshot.outputs.seal_hash }}" ||
+				mapping(step["env"])["SNAPSHOT_LOCK_HASH"] != "${{ steps.snapshot.outputs.lock_hash }}" {
+				t.Fatal("Playwright must be sealed immediately after npm ci with snapshot-bound inputs")
+			}
+			sealed = true
+		}
+		if strings.Contains(command, "npm run") || strings.Contains(command, "npx playwright") || strings.Contains(command, "node --experimental") {
+			if !sealed {
+				t.Fatal("repository Node commands must follow the Playwright seal")
+			}
+		}
 		if command == "bash scripts/ci-web-tests.sh snapshot" {
 			if index != 1 || step["id"] != "snapshot" || step["if"] != nil || mapping(step["env"])["PR_BASE_SHA"] != "${{ github.event.pull_request.base.sha }}" {
 				t.Fatal("snapshot must bind the event base immediately after checkout, before Node")
@@ -41,6 +59,9 @@ func webSelection(t *testing.T) (string, string) {
 			snapshot = command
 		}
 		if strings.Contains(command, "bash ../scripts/ci-web-tests.sh run") {
+			if !sealed || mapping(step["env"])["PLAYWRIGHT_MANIFEST"] != "${{ steps.playwright-seal.outputs.manifest }}" {
+				t.Fatal("run must consume the runner-sealed Playwright manifest")
+			}
 			if step["working-directory"] != "web" || step["if"] != nil {
 				t.Fatal("selection must run in web on every CI event")
 			}
@@ -74,7 +95,7 @@ type webResult struct {
 func runWebSelection(t *testing.T, scenario webScenario) webResult {
 	t.Helper()
 	dir := t.TempDir()
-	for _, path := range []string{"web/src", "web/tests", "scripts", "bin", "temp"} {
+	for _, path := range []string{"web/src", "web/tests", "web/node_modules/@playwright/test", "scripts", "bin", "temp"} {
 		if err := os.MkdirAll(filepath.Join(dir, path), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -123,6 +144,22 @@ func runWebSelection(t *testing.T, scenario webScenario) webResult {
 		t.Fatal(err)
 	}
 	write("scripts/ci-web-exit-guard.cjs", string(body))
+	body, err = os.ReadFile("../ci-web-seal.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("scripts/ci-web-seal.py", string(body))
+	write("web/package-lock.json", "{}")
+	launcher := `const { spawnSync } = require('node:child_process');
+const result = spawnSync(process.env.STUB, process.argv.slice(2), { stdio: 'inherit' });
+if (result.error) throw result.error;
+process.exit(result.status === null ? 1 : result.status);
+`
+	write("web/node_modules/@playwright/test/cli.js", launcher)
+	manifest, err := json.Marshal(map[string]string{"node_modules/@playwright/test/cli.js": fmt.Sprintf("%x", sha256.Sum256([]byte(launcher)))})
+	if err != nil {
+		t.Fatal(err)
+	}
 	forgedSource := scenario.forgedSource
 	if forgedSource == "" {
 		forgedSource = "tests"
@@ -137,6 +174,13 @@ if (process.argv[3].endsWith('-cleared-stack')) {
   Error.stackTraceLimit = 0;
 }
 if (process.argv[3].endsWith('-replace-reallyExit')) process.reallyExit = () => {};
+if (process.argv[3].includes('-eval-') || process.argv[3].includes('-function-')) {
+  const sourceURL = process.argv[3].endsWith('-outside') ? '/tmp/fake-runner.cjs' : process.cwd() + '/node_modules/@playwright/test/cli.js';
+  const code = 'setImmediate(() => process.exit(0));\n//# sourceURL=' + sourceURL;
+  if (process.argv[3].includes('-function-')) new Function(code)();
+  else eval(code);
+  return;
+}
 if (process.argv[3].endsWith('-kill')) process.kill(process.pid, 'SIGTERM');
 else if (process.argv[3].endsWith('-reallyExit')) process.reallyExit(0);
 else process.exit(0);
@@ -177,6 +221,9 @@ case "$MUTATION" in
     ;;
   "$phase-guard") printf 'process.exit(0);\n' > ../scripts/ci-web-exit-guard.cjs ;;
   "$phase-copy-guard") printf 'process.exit(0);\n' > "$RUNNER_TEMP/aeon-web-selection/guard.cjs" ;;
+  "$phase-launcher")
+    printf 'console.log(JSON.stringify({stats:{expected:1,skipped:0,unexpected:0,flaky:0},errors:[]}));\n' > node_modules/@playwright/test/cli.js
+    ;;
   "$phase-restore")
     node ../scripts/shrink.cjs "$@"
     exit 0
@@ -212,6 +259,7 @@ fi
 	summary := filepath.Join(dir, "summary")
 	outputs := filepath.Join(dir, "outputs")
 	vars := append(os.Environ(), "PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"),
+		"PLAYWRIGHT_MANIFEST="+string(manifest), "STUB="+filepath.Join(dir, "bin/npx"),
 		"GITHUB_EVENT_NAME="+scenario.event, "GITHUB_STEP_SUMMARY="+summary,
 		"GITHUB_OUTPUT="+outputs, "FORGED_SCRIPT="+filepath.Join(dir, forgedScript),
 		"RUNNER_TEMP="+filepath.Join(dir, "temp"), "PR_BASE_SHA="+baseInput,
@@ -240,6 +288,9 @@ fi
 		}
 		if scenario.mutation == "before-guard" || scenario.mutation == "before-both" {
 			write("scripts/ci-web-exit-guard.cjs", "process.exit(0);\n")
+		}
+		if scenario.mutation == "before-launcher" {
+			write("web/node_modules/@playwright/test/cli.js", "console.log('Total: 1 test in 1 file');\n")
 		}
 		if strings.HasPrefix(scenario.mutation, "before-") {
 			write("temp/aeon-web-selection/paths", "")
@@ -392,7 +443,7 @@ func TestWebSelectionRejectsSnapshotRewrite(t *testing.T) {
 func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
 	for _, source := range []string{"tests", "src", ".", "../scripts"} {
 		for _, phase := range []string{"list", "run"} {
-			for _, operation := range []string{"exit", "kill", "reallyExit", "cleared-stack", "replace-reallyExit"} {
+			for _, operation := range []string{"exit", "kill", "reallyExit", "cleared-stack", "replace-reallyExit", "eval-outside", "eval-node_modules", "function-outside", "function-node_modules"} {
 				t.Run(source+"/"+phase+"/"+operation, func(t *testing.T) {
 					got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts",
 						mutation: phase + "-forged-" + operation, forgedSource: source})
@@ -402,6 +453,9 @@ func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
 					}
 					diagnostic := operation
 					if operation == "cleared-stack" {
+						diagnostic = "exit"
+					}
+					if strings.HasPrefix(operation, "eval-") || strings.HasPrefix(operation, "function-") {
 						diagnostic = "exit"
 					}
 					if operation == "replace-reallyExit" {
@@ -421,7 +475,12 @@ func TestWebExitGuardLocksFunctionsAndAllowsRunnerShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", "--require", hook, "-e", `
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "web/node_modules/@playwright/test/cli.js")
+	if err := os.MkdirAll(filepath.Dir(launcher), 0700); err != nil {
+		t.Fatal(err)
+	}
+	source := `
 const assert = require('node:assert/strict');
 for (const name of ['exit', 'kill', 'reallyExit']) {
   const descriptor = Object.getOwnPropertyDescriptor(process, name);
@@ -438,9 +497,59 @@ process.reallyExit = function(code) { return original(code); };
 process.reallyExit = original;
 assert.equal(process.kill(process.pid, 0), true);
 process.exit(0);
-`)
+`
+	if err := os.WriteFile(launcher, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(map[string]string{"node_modules/@playwright/test/cli.js": fmt.Sprintf("%x", sha256.Sum256([]byte(source)))})
+	cmd := exec.Command("node", "--require", hook, launcher)
+	cmd.Env = append(os.Environ(), "AEON_CI_REPO_ROOT="+dir, "PLAYWRIGHT_MANIFEST="+string(manifest))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("guard must lock replacements while allowing runner shutdown: %v, %s", err, out)
+	}
+}
+
+func TestWebSelectionRejectsPlaywrightLauncherReplacement(t *testing.T) {
+	for _, phase := range []string{"before", "list", "run"} {
+		t.Run(phase, func(t *testing.T) {
+			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", mutation: phase + "-launcher"})
+			calls := map[string]int{"before": 0, "list": 1, "run": 2}[phase]
+			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls || !strings.Contains(got.output, "Playwright code changed after seal") {
+				t.Fatalf("returning forged JSON from a replaced launcher must fail: %+v", got)
+			}
+		})
+	}
+}
+
+func TestWebExitGuardChecksExactCompilerSource(t *testing.T) {
+	hook, err := filepath.Abs("../ci-web-exit-guard.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "web/node_modules/@playwright/test/cli.js")
+	if err := os.MkdirAll(filepath.Dir(launcher), 0700); err != nil {
+		t.Fatal(err)
+	}
+	source := `const Module = require('node:module');
+const module = new Module(__filename);
+module._compile("console.log('forged report');", __filename);
+`
+	if err := os.WriteFile(launcher, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(map[string]string{"node_modules/@playwright/test/cli.js": fmt.Sprintf("%x", sha256.Sum256([]byte(source)))})
+	cmd := exec.Command("node", "--require", hook, launcher)
+	cmd.Env = append(os.Environ(), "AEON_CI_REPO_ROOT="+dir, "PLAYWRIGHT_MANIFEST="+string(manifest))
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "changed Playwright compiler input") || strings.Contains(string(out), "forged report") {
+		t.Fatalf("unchanged path bytes must not authorize a different compiler input: %v, %s", err, out)
+	}
+}
+
+func TestWebPlaywrightTarballSeal(t *testing.T) {
+	cmd := exec.Command("python3", "-I", "../ci-web-seal.test.py")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("lockfile archive seal: %v, %s", err, out)
 	}
 }
 

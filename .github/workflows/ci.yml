@@ -161,7 +161,18 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - working-directory: web
-        run: npm ci
+        id: playwright-seal
+        env:
+          SNAPSHOT_SEAL_HASH: ${{ steps.snapshot.outputs.seal_hash }}
+          SNAPSHOT_LOCK_HASH: ${{ steps.snapshot.outputs.lock_hash }}
+        run: |
+          set -euo pipefail
+          npm ci
+          # Seal from integrity-checked lockfile tarballs before repository Node runs again.
+          [[ "$SNAPSHOT_SEAL_HASH" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SNAPSHOT_LOCK_HASH" =~ ^[0-9a-f]{64}$ ]]
+          test "$(shasum -a 256 ../scripts/ci-web-seal.py | cut -d ' ' -f 1)" = "$SNAPSHOT_SEAL_HASH" || { echo 'CI sealer changed after snapshot' >&2; exit 1; }
+          python3 -I ../scripts/ci-web-seal.py . "$SNAPSHOT_LOCK_HASH" >> "$GITHUB_OUTPUT"
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
@@ -187,6 +198,7 @@ jobs:
           SNAPSHOT_SELECTED_SPECS: ${{ steps.snapshot.outputs.selected_specs }}
           SNAPSHOT_SCRIPT_HASH: ${{ steps.snapshot.outputs.script_hash }}
           SNAPSHOT_GUARD_HASH: ${{ steps.snapshot.outputs.guard_hash }}
+          PLAYWRIGHT_MANIFEST: ${{ steps.playwright-seal.outputs.manifest }}
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
         run: |
