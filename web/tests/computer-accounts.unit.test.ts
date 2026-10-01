@@ -136,6 +136,23 @@ describe('one state per account', () => {
     expect(card.accounts[0].readiness).toMatchObject({ kind: 'signin', command: 'codex login' })
     expect(card.accounts[1].readiness.kind).toBe('ready')
   })
+  it('a pool on hold says so on its accounts, Sprint is a note on the bar', () => {
+    const cap = capacity([weekly(40)])
+    cap[0].schedule = { ...cap[0].schedule, override: 'hold', override_until: '2026-10-01T14:30:00Z' }
+    const [held] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+    expect(held.accounts[0].readiness).toMatchObject({ kind: 'hold', tone: 'mute' })
+    expect(held.accounts[0].readiness.text).toMatch(/^On hold until \d\d:\d\d$/)
+    cap[0].schedule = { ...cap[0].schedule, override: 'sprint', override_until: '2026-10-01T16:00:00Z' }
+    const [sprint] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+    expect(sprint.accounts[0].readiness.kind).toBe('ready')
+    const cell = sprint.accounts[0].capacity
+    expect(cell.kind === 'bar' && cell.note).toMatch(/^Sprint: all of it until \d\d:\d\d$/)
+  })
+  it('an online computer with a computer-wide login flag stays online; its accounts are judged on their own', () => {
+    const [card] = buildComputerCards({ computers: [computer({ setup_state: 'login_required' })], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(card.status?.text).toBe('Online · seen just now')
+    expect(card.accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
+  })
   it('a disconnecting computer pauses its accounts', () => {
     const [card] = buildComputerCards({ computers: [computer({ computer_state: 'draining' })], rows: buildRows(inputs('online'), capacity()), now: NOW })
     expect(card.status?.text).toBe('Disconnecting')

@@ -7,7 +7,7 @@
 // capacity projection, the pairing list and the person's schedule.
 import { describeEnrollmentStatus, describeHarnessFix, platformCaption, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
@@ -23,7 +23,7 @@ export interface Readiness {
   tip?: string
 }
 export type CapacityCell =
-  | { kind: 'bar'; left: number; resets: string; window: string; five: number | null; gauge: Gauge; dim: boolean; source: string; label: string }
+  | { kind: 'bar'; left: number; resets: string; window: string; five: number | null; gauge: Gauge; dim: boolean; source: string; label: string; note: string }
   | { kind: 'none' }
   | { kind: 'offline' }
   | { kind: 'quiet'; text: string }
@@ -82,8 +82,9 @@ export function computerStatus(view: PairingView, now: number): ComputerCard['st
     const seen = view.last_seen_at ? when(view.last_seen_at, now) : ''
     return { text: seen ? `Offline since ${seen}` : 'Offline', tone: 'warn', live: false }
   }
-  if (view.setup_state !== 'connected') return { text: 'Setting up', tone: 'mute', live: false }
+  // A live heartbeat is online whatever the setup flag says; that flag is computer-wide.
   if (view.connectivity === 'online') return { text: `Online · seen ${ago(view.last_seen_at, now) || 'recently'}`, tone: 'ok', live: true }
+  if (view.setup_state !== 'connected') return { text: 'Setting up', tone: 'mute', live: false }
   return { text: 'No recent report', tone: 'mute', live: false }
 }
 
@@ -109,7 +110,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
   if (computer?.computer_state === 'connected' && computer.connectivity === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${computer.computer_name} until it reports again.` }
   if (!computer && row.state === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${row.host} until it reports again.` }
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }
-  if (computer && computer.computer_state === 'connected' && computer.setup_state !== 'connected') return { kind: 'setup', text: 'Waiting for setup', tone: 'mute', tip: `${computer.computer_name} has not confirmed that setup finished.` }
+  if (computer && computer.computer_state === 'connected' && computer.setup_state !== 'connected' && computer.connectivity !== 'online') return { kind: 'setup', text: 'Waiting for setup', tone: 'mute', tip: `${computer.computer_name} has not confirmed that setup finished.` }
   if (row.state === 'signin') return { kind: 'signin', text: 'Signed out', tone: 'warn', command: LOGIN_COMMAND[row.harness] ?? '', tip: `Sign in again on ${computer?.computer_name ?? row.host}; Aeon never takes the password.` }
   if (computer && enrollment) {
     const label = describeEnrollmentStatus(computer, enrollment)
@@ -139,6 +140,12 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       case 'capacity': case 'reading': break
     }
   }
+  // Without routing advice, the pool's own Hold still pauses it.
+  const override = activeOverride(row.schedule, now)
+  if (override === 'hold') {
+    const until = row.schedule?.override_until
+    return { kind: 'hold', text: until ? `On hold until ${at(until)}` : 'On hold', tone: 'mute', tip: `Agents leave ${HARNESS_NAME[row.harness] ?? row.harness} alone${until ? ` until ${at(until)}` : ' until you resume'}. Running steps finish.` }
+  }
   // Without routing advice, a measured window at zero is still the limit.
   const spent = [row.primary, row.five].filter((w): w is CapacityWindow => !!w && w.remaining_percent < 1)
     .sort((a, b) => Date.parse(b.reading.resets_at) - Date.parse(a.reading.resets_at))[0]
@@ -164,8 +171,11 @@ export function capacityCell(row: AccountRow, ready: Readiness, now: number, sha
   const read = ago(w.reading.read_at, now)
   const source = ready.kind === 'offline' ? `Last reading ${read}` : stale ? `Reading is old · ${read}` : w.reading.source === 'estimate' ? 'Estimated' : ''
   const five = row.five ? Math.round(row.five.remaining_percent) : null
+  const override = plan?.override ?? ''
+  const until = row.schedule?.override_until
+  const note = override === 'sprint' ? `Sprint: all of it until ${until ? when(until, now) : 'the reset'}` : override === 'away' ? "Away: all of it until you're back" : plan?.atReserve ? 'Kept for you while you work' : ''
   const label = `${row.name}: ${pct(left)} left ${WINDOW_WORD[w.reading.window_kind] ?? ''}, resets ${when(w.reading.resets_at, now)}${plan && g.tick !== null ? `; today's share ${pct(plan.budget)}` : ''}`
-  return { kind: 'bar', left, resets: when(w.reading.resets_at, now), window: WINDOW_WORD[w.reading.window_kind] ?? '', five, gauge: g, dim: ready.kind !== 'ready' || stale, source, label }
+  return { kind: 'bar', left, resets: when(w.reading.resets_at, now), window: WINDOW_WORD[w.reading.window_kind] ?? '', five, gauge: g, dim: ready.kind !== 'ready' || stale, source, label, note }
 }
 
 /** "7 days · keep 10% · nights 22–08": the pacing in one line for its button. */

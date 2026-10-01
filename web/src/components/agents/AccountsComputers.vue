@@ -404,7 +404,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
               <div v-if="line.capacity.kind === 'bar'" class="meter">
                 <p class="meter-head"><b>{{ Math.round(line.capacity.left) }}% left</b><span>{{ [line.capacity.window, `resets ${line.capacity.resets}`].filter(Boolean).join(' · ') }}</span></p>
                 <CapacityGauge :gauge="line.capacity.gauge" :left="line.capacity.left" :value="line.capacity.left" :label="line.capacity.label" :dim="line.capacity.dim" />
-                <p v-if="line.capacity.five !== null || line.capacity.source" class="meter-foot">{{ [line.capacity.five !== null ? `5-hour window: ${line.capacity.five}% left` : '', line.capacity.source].filter(Boolean).join(' · ') }}</p>
+                <p v-if="line.capacity.five !== null || line.capacity.source || line.capacity.note" class="meter-foot">{{ [line.capacity.note, line.capacity.five !== null ? `5-hour window: ${line.capacity.five}% left` : '', line.capacity.source].filter(Boolean).join(' · ') }}</p>
               </div>
               <span v-else-if="line.capacity.kind === 'none'" class="no-reading">
                 <span class="quiet">No reading yet</span>
