@@ -18,6 +18,9 @@
 // rerun without attempt history is unknown. A gate median needs every sample.
 // Timestamps need a zone. Reversed intervals are unknown. A list that hits the
 // cap is collection.truncated, not evidence that the missing tail was empty.
+// Forward records require direction: "forward"; outcome never supplies it.
+// Rollback bounds identify legacy rollback records. ID-less GitHub rows leave
+// their collection partial, and numbered reruns must cover 1..runAttempt.
 
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -200,6 +203,7 @@ export function normalizeInput(raw) {
 function normalizePullRequest(pr) {
   const head = pr.head && typeof pr.head === "object" ? pr.head : null;
   return {
+    id: sourceId(pr),
     number: pr.number ?? null,
     title: pr.title || "",
     createdAt: at(pr, "createdAt", "created_at"),
@@ -242,7 +246,7 @@ function normalizeAttempt(attempt) {
 function normalizeRun(run) {
   const attempt = Number(run.runAttempt ?? run.run_attempt ?? 1);
   return {
-    id: run.databaseId ?? run.id ?? null,
+    id: sourceId(run),
     workflow: run.workflowName || run.workflow || "",
     event: run.event || "",
     conclusion: String(run.conclusion || "").toLowerCase(),
@@ -265,7 +269,7 @@ function normalizeRun(run) {
 
 function normalizeStatus(status) {
   return {
-    id: status.id ?? null,
+    id: sourceId(status),
     sha: status.sha || "",
     context: status.context || "",
     state: String(status.state || "").toLowerCase(),
@@ -348,11 +352,23 @@ function validateRecord(record, fields, start, end) {
   return { ...record, times, interval, completeness: completeness(reasons) };
 }
 
-function uniqueRecords(records, keyOf) {
+function validId(value) {
+  return (typeof value === "string" && value.trim() !== "")
+    || (Number.isSafeInteger(value) && value > 0);
+}
+
+function sourceId(record) {
+  return [record.id, record.databaseId, record.number].find(validId) ?? null;
+}
+
+function uniqueRecords(records, keyOf, onMissing = () => {}) {
   const seen = new Set();
   return records.filter((record) => {
     const key = keyOf(record);
-    if (key == null) return true;
+    if (!validId(key)) {
+      onMissing(record);
+      return true;
+    }
     if (seen.has(String(key))) return false;
     seen.add(String(key));
     return true;
@@ -378,9 +394,9 @@ function validateRun(run) {
   const historyReasons = [];
   if (!Number.isSafeInteger(run.runAttempt) || run.runAttempt < 1) historyReasons.push("invalid runAttempt");
   if (run.runAttempt > 1 && (!supplied || attempts.length !== run.runAttempt)) historyReasons.push("attempt history unavailable");
-  // Legacy bundles may list attempts in order without numbers. When GitHub
-  // supplies numbers, require exactly 1..runAttempt with no duplicates or gaps.
-  if (supplied && (attempts.length !== run.runAttempt || attempts.some((item) => item.number != null))) {
+  // List length and timestamps cannot prove rerun coverage. Require explicit
+  // numbers 1..runAttempt, including when every supplied number is missing.
+  if (supplied && (run.runAttempt > 1 || attempts.length !== run.runAttempt || attempts.some((item) => item.number != null))) {
     const numbers = attempts.map((item) => Number(item.number)).sort((a, b) => a - b);
     if (numbers.length !== run.runAttempt || numbers.some((n, i) => n !== i + 1)) historyReasons.push("attempt history unavailable");
   }
@@ -477,12 +493,38 @@ function validateGate(rollout, statuses, sha, live, truncated) {
   return { intervals, missing, completeness: completeness(reasons) };
 }
 
-function isRollbackRollout(rollout) {
-  return Boolean(rollout.rollbackStartedAt || rollout.rollbackFinishedAt || /rollback/i.test(`${rollout.outcome} ${rollout.direction}`));
+function rolloutKind(rollout) {
+  if (rollout.direction === "forward" || rollout.direction === "rollback") return rollout.direction;
+  if (rollout.direction) return null;
+  // Explicit rollback bounds support old rollback records. Outcome, release
+  // label and sequence never establish a deployment's direction.
+  if (rollout.rollbackStartedAt || rollout.rollbackFinishedAt) return "rollback";
+  return null;
+}
+
+function selectForwardRollout(rollouts) {
+  const forward = rollouts.filter((item) => rolloutKind(item) === "forward").map((item) => {
+    const reasons = [...item.interval.completeness.reasons];
+    if (item.rollbackStartedAt || item.rollbackFinishedAt) {
+      // An explicitly forward record can embed a later rollback, but its own
+      // cut/live interval must be provably separate from the rollback window.
+      if (!isComplete(item.times.rollbackStartedAt) || !isComplete(item.interval)
+        || item.times.rollbackStartedAt.ms < item.interval.end.ms) reasons.push("ambiguous forward and rollback intervals");
+    }
+    return { rollout: item, completeness: completeness(reasons) };
+  });
+  const complete = forward.filter(isComplete);
+  if (complete.length === 1) return complete[0];
+  if (complete.length > 1) return { rollout: null, completeness: completeness(["ambiguous forward rollout evidence"]) };
+  const reasons = forward.flatMap((item) => item.completeness.reasons);
+  if (!reasons.length) reasons.push(rollouts.some((item) => rolloutKind(item) == null)
+    ? "rollout direction unavailable or invalid" : rollouts.length ? "no forward rollout evidence" : "missing timestamp");
+  return { rollout: null, completeness: completeness(reasons) };
 }
 
 function validateRollback(rollouts, pins, truncated) {
-  const rollout = byTime(rollouts.filter((item) => item.rollbackStartedAt || item.rollbackFinishedAt), (item) => item.times.rollbackStartedAt, true)[0] || null;
+  const rollout = byTime(rollouts.filter((item) => rolloutKind(item) === "rollback"
+    || (rolloutKind(item) === "forward" && (item.rollbackStartedAt || item.rollbackFinishedAt))), (item) => item.rollback.start, true)[0] || null;
   const pin = byTime(pins, (item) => item.times.createdAt, true)[0] || null;
   if (truncated) return { interval: null, source: null, completeness: completeness(["truncated"]) };
   // Select the attempt before checking completeness; never fall back to an
@@ -503,13 +545,8 @@ function validateRollback(rollouts, pins, truncated) {
 function validateRelease(input, version) {
   const run = selectReleaseRun(input.runs, version);
   const matches = input.rollouts.filter((item) => item.version === version);
-  const forward = matches.filter((item) => (item.cutAt || item.liveAt) && (
-    !isRollbackRollout(item) || item.outcome === "live"
-    || (matches.length === 1 && (item.release || item.sequence != null) && !/rollback/i.test(`${item.outcome} ${item.direction}`))
-  ));
-  // A rollout with an embedded rollback still carries its own forward interval;
-  // standalone rollback records must never overwrite another forward record.
-  const rollout = byTime(forward, (item) => item.times.cutAt)[0] || null;
+  const forward = selectForwardRollout(matches);
+  const rollout = forward.rollout;
   const prMatches = input.pullRequests.filter((pr) => run && pr.mergeSha && pr.mergeSha === run.headSha);
   const prs = prMatches.length ? prMatches : input.pullRequests.filter((pr) => versionIn(pr.title) === version);
   const pr = byTime(prs, (item) => item.times.createdAt)[0] || null;
@@ -519,9 +556,14 @@ function validateRelease(input, version) {
   const pinReason = names.includes("pin_pull_requests") ? "truncated" : forwardPins.length > 1 ? "ambiguous" : null;
   const pin = pinReason ? null : forwardPins[0] || null;
   const cut = rollout?.interval || validateInterval(validateTime(null), validateTime(null));
+  cut.completeness = forward.completeness;
   const live = rollout?.times.liveAt || validateTime(null);
-  const prInterval = pr?.interval || validateInterval(validateTime(null), validateTime(null));
+  const prInterval = pr ? { ...pr.interval } : validateInterval(validateTime(null), validateTime(null));
   const prLive = validateInterval(pr?.times.createdAt || validateTime(null), live);
+  if (names.includes("pull_requests")) {
+    prInterval.completeness = completeness([...prInterval.completeness.reasons, "truncated"]);
+    prLive.completeness = completeness([...prLive.completeness.reasons, "truncated"]);
+  }
   const ci = validateCI(input.runs, pr, names.includes("pull_requests") || names.includes("ci") || input.collection.ciTruncatedBranches.includes(pr?.headRef));
   const adjustmentReasons = [];
   if (!isComplete(cut)) adjustmentReasons.push(reasonOf(cut));
@@ -544,30 +586,38 @@ function validateRelease(input, version) {
   const checks = pin?.checks || [];
   const checksCompleteness = { completeness: completeness(checks.length ? checks.flatMap((check) => check.completeness.reasons) : ["no check evidence"]) };
   const start = rollout?.cutAt ? rollout.times.cutAt : pr?.createdAt ? pr.times.createdAt : run?.times.createdAt || validateTime(null);
-  return { version, start, run, rollout, pr, pin, pinReason, cut, prInterval, prLive, ci, adjustment, gate, rollback, digest, checksCompleteness };
+  // Preserve unambiguous identity metadata so a filtered release still reports
+  // its unknown timing; metadata is never used as deployment-direction proof.
+  const labels = new Set(matches.map((item) => item.release).filter(Boolean));
+  const sequences = new Set(matches.map((item) => item.sequence).filter((value) => value != null));
+  const releaseLabel = labels.size === 1 ? [...labels][0] : null;
+  const releaseSequence = sequences.size === 1 ? [...sequences][0] : null;
+  return { version, start, run, rollout, releaseLabel, releaseSequence, pr, pin, pinReason, cut, prInterval, prLive, ci, adjustment, gate, rollback, digest, checksCompleteness };
 }
 
 export function validateEvidence(raw) {
   const input = normalizeInput(raw);
   input.collection = {
-    truncated: asArray(input.collection?.truncated),
-    ciTruncatedBranches: asArray(input.collection?.ciTruncatedBranches),
-    statusTruncatedShas: asArray(input.collection?.statusTruncatedShas),
+    truncated: [...asArray(input.collection?.truncated)],
+    ciTruncatedBranches: [...asArray(input.collection?.ciTruncatedBranches)],
+    statusTruncatedShas: [...asArray(input.collection?.statusTruncatedShas)],
   };
-  input.pullRequests = uniqueRecords(input.pullRequests, (pr) => pr.number).map((pr) => validateRecord(pr, ["createdAt", "mergedAt"], "createdAt", "mergedAt"));
-  input.pinPullRequests = uniqueRecords(input.pinPullRequests, (pr) => pr.number).map((pr) => ({
+  const missingId = (name) => noteTruncation(input.collection.truncated, name, true);
+  input.pullRequests = uniqueRecords(input.pullRequests, sourceId, () => missingId("pull_requests")).map((pr) => validateRecord(pr, ["createdAt", "mergedAt"], "createdAt", "mergedAt"));
+  input.pinPullRequests = uniqueRecords(input.pinPullRequests, sourceId, () => missingId("pin_pull_requests")).map((pr) => ({
     ...validateRecord(pr, ["createdAt", "mergedAt"], "createdAt", "mergedAt"),
     checks: pr.checks.map((check) => validateRecord(check, ["startedAt", "completedAt"], "startedAt", "completedAt")),
   }));
-  input.runs = uniqueRecords(input.runs, (run) => run.id).map(validateRun);
-  input.statuses = uniqueRecords(input.statuses, (status) => status.id).map((status) => {
+  input.runs = uniqueRecords(input.runs, (run) => run.id, (run) => missingId(run.workflow === "CI" ? "ci" : "workflow_runs")).map(validateRun);
+  input.statuses = uniqueRecords(input.statuses, (status) => status.id, () => missingId("statuses")).map((status) => {
     const times = { createdAt: validateTime(status.createdAt), updatedAt: validateTime(status.updatedAt) };
     const interval = status.createdAt ? validateInterval(times.createdAt, times.updatedAt) : validateInterval(times.updatedAt, times.updatedAt);
     return { ...status, times, interval, completeness: interval.completeness };
   });
   input.rollouts = uniqueRecords(input.rollouts, (rollout) => rollout.id).map((rollout) => {
     const record = validateRecord(rollout, ["cutAt", "liveAt", "rollbackStartedAt", "rollbackFinishedAt"], "cutAt", "liveAt");
-    record.rollback = validateInterval(record.times.rollbackStartedAt, record.times.rollbackFinishedAt);
+    record.rollback = rollout.direction === "rollback" && !rollout.rollbackStartedAt && !rollout.rollbackFinishedAt
+      ? record.interval : validateInterval(record.times.rollbackStartedAt, record.times.rollbackFinishedAt);
     record.tickets = rollout.tickets.map((ticket) => {
       const gateTime = validateTime(ticket.gateOkAt);
       return { ...ticket, gateTime, completeness: gateTime.completeness };
@@ -693,7 +743,7 @@ function isRollbackTitle(title) {
 
 function rowFor(evidence) {
   const { version, run, rollout, pr: pullRequest, pin, pinReason, cut, prInterval, prLive, ci: ciEvidence, adjustment, gate: gateEvidence, rollback, digest, checksCompleteness } = evidence;
-  const label = rollout?.release || labelFromRef(pullRequest?.headRef) || null;
+  const label = rollout?.release || evidence.releaseLabel || labelFromRef(pullRequest?.headRef) || null;
   const cutAt = rollout?.cutAt || null;
   const liveAt = rollout?.liveAt || null;
   const elapsed = duration(cut);
@@ -719,7 +769,7 @@ function rowFor(evidence) {
   const row = {
     label,
     version,
-    sequence: rollout?.sequence ?? null,
+    sequence: rollout?.sequence ?? evidence.releaseSequence,
     cut_at: cutAt,
     live_at: liveAt,
     cut_source: cutAt ? "rollout" : null,
@@ -933,14 +983,15 @@ function collectPages(gh, operation, params, keys, pageSize, listCap) {
     scanned += unpacked.items.length;
     let omitted = false;
     for (const item of unpacked.items) {
-      const id = item.id ?? item.databaseId ?? item.number ?? null;
-      if (id != null && seen.has(String(id))) continue;
-      if (id != null) seen.add(String(id));
+      const id = sourceId(item);
+      if (id == null) incomplete = true;
+      else if (seen.has(String(id))) continue;
+      else seen.add(String(id));
       if (items.length < listCap) items.push(item);
       else omitted = true;
     }
     incomplete ||= omitted;
-    if (total != null && scanned >= total) {
+    if (total != null && seen.size >= total) {
       complete = true;
       break;
     }
@@ -950,7 +1001,7 @@ function collectPages(gh, operation, params, keys, pageSize, listCap) {
     }
     page += 1;
   }
-  return { items, truncated: incomplete || !complete || (total != null && items.length < total) };
+  return { items, truncated: incomplete || !complete || (total != null && seen.size < total) };
 }
 
 function noteTruncation(names, name, truncated) {
@@ -1025,6 +1076,7 @@ export function fetchInputs(opts) {
   const enrichedRuns = runs.map((run) => {
     if (!wanted.has(rawVersion(run))) return run;
     const id = run.databaseId ?? run.id;
+    if (!validId(id)) return { ...run, jobsTruncated: true };
     const jobPages = collectPages(gh, "jobs", { repo, id }, ["jobs"], pageSize, listCap);
     noteTruncation(truncated, "jobs", jobPages.truncated);
     return { ...run, jobs: jobPages.items, jobsTruncated: jobPages.truncated };
@@ -1066,6 +1118,7 @@ export function fetchInputs(opts) {
   }
   const pinDetails = pins.map((pin) => {
     if (!wanted.has(versionIn(pin.title))) return pin;
+    if (!validId(pin.number)) return pin;
     return gh(ghRead("pin-view", { repo: pinRepo, number: pin.number }));
   });
   return {

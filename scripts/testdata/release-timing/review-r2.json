@@ -17,6 +17,7 @@
     {"createdAt": "2026-09-30T02:00:00Z", "mergedAt": "2026-09-30T01:00:00Z"}
   ],
   "partial_rerun": {
+    "id": "fixture-r2-rerun",
     "workflowName": "CI", "event": "pull_request", "conclusion": "success",
     "headBranch": "rel/r99", "runAttempt": 3,
     "createdAt": "2026-09-30T01:00:00Z", "updatedAt": "2026-09-30T01:25:00Z",
@@ -25,13 +26,13 @@
     ]
   },
   "partial_statuses": [
-    {"sha": "abc", "context": "gate/cross-family", "state": "success", "updatedAt": "2026-09-30T00:00:00Z"},
-    {"sha": "abc", "context": "gate/cross-family", "state": "success"},
-    {"sha": "abc", "context": "gate/cross-family", "state": "success", "updatedAt": "2026-09-30T00:00:00"}
+    {"id": "fixture-r2-status-1", "sha": "abc", "context": "gate/cross-family", "state": "success", "updatedAt": "2026-09-30T00:00:00Z"},
+    {"id": "fixture-r2-status-2", "sha": "abc", "context": "gate/cross-family", "state": "success"},
+    {"id": "fixture-r2-status-3", "sha": "abc", "context": "gate/cross-family", "state": "success", "updatedAt": "2026-09-30T00:00:00"}
   ],
   "incompatible_stall": [
-    {"workflowName": "CI", "event": "pull_request", "headBranch": "rel/r99", "conclusion": "failure", "createdAt": "2026-09-30T01:00:00Z", "updatedAt": "2026-09-30T01:10:00Z"},
-    {"workflowName": "CI", "event": "pull_request", "headBranch": "rel/r99", "conclusion": "success", "createdAt": "2026-09-30T01:49:00Z", "updatedAt": "2026-09-30T01:59:00Z"}
+    {"id": "fixture-r2-stall-1", "workflowName": "CI", "event": "pull_request", "headBranch": "rel/r99", "conclusion": "failure", "createdAt": "2026-09-30T01:00:00Z", "updatedAt": "2026-09-30T01:10:00Z"},
+    {"id": "fixture-r2-stall-2", "workflowName": "CI", "event": "pull_request", "headBranch": "rel/r99", "conclusion": "success", "createdAt": "2026-09-30T01:49:00Z", "updatedAt": "2026-09-30T01:59:00Z"}
   ],
   "pagination_ids": [9, 10, 11, 12],
   "incomplete_search": {

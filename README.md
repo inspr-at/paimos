@@ -162,13 +162,24 @@ cut → live, PR → merge, gate → live and rollback timings. `PATH` is a roll
 JSON file or directory; `--fixture scripts/testdata/release-timing/section1.json`
 reproduces the recorded release baseline without GitHub access. GitHub calls
 use fixed read-only templates. Lists keep a constant page width, de-duplicate
-ids and name capped or incomplete search results in `collection.truncated`.
+stable `id` / `databaseId` / `number` values and name capped, id-less or
+incomplete search results in `collection.truncated`. Only deduplicated stable
+IDs count toward `total_count`; duplicate pages cannot hide an unread tail.
 The script validates timestamps with explicit zones, ordered intervals, PR
-lifetime bounds and complete rerun coverage before computing metrics. JSON
-`evidence` records carry `complete` or `partial` with reasons; partial metrics
-are null, with observed sample counts reported separately. A rollback never
-replaces forward rollout timing, and the newest unfinished rollback remains
-unknown. CI stalls outside the rollout window cannot produce adjusted timings.
+lifetime bounds and numbered rerun coverage (`1..runAttempt`) before computing
+metrics. JSON `evidence` records carry `complete` or `partial` with reasons; partial metrics
+are null, with observed sample counts reported separately. Forward rollout
+records require `direction: "forward"`; `outcome`, release labels and sequence
+numbers cannot establish direction. Use `direction: "rollback"` for rollback
+records; explicit rollback timestamps also identify legacy rollback evidence.
+A forward record may embed a provably later rollback. Complete forward
+intervals take precedence over incomplete siblings; conflicting complete
+records remain unknown with an ambiguity reason. A rollback never replaces
+forward rollout timing, and the newest unfinished rollback remains unknown.
+Unknown timing retains consistent release metadata for filtering. CI stalls
+outside the rollout window cannot produce adjusted timings. The offline
+baseline uses clearly marked fixture IDs and explicit forward directions;
+its recorded timestamps are preserved.
 
 Session **Messages** shows both directions of that session's conversation, newest
 messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`

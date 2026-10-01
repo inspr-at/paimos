@@ -20,6 +20,7 @@ import {
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "testdata/release-timing/section1.json");
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 const reviewFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r2.json"), "utf8"));
+const finalReviewFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r3.json"), "utf8"));
 const now = new Date("2026-10-01T00:00:00Z");
 
 function report(opts = {}, input = fixture) {
@@ -95,6 +96,7 @@ test("--since and --release filters do not treat 12 as a prefix", () => {
 test("gate median uses rollout tickets, and a rollback interval is the rollout span", () => {
   const result = buildReport({
     workflow_runs: [{
+      id: "fixture-release",
       workflowName: "Release",
       event: "push",
       conclusion: "success",
@@ -106,8 +108,9 @@ test("gate median uses rollout tickets, and a rollback interval is the rollout s
     }],
     pull_requests: [],
     pin_pull_requests: [],
-    statuses: [{ sha: "abc", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T20:00:00Z" }],
+    statuses: [{ id: "fixture-status-1", sha: "abc", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T20:00:00Z" }],
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       sequence: 99,
@@ -135,6 +138,7 @@ test("gate median uses rollout tickets, and a rollback interval is the rollout s
 test("a commit status supplies gate-ok when the rollout has no ticket times", () => {
   const result = buildReport({
     workflow_runs: [{
+      id: "fixture-release",
       workflowName: "Release", event: "push", conclusion: "success",
       createdAt: "2026-09-30T00:00:00Z", updatedAt: "2026-09-30T00:10:00Z",
       headBranch: "v260930000000.0.0", headSha: "abc",
@@ -142,11 +146,11 @@ test("a commit status supplies gate-ok when the rollout has no ticket times", ()
     pull_requests: [],
     pin_pull_requests: [{ number: 1, title: "rollback v260930000000.0.0", createdAt: "2026-09-30T03:00:00Z", mergedAt: "2026-09-30T03:12:00Z", checks: [] }],
     statuses: [
-      { sha: "abc", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T22:00:00Z" },
-      { sha: "other", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T10:00:00Z" },
-      { sha: "abc", context: "ci", state: "success", updated_at: "2026-09-29T23:00:00Z" },
+      { id: "fixture-status-2", sha: "abc", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T22:00:00Z" },
+      { id: "fixture-status-3", sha: "other", context: "gate/cross-family", state: "success", updated_at: "2026-09-29T10:00:00Z" },
+      { id: "fixture-status-4", sha: "abc", context: "ci", state: "success", updated_at: "2026-09-29T23:00:00Z" },
     ],
-    rollouts: [{ release: "99", version: "260930000000.0.0", cut_at: "2026-09-29T23:00:00Z", live_at: "2026-09-30T01:00:00Z" }],
+    rollouts: [{ direction: "forward", release: "99", version: "260930000000.0.0", cut_at: "2026-09-29T23:00:00Z", live_at: "2026-09-30T01:00:00Z" }],
   }, { now });
   assert.equal(result.releases[0].gate_ok_to_live_s, 3 * 3600);
   assert.equal(result.releases[0].rollback_s, 12 * 60);
@@ -182,7 +186,7 @@ test("fetch asks GitHub for lists and GET details only", () => {
     }
     if (text.includes("search/issues") || (args[0] === "pr" && args[1] === "list")) return { total_count: 0, items: [] };
     if (text.includes("/jobs")) {
-      return { jobs: [{ name: "image", steps: [{ name: "Record pushed digest", started_at: "2026-09-30T00:04:00Z", completed_at: "2026-09-30T00:04:30Z" }] }] };
+      return { jobs: [{ id: 301, name: "image", steps: [{ name: "Record pushed digest", started_at: "2026-09-30T00:04:00Z", completed_at: "2026-09-30T00:04:30Z" }] }] };
     }
     if (text.includes("ci.yml") || args[0] === "run") return { total_count: 0, workflow_runs: [] };
     if (text.includes("/status")) return { statuses: [] };
@@ -235,6 +239,7 @@ test("fixture mode prints JSON and does not call gh", () => {
 function releaseInput(extra = {}) {
   return {
     workflow_runs: [{
+      id: "fixture-release",
       workflowName: "Release",
       event: "push",
       conclusion: "success",
@@ -254,6 +259,7 @@ function releaseInput(extra = {}) {
     pin_pull_requests: [],
     statuses: [],
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       sequence: 99,
@@ -263,6 +269,167 @@ function releaseInput(extra = {}) {
     ...extra,
   };
 }
+
+test("r3 live rollback records cannot enter the forward set, in either order", () => {
+  const forward = finalReviewFixture.forward;
+  for (const direction of [undefined, "rollback"]) {
+    const rollback = { ...finalReviewFixture.live_rollback, direction };
+    for (const rollouts of [[forward, rollback], [rollback, forward]]) {
+      const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+      assert.equal(row.elapsed_s, 1800);
+      assert.equal(row.cut_at, forward.cut_at);
+      assert.equal(row.rollback_s, 900);
+    }
+  }
+});
+
+test("r3 a sole full-schema rollback or overlapping forward is unknown", () => {
+  for (const direction of [undefined, "rollback", "forward"]) {
+    const rollout = { ...finalReviewFixture.live_rollback, direction };
+    const row = buildReport(releaseInput({ rollouts: [rollout] }), { now }).releases[0];
+    assert.equal(row.elapsed_s, null);
+    assert.equal(row.cut_at, null);
+    assert.equal(row.live_at, null);
+    assert.ok(row.reasons.cut_to_live);
+  }
+});
+
+test("r3 outcome alone never establishes forward or rollback direction", () => {
+  for (const outcome of ["live", "rollback", "failed", ""]) {
+    const rollout = { ...finalReviewFixture.forward, direction: undefined, outcome };
+    const row = buildReport(releaseInput({ rollouts: [rollout] }), { now }).releases[0];
+    assert.equal(row.elapsed_s, null);
+    assert.match(row.reasons.cut_to_live, /direction/);
+    assert.equal(row.rollback_s, null);
+  }
+});
+
+test("r3 complete forward intervals take precedence over incomplete siblings", () => {
+  const forward = finalReviewFixture.forward;
+  for (const bounds of finalReviewFixture.incomplete_forwards) {
+    const incomplete = { ...forward, ...bounds };
+    for (const rollouts of [[forward, incomplete], [incomplete, forward]]) {
+      const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+      assert.equal(row.elapsed_s, 1800);
+      assert.equal(row.cut_at, forward.cut_at);
+      assert.equal(row.evidence.cut_to_live.state, "complete");
+    }
+  }
+});
+
+test("r3 conflicting complete forward records stay ambiguous", () => {
+  const forward = finalReviewFixture.forward;
+  const other = { ...forward, cut_at: "2026-09-30T00:00:00Z" };
+  for (const rollouts of [[forward, other], [other, forward]]) {
+    const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+    assert.equal(row.elapsed_s, null);
+    assert.equal(row.live_at, null);
+    assert.equal(row.pr_open_to_live_s, null);
+    assert.match(row.reasons.cut_to_live, /ambiguous/);
+  }
+});
+
+test("r3 reruns require numbered coverage before any CI arithmetic", () => {
+  const base = releaseInput();
+  for (const numbered of [false, true]) {
+    const rerun = structuredClone(finalReviewFixture.unnumbered_rerun);
+    if (numbered) rerun.attempts.forEach((attempt, i) => { attempt.number = i + 1; });
+    const row = buildReport(releaseInput({ workflow_runs: [...base.workflow_runs, rerun] }), { now }).releases[0];
+    assert.equal(row.ci.completeness.state, numbered ? "complete" : "partial");
+    assert.equal(row.ci.success_s, numbered ? 300 : null);
+    assert.equal(row.ci.attempts, numbered ? 3 : undefined);
+    if (!numbered) assert.match(row.ci.reason, /attempt history unavailable/);
+  }
+});
+
+function statusPagesInput(pages, calls, options = {}) {
+  const fallback = pageFixtureGh(calls, { ids: [9] });
+  return fetchInputs({
+    pageSize: 2, listCap: 10, rollouts: [finalReviewFixture.forward], ...options,
+    gh: (args) => {
+      const url = new URL(args.at(-1), "https://api.github.com/");
+      if (!url.pathname.endsWith("/statuses")) return fallback(args);
+      calls.push(args);
+      return { total_count: 3, statuses: pages[Number(url.searchParams.get("page")) - 1] || [] };
+    },
+  });
+}
+
+test("r3 repeated id-less pages stay partial and cannot establish a gate median", () => {
+  const calls = [];
+  const raw = statusPagesInput(finalReviewFixture.idless_status_pages, calls);
+  assert.ok(raw.collection.truncated.includes("statuses"));
+  assert.ok(calls.some((args) => args.at(-1).includes("/statuses?page=3&per_page=2")));
+  const row = buildReport(raw, { now }).releases[0];
+  assert.equal(row.gate_ok_to_live_s, null);
+  assert.equal(row.gate_reason, "truncated");
+});
+
+test("r3 pagination counts deduplicated stable ids before claiming completeness", () => {
+  const calls = [];
+  const raw = statusPagesInput(finalReviewFixture.stable_status_pages, calls);
+  assert.deepEqual(raw.statuses.map((status) => status.id), [1, 2, 3]);
+  assert.equal(raw.collection.truncated.includes("statuses"), false);
+  assert.equal(buildReport(raw, { now }).releases[0].gate_ok_to_live_s, 4800);
+});
+
+test("r3 fixture rows without stable ids remain partial after normalization", () => {
+  const raw = releaseInput({
+    rollouts: [finalReviewFixture.forward],
+    statuses: finalReviewFixture.idless_status_pages[0].map((status) => ({ ...status, sha: "abc" })),
+  });
+  for (const input of [raw, normalizeInput(raw)]) {
+    const row = buildReport(input, { now }).releases[0];
+    assert.equal(row.gate_ok_to_live_s, null);
+    assert.equal(row.gate_reason, "truncated");
+  }
+});
+
+test("r3 an unknown rollout remains visible under its release label", () => {
+  const result = buildReport({ rollouts: [{ ...finalReviewFixture.forward, cut_at: null }] }, { now, release: "99" });
+  assert.equal(result.releases.length, 1);
+  assert.equal(result.releases[0].elapsed_s, null);
+  assert.match(result.releases[0].reasons.cut_to_live, /missing/);
+});
+
+test("r3 id-less CI rows cannot produce durations or attempt counts", () => {
+  const base = releaseInput();
+  const rerun = structuredClone(finalReviewFixture.unnumbered_rerun);
+  delete rerun.id;
+  rerun.attempts.forEach((attempt, i) => { attempt.number = i + 1; });
+  const row = buildReport(releaseInput({ workflow_runs: [...base.workflow_runs, rerun] }), { now }).releases[0];
+  assert.equal(row.ci.completeness.state, "partial");
+  assert.equal(row.ci.success_s, null);
+  assert.equal(row.ci.attempts, undefined);
+  assert.equal(row.ci.reason, "truncated");
+});
+
+test("r3 id-less PR rows cannot establish PR durations", () => {
+  const base = releaseInput();
+  const pr = { ...base.pull_requests[0], number: null };
+  const row = buildReport(releaseInput({ pull_requests: [pr] }), { now }).releases[0];
+  assert.equal(row.pr_to_merge_s, null);
+  assert.equal(row.pr_open_to_live_s, null);
+  assert.equal(row.reasons.pr_to_merge, "truncated");
+});
+
+test("r3 an explicit forward interval can carry a later unfinished rollback", () => {
+  const row = buildReport(releaseInput({ rollouts: [{
+    ...finalReviewFixture.forward, rollback_started_at: "2026-09-30T02:00:00Z",
+  }] }), { now }).releases[0];
+  assert.equal(row.elapsed_s, 1800);
+  assert.equal(row.rollback_s, null);
+  assert.match(row.rollback_reason, /missing/);
+});
+
+test("r3 explicit rollback direction scopes its cut/live interval to rollback", () => {
+  const row = buildReport(releaseInput({ rollouts: [{
+    ...finalReviewFixture.forward, direction: "rollback", outcome: "live",
+  }] }), { now }).releases[0];
+  assert.equal(row.elapsed_s, null);
+  assert.equal(row.live_at, null);
+  assert.equal(row.rollback_s, 1800);
+});
 
 test("r2 attached field flags are rejected before the GitHub executor", () => {
   for (const flag of reviewFixture.write_flags) {
@@ -537,6 +704,7 @@ test("rollback is the latest matching deployment and does not replace the forwar
   const laterRollout = buildReport(releaseInput({
     rollouts: [
       {
+        direction: "forward",
         release: "99",
         version: "260930000000.0.0",
         sequence: 99,
@@ -567,6 +735,7 @@ test("rollback is the latest matching deployment and does not replace the forwar
 
   const disagree = buildReport(releaseInput({
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       cut_at: "2026-09-30T01:00:00Z",
@@ -593,6 +762,7 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
     workflow_runs: [
       ...base.workflow_runs,
       {
+        id: "fixture-ci-1",
         workflowName: "CI",
         event: "pull_request",
         conclusion: "success",
@@ -615,6 +785,7 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
     workflow_runs: [
       ...base.workflow_runs,
       {
+        id: "fixture-ci-2",
         workflowName: "CI",
         event: "pull_request",
         conclusion: "success",
@@ -624,8 +795,8 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
         headBranch: "rel/r99",
         headSha: "def",
         attempts: [
-          { conclusion: "failure", startedAt: "2026-09-30T01:05:00Z", completedAt: "2026-09-30T01:10:00Z" },
-          { conclusion: "success", startedAt: "2026-09-30T01:11:19Z", completedAt: "2026-09-30T01:22:25Z" },
+          { number: 1, conclusion: "failure", startedAt: "2026-09-30T01:05:00Z", completedAt: "2026-09-30T01:10:00Z" },
+          { number: 2, conclusion: "success", startedAt: "2026-09-30T01:11:19Z", completedAt: "2026-09-30T01:22:25Z" },
         ],
       },
     ],
@@ -640,6 +811,7 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
     workflow_runs: [
       ...base.workflow_runs,
       {
+        id: "fixture-ci-3",
         workflowName: "CI",
         event: "pull_request",
         conclusion: "success",
@@ -659,16 +831,19 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
     workflow_runs: [
       ...base.workflow_runs,
       {
+        id: "fixture-ci-4",
         workflowName: "CI", event: "pull_request", conclusion: "failure",
         createdAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:10:00Z",
         headBranch: "rel/r99", headSha: "old",
       },
       {
+        id: "fixture-ci-5",
         workflowName: "CI", event: "pull_request", conclusion: "failure",
         createdAt: "2026-09-30T01:05:00Z", updatedAt: "2026-09-30T01:15:00Z",
         headBranch: "rel/r99", headSha: "mid",
       },
       {
+        id: "fixture-ci-6",
         workflowName: "CI", event: "pull_request", conclusion: "success",
         createdAt: "2026-09-30T01:40:00Z", updatedAt: "2026-09-30T02:10:00Z",
         headBranch: "rel/r99", headSha: "late",
@@ -685,6 +860,7 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
 test("a partial gate sample is missing, not a complete median", () => {
   const result = buildReport(releaseInput({
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       sequence: 99,
@@ -710,6 +886,7 @@ test("a partial gate sample is missing, not a complete median", () => {
 test("timestamps need a zone and reversed events stay unknown", () => {
   const zoned = buildReport(releaseInput({
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       cut_at: "2026-09-29T23:20:59+02:00",
@@ -720,6 +897,7 @@ test("timestamps need a zone and reversed events stay unknown", () => {
 
   const zoneless = buildReport(releaseInput({
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       cut_at: "2026-09-29T23:20:59",
@@ -732,6 +910,7 @@ test("timestamps need a zone and reversed events stay unknown", () => {
 
   const reversed = buildReport(releaseInput({
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       cut_at: "2026-09-30T02:00:00Z",
@@ -746,6 +925,7 @@ test("timestamps need a zone and reversed events stay unknown", () => {
 
 test("lists are paginated and truncation is not reported as absence", () => {
   const digestJob = {
+    id: 401,
     name: "image",
     steps: [{ name: "Record pushed digest", started_at: "2026-09-30T00:04:00Z", completed_at: "2026-09-30T00:04:30Z" }],
   };
@@ -783,7 +963,7 @@ test("lists are paginated and truncation is not reported as absence", () => {
       return { total_count: 2, items: [{ number: 4, title: "rollback v260930000000.0.0", created_at: "2026-09-30T03:00:00Z" }] };
     }
     if (text.includes("/jobs")) {
-      if (page === 1) return { total_count: 31, jobs: Array.from({ length: 30 }, (_, i) => ({ name: `job-${i}`, steps: [] })) };
+      if (page === 1) return { total_count: 31, jobs: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `job-${i}`, steps: [] })) };
       return { total_count: 31, jobs: [digestJob] };
     }
     if (page > 2) {
@@ -799,8 +979,8 @@ test("lists are paginated and truncation is not reported as absence", () => {
       return { total_count: 2, workflow_runs: [{ id: 8, event: "pull_request", conclusion: "success", created_at: "2026-09-29T23:10:00Z", updated_at: "2026-09-29T23:20:00Z", head_branch: "rel/r99", head_sha: "def", run_attempt: 1 }] };
     }
     if (text.includes("/statuses")) {
-      if (page === 1) return [{ context: "ci", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
-      return [{ context: "gate/cross-family", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
+      if (page === 1) return [{ id: 1, context: "ci", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
+      return [{ id: 2, context: "gate/cross-family", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
     }
     if (text.includes("pr") && text.includes("view")) {
       return { number: 4, title: "rollback v260930000000.0.0", createdAt: "2026-09-30T03:00:00Z", mergedAt: "2026-09-30T03:15:00Z", statusCheckRollup: [] };
@@ -814,6 +994,7 @@ test("lists are paginated and truncation is not reported as absence", () => {
     pageSize: 1,
     listCap: 50,
     rollouts: [{
+      direction: "forward",
       release: "99",
       version: "260930000000.0.0",
       sequence: 99,
@@ -847,7 +1028,7 @@ test("lists are paginated and truncation is not reported as absence", () => {
       if (text.includes("/pulls?")) return [{ number: 7, title: "Release v260930000000.0.0", created_at: "2026-09-30T01:00:00Z", merged_at: "2026-09-30T02:00:00Z", merge_commit_sha: "abc", head: { ref: "rel/r99" } }];
       if (text.includes("search/issues")) return { total_count: 2, items: [{ number: 3, title: "AEON: pin v260101000000.0.0", created_at: "2026-09-30T00:00:00Z" }] };
       if (text.includes("ci.yml")) return { total_count: 2, workflow_runs: [{ id: 8, event: "pull_request", conclusion: "failure", created_at: "2026-09-29T23:00:00Z", updated_at: "2026-09-29T23:10:00Z", head_branch: "rel/r99", head_sha: "def", run_attempt: 1 }] };
-      if (text.includes("/statuses")) return [{ context: "ci", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
+      if (text.includes("/statuses")) return [{ id: 1, context: "ci", state: "success", updated_at: "2026-09-29T22:00:00Z", created_at: "2026-09-29T22:00:00Z" }];
       if (text.includes("/jobs")) return { total_count: 2, jobs: [{ name: "other", steps: [] }] };
       return [];
     },

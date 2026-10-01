@@ -1,5 +1,6 @@
 {
   "schema": "aeon.release-timing.fixture.v1",
+  "fixture_identity_note": "fixture-* IDs identify recorded samples within this offline bundle; they are not GitHub database IDs. Explicit forward directions identify the recorded release cuts.",
   "pull_requests": [
     {
       "number": 24,
@@ -129,6 +130,7 @@
       ]
     },
     {
+      "id": "fixture-ci-1",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "success",
@@ -138,6 +140,7 @@
       "headSha": "965d3e00ce7829cf68f53252cefc1f8308504d97"
     },
     {
+      "id": "fixture-ci-2",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "success",
@@ -147,6 +150,7 @@
       "headSha": "f66132195efbc92f3ac4870c18a44e314ad42e4d"
     },
     {
+      "id": "fixture-ci-3",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "failure",
@@ -156,6 +160,7 @@
       "headSha": "7c975b9da65a66678cfe871aa7171f0c58f36404"
     },
     {
+      "id": "fixture-ci-4",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "success",
@@ -165,6 +170,7 @@
       "headSha": "b711cfcec3b2b94a59968d83f210494b74318d28"
     },
     {
+      "id": "fixture-ci-5",
       "workflowName": "CI",
       "event": "push",
       "conclusion": "failure",
@@ -174,6 +180,7 @@
       "headSha": "fe54493ddca47d7483b985a919067bb4fa19eeb1"
     },
     {
+      "id": "fixture-ci-6",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "failure",
@@ -183,6 +190,7 @@
       "headSha": "fe54493ddca47d7483b985a919067bb4fa19eeb1"
     },
     {
+      "id": "fixture-ci-7",
       "workflowName": "CI",
       "event": "push",
       "conclusion": "success",
@@ -192,6 +200,7 @@
       "headSha": "b689a8659f6e43b2c43c88e5a0fd53e26650ff22"
     },
     {
+      "id": "fixture-ci-8",
       "workflowName": "CI",
       "event": "pull_request",
       "conclusion": "success",
@@ -205,6 +214,7 @@
   "rollouts": [
     {
       "schema": "aeon.rollout.v1",
+      "direction": "forward",
       "release": "12",
       "version": "260929193046.0.0",
       "sequence": 107,
@@ -214,6 +224,7 @@
     },
     {
       "schema": "aeon.rollout.v1",
+      "direction": "forward",
       "release": "12b",
       "version": "260929203122.0.0",
       "sequence": 108,
@@ -223,6 +234,7 @@
     },
     {
       "schema": "aeon.rollout.v1",
+      "direction": "forward",
       "release": "12c",
       "version": "260929215406.0.0",
       "sequence": 109,
@@ -232,6 +244,7 @@
     },
     {
       "schema": "aeon.rollout.v1",
+      "direction": "forward",
       "release": "12d",
       "version": "260929232203.0.0",
       "sequence": 110,
