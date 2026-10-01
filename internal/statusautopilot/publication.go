@@ -73,9 +73,11 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 	}
 	// Remove disappeared work without loading a missing release/ticket. These
 	// rows have no remaining automation action and must not poison the cursor.
-	_, err = tx.Exec(ctx, `DELETE FROM status_autopilot_deliveries d WHERE
+	cleaned, err := tx.Exec(ctx, `DELETE FROM status_autopilot_deliveries WHERE (release_id,node_id) IN
+ (SELECT d.release_id,d.node_id FROM status_autopilot_deliveries d WHERE ($1='' OR d.release_id=nullif($1,'')::uuid) AND (
  NOT EXISTS(SELECT 1 FROM nodes n WHERE n.tenant_id=d.tenant_id AND n.id=d.node_id AND n.deleted_at IS NULL)
- OR NOT EXISTS(SELECT 1 FROM nodes r WHERE r.tenant_id=d.tenant_id AND r.id=d.release_id AND r.deleted_at IS NULL)`)
+ OR NOT EXISTS(SELECT 1 FROM nodes r WHERE r.tenant_id=d.tenant_id AND r.id=d.release_id AND r.deleted_at IS NULL))
+ ORDER BY d.release_id,d.node_id LIMIT $2)`, releaseID, batchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -107,7 +109,7 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 	err = rows.Err()
 	rows.Close()
 	if err != nil || len(work) == 0 {
-		return 0, err
+		return int(cleaned.RowsAffected()), err
 	}
 	p, err := systemactor.Ensure(ctx, tx, tenantID)
 	if err != nil {
@@ -148,7 +150,7 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 			return 0, err
 		}
 	}
-	return len(work), nil
+	return max(len(work), int(cleaned.RowsAffected())), nil
 }
 
 func deliver(ctx context.Context, tx pgx.Tx, p tenant.Principal, c candidate, releaseID, title, version string) error {

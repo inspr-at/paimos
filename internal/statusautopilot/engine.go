@@ -131,7 +131,7 @@ const candidateStateSQL = `regexp_replace(lower(btrim(n.state)), '[[:space:]-]+'
 func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time) ([]candidate, error) {
 	rows, err := tx.Query(ctx, `SELECT to_jsonb(n),
  coalesce(episode.at,n.created_at),
- greatest(n.created_at,coalesce(activity.at,n.created_at)),
+ greatest(n.created_at,coalesce(activity.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  greatest(coalesce(episode.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  coalesce(work.live,false),
  EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at))

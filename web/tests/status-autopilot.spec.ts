@@ -96,7 +96,7 @@ test('light, dark and narrow settings evidence beside the approved fragment', as
   await setup(page); await page.goto('/settings/workspace')
   const folder = process.env.STATUS_AUTOPILOT_SHOTS ?? testInfo.outputPath('shots'); await mkdir(folder, { recursive: true })
   for (const theme of ['light', 'dark']) {
-    await page.setViewportSize({ width: 1440, height: 1500 })
+    await page.setViewportSize({ width: 1440, height: 2400 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(page.getByRole('region', { name: 'Recent automatic changes' })).toBeVisible()
     const path = `${folder}/status-autopilot-${theme}.png`
