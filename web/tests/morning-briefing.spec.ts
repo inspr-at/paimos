@@ -129,6 +129,22 @@ test('Projects links to the daily briefing and reading it clears the due reminde
 })
 
 
+test('a briefing action focuses its existing approval card when Agents was already loaded', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page)
+  await page.goto('/briefing')
+  const next = () => page.getByRole('region', { name: 'Recommended next step' }).getByRole('link').first()
+  await next().click()
+  const request = page.locator(`[data-row="a:${uuid}"]`)
+  await expect(request).toBeFocused()
+  // A client-side return preserves the Agents store. Mounting the same link again still focuses it.
+  await page.goBack()
+  await expect(next()).toBeVisible()
+  await next().click()
+  await expect(request).toBeFocused()
+  expect(errors).toEqual([])
+})
+
 test('leaving during a slow source read never advances the visit marker', async ({ page }) => {
   const data = await setup(page, { slow: true })
   await page.goto('/briefing')

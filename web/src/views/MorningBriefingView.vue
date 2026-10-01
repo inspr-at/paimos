@@ -168,7 +168,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose() })
       <div v-if="person" class="briefing-tools">
         <label for="briefing-time">Daily reminder at</label><input id="briefing-time" v-model="time" class="field" type="time" :disabled="loading || saving" @change="saveTime" />
         <span class="muted">your device’s local time</span>
-        <button type="button" class="btn sm" :disabled="loading" @click="load"><AppIcon name="refresh" :size="14" />Refresh</button>
+        <button type="button" class="btn sm" :disabled="loading || saving" @click="load"><AppIcon name="refresh" :size="14" />Refresh</button>
       </div>
       <p v-if="saveError" role="alert">{{ saveError }}</p>
     </header>

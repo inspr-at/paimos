@@ -44,7 +44,7 @@ watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   await nextTick()
   cursor.value = id
   focusRow(id)
-})
+}, { immediate: true })
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
 const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
