@@ -12,7 +12,7 @@ import { AGENT_PALETTES } from '../../lib/agentPalettes'
 
 const { choice, setStyle, setHovering, setRing, setSize } = useAgentIndicator()
 const { choice: states, save: saveStates } = useAgentAppearance()
-const previewStates: AgentState[] = ['working', 'awaiting', 'waiting', 'throttled', 'problem', 'unresponsive', 'idle', 'stopped']
+const previewStates: AgentState[] = ['working', 'awaiting', 'waiting', 'throttled', 'problem', 'unresponsive', 'idle', 'done', 'stopped']
 const stateFailed = ref(false)
 onBeforeUnmount(onPreferenceFailure(key => { if (key === AGENT_STATE_KEY) stateFailed.value = true }))
 function saveState(patch: Parameters<typeof saveStates>[0]) { stateFailed.value = false; saveStates(patch) }
@@ -147,7 +147,7 @@ const fill = (value: number, min: number, max: number) => ({ '--fill': `${(value
         </span>
       </div>
       <div class="setting-row switch-row dim-row">
-        <div class="setting-copy"><p :id="`${id}-dim`" class="setting-label">Dim inactive</p><p class="hint">Idle and stopped agents fade.</p></div>
+        <div class="setting-copy"><p :id="`${id}-dim`" class="setting-label">Dim inactive</p><p class="hint">Idle and ended agents fade.</p></div>
         <div class="dim-controls">
           <div v-if="states.dimInactive" class="slider compact">
             <input :id="`${id}-opacity`" class="range" type="range" min="40" max="80" step="1" :value="states.inactiveOpacity"
@@ -217,7 +217,7 @@ legend, .setting-label { display: block; padding: 0; font-size: 13.5px; font-wei
 .save-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--danger); }
 .state-settings { margin-top: 28px; }
 .palette { flex-shrink: 0; width: 220px; min-height: 36px; padding: 6px 10px; }
-.state-preview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 10px; margin-top: 14px; padding: 14px 10px; border-radius: 10px; background: var(--surface-sunken); }
+.state-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; margin-top: 14px; padding: 14px 10px; border-radius: 10px; background: var(--surface-sunken); }
 .state-example { display: grid; justify-items: center; gap: 8px; text-align: center; }
 .dim-controls { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
 .slider.compact { grid-template-columns: 140px 42px; }

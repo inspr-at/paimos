@@ -28,7 +28,7 @@ export function agentData(world: AgentWorld) {
     [agent(1)]: 'claude:camy', [agent(2)]: 'codex:nova', [agent(3)]: 'pi:pixel', [agent(4)]: 'cursor:kite',
     [agent(5)]: 'grok:amy', [agent(6)]: 'claude:sable', [agent(7)]: 'codex:orbit',
   }
-  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null }
+  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null, finished: false }
   const summary = (nodeId: unknown) => typeof nodeId === 'string' && world.nodes?.[nodeId] ? { id: nodeId, ...world.nodes[nodeId] } : null
   const session = (n: number, fields: Record<string, unknown>) => ({ ...base, id: id('5e', n), ...fields, project: summary(fields.project_id) ?? { id: fields.project_id, key: '', title: '' }, ticket: summary(fields.ticket_node_id) })
   const sessions = world.empty ? [] : [

@@ -788,10 +788,13 @@ func assigneeLeadKeyExpr(harnessAll string) string {
 // STATE_PRIORITY at this viewer's normalized thresholds (yellow awaiting,
 // red unresponsive): problem, unresponsive, waiting, awaiting, throttled,
 // working, idle, stale. Waiting is a yielded phase, a waiting run, a stale
-// estimate, or a pending approval on this session's run. Ties break by a
-// worker before a coordinator, then start, then heartbeat, then public
-// session facts, the projected name and the stable viewer-visible key. A
-// withheld label or session id must not decide which name is shown or sorted.
+// estimate, or a pending approval on this session's run. Only a live session can
+// lead, and a finished one has stopped, so reported progress never changes the
+// rank: a quiet worker at 100% is still awaiting or unresponsive, and a pending
+// approval still makes it wait (AEON-437). Ties break by a worker before a
+// coordinator, then start, then heartbeat, then public session facts, the
+// projected name and the stable viewer-visible key. A withheld label or session
+// id must not decide which name is shown or sorted.
 func assigneeLeadOrder(yellow, red int, shown, key string) string {
 	if yellow == 0 && red == 0 {
 		yellow, red = 3, 10
@@ -1111,7 +1114,8 @@ func listOrder(q listQuery) string {
 		case "estimate":
 			parts = append(parts, "est.hours IS NULL ASC", "est.hours "+dir)
 		case "progress":
-			parts = append(parts, "eta.progress_pct IS NULL ASC", "eta.progress_pct "+dir)
+			// The number the cell shows: a finished ticket is 100, like its ETA view.
+			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
 		case "model":
 			// The role's rung on the ladder, then the area; rows without a role last.
 			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
@@ -1168,7 +1172,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
-		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true`
+		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {

@@ -180,7 +180,17 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.6`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing fields and required payloads are unchanged.
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.7`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.7 adds `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`.
+
+Reporter pins identify response schemas by their `METHOD /path status` labels.
+`RequiredBump` treats a new required response property as a minor addition:
+the server supplies it, and existing harness clients ignore extra response fields.
+Components also referenced by any request body, including through nested schema
+or reusable request-body references, retain request rules throughout their
+expanded subtree. Pins store this provenance separately from the response hash.
+New required properties on these shared components still require a major bump.
+Changed existing properties, newly requiring an existing optional property, and adding a required
+property to a previously closed response schema also remain major changes.
 
 Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
 
@@ -1257,7 +1267,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.6`:
+The reporter contract is `harness-session/1.7`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

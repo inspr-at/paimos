@@ -6905,7 +6905,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.7']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
     aithemaDelegated:
@@ -10795,8 +10795,8 @@ components:
         archived_at: {type: [string, 'null'], format: date-time}
     HarnessSession:
       type: object
-      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
-      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
+      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
+      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
         warnings:
           type: array
@@ -10809,6 +10809,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
+        finished: {type: boolean, description: "True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Anything else that stopped, a silence the server closed, a stop with no recorded reason, and a session that is still open are false. Derived, so it is always present, also where stop_reason is withheld. Clients read this flag and never derive Done from progress_pct or stop_reason (AEON-437)."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
@@ -10928,9 +10929,13 @@ components:
             estimated: {type: integer, minimum: 0}
     TicketEta:
       type: object
-      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
+      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
+      required: [finished]
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
+        finished: {type: boolean, description: 'True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Always present, false included (AEON-437).'}
+        finished_at: {type: string, format: date-time, description: 'When that worker stopped. Present with finished.'}
+        finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
@@ -11116,7 +11121,7 @@ components:
                 name: {type: string}
     LiveAgent:
       type: object
-      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
+      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at, finished]
       properties:
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other]}
@@ -11125,6 +11130,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
+        finished: {type: boolean, description: 'True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Derived, so it is always present, also where stop_reason is withheld; clients never derive Done from progress_pct or stop_reason (AEON-437).'}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
@@ -11156,6 +11162,7 @@ components:
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. Reported progress alone never means finished; read finished (AEON-437).}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
