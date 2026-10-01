@@ -49,6 +49,7 @@ func TestFromEnvDefaults(t *testing.T) {
 	t.Setenv("AEON_ENV", "")
 	t.Setenv("AEON_PUBLIC_URL", "")
 	t.Setenv("AEON_WEB_DIR", "")
+	t.Setenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES", "")
 	t.Setenv("AEON_BOOTSTRAP_TENANT_SLUG", "")
 	t.Setenv("AEON_BOOTSTRAP_TENANT_NAME", "")
 
@@ -58,6 +59,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.Addr != ":8080" || cfg.Env != "dev" {
 		t.Fatalf("addr/env = %s %s", cfg.Addr, cfg.Env)
+	}
+	if len(cfg.AithemaOperatorLocalServices) != 0 {
+		t.Fatal("operator-local service exceptions must default off")
 	}
 	if cfg.BootstrapTenantSlug != "inspr" || cfg.BootstrapTenantName != "INSPR" {
 		t.Fatalf("bootstrap = %s %s", cfg.BootstrapTenantSlug, cfg.BootstrapTenantName)
@@ -74,6 +78,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("AEON_ENV", "prod")
 	t.Setenv("AEON_PUBLIC_URL", "https://aeon.example")
 	t.Setenv("AEON_WEB_DIR", "/var/aeon/web")
+	t.Setenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES", "127.0.0.1:8910,[::1]:8910")
 	t.Setenv("AEON_BOOTSTRAP_TENANT_SLUG", "studio")
 	t.Setenv("AEON_BOOTSTRAP_TENANT_NAME", "Studio")
 
@@ -86,6 +91,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.WebDir != "/var/aeon/web" || cfg.BootstrapTenantSlug != "studio" || cfg.BootstrapTenantName != "Studio" {
 		t.Fatalf("%+v", cfg)
+	}
+	if len(cfg.AithemaOperatorLocalServices) != 2 || cfg.AithemaOperatorLocalServices[0] != "127.0.0.1:8910" || cfg.AithemaOperatorLocalServices[1] != "[::1]:8910" {
+		t.Fatal("deployment service exceptions were not loaded")
 	}
 }
 

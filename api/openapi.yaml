@@ -21,7 +21,7 @@ paths:
     put:
       operationId: aithemaSettingsPut
       summary: Replace Aithema settings and optionally rotate the write-only service JWT
-      description: Requires a person with plugins.manage. Omitting service_jwt preserves the credential; an empty value clears it. Secrets are encrypted at rest; audit records contain only changed field names. Processing policy is immutable while sessions or callbacks are active; preview pins and credentials may rotate.
+      description: Requires a person with plugins.manage. Service URLs are checked against the deployment outbound policy before writing and again at each dial. HTTPS public addresses are the default; operator-local loopback/private destinations require an exact host-and-port entry in server configuration. Tenant location cannot grant that exception. Omitting service_jwt preserves the credential; an empty value clears it. Secrets are encrypted at rest; audit records contain only changed field names. Processing policy is immutable while sessions or callbacks are active; preview pins and credentials may rotate.
       security: [{session: []}]
       requestBody:
         required: true
@@ -68,11 +68,11 @@ paths:
       - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: aithemaTokensRefresh
-      summary: Recheck live host authority and mint tokens for current generation
+      summary: Recheck live host authority and mint a browser session token
       security: [{session: []}]
       responses:
         '200':
-          description: Short-lived session and delegated tokens; no service credential
+          description: Short-lived session token with audience aithema. Delegated host-audience tokens are delivered only server-to-server and never returned to a person session.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AithemaSessionTokens'}
@@ -7980,7 +7980,6 @@ components:
         auth_epoch: {type: integer, minimum: 1, maximum: 9007199254740991}
         callback_id: {type: string, format: uuid}
         session_token: {type: string}
-        delegated_token: {type: string}
     AithemaStoredRecord:
       type: object
       additionalProperties: false

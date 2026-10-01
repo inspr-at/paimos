@@ -169,7 +169,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("aithema journal contracts: %w", err)
 	}
 	journalMod := &journal.Module{Store: journalStore, Keys: tokenMod.Keys}
-	aithemaHost, err := host.New(pool, journalStore, tokenMod.Keys, authCfg.SessionKey, cfg.PublicURL)
+	aithemaHost, err := host.New(pool, journalStore, tokenMod.Keys, authCfg.SessionKey, cfg.PublicURL, cfg.AithemaOperatorLocalServices...)
 	if err != nil {
 		closeListener()
 		return fmt.Errorf("aithema host: %w", err)

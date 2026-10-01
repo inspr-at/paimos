@@ -5,6 +5,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -64,7 +65,7 @@ func (m *Module) proxy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fail(503, "unavailable"))
 		return
 	}
-	pair, err := m.tokenPair(ctx, p.TenantID, state)
+	pair, err := m.sessionToken(ctx, p.TenantID, state)
 	cancel()
 	if err != nil {
 		writeError(w, err)
@@ -84,7 +85,7 @@ func (m *Module) proxy(w http.ResponseWriter, r *http.Request) {
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		r.ContentLength = int64(len(raw))
 	}
-	proxy := &httputil.ReverseProxy{Transport: serviceTransport(s), ErrorLog: log.New(io.Discard, "", 0), Rewrite: func(pr *httputil.ProxyRequest) {
+	proxy := &httputil.ReverseProxy{Transport: serviceTransport(s, m.servicePolicy), ErrorLog: log.New(io.Discard, "", 0), Rewrite: func(pr *httputil.ProxyRequest) {
 		pr.SetURL(target)
 		pr.Out.URL.Path = "/v1/sessions/" + sid + "/" + operation
 		pr.Out.URL.RawPath = ""
@@ -108,6 +109,15 @@ func (m *Module) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		if operation == "inline" && resp.StatusCode != 101 {
 			return fail(502, "unavailable")
+		}
+		if operation == "inline" {
+			// No extensions were offered upstream; reject compressed/extended
+			// streams and scan complete messages before releasing any frame.
+			stream, ok := resp.Body.(io.ReadWriteCloser)
+			if !ok || resp.Header.Get("Sec-WebSocket-Extensions") != "" {
+				return errors.New("unsafe WebSocket output")
+			}
+			resp.Body = &guardedWebSocket{ReadWriteCloser: stream, credential: []byte(string(credential))}
 		}
 		if operation != "inline" && (!strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") || resp.StatusCode < 200 || resp.StatusCode >= 300) {
 			return fail(502, "unavailable")

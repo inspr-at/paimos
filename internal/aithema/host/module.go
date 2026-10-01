@@ -28,12 +28,13 @@ import (
 )
 
 type Module struct {
-	Pool     *pgxpool.Pool
-	Journal  *journal.Store
-	Keys     *tokens.KeySet
-	Issuer   string
-	vaultKey []byte
-	clock    func() time.Time
+	Pool          *pgxpool.Pool
+	Journal       *journal.Store
+	Keys          *tokens.KeySet
+	Issuer        string
+	vaultKey      []byte
+	clock         func() time.Time
+	servicePolicy servicePolicy
 }
 type Fault struct {
 	Status int
@@ -97,12 +98,16 @@ func newID() string {
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
-func New(pool *pgxpool.Pool, store *journal.Store, keys *tokens.KeySet, master []byte, issuer string) (*Module, error) {
+func New(pool *pgxpool.Pool, store *journal.Store, keys *tokens.KeySet, master []byte, issuer string, operatorLocalServices ...string) (*Module, error) {
 	if len(master) < 32 || store == nil || keys != nil && !strings.HasPrefix(issuer, "https://") {
 		return nil, fail(503, "unavailable")
 	}
+	policy, err := newServicePolicy(operatorLocalServices)
+	if err != nil {
+		return nil, err
+	}
 	sum := sha256.Sum256(append([]byte("aeon/aithema-host-settings-v1\x00"), master...))
-	return &Module{Pool: pool, Journal: store, Keys: keys, Issuer: strings.TrimRight(issuer, "/"), vaultKey: sum[:], clock: time.Now}, nil
+	return &Module{Pool: pool, Journal: store, Keys: keys, Issuer: strings.TrimRight(issuer, "/"), vaultKey: sum[:], clock: time.Now, servicePolicy: policy}, nil
 }
 
 func Plugin() (plugins.Plugin, error) {

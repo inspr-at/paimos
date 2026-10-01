@@ -90,7 +90,8 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.m, err = New(f.db.App, store, keys, bytes.Repeat([]byte{5}, 32), hostOrigin)
+	serviceURL, _ := url.Parse(f.service.URL)
+	f.m, err = New(f.db.App, store, keys, bytes.Repeat([]byte{5}, 32), hostOrigin, serviceURL.Host)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,13 +131,18 @@ func (f *fixture) call(method, path string, body any) *httptest.ResponseRecorder
 	f.mux.ServeHTTP(w, r)
 	return w
 }
-func (f *fixture) session() sessionTokens {
+func (f *fixture) createSession() *httptest.ResponseRecorder {
 	f.t.Helper()
 	a := map[string]any{"contract": "aithema.authz", "major": 1, "minor": 0, "min_reader": 0, "tid": f.p.TenantID, "pid": f.project, "sid": newID(), "epoch": 1, "participants": []any{map[string]any{"participant_ref": f.p.ID, "role": "owner", "notice_ref": "notice-test"}}, "purposes": []string{"intake", "specification"}, "processors": []any{}, "settings_sha256": strings.Repeat("a", 64), "basis_label": "contract", "created_at": time.Now().UTC().Format(time.RFC3339Nano), "withdrawn_at": nil}
 	w := f.call("POST", "/api/projects/"+f.project+"/aithema/sessions", map[string]any{"authorization": a, "host_mode": "review"})
 	if w.Code != 202 {
 		f.t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
+	return w
+}
+func (f *fixture) session() sessionTokens {
+	f.t.Helper()
+	w := f.createSession()
 	var out sessionTokens
 	if json.Unmarshal(w.Body.Bytes(), &out) != nil {
 		f.t.Fatal("create response")
@@ -303,8 +309,8 @@ func TestCallbackRetryIdempotencyAndLifecycleAtomicity(t *testing.T) {
 	}
 	f.deliver()
 	pair := f.refresh(s.Session)
-	if pair.Generation != 1 || pair.SessionToken == "" || pair.DelegatedToken == "" {
-		t.Fatal("token pair missing")
+	if pair.Generation != 1 || pair.SessionToken == "" || pair.DelegatedToken != "" {
+		t.Fatal("browser token boundary")
 	}
 	mu.Lock()
 	same := len(ids) == 2 && ids[0] == ids[1]
@@ -435,7 +441,14 @@ func TestLiveDelegationThroughRealAuthGenerationAndRemoval(t *testing.T) {
 	f := newFixture(t, nil)
 	s := f.session()
 	f.deliver()
-	pair := f.refresh(s.Session)
+	state, err := f.m.Journal.Current(t.Context(), f.p.TenantID, f.project, s.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := f.m.tokenPair(t.Context(), f.p.TenantID, state)
+	if err != nil {
+		t.Fatal(err)
+	}
 	authMod, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{8}, 32)}, f.db.App)
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +510,7 @@ func TestLiveDelegationThroughRealAuthGenerationAndRemoval(t *testing.T) {
 	if err := f.m.reconcile(db.AllProjects(t.Context(), "host test reconciliation"), f.p.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	state, err := f.m.Journal.Current(t.Context(), f.p.TenantID, f.project, s.Session)
+	state, err = f.m.Journal.Current(t.Context(), f.p.TenantID, f.project, s.Session)
 	if err != nil || !state.Tombstone {
 		t.Fatal("offboarding reconciliation did not tombstone")
 	}
@@ -521,7 +534,12 @@ func TestOutboundAddressPolicyAndNoRedirect(t *testing.T) {
 	defer target.Close()
 	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 302) }))
 	defer redirect.Close()
-	resp, err := serviceClient(Settings{Location: "operator"}).Get(redirect.URL)
+	u, _ := url.Parse(redirect.URL)
+	policy, err := newServicePolicy([]string{u.Host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := serviceClient(Settings{ServiceURL: redirect.URL, Location: "operator"}, policy).Get(redirect.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

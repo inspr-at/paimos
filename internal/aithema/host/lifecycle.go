@@ -20,15 +20,17 @@ import (
 )
 
 type sessionTokens struct {
-	Session        string `json:"sid"`
-	Generation     int64  `json:"worker_generation"`
-	Epoch          int64  `json:"auth_epoch"`
-	Callback       string `json:"callback_id,omitempty"`
-	SessionToken   string `json:"session_token,omitempty"`
-	DelegatedToken string `json:"delegated_token,omitempty"`
+	Session      string `json:"sid"`
+	Generation   int64  `json:"worker_generation"`
+	Epoch        int64  `json:"auth_epoch"`
+	Callback     string `json:"callback_id,omitempty"`
+	SessionToken string `json:"session_token,omitempty"`
+	// Only server-to-server delivery may use this bearer. It must never be
+	// serialized into a browser/person response, including future call sites.
+	DelegatedToken string `json:"-"`
 }
 
-func (m *Module) tokenPair(ctx context.Context, tid string, state journal.AuthorityState) (sessionTokens, error) {
+func (m *Module) sessionToken(ctx context.Context, tid string, state journal.AuthorityState) (sessionTokens, error) {
 	var a authorization
 	if json.Unmarshal(state.Authorization, &a) != nil || m.Keys == nil {
 		return sessionTokens{}, fail(503, "unavailable")
@@ -46,12 +48,26 @@ func (m *Module) tokenPair(ctx context.Context, tid string, state journal.Author
 	if err != nil {
 		return sessionTokens{}, fail(503, "unavailable")
 	}
-	c = tokens.Claims{Issuer: m.Issuer, Audience: m.Issuer, Subject: state.PluginPrincipal, TenantID: tid, ProjectID: a.Project, SessionID: a.Session, Actor: &tokens.Actor{Subject: owner(a)}, AuthEpoch: state.Epoch, Generation: state.Generation, IssuedAt: now, ExpiresAt: now + 900, Capabilities: []string{"intake.read", "intake.write", "aithema.journal.read", "aithema.journal.write", "aithema.authority.read", "aithema.ledger"}}
+	return sessionTokens{Session: a.Session, Generation: state.Generation, Epoch: state.Epoch, SessionToken: st}, nil
+}
+
+func (m *Module) tokenPair(ctx context.Context, tid string, state journal.AuthorityState) (sessionTokens, error) {
+	pair, err := m.sessionToken(ctx, tid, state)
+	if err != nil {
+		return sessionTokens{}, err
+	}
+	var a authorization
+	if json.Unmarshal(state.Authorization, &a) != nil {
+		return sessionTokens{}, fail(503, "unavailable")
+	}
+	now := m.clock().Unix()
+	c := tokens.Claims{Issuer: m.Issuer, Audience: m.Issuer, Subject: state.PluginPrincipal, TenantID: tid, ProjectID: a.Project, SessionID: a.Session, Actor: &tokens.Actor{Subject: owner(a)}, AuthEpoch: state.Epoch, Generation: state.Generation, IssuedAt: now, ExpiresAt: now + 900, Capabilities: []string{"intake.read", "intake.write", "aithema.journal.read", "aithema.journal.write", "aithema.authority.read", "aithema.ledger"}}
 	dt, err := m.Keys.MintDelegated(ctx, c)
 	if err != nil {
 		return sessionTokens{}, fail(503, "unavailable")
 	}
-	return sessionTokens{Session: a.Session, Generation: state.Generation, Epoch: state.Epoch, SessionToken: st, DelegatedToken: dt}, nil
+	pair.DelegatedToken = dt
+	return pair, nil
 }
 
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +225,7 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var err error
-		out, err = m.tokenPair(ctx, p.TenantID, state)
+		out, err = m.sessionToken(ctx, p.TenantID, state)
 		return err
 	})
 	if err != nil {

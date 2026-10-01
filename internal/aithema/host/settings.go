@@ -8,8 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -64,12 +62,7 @@ func masked(s Settings, configured bool) settingsRead {
 	return settingsRead{s, value, configured}
 }
 func (s Settings) validate() error {
-	u, err := url.Parse(s.ServiceURL)
-	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || strings.ContainsAny(s.ServiceURL, "\r\n\t ") {
-		return fail(400, "invalid_settings")
-	}
-	local := u.Hostname() == "localhost" || net.ParseIP(u.Hostname()) != nil && net.ParseIP(u.Hostname()).IsLoopback()
-	if s.Location != "cloud" && s.Location != "operator" || u.Scheme != "https" && !(u.Scheme == "http" && s.Location == "operator" && local) || s.Location == "cloud" && local {
+	if _, _, err := serviceEndpoint(s); err != nil {
 		return fail(400, "invalid_settings")
 	}
 	if !uuidRE.MatchString(s.PluginPrincipal) || !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(s.Currency) {
@@ -140,6 +133,9 @@ func (m *Module) settings(ctx context.Context, tid string) (Settings, secret, er
 func (m *Module) saveSettings(ctx context.Context, p tenant.Principal, in settingsWrite) (settingsRead, error) {
 	if err := in.Settings.validate(); err != nil {
 		return settingsRead{}, err
+	}
+	if _, err := m.servicePolicy.addresses(ctx, in.Settings); err != nil {
+		return settingsRead{}, fail(400, "invalid_settings")
 	}
 	if in.ServiceJWT != nil && (*in.ServiceJWT == "********" || len(*in.ServiceJWT) > 16384 || strings.ContainsAny(string(*in.ServiceJWT), "\r\n\t ")) {
 		return settingsRead{}, fail(400, "invalid_settings")

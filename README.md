@@ -115,8 +115,10 @@ A person with project `intake.write` creates a host session through
 `POST /api/projects/{projectId}/aithema/sessions`; the host assigns the session,
 tenant, project, epoch and settings digest. It queues service creation before
 issuing browser tokens. `…/sessions/{sid}/tokens` refreshes for the current
-generation only after creation succeeds. Intake delegation uses the same
-locked journal authority as its effect, checks both project bindings and the
+generation only after creation succeeds. Browser responses contain only the
+session token with audience `aithema`; host-audience delegated tokens remain
+server-side and are supplied to the service at creation/resume delivery.
+Intake delegation uses the same locked journal authority as its effect, checks both project bindings and the
 installed plugin, and creates no persistent agent grant. Acceptance stays
 person-only. Journal and ledger effects recheck host bindings as well; authority
 polling and settlement of already committed claims retain their existing rules.
@@ -150,8 +152,10 @@ host-owned cleanup, never authority to delete arbitrary paths.
 or `resource=tokens.css` proxies their stylesheets with the same capability.
 The service-signed EdDSA JWT has exactly `iss`, `aud`, `tid`, `sid`,
 `design_rev`, `iat`, and `exp`, uses a pinned `kid` and `typ: JWT`, and expires
-within 300 seconds without expiry skew. Missing, foreign, invalid, expired or
-revoked caps receive the same 404 before upstream access. Final host headers
+within 300 seconds without expiry skew. The unsigned tenant claim selects
+only public verification settings; signature and claims verification precede
+any read or decryption of the service credential. Missing, foreign, invalid,
+expired or revoked caps receive the same 404 before upstream access. Final host headers
 permit only the configured picker script hash, same-origin CSS, data images
 and fonts, and `frame-ancestors 'self'`; they set `SAMEORIGIN`, `nosniff`,
 `no-referrer` and `private, no-store`. Native app documents allow
@@ -167,9 +171,19 @@ WebSocket upgrade with a service-issued single-use `ticket`. The service owns
 ticket consumption; the host checks live person authority before the handshake.
 The host supplies service/session credentials and strips browser cookies and
 forwarding headers. It never retries input or sockets, follows no redirects,
-and suppresses upstream credential echoes. Service connections pin checked DNS
-addresses and deny private/special networks; explicit operator service URLs
-may use HTTP only on loopback. No frontend assets changed in this host package;
+and suppresses upstream credential echoes, including WebSocket data and control
+frames. Complete WebSocket messages (at most 1 MiB / 1024 fragments) are checked
+before forwarding; compressed, extended or masked server frames are refused.
+Service URL writes and every dial use one outbound policy: HTTPS with public
+DNS answers by default, no redirects or ambient proxy, and only checked IP
+literals are dialed. The deployment may explicitly configure an operator-local
+service with `AEON_AITHEMA_OPERATOR_LOCAL_SERVICES`, a comma-separated list of
+exact `host:port` entries (IPv6 uses `[address]:port`; no wildcards). Only
+`location=operator` at one of those exact endpoints permits HTTP and
+loopback/private IPs; link-local and other special networks stay denied.
+Tenant settings never enable this exception, and a changed DNS answer is
+checked again before any connection. No frontend assets changed in this host
+package;
 real renderer and native-view qualification remain AIT-P23 / AEON-P05.
 
 Wide project headers can show an ambient ticket graph (Display → Graph in

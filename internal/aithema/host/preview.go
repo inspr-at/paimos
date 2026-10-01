@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -160,12 +161,35 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	s, credential, err := m.settings(ctx, untrusted.Tenant)
-	if err != nil || credential == "" {
-		notFound()
-		return
-	}
-	c, err := verifyCap(q.Get("cap"), s, m.Issuer, r.PathValue("design_rev"), m.clock())
+	var s Settings
+	var c previewClaims
+	var credential secret
+	err = db.InTenant(ctx, m.Pool, untrusted.Tenant, func(tx pgx.Tx) error {
+		// Unsigned tid is only a key-selection hint. Do not even read the
+		// credential column until the pinned signature and all claims verify.
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT settings FROM aithema_host_settings WHERE tenant_id=$1`, untrusted.Tenant).Scan(&raw); err != nil {
+			return err
+		}
+		if json.Unmarshal(raw, &s) != nil || s.validate() != nil {
+			return fail(404, "not_found")
+		}
+		var err error
+		c, err = verifyCap(q.Get("cap"), s, m.Issuer, r.PathValue("design_rev"), m.clock())
+		if err != nil || c.Tenant != untrusted.Tenant {
+			return fail(404, "not_found")
+		}
+		var encrypted []byte
+		if err := tx.QueryRow(ctx, `SELECT service_credential FROM aithema_host_settings WHERE tenant_id=$1`, c.Tenant).Scan(&encrypted); err != nil || len(encrypted) == 0 {
+			return fail(404, "not_found")
+		}
+		plain, err := linkvault.Decrypt(m.vaultKey, c.Tenant, "aithema-service-jwt", encrypted)
+		if err != nil || plain == "" {
+			return fail(404, "not_found")
+		}
+		credential = secret(plain)
+		return nil
+	})
 	if err != nil {
 		notFound()
 		return
@@ -188,7 +212,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 	u := s.ServiceURL + "/aithema/preview/" + c.Design + "?" + q.Encode()
 	request, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	request.Header.Set("Authorization", "Bearer "+string(credential))
-	resp, err := serviceClient(s).Do(request)
+	resp, err := serviceClient(s, m.servicePolicy).Do(request)
 	if err != nil {
 		notFound()
 		return

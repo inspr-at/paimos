@@ -170,7 +170,7 @@ func (m *Module) sendCallback(ctx context.Context, tid string, c callback) (int,
 		request.Header.Set("X-Aithema-Session-Token", pair.SessionToken)
 		request.Header.Set("X-Aithema-Delegated-Token", pair.DelegatedToken)
 	}
-	resp, err := serviceClient(s).Do(request)
+	resp, err := serviceClient(s, m.servicePolicy).Do(request)
 	if err != nil {
 		return 0, nil
 	}
