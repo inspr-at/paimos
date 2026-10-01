@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Capture the actual /agents page/component on CI with deterministic API fixtures.
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
@@ -90,7 +90,24 @@ test('execution kinds and person-specific host names on the real agents table', 
   await page.locator(`[data-row="s:${ai.id}"]`).focus()
   await page.mouse.move(0, 0)
   const root = process.env.AEON_501_SHOTS
-  if (root) mkdirSync(root, { recursive: true })
+  if (root) {
+    mkdirSync(root, { recursive: true })
+    const layout = await page.locator('[data-row^="s:"]').evaluateAll(items => items.map(item => {
+      const row = item.getBoundingClientRect()
+      const state = item.querySelector('.c-state')!.getBoundingClientRect()
+      return { id: item.getAttribute('data-row'), height: row.height, stateLeft: state.left }
+    }))
+    const path = join(root, 'before-layout.json')
+    if (before) writeFileSync(path, JSON.stringify(layout))
+    else {
+      const baseline = JSON.parse(readFileSync(path, 'utf8')) as typeof layout
+      for (const row of layout) {
+        const original = baseline.find(item => item.id === row.id)!
+        expect(row.height, `${row.id} retains the base row height`).toBeCloseTo(original.height, 1)
+        expect(row.stateLeft, `${row.id} retains the base state position`).toBe(original.stateLeft)
+      }
+    }
+  }
   await page.screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}.png`) : info.outputPath(`${before ? 'before' : 'after'}.png`), fullPage: true, animations: 'disabled' })
   await page.locator('.sessions').screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}-sessions.png`) : info.outputPath(`${before ? 'before' : 'after'}-sessions.png`), animations: 'disabled' })
 })

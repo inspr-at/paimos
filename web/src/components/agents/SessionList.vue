@@ -644,11 +644,13 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; }
+/* Retain the pre-Host ticket allocation: the new column must not wrap ETA/%
+   or increase existing row heights. The other flexible tracks absorb Host. */
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; }
 @container sessions (max-width: 980px) {
   .sort-bar { display: flex; }
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 132px 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 132px 72px 76px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(max(104px, calc((100% - var(--state-width) - 148px) * .42 / 2.52)), .42fr) minmax(116px, .75fr) 132px 72px 76px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
