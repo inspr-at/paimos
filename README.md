@@ -963,15 +963,22 @@ When Connect is disabled, its reason appears beside the button.
 cd web
 npm run test:unit
 npm run test:browser-safety # tiny Node process fixtures; no browser locally
-# Full UI suites: prefer draft PR CI (including AEON-410's sharded UI jobs).
-# Or test committed HEAD on the approved mbp2606 lane:
+# Full UI suites: prefer CI; sharded UI jobs are tracked in AEON-410 (PR #29).
+# Prepared mbp2606 entry point (refuses until OPS-247 bootstrap is approved):
 AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
 # Locally, only one targeted file, one worker, when there is a technical reason:
 npm test -- tests/authz.spec.ts --workers=1
 ```
 
-`just ui-remote` is the same remote entry point from the repository root; extra
-arguments select files or reporters. Set `AEON_REMOTE_CONTROL_DIR` to the existing
+`just ui-remote` is the same remote entry point from the repository root. It
+currently refuses with exit 3 before SSH or dependency installation: OPS-247
+owns the approved browser bootstrap and shared heavy-job launcher. Use hosted
+draft PR CI while that work is pending. No environment flag enables the lane;
+the coordinator must confirm the launcher contract and review a follow-up change
+to enable it. No browsers or Playwright were installed on mbp2606 for AEON-508.
+
+The prepared runner accepts extra arguments to select files or reporters. Set
+`AEON_REMOTE_CONTROL_DIR` to the existing
 coordinator directory containing `remote-test.sh` and its OPS hold controls. The
 runner respects holds and capture reservations, refuses an active builder pool,
 Mailina's console session, a non-ci console idle less than ten minutes, unknown
@@ -981,8 +988,8 @@ or unreachability returns exit 3 and never starts a local suite. It streams only
 committed HEAD through `git archive` (no extra Git push), runs at one worker, and
 copies logs and test artifacts to `web/test-results/remote/<run>/`. The remote
 checkout and artifacts remain for inspection; no other worker's state is cleaned.
-OPS-247 owns the one-time pinned browser install: a missing headless shell refuses
-the run rather than installing one. When its shared lane launcher is available,
+After the gate is enabled, a missing pinned headless shell still refuses the run
+rather than installing one. When the approved shared lane launcher is available,
 `AEON_HEAVY_JOB_LANE=/absolute/launcher` wraps the job using `browser -- COMMAND ARGS`;
 the coordinator must confirm that adapter contract before enabling it.
 

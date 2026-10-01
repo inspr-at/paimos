@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { quote, remoteProbe, remoteScript } from './playwright-remote.mjs'
+import { quote, remoteProbe, remoteScript, runRemote } from './playwright-remote.mjs'
 
 const idle = { consoleUser: 'mba', idleSeconds: '600', load: '5', active: false, builderOn: false }
 function probe(overrides = {}) {
@@ -49,4 +49,38 @@ test('remote script checks presence again under the reservation and installs no 
   assert.doesNotMatch(script, /playwright install|git push|rm -/)
   assert.match(script, /CI= PW_WORKERS=1/)
   assert.throws(() => remoteScript('../foreign', []), /identity/)
+})
+
+test('OPS hold and capture controls refuse before any SSH or heavy setup', async () => {
+  const previous = process.env.AEON_REMOTE_CONTROL_DIR
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-remote-control-'))
+  try {
+    delete process.env.AEON_REMOTE_CONTROL_DIR
+    await assert.rejects(runRemote([]), /Set AEON_REMOTE_CONTROL_DIR/)
+    process.env.AEON_REMOTE_CONTROL_DIR = directory
+    await assert.rejects(runRemote([]), /OPS-247 bootstrap and approved launcher are pending/)
+    const cli = spawnSync(process.execPath, [new URL('./playwright-remote.mjs', import.meta.url).pathname], {
+      env: { ...process.env, AEON_HEAVY_JOB_LANE: '/unavailable-ops-launcher', AEON_UI_LANE_ACTIVE: '1' }, encoding: 'utf8',
+    })
+    assert.equal(cli.status, 3)
+    assert.match(cli.stderr, /OPS-247 bootstrap and approved launcher are pending/)
+    writeFileSync(join(directory, '.capture-open'), '')
+    await assert.rejects(runRemote([]), /capture window/)
+    writeFileSync(join(directory, '.hold-mbp2606'), '')
+    await assert.rejects(runRemote([]), /held by OPS/)
+  } finally { if (previous === undefined) delete process.env.AEON_REMOTE_CONTROL_DIR; else process.env.AEON_REMOTE_CONTROL_DIR = previous }
+})
+
+test('missing approved browser exits 3 and releases only this run reservation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-remote-missing-'))
+  const run = 'abcdefabcdef-12345678-1234-1234-1234-123456789abc'
+  const prelude = `lane_probe_home=${quote(directory)}\n` +
+    'stat() { echo mba; }\nioreg() { echo \'"HIDIdleTime" = 600000000000\'; }\nsysctl() { echo "{ 5 2 2 }"; }\n' +
+    'tar() { mkdir -p "$4/web"; }\nnpm() { :; }\nnode() { return 3; }\n'
+  const result = spawnSync('bash', ['-s'], { input: prelude + remoteScript(run, []).replaceAll('$HOME', '$lane_probe_home'), encoding: 'utf8' })
+  assert.equal(result.status, 3, result.stderr)
+  assert.equal(existsSync(join(directory, '.aeon-ui-remote.lock')), false)
+  assert.equal(existsSync(join(directory, `.aeon-remote-test/ui-${run}.pid`)), false)
+  // Run files remain for inspection; only our reservation is released.
+  assert.equal(existsSync(join(directory, `aeon-ui-runs/${run}/web`)), true)
 })

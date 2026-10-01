@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const host = 'mba@mbp2606.local'
 const sshArgs = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', host]
+// OPS-247 must supply the approved bootstrap and confirm its launcher contract
+// before a follow-up changes this gate. Environment flags cannot enable it.
+const remoteLaneReady = false
 export const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`
 
 // Check again under the host-wide browser lock, before extracting or installing
@@ -19,7 +22,7 @@ set -eu
 export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
 [ ! -e "$HOME/.aeon-builder-on" ] || { echo 'remote refused: builder pool active' >&2; exit 3; }
 console_user=$(stat -f %Su /dev/console)
-idle=$(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}')
+idle=$(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ && $NF ~ /^[0-9]+$/ {print int($NF/1000000000); exit}')
 load=$(sysctl -n vm.loadavg | awk '{print $2}')
 case "$console_user" in ''|mailina) echo 'remote refused: console presence' >&2; exit 3;; esac
 case "$idle" in ''|*[!0-9]*) echo 'remote refused: idle unknown' >&2; exit 3;; esac
@@ -43,7 +46,7 @@ suite_pid=''
 finish() {
   # Only these exact, self-created reservation files are removed. Run files and
   # artifacts remain for inspection; no worktree or unrelated state is pruned.
-  if [ -n "$suite_pid" ] && node --input-type=module -e 'import { existsSync } from "node:fs"; import { suiteLockPath } from "./scripts/playwright-global-setup.mjs"; process.exit(existsSync(suiteLockPath) ? 0 : 1)' 2>/dev/null; then
+  if [ -n "$suite_pid" ] && node --input-type=module -e 'import { existsSync } from "node:fs"; import { pathToFileURL } from "node:url"; const { suiteLockPath } = await import(pathToFileURL(process.argv[1])); process.exit(existsSync(suiteLockPath) ? 0 : 1)' "$run_dir/scripts/playwright-global-setup.mjs" 2>/dev/null; then
     echo 'remote cleanup not proven; reservations retained for inspection' >&2
     return
   fi
@@ -73,9 +76,11 @@ set +e
 CI= PW_WORKERS=1 node ../scripts/playwright-safe.mjs -c playwright.ui.config.ts ${args.map(quote).join(' ')} --workers=1 &
 suite_pid=$!
 echo "$suite_pid" > "$run_dir/supervisor.pid"
+ps -p "$suite_pid" -o lstart= > "$run_dir/supervisor.identity"
 wait "$suite_pid"
 rc=$?
 unlink "$run_dir/supervisor.pid"
+unlink "$run_dir/supervisor.identity"
 cd "$run_dir"
 exit "$rc"
 `
@@ -94,6 +99,7 @@ export async function runRemote(args) {
   if (!controls || !existsSync(controls)) throw new Error('Set AEON_REMOTE_CONTROL_DIR to the coordinator directory containing remote-test.sh and its OPS hold controls. Use draft PR CI while the lane is unavailable.')
   if (existsSync(join(controls, '.hold-mbp2606'))) throw new Error('Remote lane held by OPS; use draft PR CI. No local fallback.')
   if (existsSync(join(controls, '.capture-open'))) throw new Error('Remote capture window reserved; use draft PR CI. No local fallback.')
+  if (!remoteLaneReady) throw new Error('Remote browser lane unavailable: OPS-247 bootstrap and approved launcher are pending. Use draft PR hosted CI; no SSH, dependency or browser installation, or local fallback.')
   // An optional OPS-owned launcher wraps the entire SSH job once OPS-247 is
   // available. Its executable accepts: browser -- <command> <args...>.
   // It is opt-in: no invented autodetection or edits to workstation tooling.
@@ -133,7 +139,8 @@ export async function runRemote(args) {
       interrupted = true
       // Signal the exact run's supervisor before closing the SSH transport.
       // Its process group cleanup completes before the remote reservation ends.
-      const stop = spawn('ssh', [...sshArgs, `bash -c ${quote(`file="$HOME/aeon-ui-runs/${run}/supervisor.pid"; if [ -f "$file" ]; then read -r pid < "$file"; case "$pid" in ''|*[!0-9]*) exit 3;; esac; kill -TERM "$pid"; fi` )}`], { stdio: 'inherit' })
+      const stopScript = `run_dir="$HOME/aeon-ui-runs/${run}"; file="$run_dir/supervisor.pid"; if [ -f "$file" ]; then read -r pid < "$file"; case "$pid" in ''|*[!0-9]*) exit 3;; esac; expected=$(cat "$run_dir/supervisor.identity"); actual=$(ps -p "$pid" -o lstart=); [ -n "$expected" ] && [ "$expected" = "$actual" ] || exit 3; kill -TERM "$pid"; fi`
+      const stop = spawn('ssh', [...sshArgs, `bash -c ${quote(stopScript)}`], { stdio: 'inherit' })
       stop.once('error', () => { console.error('Could not signal the remote run; its reservation is retained for inspection') })
       archive.kill(signal)
     }

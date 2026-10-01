@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 
-export const suiteLockPath = join(tmpdir(), `aeon-playwright-${process.getuid?.() ?? 'user'}.lock`)
+// A fixed host directory prevents different worktree TMPDIR values from
+// accidentally creating independent locks on the same machine.
+export const suiteLockPath = join('/tmp', `aeon-playwright-${process.getuid?.() ?? 'user'}.lock`)
 
 export default function requireSupervisor() {
   // CI sharding (AEON-410) also supports direct Playwright invocations. Hosted

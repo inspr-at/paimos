@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -52,6 +52,19 @@ test('direct local Playwright invocation is refused before workers start', () =>
   finally { if (prior === undefined) delete process.env.CI; else process.env.CI = prior }
 })
 
+test('worktree TMPDIR overrides cannot split the host browser lock', () => {
+  const script = `import { suiteLockPath } from ${JSON.stringify(new URL('./playwright-global-setup.mjs', import.meta.url).href)}; console.log(suiteLockPath)`
+  const paths = ['first', 'second'].map(label => {
+    const directory = mkdtempSync(join(tmpdir(), `aeon-pw-${label}-`))
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, TMPDIR: directory, TMP: directory, TEMP: directory }, encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  })
+  assert.equal(paths[0], paths[1])
+})
+
 test('failed executable startup releases its lock', async () => {
   const lockPath = join(mkdtempSync(join(tmpdir(), 'aeon-pw-start-test-')), 'suite.lock')
   await assert.rejects(runOwnedCommand('/aeon-nonexistent-executable', [], { lockPath }), /ENOENT/)
@@ -85,14 +98,14 @@ for (const mode of ['normal', 'fail', 'hang']) {
 
 // Real Chromium is tested only in hosted CI after its pinned install. Local
 // safety checks use tiny Node descendants and never open a browser.
-for (const mode of ['browser', 'browser-fail', 'browser-hang']) {
-  test(`Chromium shell lifecycle: ${mode}`, { skip: process.env.AEON_BROWSER_LIFECYCLE !== '1' }, async () => {
+for (const [mode, signal] of [['browser'], ['browser-fail'], ['browser-hang', 'SIGINT'], ['browser-hang', 'SIGTERM']]) {
+  test(`Chromium shell lifecycle: ${mode}${signal ? ` ${signal}` : ''}`, { skip: process.env.AEON_BROWSER_LIFECYCLE !== '1' }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-browser-test-'))
     const probe = fixture(mode, directory)
     try {
       await waitReady(probe.ready, probe.exited)
-      if (mode === 'browser-hang') probe.child.kill('SIGTERM')
-      assert.equal(await probe.completion, mode === 'browser' ? 0 : mode === 'browser-fail' ? 7 : 143, probe.log())
+      if (signal) probe.child.kill(signal)
+      assert.equal(await probe.completion, signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : mode === 'browser-fail' ? 7 : 0, probe.log())
       const result = JSON.parse(readFileSync(probe.output, 'utf8'))
       assert.ok(result.metrics.peak > 0, 'must measure actual browser processes')
       assert.equal(result.metrics.after, 0)

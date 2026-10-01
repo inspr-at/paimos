@@ -94,6 +94,9 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
       const handler = () => {
         if (interrupt) return
         interrupt = signal
+        // Capture live browsers before signalling; short runs may finish
+        // between periodic samples, especially immediately after readiness.
+        sample()
         signalGroup(child.pid, signal)
         escalation = setTimeout(() => signalOwned('SIGKILL'), graceMs)
       }
@@ -106,6 +109,7 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
     const result = await exited
     clearInterval(timer)
     clearTimeout(escalation)
+    sample()
     // Playwright closes fixture browsers normally. Sweep only this run's groups
     // as a backstop for failed startup, custom launches and interrupted workers.
     signalOwned('SIGTERM')

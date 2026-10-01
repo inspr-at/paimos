@@ -8,13 +8,14 @@ if (mode === 'browser' || mode === 'browser-fail' || mode === 'browser-hang') {
   const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'] })
   const page = await browser.newPage()
   await page.setContent('<h1>Isolated browser lifecycle probe</h1>')
-  writeFileSync(ready, 'ready')
   if (mode === 'browser-hang') {
     // Deliberately ignore termination to exercise the supervisor backstop.
     process.on('SIGTERM', () => {})
     process.on('SIGINT', () => {})
     setInterval(() => {}, 1000)
+    writeFileSync(ready, 'ready')
   } else {
+    writeFileSync(ready, 'ready')
     await new Promise(resolve => setTimeout(resolve, 400))
     await browser.close()
     process.exit(mode === 'browser-fail' ? 7 : 0)
