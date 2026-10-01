@@ -1063,8 +1063,10 @@ rather than installing one. When the approved shared lane launcher is available,
 the coordinator must confirm that adapter contract before enabling it.
 
 All three Playwright configs default to one worker locally; `PW_WORKERS` is an
-explicit positive-integer override. UI test-level parallelism is enabled only
-in CI, whose worker/shard budget remains owned by CI (AEON-410). Local UI runs use
+explicit positive-integer override. Local CLI `--workers` / `-j` values are
+ignored unless `PW_WORKERS` is set. Only the UI config opts into test-level
+parallelism in CI; smoke and performance keep their serial test behavior.
+CI's worker/shard budget remains owned by CI (AEON-410). Local UI runs use
 one project and Playwright's bundled [Chromium headless shell](https://playwright.dev/docs/browsers#chromium-headless-shell)
 with GPU disabled. Smoke and performance runs use the same browser policy.
 
@@ -1075,10 +1077,27 @@ suite prints the lock path and owner PID and refuses to start. An interrupted or
 failed run terminates only its own process groups, checks that they are empty, and
 then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
 and wall time. A Node preload records detached browser groups when they spawn,
-preserving Playwright's normal browser shutdown behavior. Forced supervisor
-termination (SIGKILL) cannot run cleanup: if a
-stale lock remains, confirm its recorded owner and descendants have exited before
-moving that exact lock to trash. Never kill other workers' or desktop browsers.
+preserving Playwright's normal browser shutdown behavior. The lock descriptor
+stays open throughout the run. After forced supervisor termination (SIGKILL),
+the next run recovers a dead owner's lock under an exclusive recovery claim:
+it signals only journalled groups with matching process start identities,
+verifies that they have exited, and removes that owner's journal and lock before
+starting. Live owners, missing identities/journals, reused PIDs and unverified
+orphan groups refuse recovery. One mismatched group cannot prevent an active
+run from cleaning up its other verified groups. Metrics use stderr so JSON
+reporter stdout remains parseable. Never kill other workers' or desktop browsers.
+If recovery itself is interrupted, its `.guard` claim deliberately remains:
+inspect the exact lock, journal and claim before an operator clears them; no
+automatic recovery can steal a claim from a potentially active reaper.
+
+When AEON-410's runner from PR #29 is integrated, use `npm run test:ui-shards --
+--shard=1/8` (or `node scripts/playwright-ui-shards-safe.mjs --shard=1/8` from
+the root) in place of calling `playwright-ui-shards.mjs` directly. This wrapper
+supervises the whole existing planner, JSON listing, selection verification and
+shard execution, without duplicating its sharding or compiled graph. It sets
+`AEON_PW_SHARD=1` and `PW_WORKERS=1`; keep `workers: 1` and
+`fullyParallel: false` **after** the policy spread in the merged UI config.
+The wrapper refuses before acquiring a lock when that runner is absent.
 
 The Playwright UI suite starts Vite on a stable port derived from its worktree
 path; `PLAYWRIGHT_PORT` overrides it. Set `PLAYWRIGHT_REUSE=1` only for a dev server

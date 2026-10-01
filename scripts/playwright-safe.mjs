@@ -1,95 +1,59 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawn, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { suiteLockPath } from './playwright-global-setup.mjs'
+import { acquireLock } from './playwright-lock.mjs'
+import { processStart, trackGroups, validStart } from './playwright-processes.mjs'
+export { acquireLock } from './playwright-lock.mjs'
+export { groupProcesses } from './playwright-processes.mjs'
 
 const delay = ms => new Promise(resolveDelay => setTimeout(resolveDelay, ms))
 
-export function acquireLock(path = suiteLockPath) {
-  const token = randomUUID()
-  let fd
-  try { fd = openSync(path, 'wx', 0o600) } catch (error) {
-    if (error.code !== 'EEXIST') throw error
-    let pid = 'unknown'
-    try { pid = JSON.parse(readFileSync(path, 'utf8')).pid } catch { /* fail closed */ }
-    throw new Error(`Another Aeon browser suite holds ${path} (PID ${pid}). Wait for it to finish. If its owner has exited, inspect the lock and move that stale lock to trash; never stop another worker's processes.`)
-  }
-  try { writeFileSync(fd, JSON.stringify({ pid: process.pid, token, started: new Date().toISOString() })) }
-  finally { closeSync(fd) }
-  return { token, release() {
-    // Never remove a lock that another owner replaced.
-    if (JSON.parse(readFileSync(path, 'utf8')).token === token) unlinkSync(path)
-  } }
-}
-
-function processTable() {
-  // Read numeric identity and executable names only, never args or environments.
-  const result = spawnSync('ps', ['-axo', 'pid=,pgid=,lstart=,comm='], { encoding: 'utf8' })
-  if (result.status !== 0) throw new Error('Cannot inspect the owned browser process group')
-  return result.stdout.trim().split('\n').flatMap(line => {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\w+\s+\w+\s+\d+\s+\d\d:\d\d:\d\d\s+\d+)\s+(.+)$/)
-    return match ? [{ pid: Number(match[1]), group: Number(match[2]), started: match[3].replaceAll(/\s+/g, ' '), name: match[4] }] : []
-  })
-}
-
-export function groupProcesses(pgid) { return processTable().filter(row => row.group === pgid) }
-
-function signalGroup(pgid, signal) {
-  try { process.kill(-pgid, signal) } catch (error) { if (error.code !== 'ESRCH') throw error }
-}
-
-function trackGroups(log) {
-  const groups = new Map()
-  let consumed = 0, rootAdded = false
-  return child => {
-    if (!rootAdded && child?.pid) { groups.set(child.pid, ''); rootAdded = true }
-    const contents = readFileSync(log, 'utf8')
-    const complete = contents.lastIndexOf('\n') + 1
-    for (const line of contents.slice(consumed, complete).split('\n').filter(Boolean)) {
-      const entry = JSON.parse(line)
-      if (!Number.isSafeInteger(entry.pid) || entry.pid <= 1) throw new Error('Invalid owned process group identity')
-      groups.set(entry.pid, entry.started.replaceAll(/\s+/g, ' '))
-    }
-    consumed = complete
-    const table = processTable()
-    for (const [pid, started] of groups) {
-      const leader = table.find(row => row.pid === pid)
-      if (leader && started && leader.started !== started) throw new Error('Owned process group identity changed; refusing to signal it')
-      // Retire exited groups so large suites do not poll every historical PID.
-      if (!table.some(row => row.group === pid)) groups.delete(pid)
-    }
-    return { groups: [...groups.keys()], rows: table.filter(row => groups.has(row.group)) }
-  }
-}
-
-export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000 } = {}) {
+export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false } = {}) {
   if (process.platform === 'win32') throw new Error('Browser supervision requires POSIX process groups; use Linux CI on Windows')
-  const lock = acquireLock(lockPath)
+  const lock = await acquireLock(lockPath, { graceMs })
   const groupLog = `${lockPath}.${lock.token}.groups`
-  writeFileSync(groupLog, '', { flag: 'wx', mode: 0o600 })
   const start = Date.now()
-  let child, interrupt, peak = 0, timer, monitoringError
+  let child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = ''
   const browserCount = rows => rows.filter(row => /chrom(?:e|ium)|headless_shell/i.test(row.name)).length
   const snapshot = trackGroups(groupLog)
-  const rowsOwned = () => snapshot(child).rows
-  const signalOwned = signal => { for (const group of snapshot(child).groups) signalGroup(group, signal) }
+  const rowsOwned = () => snapshot.snapshot().rows
+  const signalOwned = signal => {
+    try {
+      const errors = snapshot.signal(signal)
+      if (errors.length) monitoringError ??= errors[0]
+    } catch (error) { monitoringError ??= error }
+  }
   const sample = () => {
     try { peak = Math.max(peak, browserCount(rowsOwned())) }
-    catch (error) { monitoringError = error; signalGroup(child.pid, 'SIGTERM') }
+    catch (error) { monitoringError ??= error; signalOwned('SIGTERM') }
   }
   const handlers = new Map()
   let escalation
   try {
+    writeFileSync(groupLog, '', { flag: 'wx', mode: 0o600 })
+    journalCreated = true
     const preload = new URL('./playwright-owned-groups.mjs', import.meta.url).href
-    child = spawn(command, args, { cwd, env: { ...env, AEON_PW_RUN: lock.token, AEON_PW_GROUP_LOG: groupLog, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --import=${preload}` }, stdio: 'inherit', detached: true })
+    child = spawn(command, args, { cwd, env: { ...env, AEON_PW_RUN: lock.token, AEON_PW_GROUP_LOG: groupLog, AEON_PW_OWNER: String(process.pid), AEON_PW_OWNER_STARTED: lock.started, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --import=${preload}` }, stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', detached: true })
+    if (capture) {
+      child.stdout.on('data', data => { stdout += data })
+      child.stderr.on('data', data => { stderr += data })
+    }
     const exited = new Promise((resolveExit, reject) => {
       child.once('error', reject)
       // 'exit', not 'close': an orphan may still hold inherited output pipes.
       child.once('exit', (code, signal) => resolveExit({ code, signal }))
     })
+    if (child.pid) {
+      const started = processStart(child.pid)
+      if (!validStart(started)) {
+        // Fast commands can exit before ps. The preload also journals the
+        // root before executing user code; never create an unverified entry.
+        monitoringError = new Error('Could not establish root process start time')
+      } else appendFileSync(groupLog, `${JSON.stringify({ pid: child.pid, started })}\n`)
+    }
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
       const handler = () => {
         if (interrupt) return
@@ -97,13 +61,13 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
         // Capture live browsers before signalling; short runs may finish
         // between periodic samples, especially immediately after readiness.
         sample()
-        signalGroup(child.pid, signal)
+        signalOwned(signal)
         escalation = setTimeout(() => signalOwned('SIGKILL'), graceMs)
       }
       handlers.set(signal, handler)
       process.on(signal, handler)
     }
-    console.log('AEON_PW_PROCESSES before=0 (new owned group)')
+    console.error('AEON_PW_PROCESSES before=0 (new owned group)')
     sample()
     timer = setInterval(sample, 250)
     const result = await exited
@@ -120,23 +84,49 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
     while (rowsOwned().length && Date.now() < killDeadline) await delay(50)
     const rows = rowsOwned()
     const metrics = { before: 0, peak, after: browserCount(rows), remaining_processes: rows.length, wall_ms: Date.now() - start, signal: interrupt ?? result.signal }
-    console.log(`AEON_PW_PROCESSES ${JSON.stringify(metrics)}`)
-    if (rows.length) throw new Error('Owned browser processes survived shutdown; host lock retained')
+    console.error(`AEON_PW_PROCESSES ${JSON.stringify(metrics)}`)
+    const state = snapshot.snapshot()
+    if (rows.length || state.unverified.length || state.issues.length) throw new Error('Owned browser processes or incomplete identities survived shutdown; host lock retained')
     if (monitoringError) throw monitoringError
-    return { code: interrupt ? ({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[interrupt]) : result.code ?? 1, metrics }
+    return { code: interrupt ? ({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[interrupt]) : result.code ?? 1, metrics, ...(capture ? { stdout, stderr } : {}) }
   } finally {
     clearInterval(timer)
     clearTimeout(escalation)
     for (const [signal, handler] of handlers) process.off(signal, handler)
-    // Keep the lock if cleanup cannot prove the group is gone.
-    if (!child?.pid || rowsOwned().length === 0) { unlinkSync(groupLog); lock.release() }
+    // Always attempt cleanup after a throw. A reused PID is excluded by the
+    // tracker; it cannot abort signalling or lock release for valid siblings.
+    let releasable = !child?.pid
+    try {
+      if (journalCreated && child?.pid) {
+        signalOwned('SIGKILL')
+        const deadline = Date.now() + 2000
+        while (rowsOwned().length && Date.now() < deadline) await delay(50)
+        const state = snapshot.snapshot()
+        releasable = state.rows.length === 0 && state.unverified.length === 0 && state.issues.length === 0
+      }
+      if (releasable) {
+        lock.release({ journal: journalCreated })
+      }
+    } finally { lock.close() }
   }
+}
+
+export function localWorkerArgs(args, env = process.env) {
+  if ((env.CI && !['0', 'false'].includes(env.CI)) || env.PW_WORKERS !== undefined) return [...args]
+  const result = []
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === '--workers' || arg === '-j') { index++; continue }
+    if (arg.startsWith('--workers=') || /^-j=?\d/.test(arg)) continue
+    result.push(arg)
+  }
+  return [...result, '--workers=1']
 }
 
 export async function runPlaywright(args, options = {}) {
   const web = fileURLToPath(new URL('../web/', import.meta.url))
   const cli = resolve(web, 'node_modules/@playwright/test/cli.js')
-  return runOwnedCommand(process.execPath, [cli, 'test', ...args], { cwd: web, ...options })
+  return runOwnedCommand(process.execPath, [cli, 'test', ...localWorkerArgs(args, options.env ?? process.env)], { cwd: web, ...options })
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

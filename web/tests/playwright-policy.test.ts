@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { browserPolicy, headlessChromium } from '../playwright.policy.ts'
+import { browserPolicy, headlessChromium, uiShardPolicy } from '../playwright.policy.ts'
 
 test('local configs serialize workers and tests; CI keeps its own defaults', () => {
   for (const CI of [undefined, '', '0', 'false']) {
@@ -11,7 +11,23 @@ test('local configs serialize workers and tests; CI keeps its own defaults', () 
   assert.equal(browserPolicy({ CI: 'true' }, 4).workers, 4)
   assert.equal(browserPolicy({ CI: 'true' }).workers, undefined)
   assert.equal(browserPolicy({ CI: 'true' }, 1).workers, 1)
-  assert.equal(browserPolicy({ CI: 'true' }, 4).fullyParallel, true)
+  assert.equal(browserPolicy({ CI: 'true' }, 4).fullyParallel, false)
+  assert.equal(browserPolicy({ CI: 'true' }, 4, true).fullyParallel, true)
+  assert.equal(browserPolicy({}, 4, true).fullyParallel, false)
+})
+
+test('smoke and performance CI keep serial tests while UI explicitly opts in', () => {
+  assert.equal(browserPolicy({ CI: '1' }).fullyParallel, false)
+  assert.equal(browserPolicy({ CI: '1' }, 1).fullyParallel, false)
+  assert.equal(browserPolicy({ CI: '1' }, 4, true).fullyParallel, true)
+})
+
+test('shard budget overrides UI policy spread even with CI or PW_WORKERS overrides', () => {
+  const env = { CI: '1', PW_WORKERS: '4', AEON_PW_SHARD: '1' }
+  const policy = { ...browserPolicy(env, 4, true), ...uiShardPolicy(env) }
+  assert.equal(policy.workers, 1)
+  assert.equal(policy.fullyParallel, false)
+  assert.deepEqual(uiShardPolicy({}), {})
 })
 
 test('worker override is explicit and invalid overrides fail closed', () => {

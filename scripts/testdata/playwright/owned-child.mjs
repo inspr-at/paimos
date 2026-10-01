@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 const [mode, ready, pidFile] = process.argv.slice(2)
 
 if (mode === 'browser' || mode === 'browser-fail' || mode === 'browser-hang') {
@@ -21,6 +21,7 @@ if (mode === 'browser' || mode === 'browser-fail' || mode === 'browser-hang') {
     process.exit(mode === 'browser-fail' ? 7 : 0)
   }
 } else {
+  if (process.env.AEON_PW_REUSE_PID) appendFileSync(process.env.AEON_PW_GROUP_LOG, `${JSON.stringify({ pid: Number(process.env.AEON_PW_REUSE_PID), started: 'Mon Jan 1 00:00:00 2001' })}\n`)
   const orphan = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); process.on("SIGINT", () => {}); setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true })
   writeFileSync(pidFile, String(orphan.pid))
   // Keep unrelated child alive until this parent is terminated; normal exit
