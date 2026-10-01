@@ -89,7 +89,9 @@ describe('online, no readings yet', () => {
   it('each account is ready, and capacity says honestly that nothing was read', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
     expect(cards[0].accounts[0].capacity).toEqual({ kind: 'none' })
-    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: "Cursor doesn't report a usage limit" })
+    // The approved Ready state: Cursor without a reading is "No reading yet" with Check now,
+    // never "doesn't report a usage limit" (nothing in the projection confirms that).
+    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'none' })
     expect(cards[0].legend).toBe(false)
     expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
   })
@@ -119,6 +121,42 @@ describe('online with readings', () => {
     cap[0].routing = { rank: 0, available_slots: 0, wait: { code: 'vendor', until: '2026-10-01T18:00:00Z', run_now_allowed: false } }
     const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
     expect(card.accounts[0].readiness).toMatchObject({ kind: 'limit', tone: 'warn' })
+  })
+})
+
+describe('waits from the server routing', () => {
+  // AEON-499 review: a capacity or reading wait (rank 0, no slot, run_now_allowed false) showed "Ready".
+  const waiting = (code: 'capacity' | 'reading') => {
+    const cap = capacity([weekly(40)])
+    cap[0].routing = { rank: 0, available_slots: 0, wait: { code, run_now_allowed: false } }
+    return buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+  }
+  it('a run still working makes the account busy, not ready', () => {
+    const cards = waiting('capacity')
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip: 'Waiting for the current run to finish' })
+    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
+  })
+  it('a reading on its way makes the account wait, not ready', () => {
+    const cards = waiting('reading')
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'waiting', text: 'Waiting for a reading', tone: 'mute' })
+    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
+  })
+  it('the only account busy is "0 of 1 ready", and a warning elsewhere still warns', () => {
+    const cap = capacity([weekly(40)]).slice(0, 1)
+    cap[0].routing = { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } }
+    const view = computer({ enrollments: computer().enrollments.slice(0, 1) })
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online').slice(0, 1), cap), now: NOW })
+    expect(readySummary(cards)).toEqual({ text: '0 of 1 ready', tone: 'mute' })
+    const signin = computer({ harness_statuses: { codex: 'ready', cursor: 'login_required' }, harness_details: { cursor: { state: 'login_required', reason: 'login_required' } } })
+    const mixed = capacity([weekly(40)])
+    mixed[0].routing = { rank: 0, available_slots: 0, wait: { code: 'reading', run_now_allowed: false } }
+    expect(readySummary(buildComputerCards({ computers: [signin], rows: buildRows(inputs('online'), mixed), now: NOW }))).toEqual({ text: '0 of 2 ready', tone: 'warn' })
+  })
+  it('a ranked account with a free slot stays ready', () => {
+    const cap = capacity([weekly(40)])
+    cap[0].routing = { rank: 1, available_slots: 2 }
+    const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+    expect(card.accounts[0].readiness.kind).toBe('ready')
   })
 })
 

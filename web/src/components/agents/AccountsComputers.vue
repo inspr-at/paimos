@@ -57,13 +57,14 @@ const pacingLine = computed(() => pacingSummary(schedule.value))
 const empty = computed(() => capacity.loaded && !cards.value.length)
 const shown = (line: AccountLine) => middleEllipsis(line.identity, 48)
 
-// ---------- Check now: read capacity again, say plainly when nothing came ----------
+// ---------- Check now: read capacity again; say what came back, a failure as a failure ----------
 const checking = ref('')
 async function checkNow(line: AccountLine, host: string) {
   if (checking.value) return
   checking.value = line.id
   try {
-    await capacity.refreshCapacity()
+    const outcome = await capacity.refreshCapacity()
+    if (!outcome.ok) { toast(`Capacity could not be read${'error' in outcome ? `: ${outcome.error}` : '.'} Please try again.`, { tone: 'error' }); return }
     const fresh = capacity.rows.find(r => r.id === line.id)
     toast(fresh?.primary ? `${line.vendor} on ${host}: reading updated.` : `No reading yet for ${line.vendor} on ${host}. It arrives with its next run.`)
   } catch { toast('Capacity could not be read. Please try again.', { tone: 'error' }) }
@@ -562,7 +563,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 /* One pill shape for every state: a subtle full tint, never an edge bar. */
 .pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
 .pill.ok { background: color-mix(in srgb, var(--ok) 13%, transparent); color: color-mix(in srgb, var(--ok) 70%, var(--ink)); }
-.pill.warn { background: color-mix(in srgb, var(--gold) 17%, transparent); color: var(--gold-ink); }
+/* Warning text is --warn-ink: --gold-ink on this tint is about 4:1 in light, under 4.5:1. */
+.pill.warn { background: color-mix(in srgb, var(--gold) 17%, transparent); color: var(--warn-ink); }
 .pill.mute { background: var(--surface-sunken); color: var(--ink-2); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: currentColor; }
 .pill.ok .dot { background: var(--ok); }
@@ -592,7 +594,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .c-name { color: var(--ink); font: 700 18px/1.2 var(--font); letter-spacing: -.01em; overflow-wrap: anywhere; }
 .c-agent { padding: 5px 8px; border-radius: 7px; background: var(--surface-sunken); color: var(--ink-2); font: 500 11px/1 var(--mono); white-space: nowrap; }
 .c-caption { margin: 3px 0 0; color: var(--ink-3); font-size: 13px; overflow-wrap: anywhere; }
-.c-advice { margin: 4px 0 0; color: var(--gold-ink); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.c-advice { margin: 4px 0 0; color: var(--warn-ink); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .r-hint { margin: 0; max-width: 100%; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .c-side { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .more { width: 36px; height: 36px; color: var(--ink-2); }
@@ -603,7 +605,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .n-body { margin: 2px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
 .n-fix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; }
 .n-fix code { padding: 7px 10px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: 13px; line-height: 1; }
-.n-copy, .fix, .check-now { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--gold-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
+.n-copy, .fix, .check-now { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--warn-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
 @media (hover: hover) { .n-copy:hover, .fix:hover { background: var(--row-hover); } }
 .n-copy:focus-visible, .fix:focus-visible, .check-now:focus-visible { box-shadow: var(--focus-ring); }
 .c-details { margin: 10px 0 0 58px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }

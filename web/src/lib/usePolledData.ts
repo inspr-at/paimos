@@ -5,6 +5,8 @@ import { positionOf, type ReadOrder } from './position'
 
 export type PollState = 'idle' | 'ready' | 'forbidden' | 'error'
 export interface RefreshStatus { state: PollState; failures: number; updatedAt: number | null; error: string }
+/** What one refresh did: kept a new answer, failed with the reason shown, or was dropped as out of date. */
+export type RefreshOutcome = { ok: true } | { ok: false; error: string } | { ok: false; dropped: true }
 export const initialRefreshStatus = (): RefreshStatus => ({ state: 'idle', failures: 0, updatedAt: null, error: '' })
 export function refreshStatus(previous: RefreshStatus, result: { ok: true; at: number } | { ok: false; error: string; forbidden?: boolean }): RefreshStatus {
   if (result.ok) return { state: 'ready', failures: 0, updatedAt: result.at, error: '' }
@@ -29,48 +31,49 @@ export function usePolledData<R, T>(read: () => Promise<R>, initial: T, onSucces
   const data = shallowRef<T>(initial) as Ref<T>
   const status = shallowRef(initialRefreshStatus())
   const stale = computed(() => status.value.failures > 0 && status.value.updatedAt !== null)
-  let flight: Promise<void> | undefined
+  let flight: Promise<RefreshOutcome> | undefined
   let flightTurn = -1
   let generation = 0
   function invalidate() { generation++ }
   // Refreshes join the read in flight only while it is current: after an
   // invalidation the next refresh reads again instead of waiting on a dropped one.
-  function refresh(): Promise<void> {
+  // A caller that must say what happened (Check now) reads the outcome; pollers ignore it.
+  function refresh(): Promise<RefreshOutcome> {
     if (flight && flightTurn === generation) return flight
     const turn = generation
     flightTurn = turn
-    const current: Promise<void> = (async () => {
+    const dropped: RefreshOutcome = { ok: false, dropped: true }
+    const current: Promise<RefreshOutcome> = (async (): Promise<RefreshOutcome> => {
       for (let attempt = 0; attempt < 2; attempt++) {
         const started = Date.now()
-        const dropped = () => turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+        const gone = () => turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')
         try {
           const ticket = order?.begin()
           const value = await read()
-          if (dropped()) return
+          if (gone()) return dropped
           const verdict = order && ticket ? order.land(ticket, positionOf(value)) : 'apply'
           if (verdict === 'stale') continue
-          if (verdict === 'older') return
+          if (verdict === 'older') return dropped
           const adopted = adopt ? adopt(value) : value as unknown as T
           data.value = adopted
           onSuccess?.(adopted)
           status.value = refreshStatus(status.value, { ok: true, at: Date.now() })
-          return
+          return { ok: true }
         } catch (error) {
-          if (error instanceof StaleRequestError || dropped()) return
-          status.value = refreshStatus(status.value, {
-            ok: false, error: error instanceof APIError ? `The server answered “${error.message}” (${error.status}).` : error instanceof Error ? error.message : 'Request failed. Please try again.',
-            forbidden: error instanceof APIError && error.status === 403,
-          })
-          return
+          if (error instanceof StaleRequestError || gone()) return dropped
+          const message = error instanceof APIError ? `The server answered “${error.message}” (${error.status}).` : error instanceof Error ? error.message : 'Request failed. Please try again.'
+          status.value = refreshStatus(status.value, { ok: false, error: message, forbidden: error instanceof APIError && error.status === 403 })
+          return { ok: false, error: message }
         }
       }
+      return dropped
     })().finally(() => { if (flight === current) flight = undefined })
     flight = current
     return current
   }
   return { data, status, stale, refresh, invalidate }
 }
-export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>; stale: ComputedRef<boolean>; refresh: () => Promise<void>; invalidate: () => void }
+export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>; stale: ComputedRef<boolean>; refresh: () => Promise<RefreshOutcome>; invalidate: () => void }
 
 // The same lifecycle for every periodic read. Ticks never stack; coming back to
 // a tab or network refreshes immediately, including after a suspended timer.

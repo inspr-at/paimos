@@ -125,7 +125,10 @@ test('accounts and computers fit every width, panel open and closed', async ({ p
   const mbp = card.getByRole('region', { name: 'Computer mbp2607' })
   await expect(mbp.getByRole('row')).toHaveCount(6)
   await expect(card.getByRole('region', { name: 'Computer studio' }).getByRole('row')).toHaveCount(1)
-  await expect(mbp.getByRole('row').filter({ hasText: 'Pi on the home server' })).toContainText("Pi doesn't report a usage limit")
+  // No reading is never taken as "no limit": it is said as such, with Check now.
+  const pi = mbp.getByRole('row').filter({ hasText: 'Pi on the home server' })
+  await expect(pi).toContainText('No reading yet')
+  await expect(pi.getByRole('button', { name: 'Check now' })).toBeVisible()
   await expect(mbp.locator('.identity').filter({ hasText: /^production/ })).toHaveAttribute('title', UNBROKEN)
   if (shots) mkdirSync(shots, { recursive: true })
 

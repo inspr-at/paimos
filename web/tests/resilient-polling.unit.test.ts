@@ -42,3 +42,26 @@ it('keeps a good snapshot through two failures and flags the third without losin
   expect(refreshStatus(three, { ok: true, at: 200 })).toEqual({ state: 'ready', failures: 0, updatedAt: 200, error: '' })
   expect(refreshStatus(initialRefreshStatus(), { ok: false, error: 'No connection' }).state).toBe('error')
 })
+
+// AEON-499 review: Check now awaited refresh() for a rejection that never came, so a
+// 500 read as "no reading yet". The refresh now says what it did.
+it('refresh reports a kept answer, a failure with its reason, and a dropped read', async () => {
+  const { APIError } = await import('../src/lib/api')
+  const { usePolledData } = await import('../src/lib/usePolledData')
+  const ok = usePolledData(async () => [1], [] as number[])
+  await expect(ok.refresh()).resolves.toEqual({ ok: true })
+  expect(ok.data.value).toEqual([1])
+  const empty = usePolledData(async () => [] as number[], [9])
+  await expect(empty.refresh()).resolves.toEqual({ ok: true })
+  expect(empty.data.value).toEqual([])
+  const failed = usePolledData(async () => { throw new APIError(500, 'internal error') }, [] as number[])
+  await expect(failed.refresh()).resolves.toEqual({ ok: false, error: 'The server answered “internal error” (500).' })
+  expect(failed.status.value.state).toBe('error')
+  let release: (v: number[]) => void = () => {}
+  const slow = usePolledData(() => new Promise<number[]>(resolve => { release = resolve }), [] as number[])
+  const pending = slow.refresh()
+  slow.invalidate()
+  release([2])
+  await expect(pending).resolves.toEqual({ ok: false, dropped: true })
+  expect(slow.data.value).toEqual([])
+})

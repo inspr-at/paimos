@@ -11,7 +11,6 @@ export type WorkingView = 'area' | 'model'
 export interface WorkingPreference { cap?: number; view?: WorkingView; area?: Record<string, number>; model?: Record<string, number> }
 export const CAP_MIN = 1
 export const CAP_MAX = 12
-export const DEFAULT_CAP = 4
 /** A session holds a slot while it works, waits on a person, starts, or is throttled. */
 export const RUNNING_GROUPS = ['working', 'needs', 'awaiting', 'throttled'] as const
 
@@ -28,9 +27,15 @@ export interface WorkingRow {
   canDec: boolean; canInc: boolean
 }
 export interface WorkingPlan {
-  cap: number; running: number; view: WorkingView
-  /** The person has not chosen a total yet: the number shows what runs now. */
+  /** The person's total; null until they choose one, and nothing stands in for it. */
+  cap: number | null
+  running: number; view: WorkingView
   unset: boolean
+  /** Where a first step starts while no total is set: what runs now. */
+  from: number
+  canFewer: boolean; canMore: boolean
+  /** Every agent of the total is assigned: no row takes another. */
+  full: boolean
   /** Areas with no work and no target, offered as quiet "+ Area" choices. */
   spare: { key: string; label: string }[]
   runningLine: string
@@ -60,7 +65,10 @@ export function workingPlan(input: { pref: WorkingPreference | null; sessions: R
   const pref = input.pref ?? {}
   const running = input.sessions.length
   const unset = pref.cap === undefined
-  const cap = clampCap(pref.cap ?? Math.max(running, DEFAULT_CAP))
+  const cap = unset ? null : clampCap(pref.cap!)
+  // A step without a total starts from what runs now; a row target then fixes that total.
+  const from = cap ?? running
+  const limit = clampCap(from)
   const view: WorkingView = pref.view === 'model' ? 'model' : 'area'
   const targets = (view === 'area' ? pref.area : pref.model) ?? {}
   const count = (key: string) => input.sessions.filter(s => (view === 'area' ? s.area : s.harness) === key).length
@@ -79,22 +87,32 @@ export function workingPlan(input: { pref: WorkingPreference | null; sessions: R
       ? `${n} running · ${AREA_HINT[key] ?? key}`
       : `${n} running${models.length ? ` · ${models.slice(0, 2).join(', ')}${models.length > 2 ? ` +${models.length - 2}` : ''}` : ''}`
     const label = view === 'area' ? AREA_LABEL[key] ?? key : HARNESS_NAME[key] ?? key
-    return { key, label, initial: label.slice(0, 1).toUpperCase(), sub, running: n, target, dots: dotsOf(n, target), canDec: target > 0, canInc: assigned < cap }
+    return { key, label, initial: label.slice(0, 1).toUpperCase(), sub, running: n, target, dots: dotsOf(n, target), canDec: target > 0, canInc: assigned < limit }
   })
-  const flexible = Math.max(0, cap - assigned)
+  const flexible = cap === null ? 0 : Math.max(0, cap - assigned)
   const capacity = input.roomNow !== null ? `the accounts have room for ${plural(input.roomNow, 'more agent', 'more agents')} now` : input.capacityKnown ? '' : 'no capacity readings yet, so the limits are yours, not the accounts’'
-  const footLine = [
-    `${assigned} of ${cap} assigned`,
+  // Without a total there is nothing to assign against: only the accounts' room is said.
+  const foot = [
+    cap === null ? '' : `${assigned} of ${cap} assigned`,
     flexible ? `${flexible} flexible: any ${view === 'area' ? 'area' : 'model'} takes them` : '',
     capacity,
   ].filter(Boolean).join(' · ')
+  const footLine = foot.charAt(0).toUpperCase() + foot.slice(1)
   const spare = view === 'area' ? AREAS.filter(key => !used(key)).map(key => ({ key, label: AREA_LABEL[key] })) : []
-  return { cap, running, view, unset, spare, runningLine: unset ? 'no target set yet' : freeLine(cap, running), capDots: dotsOf(running, cap), rows, assigned, flexible, footLine }
+  return {
+    cap, running, view, unset, from,
+    // Without a total, − sets one below what runs now and + one above.
+    canFewer: from > CAP_MIN, canMore: from < CAP_MAX,
+    full: assigned >= limit, spare,
+    runningLine: cap === null ? 'no target set yet' : freeLine(cap, running),
+    // Rings are free slots of a chosen total; without one only what runs is drawn.
+    capDots: dotsOf(running, cap ?? 0), rows, assigned, flexible, footLine,
+  }
 }
 
 /** The next preference after a step on the total; row targets above the new total shrink from the last row. */
-export function stepCap(pref: WorkingPreference | null, delta: number, shown = DEFAULT_CAP): WorkingPreference {
-  const next: WorkingPreference = { ...(pref ?? {}), cap: clampCap((pref?.cap ?? shown) + delta) }
+export function stepCap(pref: WorkingPreference | null, delta: number, from: number): WorkingPreference {
+  const next: WorkingPreference = { ...(pref ?? {}), cap: clampCap((pref?.cap ?? from) + delta) }
   for (const view of ['area', 'model'] as const) {
     const targets = { ...(next[view] ?? {}) }
     let over = Object.values(targets).reduce((a, b) => a + b, 0) - next.cap!
@@ -110,9 +128,9 @@ export function stepCap(pref: WorkingPreference | null, delta: number, shown = D
 }
 
 /** One step on a row's target, kept within the total. */
-export function stepRow(pref: WorkingPreference | null, view: WorkingView, key: string, delta: number, shown = DEFAULT_CAP): WorkingPreference {
-  // A row target fixes the total that was shown, so the two never disagree.
-  const base: WorkingPreference = { ...(pref ?? {}), cap: clampCap(pref?.cap ?? shown) }
+export function stepRow(pref: WorkingPreference | null, view: WorkingView, key: string, delta: number, from: number): WorkingPreference {
+  // A row target needs a total: without one it fixes what runs now, so the two never disagree.
+  const base: WorkingPreference = { ...(pref ?? {}), cap: clampCap(pref?.cap ?? from) }
   const cap = base.cap!
   const targets = { ...(base[view] ?? {}) }
   const assigned = Object.values(targets).reduce((a, b) => a + b, 0)

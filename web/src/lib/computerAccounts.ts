@@ -2,17 +2,18 @@
 // Accounts and computers on /agents (AEON-499): one card per computer, its
 // accounts nested inside with exactly one readiness state each, and capacity
 // shown only as the server measured it. An offline computer never says
-// "ready", a missing reading is said once with Check now, and the legend
+// "ready", a missing reading is said once with Check now (for every vendor:
+// no reading is never taken as "no limit"), and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
 import { agentUpdateAdvice, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, consumptionLine, estimateLabel, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
 export type Tone = 'ok' | 'warn' | 'mute'
-export type ReadinessKind = 'ready' | 'offline' | 'signin' | 'limit' | 'kept' | 'hold' | 'hours' | 'paused' | 'attention' | 'setup' | 'unavailable' | 'waiting'
+export type ReadinessKind = 'ready' | 'offline' | 'signin' | 'limit' | 'kept' | 'hold' | 'hours' | 'paused' | 'attention' | 'setup' | 'unavailable' | 'waiting' | 'busy'
 export interface Readiness {
   kind: ReadinessKind
   text: string
@@ -60,7 +61,6 @@ export interface ComputerCard {
   offline: boolean
 }
 
-const LIMITLESS = ['grok', 'cursor', 'pi']
 const ago = (iso: string | null | undefined, now: number) => {
   const at = iso ? Date.parse(iso) : NaN
   if (!Number.isFinite(at)) return ''
@@ -142,8 +142,9 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       case 'state': return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip }
       case 'approval': return { kind: 'paused', text: 'Not allowed for agents', tone: 'mute', tip }
       case 'models': return { kind: 'attention', text: 'No model granted', tone: 'warn', tip }
-      // A run still busy or a reading on its way does not make the account unready.
-      case 'capacity': case 'reading': break
+      // The server starts nothing here until its run ends or a reading arrives: not ready, nothing to fix.
+      case 'capacity': return { kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip }
+      case 'reading': return { kind: 'waiting', text: 'Waiting for a reading', tone: 'mute', tip }
     }
   }
   // Without routing advice, the pool's own Hold still pauses it.
@@ -165,14 +166,7 @@ const WINDOW_WORD: Record<string, string> = { weekly: 'this week', monthly: 'thi
 export function capacityCell(row: AccountRow, ready: Readiness, now: number, sharedWith = ''): CapacityCell {
   if (sharedWith) return { kind: 'quiet', text: `Shares quota with ${sharedWith}` }
   const w = row.primary
-  if (!w) {
-    if (ready.kind === 'offline') return { kind: 'offline' }
-    if (LIMITLESS.includes(row.harness)) {
-      const used = row.learning ? consumptionLine(row.learning) : ''
-      return { kind: 'quiet', text: [`${HARNESS_NAME[row.harness] ?? row.harness} doesn't report a usage limit`, used === 'Learning' ? '' : used].filter(Boolean).join(' · ') }
-    }
-    return { kind: 'none' }
-  }
+  if (!w) return ready.kind === 'offline' ? { kind: 'offline' } : { kind: 'none' }
   const plan = accountPlan(row, now)
   const g = gaugeOf(row, plan)
   const left = Math.max(0, Math.min(100, w.remaining_percent))
@@ -263,7 +257,9 @@ export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone 
   const ready = lines.filter(l => l.readiness.kind === 'ready').length
   const offline = cards.filter(c => c.offline && c.accounts.length)
   const tail = offline.length === 1 ? ` · ${offline[0].name} offline` : offline.length > 1 ? ` · ${offline.length} computers offline` : ''
-  return { text: `${ready} of ${lines.length} ready${tail}`, tone: ready === lines.length ? 'ok' : 'warn' }
+  // Busy or waiting is not a problem: the pill warns only when something needs fixing.
+  const tone: Tone = ready === lines.length ? 'ok' : offline.length || lines.some(l => l.readiness.tone === 'warn') ? 'warn' : 'mute'
+  return { text: `${ready} of ${lines.length} ready${tail}`, tone }
 }
 
 /**

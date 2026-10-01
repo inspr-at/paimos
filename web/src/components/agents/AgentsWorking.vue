@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
-import { CAP_MAX, CAP_MIN, RUNNING_GROUPS, stepCap, stepRow, workingPlan, type RunningSession, type WorkingPreference, type WorkingView } from '../../lib/agentsWorking'
+import { RUNNING_GROUPS, stepCap, stepRow, workingPlan, type RunningSession, type WorkingPreference, type WorkingView } from '../../lib/agentsWorking'
 import { usePreference } from '../../lib/preferences'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -34,9 +34,12 @@ const plan = computed(() => workingPlan({
   capacityKnown: capacity.rows.some(r => r.primary), roomNow: routed.value ? capacity.pools.reduce((n, p) => n + p.parallelRuns, 0) : null,
 }))
 
+// The stored total decides before the control first shows: no flash of "no target set".
+const prefReady = ref(false)
+void pref.ready.then(() => { prefReady.value = true })
 const save = (next: WorkingPreference) => pref.save(next)
-const stepTotal = (delta: number) => save(stepCap(pref.value.value, delta, plan.value.cap))
-const stepTarget = (key: string, delta: number) => save(stepRow(pref.value.value, plan.value.view, key, delta, plan.value.cap))
+const stepTotal = (delta: number) => save(stepCap(pref.value.value, delta, plan.value.from))
+const stepTarget = (key: string, delta: number) => save(stepRow(pref.value.value, plan.value.view, key, delta, plan.value.from))
 const setView = (view: WorkingView) => { if (plan.value.view !== view) save({ ...(pref.value.value ?? {}), view }) }
 function tabKeys(event: KeyboardEvent) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -48,18 +51,18 @@ function tabKeys(event: KeyboardEvent) {
 </script>
 
 <template>
-  <section class="working glass-card" aria-labelledby="working-title">
+  <section v-if="prefReady" class="working glass-card" aria-labelledby="working-title">
     <div class="total">
       <p id="working-title" class="eyebrow">Agents working at once</p>
       <div class="stepper">
-        <button type="button" class="step big" aria-label="Fewer agents at once" :disabled="plan.cap <= CAP_MIN" @click="stepTotal(-1)"><AppIcon name="minus" :size="18" /></button>
-        <span class="big-num" aria-live="polite" :aria-label="`Target: ${plan.cap} agents at once`">{{ plan.cap }}</span>
-        <button type="button" class="step big" aria-label="More agents at once" :disabled="plan.cap >= CAP_MAX" @click="stepTotal(1)"><AppIcon name="plus" :size="18" /></button>
+        <button type="button" class="step big" aria-label="Fewer agents at once" :disabled="!plan.canFewer" @click="stepTotal(-1)"><AppIcon name="minus" :size="18" /></button>
+        <span class="big-num" :class="{ unset: plan.cap === null }" aria-live="polite" :aria-label="plan.cap === null ? 'Target: not set yet' : `Target: ${plan.cap} agents at once`">{{ plan.cap ?? '—' }}</span>
+        <button type="button" class="step big" aria-label="More agents at once" :disabled="!plan.canMore" @click="stepTotal(1)"><AppIcon name="plus" :size="18" /></button>
         <AppIcon name="sparkle" :size="16" class="sparkle s1" aria-hidden="true" />
         <AppIcon name="sparkle" :size="11" class="sparkle s2" aria-hidden="true" />
       </div>
       <p class="now"><strong>{{ plan.running }} running</strong> now · {{ plan.runningLine }}</p>
-      <div class="dots" aria-hidden="true"><span v-for="(on, i) in plan.capDots" :key="i" class="dot" :class="{ on }" /></div>
+      <div v-if="plan.capDots.length" class="dots" aria-hidden="true"><span v-for="(on, i) in plan.capDots" :key="i" class="dot" :class="{ on }" /></div>
     </div>
 
     <div class="where">
@@ -91,10 +94,10 @@ function tabKeys(event: KeyboardEvent) {
         <span class="spare-lbl">{{ plan.rows.length ? 'Also' : 'Set a target for' }}</span>
         <button
           v-for="area in plan.spare" :key="area.key" type="button" class="spare-btn" :aria-label="`More agents on ${area.label}`"
-          :disabled="plan.assigned >= plan.cap" :data-tip="plan.assigned >= plan.cap ? 'Every agent is assigned; raise the total first' : undefined" @click="stepTarget(area.key, 1)"
+          :disabled="plan.full" :data-tip="plan.full ? 'Every agent is assigned; raise the total first' : undefined" @click="stepTarget(area.key, 1)"
         ><AppIcon name="plus" :size="12" />{{ area.label }}</button>
       </p>
-      <p class="foot">{{ plan.footLine }}</p>
+      <p v-if="plan.footLine" class="foot">{{ plan.footLine }}</p>
     </div>
   </section>
 </template>
@@ -111,6 +114,7 @@ function tabKeys(event: KeyboardEvent) {
 .step:disabled { opacity: .35; cursor: default; }
 .step:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .big-num { min-width: 96px; text-align: center; font: 800 64px/1 var(--font); letter-spacing: -.04em; font-variant-numeric: tabular-nums; background-image: linear-gradient(100deg, var(--teal-ink) 0%, var(--teal) 38%, var(--aqua) 47%, var(--aqua-wash) 50%, var(--aqua) 53%, var(--teal) 62%, var(--teal-ink) 100%); background-size: 320% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
+.big-num.unset { background: none; color: var(--ink-3); -webkit-text-fill-color: currentColor; font-weight: 600; }
 .sparkle { position: absolute; pointer-events: none; color: var(--aqua); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--aqua) 90%, transparent)); animation: twinkle 2.8s ease-in-out infinite; }
 .sparkle.s1 { left: 58px; top: -10px; }
 .sparkle.s2 { left: 150px; bottom: -4px; color: var(--brand-gold); animation-delay: .9s; }
