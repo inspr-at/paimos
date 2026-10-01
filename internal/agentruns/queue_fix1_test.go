@@ -132,12 +132,6 @@ func TestTicketQueueTerminalStateCancelsRunAndReservation(t *testing.T) {
 			e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
 			f.reserve(t, e.Run)
 			if state == "deleted" {
-				// The tree forbids deleting a parent with live children. Hide the
-				// generated work-order child first, as ordinary child deletion does.
-				f.tx(t, f.person, func(tx pgx.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, e.Run.OrderID)
-					return err
-				})
 				f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
 			} else {
 				f.call(t, f.person, "PATCH", "/api/nodes/"+id, map[string]string{"state": state}, 200, nil)
@@ -303,6 +297,7 @@ func TestTicketQueueTerminalCancellationRollsBackWithTicket(t *testing.T) {
 	if n := f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state='open'`, id); n != 1 {
 		t.Fatal("failed patch changed ticket")
 	}
+	f.call(t, f.person, "GET", "/api/nodes/"+e.Run.OrderID, nil, 200, nil)
 }
 
 func TestTicketQueueBulkArchiveCancelsOnlyQueuedWork(t *testing.T) {

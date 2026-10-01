@@ -362,10 +362,12 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				if err := agentpairing.Lock(ctx, tx); err != nil {
 					return err
 				}
-				if err := lockTree(ctx, tx); err != nil {
-					return err
-				}
 			}
+		}
+		// Match queue writes and delete: tree before any node row lock. Terminal
+		// edits additionally take pairing first to serialize cancellation and claim.
+		if err := lockTree(ctx, tx); err != nil {
+			return err
 		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
@@ -515,7 +517,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		node.Estimate = views[id]
 		return nil
 	})
-	return node, err
+	return node, dbErr("update node", err)
 }
 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) (time.Time, error) {

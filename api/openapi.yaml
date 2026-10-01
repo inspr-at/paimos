@@ -68,7 +68,7 @@ paths:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
     delete:
       operationId: removeWorkQueue
-      description: Idempotently cancel only a queued ticket run and release its capacity holds. The ticket stays Open or Blocked. Same queue permissions as add.
+      description: Idempotently cancel only a queued ticket run and release its capacity holds. Cancel its generated work order and soft-delete that work-order node in the same transaction. The ticket stays Open or Blocked. Same queue permissions as add.
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
@@ -3666,6 +3666,8 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        The tenant tree lock is acquired before the node row lock. A database deadlock
+        rolls back the update and returns 409 with code retryable_conflict; retry the request.
         Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
@@ -3685,7 +3687,9 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+          description: |
+            A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+            A database deadlock leaves the node unchanged and returns code retryable_conflict; retry the request.
           content:
             application/json:
               schema:
@@ -3703,7 +3707,7 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
+      description: Soft-delete; cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
       security: *auth
       responses:
         '204':

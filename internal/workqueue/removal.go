@@ -50,6 +50,11 @@ func RemoveQueued(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID str
 	if _, err = tx.Exec(ctx, `UPDATE work_orders SET status='cancelled',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1`, order); err != nil {
 		return false, err
 	}
+	// Queuing creates this child under the ticket. Remove it before a ticket
+	// delete reaches the live-child guard, including after explicit queue removal.
+	if _, err = tx.Exec(ctx, `UPDATE nodes SET deleted_at=clock_timestamp(),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 AND deleted_at IS NULL`, order); err != nil {
+		return false, err
+	}
 	err = workorders.Record(ctx, tx, p, nodeID, "queue.removed", before, map[string]string{"run_id": id})
 	return true, err
 }
