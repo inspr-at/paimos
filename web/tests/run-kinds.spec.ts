@@ -14,10 +14,10 @@ test('execution kinds and person-specific host names on the real agents table', 
   await page.setViewportSize({ width: 1600, height: 1000 })
   const work = fixtures()
   await mockWork(page, work, { admin: true })
-  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
+  const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'n-1': { key: 'PHAROS-42', title: 'Ship the execution kinds' } } })
   const lead = data.sessions[0]!
   Object.assign(lead, { display_label: 'Release coordinator', model: 'claude-fixture', role: 'coordinator', harness: 'claude', run_id: null, host: 'mbp2607', progress_pct: 50, eta_live_at: new Date(now + 20 * 60_000).toISOString(), heartbeat_at: new Date(now - 5_000).toISOString() })
-  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'mbp2606', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
+  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, ticket: lead.ticket, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'mbp2606', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
   const xai = { ...ai, id: '52000000-0000-4000-8000-000000000001', display_label: 'xAI worker', harness: 'grok', model: 'grok-fixture' }
   const media = { ...ai, id: '52000000-0000-4000-8000-000000000002', display_label: 'Media worker', harness: 'media', model: null, reasoning_effort: null, generator: 'higgsfield/kling3_0', progress_pct: 40 }
   const terminal = { ...ai, id: '52000000-0000-4000-8000-000000000003', display_label: 'Terminal worker', harness: 'terminal', model: null, reasoning_effort: null, command: 'ffmpeg', progress_pct: 90 }
@@ -49,10 +49,23 @@ test('execution kinds and person-specific host names on the real agents table', 
       return { width: rect.width, height: rect.height, border: getComputedStyle(item).borderWidth }
     }))
     for (const slot of slots) { expect(slot.width).toBe(slot.height); expect(slot.border).toBe('0px') }
+    const labelLefts = await page.locator('.exec-copy').evaluateAll(items => items.map(item => item.getBoundingClientRect().left))
+    expect(new Set(labelLefts).size).toBe(1)
     const workerHost = page.locator(`[data-row="s:${ai.id}"] .host-badge`)
     const original = await workerHost.boundingBox()
+    await workerHost.hover()
+    const pencil = page.locator(`[data-row="s:${ai.id}"] .host-pencil`)
+    await expect(pencil).toHaveCSS('opacity', '1')
+    expect((await pencil.boundingBox())!.x).toBeGreaterThanOrEqual(original!.x + original!.width)
+    expect(await workerHost.boundingBox()).toEqual(original)
     await workerHost.click()
     const dialog = page.getByRole('dialog', { name: 'Your name for this computer' })
+    await expect(dialog.getByRole('textbox')).toBeEnabled()
+    await dialog.getByRole('textbox').fill('Cancelled name')
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(workerHost).toContainText('mbp2606')
+    expect(names.size).toBe(0)
+    await workerHost.click()
     await expect(dialog.getByRole('textbox')).toBeEnabled()
     await dialog.getByRole('textbox').fill("David's MacBook")
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
@@ -73,6 +86,9 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
     await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
   }
+  // Keep the same row focused in both captures so the existing tint is comparable.
+  await page.locator(`[data-row="s:${ai.id}"]`).focus()
+  await page.mouse.move(0, 0)
   const root = process.env.AEON_501_SHOTS
   if (root) mkdirSync(root, { recursive: true })
   await page.screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}.png`) : info.outputPath(`${before ? 'before' : 'after'}.png`), fullPage: true, animations: 'disabled' })
