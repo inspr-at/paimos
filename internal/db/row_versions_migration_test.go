@@ -55,6 +55,18 @@ func TestRowVersionValidationRunsAfterDDLLocksRelease(t *testing.T) {
 			// open until the real migration runner finishes both VALIDATEs.
 			_, err = writer.Exec(t.Context(), `LOCK TABLE harness_sessions, agent_runs IN ROW EXCLUSIVE MODE`)
 			return err
+		case "1059_epic_finished_progress.sql":
+			// Both VALIDATE statements completed while the writer held its
+			// lock. Release it before unrelated later schema expansion needs
+			// ACCESS EXCLUSIVE on the same table (AEON-503).
+			var validated int
+			if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM pg_constraint WHERE conname IN ('harness_sessions_row_version_check','agent_runs_row_version_check') AND convalidated`).Scan(&validated); err != nil {
+				return err
+			}
+			if writer == nil || validated != 2 {
+				return fmt.Errorf("validation did not finish with writer open: %d", validated)
+			}
+			return writer.Rollback(t.Context())
 		}
 		return nil
 	})

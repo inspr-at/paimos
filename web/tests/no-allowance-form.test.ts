@@ -75,7 +75,12 @@ test('no UI string in web/src asks for a start, end, unit, pace, burst or micros
     const text = readFileSync(path, 'utf8')
     const file = relative(SRC, path)
     if (ELSEWHERE.some(([where]) => where.test(file))) continue
-    for (const p of prompts(path, text)) if (ASKS.test(p)) asked.push(`${file}: asks "${p}"`)
+    for (const p of prompts(path, text)) {
+      // AEON-500's exact approved switch label describes test coverage; it
+      // does not ask for an allowance end date. Keep the exception this narrow.
+      if (file === 'components/settings/DeveloperSection.vue' && p === 'Show the flow controls (not yet tested end to end)') continue
+      if (ASKS.test(p)) asked.push(`${file}: asks "${p}"`)
+    }
     for (const s of uiText(path, text)) if (NEVER.test(s)) asked.push(`${file}: says "${s.slice(0, 80)}"`)
   }
   assert.deepEqual(asked, [])

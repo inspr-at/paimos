@@ -108,8 +108,14 @@ func normalizeVendorRef(raw string) string {
 	return raw
 }
 
-func attachVendorSessionRef(body map[string]any, harness, ref, lease string) {
+func attachVendorSessionRef(body map[string]any, harness, ref, lease, parent, sourceSession string) {
 	vendor := vendorSessionRef(harness)
+	if harness == "claude" && parent != "" {
+		// A coordinator launches Claude children in its own environment. Its
+		// ambient native id belongs to the parent, not this new generation.
+		// Only an explicit child source session may bind that child's hooks.
+		vendor = normalizeVendorRef(sourceSession)
+	}
 	if vendor == "" || vendor == ref || vendor == lease {
 		return
 	}
