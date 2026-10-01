@@ -38,6 +38,7 @@ export function currentActivity(view: SessionView, now: number): string {
 export function workerActivity(workers: SessionView[], now: number): string {
   const counts = new Map<string, number>()
   for (const view of workers) {
+    if (view.session.role === 'coordinator') continue
     const text = currentActivity(view, now)
     if (!text) continue
     const group = /^Running .*tests$/.test(text) ? 'testing' : text === 'Waiting for CI' ? 'waiting for CI' : text.startsWith('Editing ') ? 'editing' : text.toLowerCase()

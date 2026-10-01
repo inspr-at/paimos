@@ -15,7 +15,8 @@ test('policy and freshness govern the current line, including stopped sessions',
   assert.equal(currentActivity({ ...view('Running Go tests'), session: { ...view('').session, stopped_at: new Date(now).toISOString() } } as unknown as SessionView, now), '')
 })
 test('coordinator summaries combine testing workers and exclude disabled or ended activity', () => {
-  assert.equal(workerActivity([view('Running Go tests'), view('Running web tests'), view('Running browser tests'), view('Waiting for CI'), view('Pushing', 'auto', 0, 'off')], now), '3 workers testing · 1 worker waiting for CI')
+  const coordinator = { ...view('Working'), session: { ...view('Working').session, role: 'coordinator' as const } }
+  assert.equal(workerActivity([view('Running Go tests'), view('Running web tests'), view('Running browser tests'), view('Waiting for CI'), view('Pushing', 'auto', 0, 'off'), coordinator], now), '3 workers testing · 1 worker waiting for CI')
 })
 test('summary policy preserves the existing heartbeat note for older reporters', () => {
   const legacy = { session: { agent_activity_mode: 'agent_summary', activity_note: 'Reviewing the change' }, status: { state: 'working' } } as unknown as SessionView

@@ -146,8 +146,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	AgentActivityMode       string                   `json:"agent_activity_mode"`
-	CurrentActivity         *agentactivity.Activity  `json:"current_activity"`
+	AgentActivityMode       string                   `json:"agent_activity_mode,omitempty"`
+	CurrentActivity         *agentactivity.Activity  `json:"current_activity,omitempty"`
 	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
 	doing, toolActivity     *string
 	doingAt, toolActivityAt *time.Time

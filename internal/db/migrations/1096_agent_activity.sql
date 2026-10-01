@@ -12,10 +12,11 @@ ALTER TABLE harness_sessions ADD COLUMN tool_activity_at timestamptz;
 CREATE TABLE harness_current_activity (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id uuid NOT NULL REFERENCES tenants(id),
-    session_id uuid NOT NULL REFERENCES harness_sessions(id) ON DELETE CASCADE,
+    session_id uuid NOT NULL,
     text text NOT NULL CHECK (char_length(text) BETWEEN 1 AND 60),
     source text NOT NULL CHECK (source IN ('agent','auto')),
-    at timestamptz NOT NULL
+    at timestamptz NOT NULL,
+    FOREIGN KEY (tenant_id,session_id) REFERENCES harness_sessions(tenant_id,id) ON DELETE CASCADE
 );
 ALTER TABLE harness_current_activity ENABLE ROW LEVEL SECURITY;
 ALTER TABLE harness_current_activity FORCE ROW LEVEL SECURITY;
