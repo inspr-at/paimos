@@ -21,6 +21,7 @@ const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "testdata/rele
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 const reviewFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r2.json"), "utf8"));
 const finalReviewFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r3.json"), "utf8"));
+const ambiguityFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r4.json"), "utf8"));
 const now = new Date("2026-10-01T00:00:00Z");
 
 function report(opts = {}, input = fixture) {
@@ -269,6 +270,97 @@ function releaseInput(extra = {}) {
     ...extra,
   };
 }
+
+function assertUnknownReleaseAssociation(raw) {
+  const row = buildReport(raw, { now, release: "99" }).releases[0];
+  assert.equal(validateEvidence(raw).releases[0].run, null);
+  assert.equal(row.pull_request, null);
+  assert.equal(row.pr_to_merge_s, null);
+  assert.equal(row.pr_open_to_live_s, null);
+  assert.equal(row.ci.success_s, null);
+  assert.equal(row.ci.attempts, undefined);
+  assert.equal(row.gate_ok_to_live_s, null);
+  assert.equal(row.digest_after_tag_s, null);
+  for (const metric of ["pr_to_merge", "pr_open_to_live", "ci", "gate", "digest"]) {
+    assert.equal(row.evidence[metric].state, "partial");
+    assert.match(row.evidence[metric].reasons.join("; "), /ambiguous/);
+  }
+  assert.equal(row.elapsed_s, 7200);
+}
+
+test("r4 unorderable release candidates cannot choose a SHA or fall back to a titled PR", () => {
+  for (const createdAt of [null, "2026-09-30T02:00:00", "not-a-timeZ"]) {
+    for (const event of ["push", "workflow_dispatch"]) {
+      const raw = structuredClone(ambiguityFixture.release);
+      raw.workflow_runs[0].createdAt = createdAt;
+      raw.workflow_runs.filter((run) => run.workflowName === "Release").forEach((run) => { run.event = event; });
+      for (const workflow_runs of [raw.workflow_runs, [...raw.workflow_runs].reverse()]) {
+        assertUnknownReleaseAssociation({ ...raw, workflow_runs });
+      }
+    }
+  }
+});
+
+test("r4 tied release runs with different content leave association unknown", () => {
+  const raw = structuredClone(ambiguityFixture.release);
+  raw.workflow_runs[0].createdAt = raw.workflow_runs[1].createdAt;
+  for (const workflow_runs of [raw.workflow_runs, [...raw.workflow_runs].reverse()]) {
+    assertUnknownReleaseAssociation({ ...raw, workflow_runs });
+  }
+});
+
+test("r4 identical release candidates and independent rollout gates stay measurable", () => {
+  const raw = structuredClone(ambiguityFixture.release);
+  const run = raw.workflow_runs[1];
+  raw.workflow_runs[0] = { ...run, id: "fixture-r4-equivalent-release" };
+  const row = buildReport(raw, { now }).releases[0];
+  assert.equal(row.pr_to_merge_s, 3600);
+  assert.equal(row.ci.success_s, 300);
+  assert.equal(row.gate_ok_to_live_s, 10800);
+  const uncertain = structuredClone(ambiguityFixture.release);
+  uncertain.rollouts[0].tickets = [{ key: "AEON-416", gate_ok_at: "2026-09-30T00:00:00Z" }];
+  const independent = buildReport(uncertain, { now }).releases[0];
+  assert.equal(independent.pr_to_merge_s, null);
+  assert.equal(independent.gate_ok_to_live_s, 10800);
+});
+
+test("r4 tied newest rollback intervals with different ends are ambiguous for each source", () => {
+  for (const source of ["rollout", "pin"]) {
+    const records = ambiguityFixture[source === "rollout" ? "rollback_rollouts" : "rollback_pins"];
+    for (const candidates of [records, [...records].reverse()]) {
+      const raw = releaseInput(source === "rollout" ? { rollouts: [...releaseInput().rollouts, ...candidates] } : { pin_pull_requests: candidates });
+      for (const input of [raw, normalizeInput(raw)]) {
+        const row = buildReport(input, { now }).releases[0];
+        assert.equal(row.rollback_s, null);
+        assert.equal(row.rollback_source, null);
+        assert.match(row.rollback_reason, /ambiguous/);
+      }
+    }
+  }
+});
+
+test("r4 rollback candidates without an orderable start are ambiguous", () => {
+  for (const source of ["rollout", "pin"]) {
+    const records = structuredClone(ambiguityFixture[source === "rollout" ? "rollback_rollouts" : "rollback_pins"]);
+    records[0][source === "rollout" ? "rollback_started_at" : "createdAt"] = null;
+    const row = buildReport(releaseInput(source === "rollout" ? { rollouts: records } : { pin_pull_requests: records }), { now }).releases[0];
+    assert.equal(row.rollback_s, null);
+    assert.match(row.rollback_reason, /ambiguous/);
+  }
+});
+
+test("r4 tied identical rollback intervals still report their duration", () => {
+  for (const source of ["rollout", "pin"]) {
+    const records = structuredClone(ambiguityFixture[source === "rollout" ? "rollback_rollouts" : "rollback_pins"]);
+    records[1][source === "rollout" ? "rollback_finished_at" : "mergedAt"] = source === "rollout" ? records[0].rollback_finished_at : records[0].mergedAt;
+    for (const candidates of [records, [...records].reverse()]) {
+      const row = buildReport(releaseInput(source === "rollout" ? { rollouts: candidates } : { pin_pull_requests: candidates }), { now }).releases[0];
+      assert.equal(row.rollback_s, 900);
+      assert.equal(row.rollback_source, source);
+      assert.equal(row.evidence.rollback.state, "complete");
+    }
+  }
+});
 
 test("r3 live rollback records cannot enter the forward set, in either order", () => {
   const forward = finalReviewFixture.forward;

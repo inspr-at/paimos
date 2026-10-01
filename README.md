@@ -176,6 +176,11 @@ A forward record may embed a provably later rollback. Complete forward
 intervals take precedence over incomplete siblings; conflicting complete
 records remain unknown with an ambiguity reason. A rollback never replaces
 forward rollout timing, and the newest unfinished rollback remains unknown.
+Missing or invalid ordering timestamps leave candidate selection ambiguous;
+tied candidates with conflicting content also stay unknown. Identical rollback
+intervals can still report their duration. An ambiguous release run cannot
+supply a SHA or fall back to PR titles for PR, CI or status-gate timings;
+independent rollout gate timestamps remain usable.
 Unknown timing retains consistent release metadata for filtering. CI stalls
 outside the rollout window cannot produce adjusted timings. The offline
 baseline uses clearly marked fixture IDs and explicit forward directions;

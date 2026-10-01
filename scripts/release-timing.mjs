@@ -21,6 +21,7 @@
 // Forward records require direction: "forward"; outcome never supplies it.
 // Rollback bounds identify legacy rollback records. ID-less GitHub rows leave
 // their collection partial, and numbered reruns must cover 1..runAttempt.
+// Unorderable candidates and conflicting ties never establish a winner.
 
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -429,23 +430,37 @@ function stableKey(record) {
   return String(record.id ?? record.number ?? JSON.stringify(record));
 }
 
-function byTime(items, timeOf, newest = false) {
-  return [...items].sort((a, b) => {
-    const x = timeOf(a).ms;
-    const y = timeOf(b).ms;
-    // An unorderable candidate cannot establish that another is the latest.
-    if (x == null || y == null) {
-      if (x == null && y != null) return -1;
-      if (y == null && x != null) return 1;
-    } else if (x !== y) return newest ? (x > y ? -1 : 1) : (x < y ? -1 : 1);
-    return stableKey(a).localeCompare(stableKey(b));
-  });
+function recordContent({ id: _id, ...record }) {
+  return JSON.stringify(record);
+}
+
+function intervalContent(interval) {
+  return JSON.stringify([
+    interval.start.ms ?? interval.start.value,
+    interval.end.ms ?? interval.end.value,
+    interval.completeness,
+  ]);
+}
+
+function selectByTime(items, timeOf, contentOf, newest = false) {
+  const unorderable = items.filter((item) => !isComplete(timeOf(item)));
+  if (unorderable.length) return {
+    item: null,
+    completeness: completeness(["ambiguous", ...unorderable.flatMap((item) => timeOf(item).completeness.reasons)]),
+  };
+  const ordered = [...items].sort((a, b) => newest ? timeOf(b).ms - timeOf(a).ms : timeOf(a).ms - timeOf(b).ms);
+  if (!ordered.length) return { item: null, completeness: completeness() };
+  const tied = ordered.filter((item) => timeOf(item).ms === timeOf(ordered[0]).ms);
+  if (new Set(tied.map(contentOf)).size > 1) return { item: null, completeness: completeness(["ambiguous"]) };
+  // Stable identity only breaks ties after their consumed content agrees.
+  tied.sort((a, b) => stableKey(a).localeCompare(stableKey(b)));
+  return { item: tied[0], completeness: completeness() };
 }
 
 function selectReleaseRun(runs, version) {
   const tagged = runs.filter((run) => run.workflow === "Release" && versionIn(run.headBranch) === version);
   const pushed = tagged.filter((run) => run.conclusion === "success" && run.event === "push");
-  return byTime(pushed.length ? pushed : tagged, (run) => run.times.createdAt)[0] || null;
+  return selectByTime(pushed.length ? pushed : tagged, (run) => run.times.createdAt, recordContent);
 }
 
 function validateCI(runs, pr, truncated) {
@@ -523,14 +538,18 @@ function selectForwardRollout(rollouts) {
 }
 
 function validateRollback(rollouts, pins, truncated) {
-  const rollout = byTime(rollouts.filter((item) => rolloutKind(item) === "rollback"
-    || (rolloutKind(item) === "forward" && (item.rollbackStartedAt || item.rollbackFinishedAt))), (item) => item.rollback.start, true)[0] || null;
-  const pin = byTime(pins, (item) => item.times.createdAt, true)[0] || null;
   if (truncated) return { interval: null, source: null, completeness: completeness(["truncated"]) };
+  const rollout = selectByTime(rollouts.filter((item) => rolloutKind(item) === "rollback"
+    || (rolloutKind(item) === "forward" && (item.rollbackStartedAt || item.rollbackFinishedAt))), (item) => item.rollback.start, (item) => intervalContent(item.rollback), true);
+  const pin = selectByTime(pins, (item) => item.times.createdAt, (item) => intervalContent(item.interval), true);
+  const reasons = [...rollout.completeness.reasons, ...pin.completeness.reasons];
+  if (reasons.length) return { interval: null, source: null, completeness: completeness(reasons) };
   // Select the attempt before checking completeness; never fall back to an
   // older measured duration when the newest attempt has not finished.
-  const candidates = [rollout && { interval: rollout.rollback, source: "rollout" }, pin && { interval: pin.interval, source: "pin" }].filter(Boolean);
-  const latest = byTime(candidates, (item) => item.interval.start, true)[0];
+  const candidates = [rollout.item && { interval: rollout.item.rollback, source: "rollout" }, pin.item && { interval: pin.item.interval, source: "pin" }].filter(Boolean);
+  const selected = selectByTime(candidates, (item) => item.interval.start, (item) => intervalContent(item.interval), true);
+  if (!isComplete(selected)) return { interval: null, source: null, completeness: selected.completeness };
+  const latest = selected.item;
   if (!latest) return { interval: null, source: null, completeness: completeness(["no rollback evidence"]) };
   if (!isComplete(latest.interval)) return { ...latest, completeness: latest.interval.completeness };
   if (candidates.length === 2 && candidates.every((item) => isComplete(item.interval))) {
@@ -543,13 +562,17 @@ function validateRollback(rollouts, pins, truncated) {
 }
 
 function validateRelease(input, version) {
-  const run = selectReleaseRun(input.runs, version);
+  const releaseRun = selectReleaseRun(input.runs, version);
+  const run = releaseRun.item;
   const matches = input.rollouts.filter((item) => item.version === version);
   const forward = selectForwardRollout(matches);
   const rollout = forward.rollout;
   const prMatches = input.pullRequests.filter((pr) => run && pr.mergeSha && pr.mergeSha === run.headSha);
   const prs = prMatches.length ? prMatches : input.pullRequests.filter((pr) => versionIn(pr.title) === version);
-  const pr = byTime(prs, (item) => item.times.createdAt)[0] || null;
+  // An ambiguous run must not regain a guessed SHA association via PR titles.
+  const selectedPR = selectByTime(prs, (item) => item.times.createdAt, recordContent);
+  const associationReasons = [...releaseRun.completeness.reasons, ...selectedPR.completeness.reasons];
+  const pr = associationReasons.length ? null : selectedPR.item;
   const pins = input.pinPullRequests.filter((item) => versionIn(item.title) === version);
   const forwardPins = pins.filter((item) => !isRollbackTitle(item.title));
   const names = input.collection.truncated;
@@ -560,11 +583,14 @@ function validateRelease(input, version) {
   const live = rollout?.times.liveAt || validateTime(null);
   const prInterval = pr ? { ...pr.interval } : validateInterval(validateTime(null), validateTime(null));
   const prLive = validateInterval(pr?.times.createdAt || validateTime(null), live);
+  prInterval.completeness = completeness([...prInterval.completeness.reasons, ...associationReasons]);
+  prLive.completeness = completeness([...prLive.completeness.reasons, ...associationReasons]);
   if (names.includes("pull_requests")) {
     prInterval.completeness = completeness([...prInterval.completeness.reasons, "truncated"]);
     prLive.completeness = completeness([...prLive.completeness.reasons, "truncated"]);
   }
   const ci = validateCI(input.runs, pr, names.includes("pull_requests") || names.includes("ci") || input.collection.ciTruncatedBranches.includes(pr?.headRef));
+  ci.completeness = completeness([...ci.completeness.reasons, ...associationReasons]);
   const adjustmentReasons = [];
   if (!isComplete(cut)) adjustmentReasons.push(reasonOf(cut));
   if (!isComplete(ci)) adjustmentReasons.push(reasonOf(ci));
@@ -573,10 +599,11 @@ function validateRelease(input, version) {
   else if (isComplete(cut) && (ci.stall.start.ms < cut.start.ms || ci.stall.end.ms > cut.end.ms)) adjustmentReasons.push("CI stall outside rollout window");
   const adjustment = { completeness: completeness(adjustmentReasons) };
   const gate = validateGate(rollout, input.statuses, run?.headSha || "", live, input.collection.statusTruncatedShas.includes(run?.headSha || "") || names.includes("statuses") || names.includes("workflow_runs"));
+  if (!rollout?.tickets.length) gate.completeness = completeness([...gate.completeness.reasons, ...releaseRun.completeness.reasons]);
   const rollback = validateRollback(matches, pins.filter((item) => isRollbackTitle(item.title)), names.includes("pin_pull_requests"));
   const digestSteps = run?.jobs.flatMap((job) => job.steps).filter((step) => /^record pushed digest$/i.test(step.name)) || [];
   const digest = digestSteps.length === 1 ? validateInterval(run.times.createdAt, digestSteps[0].times.completedAt) : validateInterval(validateTime(null), validateTime(null));
-  const digestReasons = [...digest.completeness.reasons];
+  const digestReasons = [...digest.completeness.reasons, ...releaseRun.completeness.reasons];
   if (digestSteps.length > 1) digestReasons.push("ambiguous digest evidence");
   if (run?.jobsTruncated || names.includes("workflow_runs")) digestReasons.push("truncated");
   if (run && !isComplete(run)) digestReasons.push(...run.completeness.reasons);
@@ -843,8 +870,8 @@ function gapText(rows) {
     let text = `rollback is empty: no rollout rollback interval and no pin PR marked as a rollback. §1's ≈15 min is an estimate for a rollback pin PR, not an observed rollback (the published failure count was 0 of 12). ${measured}.`;
     if (rows.some((row) => row.rollback_reason === "truncated")) {
       text = "rollback is empty because the pin list was truncated. An incomplete collection is not an observed absence.";
-    } else if (rows.some((row) => row.rollback_reason === "ambiguous")) {
-      text = "rollback is ambiguous: the rollout interval and the rollback pin PR disagree, so neither duration is reported.";
+    } else if (rows.some((row) => row.evidence.rollback.reasons.includes("ambiguous"))) {
+      text = "rollback is ambiguous: candidates cannot be ordered or their intervals disagree, so no duration is reported.";
     } else if (rows.some((row) => row.rollback_reason && row.rollback_reason !== "no rollback evidence")) {
       text = "rollback is unknown: the newest attempt has an incomplete or invalid interval; no older duration is substituted.";
     }
