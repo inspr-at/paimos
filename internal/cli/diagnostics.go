@@ -35,6 +35,10 @@ func (rt *runtime) nodeSchema() (cliSchema, error) {
 	if err := rt.do(http.MethodGet, "/api/version", nil, &v); err != nil {
 		return cliSchema{}, err
 	}
+	return rt.nodeSchemaForVersion(v)
+}
+
+func (rt *runtime) nodeSchemaForVersion(v cliVersion) (cliSchema, error) {
 	var page struct {
 		Items []map[string]any `json:"items"`
 	}
@@ -101,11 +105,14 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "config", Status: "ok", Detail: "instance=" + inst.Name + " url=" + inst.URL})
+		// Public service probes do not carry the agent credential. Authentication
+		// is checked separately through the same identity call as auth whoami.
+		probe := client.New(inst.URL, "")
 		var health struct {
 			Status string `json:"status"`
 			DB     string `json:"db"`
 		}
-		if err := rt.do(http.MethodGet, "/api/health", nil, &health); err != nil {
+		if err := probe.Do(context.Background(), http.MethodGet, "/api/health", nil, &health); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -114,7 +121,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		var v cliVersion
-		if err := rt.do(http.MethodGet, "/api/version", nil, &v); err != nil {
+		if err := probe.Do(context.Background(), http.MethodGet, "/api/version", nil, &v); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -130,7 +137,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "auth", Status: "ok", Detail: "user=" + me.Principal.Name})
-		s, err := rt.nodeSchema()
+		s, err := rt.nodeSchemaForVersion(v)
 		if err != nil {
 			checks = append(checks, doctorCheck{Name: "schema", Status: "fail", Detail: err.Error()})
 		} else {
