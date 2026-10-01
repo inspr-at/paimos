@@ -472,7 +472,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :class="[density, { selectable, selecting }]">
+  <div ref="card" class="table-card" :class="[density, { selectable, selecting, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
@@ -1170,5 +1170,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-head { height: 40px; }
   .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
 }
-@media (min-width: 721px) { .table-card { overflow-x: auto; overscroll-behavior-x: contain; } }
+@media (min-width: 721px) {
+  .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
+  .table-card.overflowing thead th { top: 0; }
+}
 </style>

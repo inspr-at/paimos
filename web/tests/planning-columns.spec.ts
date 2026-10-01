@@ -24,8 +24,8 @@ function world(): Fixtures {
   const done = planning(1_900_000, 99_000_000); done.cost = cost('3.33', '999')
   done.models = [{ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-done', effort: 'high', role: 'worker', running: false, tokens: 1_900_000 }] }, { label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-review', effort: 'xhigh', role: 'reviewer', running: false, tokens: 0 }] }]
   done.estimate_snapshot = { id: 'snapshot', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 3, estimated_tokens: 2_400_000, estimated_cost_usd: '4.20', route, rate_basis: { basis: 'median', tickets: 12, tokens_per_hour: 800_000 } }; set('PHAROS-13', done)
-  const over = planning(2_160_000, 1_600_000); over.cost = cost('3.78', '2.80'); set('PHAROS-14', over)
-  const plan = planning(1_770_000, 2_000_000); plan.cost = cost('3.10', '3.50', true); set('PHAROS-15', plan)
+  const over = planning(2_160_000, 1_600_000); over.models = [{ label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-over', effort: 'xhigh', role: 'worker', running: false, tokens: 2_160_000 }] }]; over.cost = cost('3.78', '2.80'); set('PHAROS-14', over)
+  const plan = planning(1_770_000, 2_000_000); plan.models = [{ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-plan', effort: 'high', role: 'worker', running: false, tokens: 1_770_000 }] }]; plan.cost = cost('3.10', '3.50', true); set('PHAROS-15', plan)
   data.preferences['list:p-pharos'] = { visible: ['status', 'estimate', 'model', 'tokens', 'list_cost'] }
   return data
 }
