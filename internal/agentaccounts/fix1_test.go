@@ -26,7 +26,7 @@ func TestPoolConfirmationDoesNotSilentlyIncludeSpare(t *testing.T) {
 		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/quota-pool", encoded(t, map[string]any{"account_ids": ids, "quota_fingerprint": fp, "confirmed": true}), 204, nil)
 	}
 	confirm([]string{doors[0].ID, doors[1].ID})
-	confirm([]string{doors[0].ID, doors[2].ID}) // The dialog names only Main and Studio.
+	confirm([]string{doors[0].ID, doors[2].ID}) // The caller explicitly excludes Spare.
 	if n := scalar(t, admin, `SELECT count(*) FROM (`+quotaAccounts+`) q`, doors[0].ID); n != 2 {
 		t.Fatalf("Pool with Studio silently included Spare: members=%d", n)
 	}
@@ -35,6 +35,55 @@ func TestPoolConfirmationDoesNotSilentlyIncludeSpare(t *testing.T) {
 	}
 	if scalar(t, admin, `SELECT count(*) FROM events WHERE type='account.quota_pool_confirmed' AND after->'account_ids' ? $1 AND after->'account_ids' ? $2 AND NOT (after->'account_ids' ? $3)`, doors[0].ID, doors[2].ID, doors[1].ID) != 1 {
 		t.Fatal("audit did not name the exact confirmed set")
+	}
+}
+
+func TestThreeAccountQuotaPoolAdditionsAndExplicitRemovals(t *testing.T) {
+	reset(t)
+	admin, runner, _, _, mod := groupFixture(t)
+	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
+	doors := []Account{
+		groupAccount(t, mod, admin, runner, token, "main", "daemon-a", "Main", "laptop"),
+		groupAccount(t, mod, admin, runner, token, "spare", "daemon-b", "Spare", "laptop"),
+		groupAccount(t, mod, admin, runner, token, "studio", "daemon-c", "Studio", "studio"),
+	}
+	fp := strings.Repeat("ab", 32)
+	for _, a := range doors {
+		callStatus(t, mod, &runner, token, "PUT", "/api/agent-accounts/"+a.ID+"/signals", encoded(t, accountSignals{"none", fp}), 204, nil)
+	}
+	main, spare, studio := doors[0].ID, doors[1].ID, doors[2].ID
+	steps := []struct {
+		name      string
+		ids       []string
+		confirmed bool
+		members   []int64
+	}{
+		{"confirm pair", []string{main, spare}, true, []int64{2, 2, 1}},
+		{"add Studio while keeping Spare", []string{main, spare, studio}, true, []int64{3, 3, 3}},
+		{"remove Spare and name remaining pair", []string{main, studio}, true, []int64{2, 1, 2}},
+		{"rejoin from unpooled Spare", []string{spare, main, studio}, true, []int64{3, 3, 3}},
+		{"Main stops sharing and names remaining pair", []string{spare, studio}, true, []int64{1, 2, 2}},
+		{"last pair stops sharing", []string{spare, studio}, false, []int64{1, 1, 1}},
+	}
+	for i, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/quota-pool", encoded(t, map[string]any{"account_ids": step.ids, "quota_fingerprint": fp, "confirmed": step.confirmed}), 204, nil)
+			for j, a := range doors {
+				if n := scalar(t, admin, `SELECT count(*) FROM (`+quotaAccounts+`) q`, a.ID); n != step.members[j] {
+					t.Fatalf("%s quota members=%d; want %d", a.Label, n, step.members[j])
+				}
+			}
+			// Every write is audited with the entire selected set, including removals.
+			if n := scalar(t, admin, `SELECT count(*) FROM events WHERE type='account.quota_pool_confirmed' AND actor_principal_id=$1`, admin.ID); n != int64(i+1) {
+				t.Fatalf("confirmation audit events=%d; want %d", n, i+1)
+			}
+			if n := scalar(t, admin, `SELECT count(*) FROM events WHERE type='account.quota_pool_confirmed' AND jsonb_array_length(after->'account_ids')=$1 AND after->'account_ids' @> $2::jsonb AND after->'confirmed'=$3::jsonb`, len(step.ids), encoded(t, step.ids), encoded(t, step.confirmed)); n == 0 {
+				t.Fatal("audit did not name the complete confirmed or removed set")
+			}
+		})
+	}
+	if n := scalar(t, admin, `SELECT count(*) FROM agent_accounts WHERE quota_pool_fingerprint<>''`); n != 0 {
+		t.Fatal("stopping the last pair left a pool confirmation behind")
 	}
 }
 

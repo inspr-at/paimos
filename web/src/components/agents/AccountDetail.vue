@@ -9,7 +9,7 @@ import {
 } from '../../lib/accountLimits'
 import { putQuotaPool, type AgentAccount, type AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
-import { confirmAction } from '../../lib/confirm'
+import { confirmAction, type ConfirmRequest } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
 import PiAccountModel from '../settings/PiAccountModel.vue'
 import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
@@ -36,18 +36,38 @@ const poolError = ref('')
 const poolCandidates = computed(() => (props.accounts ?? []).filter(a => a.id !== props.account.id && a.harness === props.account.harness && !!props.account.quota_fingerprint && a.quota_fingerprint === props.account.quota_fingerprint && (!props.account.quota_pool_fingerprint || a.quota_pool_fingerprint !== props.account.quota_pool_fingerprint)))
 const poolMembers = computed(() => (props.accounts ?? []).filter(a => a.id !== props.account.id && a.harness === props.account.harness && !!props.account.quota_pool_fingerprint && a.quota_pool_fingerprint === props.account.quota_pool_fingerprint))
 const loginName = (a: AgentAccount) => `${accountName(a)}${a.host_label ? ` · ${a.host_label}` : ''}`
-async function shareQuota(other?: AgentAccount) {
-  if (!props.mayManage || poolBusy.value) return
+async function shareQuota(other: AgentAccount) {
   const account = props.account
-  const fingerprint = other ? account.quota_fingerprint : account.quota_pool_fingerprint
+  const fingerprint = account.quota_fingerprint
   if (!fingerprint) return
-  const ok = await confirmAction(other
-    ? { title: 'Same login — pool them?', body: 'Confirm these accounts use the same vendor login before they share a quota.', points: [loginName(account), loginName(other)], confirmLabel: 'Pool accounts' }
-    : { title: 'Stop sharing quota?', body: `${loginName(account)} will use its own readings and limits.`, confirmLabel: 'Stop sharing' })
+  // Confirmation replaces the entire pool. Include existing confirmed members
+  // even when the open account is joining a pool from outside it.
+  const current = (props.accounts ?? []).filter(a => a.harness === account.harness && a.quota_pool_fingerprint === fingerprint)
+  const members = [account, ...current, other].filter((a, i, all) => all.findIndex(b => b.id === a.id) === i)
+  await changeQuotaPool(members, fingerprint, true, {
+    title: 'Same login — pool them?', body: 'Confirm all these accounts use the same vendor login before they share a quota.', points: members.map(loginName), confirmLabel: 'Pool accounts',
+  })
+}
+async function stopSharingQuota(removed = props.account) {
+  const fingerprint = props.account.quota_pool_fingerprint
+  if (!fingerprint) return
+  const members = [props.account, ...poolMembers.value]
+  const remaining = members.filter(a => a.id !== removed.id)
+  const keepPool = remaining.length >= 2
+  const self = removed.id === props.account.id
+  await changeQuotaPool(keepPool ? remaining : members, fingerprint, keepPool, {
+    title: self ? 'Stop sharing quota?' : `Remove ${loginName(removed)} from pool?`,
+    body: `${loginName(removed)} will use its own readings and limits.${remaining.length ? keepPool ? ' These accounts will keep sharing quota:' : ' The remaining account will also use its own readings and limits:' : ''}`,
+    points: remaining.map(loginName), confirmLabel: self ? 'Stop sharing' : 'Remove from pool',
+  })
+}
+async function changeQuotaPool(members: AgentAccount[], fingerprint: string, confirmed: boolean, request: ConfirmRequest) {
+  if (!props.mayManage || poolBusy.value) return
+  const ok = await confirmAction(request)
   if (!ok) return
   poolBusy.value = true; poolError.value = ''
   try {
-    await putQuotaPool(other ? [account.id, other.id] : [account.id], fingerprint, !!other)
+    await putQuotaPool(members.map(a => a.id), fingerprint, confirmed)
     emit('changed')
   } catch (e) { poolError.value = e instanceof Error ? e.message : 'The quota did not change. Please try again.' }
   finally { poolBusy.value = false }
@@ -195,7 +215,8 @@ async function drop(w: AllowanceWindow) {
         <dd>
           <p v-if="poolMembers.length" class="quiet">Shared with {{ poolMembers.map(loginName).join(', ') }}</p>
           <button v-for="other in poolCandidates" :key="other.id" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota(other)">Pool with {{ loginName(other) }}</button>
-          <button v-if="account.quota_pool_fingerprint" type="button" class="btn sm ghost" :disabled="poolBusy" @click="shareQuota()">Stop sharing quota</button>
+          <button v-for="member in poolMembers" :key="member.id" type="button" class="btn sm ghost" :disabled="poolBusy" @click="stopSharingQuota(member)">Remove {{ loginName(member) }} from pool</button>
+          <button v-if="account.quota_pool_fingerprint" type="button" class="btn sm ghost" :disabled="poolBusy" @click="stopSharingQuota()">Stop sharing quota</button>
           <p v-if="poolError" class="problem" role="alert">{{ poolError }}</p>
         </dd>
       </div>

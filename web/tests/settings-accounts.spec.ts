@@ -43,7 +43,7 @@ async function details(page: Page, id: string) {
 }
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 
-test('matching login hints need a person to confirm the selected pair', async ({ page }) => {
+test('quota pool additions name every member and removals confirm the remaining set', async ({ page }) => {
   const errors = watchErrors(page)
   const { capacity } = await setup(page)
   const fingerprint = 'ab'.repeat(32)
@@ -52,6 +52,10 @@ test('matching login hints need a person to confirm the selected pair', async ({
   await page.route('**/api/agent-accounts/quota-pool', async route => {
     const body = route.request().postDataJSON()
     writes.push(body)
+    // The server replaces the complete confirmed pool, clearing unnamed members.
+    if (body.confirmed) for (const a of capacity.accounts) {
+      if (a.harness === 'codex' && a.quota_pool_fingerprint === body.quota_fingerprint && !body.account_ids.includes(a.id)) a.quota_pool_fingerprint = ''
+    }
     for (const a of capacity.accounts) if (body.account_ids.includes(a.id)) Object.assign(a, { quota_pool_fingerprint: body.confirmed ? body.quota_fingerprint : '' })
     await route.fulfill({ status: 204 })
   })
@@ -72,20 +76,97 @@ test('matching login hints need a person to confirm the selected pair', async ({
   await expect(detail).toContainText('Shared with Spare · mbp2607')
   await expect(detail.getByRole('button', { name: 'Pool with Studio · studio' })).toBeVisible()
   await expect(pool).toHaveCount(0)
-  const shots = process.env.AEON397_SHOTS
-  if (shots) {
-    mkdirSync(shots, { recursive: true })
-    for (const width of [1600, 390]) for (const colorScheme of ['light', 'dark'] as const) {
-      await page.setViewportSize({ width, height: 1000 })
-      await page.emulateMedia({ colorScheme })
-      expect(await noScroll(page)).toBe(true)
-      await page.screenshot({ path: `${shots}/quota-${width}-${colorScheme}.png`, fullPage: true })
+  const captureDialog = async (name: string) => {
+    const shots = process.env.AEON397_SHOTS
+    if (shots) {
+      mkdirSync(shots, { recursive: true })
+      for (const width of [1600, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+        await page.setViewportSize({ width, height: 1000 })
+        await page.emulateMedia({ colorScheme })
+        expect(await noScroll(page)).toBe(true)
+        await page.screenshot({ path: `${shots}/${name}-${width}-${colorScheme}.png`, fullPage: true })
+      }
+      await page.setViewportSize({ width: 1280, height: 720 })
+      await page.emulateMedia({ colorScheme: 'light' })
     }
   }
-  await detail.getByRole('button', { name: 'Stop sharing quota' }).click()
-  await page.getByRole('dialog', { name: 'Stop sharing quota?' }).getByRole('button', { name: 'Stop sharing', exact: true }).click()
+
+  // Confirm the third account, keeping Spare in both the dialog and the write.
+  await detail.getByRole('button', { name: 'Pool with Studio · studio' }).click()
+  await expect(confirm.locator('.points li')).toHaveText(['Main · mbp2607', 'Spare · mbp2607', 'Studio · studio'])
+  await captureDialog('quota-dialog-add')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  expect(writes).toHaveLength(1)
+  await detail.getByRole('button', { name: 'Pool with Studio · studio' }).click()
+  await confirm.getByRole('button', { name: 'Pool accounts' }).click()
   await expect.poll(() => writes.length).toBe(2)
-  expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: false })
+  expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.spare, ACCOUNTS.studio], quota_fingerprint: fingerprint, confirmed: true })
+  await expect(detail).toContainText('Shared with Spare · mbp2607, Studio · studio')
+  await expect(detail.getByRole('button', { name: /^Pool with/ })).toHaveCount(0)
+
+  await detail.getByRole('button', { name: 'Remove Spare · mbp2607 from pool', exact: true }).click()
+  const remove = page.getByRole('dialog', { name: 'Remove Spare · mbp2607 from pool?' })
+  await expect(remove).toContainText('Spare · mbp2607 will use its own readings and limits.')
+  await expect(remove.locator('.points li')).toHaveText(['Main · mbp2607', 'Studio · studio'])
+  await captureDialog('quota-dialog-remove')
+  await remove.getByRole('button', { name: 'Cancel' }).click()
+  expect(writes).toHaveLength(2)
+  await detail.getByRole('button', { name: 'Remove Spare · mbp2607 from pool', exact: true }).click()
+  await remove.getByRole('button', { name: 'Remove from pool', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(3)
+  expect(writes[2]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.studio], quota_fingerprint: fingerprint, confirmed: true })
+  await expect(detail).toContainText('Shared with Studio · studio')
+  await expect(pool).toBeVisible()
+
+  // Leaving a pair clears both confirmations and names the last remaining account.
+  await detail.getByRole('button', { name: 'Stop sharing quota' }).click()
+  const stop = page.getByRole('dialog', { name: 'Stop sharing quota?' })
+  await expect(stop.locator('.points li')).toHaveText(['Studio · studio'])
+  await stop.getByRole('button', { name: 'Stop sharing', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(4)
+  expect(writes[3]).toEqual({ account_ids: [ACCOUNTS.main, ACCOUNTS.studio], quota_fingerprint: fingerprint, confirmed: false })
+  await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toHaveCount(0)
+  await expect(detail.getByRole('button', { name: /^Pool with/ })).toHaveCount(2)
+  expect(errors).toEqual([])
+})
+
+test('an unpooled account joins every existing member and can leave them sharing', async ({ page }) => {
+  const errors = watchErrors(page)
+  const { capacity } = await setup(page)
+  const fingerprint = 'ab'.repeat(32)
+  for (const a of capacity.accounts.filter(a => a.harness === 'codex')) Object.assign(a, {
+    quota_fingerprint: fingerprint, quota_pool_fingerprint: a.id === ACCOUNTS.studio ? '' : fingerprint,
+  })
+  const writes: Record<string, unknown>[] = []
+  await page.route('**/api/agent-accounts/quota-pool', async route => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    for (const a of capacity.accounts.filter(a => a.harness === 'codex')) {
+      if (body.confirmed || body.account_ids.includes(a.id)) a.quota_pool_fingerprint = body.confirmed && body.account_ids.includes(a.id) ? body.quota_fingerprint : ''
+    }
+    await route.fulfill({ status: 204 })
+  })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.studio)
+  await detail.getByRole('button', { name: 'Pool with Main · mbp2607', exact: true }).click()
+  const confirm = page.getByRole('dialog', { name: 'Same login — pool them?' })
+  await expect(confirm.locator('.points li')).toHaveText(['Studio · studio', 'Spare · mbp2607', 'Main · mbp2607'])
+  await confirm.getByRole('button', { name: 'Pool accounts' }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toEqual({ account_ids: [ACCOUNTS.studio, ACCOUNTS.spare, ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: true })
+  await expect(detail).toContainText('Shared with Spare · mbp2607, Main · mbp2607')
+
+  await detail.getByRole('button', { name: 'Stop sharing quota' }).click()
+  const stop = page.getByRole('dialog', { name: 'Stop sharing quota?' })
+  await expect(stop).toContainText('These accounts will keep sharing quota:')
+  await expect(stop.locator('.points li')).toHaveText(['Spare · mbp2607', 'Main · mbp2607'])
+  await stop.getByRole('button', { name: 'Stop sharing', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(2)
+  expect(writes[1]).toEqual({ account_ids: [ACCOUNTS.spare, ACCOUNTS.main], quota_fingerprint: fingerprint, confirmed: true })
+  await expect(detail.getByRole('button', { name: 'Stop sharing quota' })).toHaveCount(0)
+  const main = await details(page, ACCOUNTS.main)
+  await expect(main).toContainText('Shared with Spare · mbp2607')
+  await expect(main.getByRole('button', { name: 'Pool with Studio · studio', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 

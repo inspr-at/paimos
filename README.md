@@ -80,8 +80,11 @@ and choose **Pool with…**, then confirm the named accounts use the same vendor
 login. Only those confirmed accounts share readings, holds and parallel slots;
 confirmation replaces the pool with exactly the named accounts, leaving unnamed
 previous members separate. Later enrollments require their own confirmation.
-**Stop sharing quota** removes an account, and a changed fingerprint clears its
-confirmation. Existing accounts
+The dialog names every current member plus the account being added, so adding
+a third account keeps the existing pair. **Remove … from pool** and **Stop sharing
+quota** explicitly name every remaining member; the last pair returns to separate
+readings and limits. A changed fingerprint clears that account's confirmation.
+Existing accounts
 start unconfirmed after migration 1054; prior holds can still settle or release.
 The person-only API is `PUT /api/agent-accounts/quota-pool` (`account.manage`).
 Ticket pins require edit permission in the ticket's visible project. If a queued
