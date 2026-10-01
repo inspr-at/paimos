@@ -13,15 +13,19 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/ticketwork"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 func TestDemoSeedRefusesOutsideDev(t *testing.T) {
@@ -73,6 +77,7 @@ func TestDemoSeedTwice(t *testing.T) {
 		t.Fatalf("kinds %d knowledge %d agents %d sessions %d finished %d pending %d hours %d rates %d tickets %d", kinds, knowledge, agents, sessions, finished, pending, hours, rates, tickets)
 	}
 	assertCaptureState(t, database, first.TenantID)
+	assertShowcaseState(t, database, first.TenantID)
 	second, err := Seed(ctx, database.App, "lumen-demo")
 	if err != nil {
 		t.Fatal(err)
@@ -185,6 +190,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	for _, table := range []string{
 		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
 		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"work_orders", "work_criteria", "work_evidence", "agent_delivery_votes",
 		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
 		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
 		"intake_sources", "intake_drafts", "intake_citations", "intake_draft_acceptances",
@@ -205,6 +211,111 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 		t.Fatal(err)
 	}
 	return rows
+}
+
+func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
+	t.Helper()
+	admin := tenant.Principal{TenantID: tenantID, Kind: tenant.Person}
+	var showcase, harbor, project, approvalID string
+	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text,project_id::text FROM nodes WHERE key='LT-1'`).Scan(&showcase, &project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='HT-1'`).Scan(&harbor); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT a.id::text FROM approval_requests a JOIN approval_decisions d ON d.tenant_id=a.tenant_id AND d.request_id=a.id JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.agent_principal_id JOIN principals decider ON decider.tenant_id=d.tenant_id AND decider.id=d.decided_by_principal_id WHERE a.resource_id=$1::uuid AND a.scope='nodes.write' AND p.name='Lumen Scribe' AND d.decision='approved' AND decider.name='Demo Operator'`, showcase).Scan(&approvalID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := newAPI(t.Context(), database.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketwork.New(database.App).Mount(api.mux)
+	var page activity.Page
+	if err := api.do(admin, "", http.MethodGet, "/api/nodes/"+showcase+"/activity", nil, http.StatusOK, &page, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Activity is newest first. Prove the authored progress, request and person
+	// decision are interleaved in the chronology returned to the drawer.
+	want := []struct{ author, text string }{
+		{"Ivo Quill", "the brief stays in the demo tenant"},
+		{"Lumen Scribe", "Fictional progress note:"},
+		{"Nia Frost", "Fictional human review:"},
+		{"Lumen Scribe", "Fictional approval request:"},
+		{"Demo Operator", "Fictional approval decision:"},
+		{"Lumen Scribe", "The fictional label review is complete."},
+		{"Nia Frost", "The fictional label reads clearly."},
+	}
+	next, agentEntries := 0, 0
+	for i := len(page.Items) - 1; i >= 0; i-- {
+		item := page.Items[i]
+		if item.Type != "comment" || item.BodyMarkdown == nil {
+			continue
+		}
+		if item.Author.Name == "Lumen Scribe" {
+			agentEntries++
+		}
+		if next < len(want) && item.Author.Name == want[next].author && strings.Contains(*item.BodyMarkdown, want[next].text) {
+			if (next == 3 || next == 4) && !strings.Contains(*item.BodyMarkdown, "`"+approvalID+"`") {
+				t.Fatal("showcase approval note does not reference the stored person-approved request")
+			}
+			next++
+		}
+	}
+	if agentEntries < 2 || next != len(want) {
+		t.Fatalf("showcase activity: %d agent comments, %d/%d interleaved notes", agentEntries, next, len(want))
+	}
+	var report ticketwork.Report
+	if err := api.do(admin, "", http.MethodGet, "/api/nodes/"+showcase+"/agent-work", nil, http.StatusOK, &report, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Sessions) != 1 || report.Sessions[0].Label == nil || *report.Sessions[0].Label != "Lumen Scribe · Done" || report.Sessions[0].Phase != "stopped" {
+		t.Fatal("showcase agent work must identify Lumen Scribe's completed review")
+	}
+	var session harness.Session
+	if err := api.do(admin, "", http.MethodGet, "/api/projects/"+project+"/harness-sessions/"+report.Sessions[0].ID, nil, http.StatusOK, &session, nil); err != nil {
+		t.Fatal(err)
+	}
+	if session.WorkOrderID == nil {
+		t.Fatal("showcase session has no work order")
+	}
+	var order workorders.Order
+	if err := api.do(admin, "", http.MethodGet, "/api/work-orders/"+*session.WorkOrderID, nil, http.StatusOK, &order, nil); err != nil {
+		t.Fatal(err)
+	}
+	if order.Status != "done" || len(order.Criteria) == 0 || order.Criteria[0].CheckedBy == nil || *order.Criteria[0].CheckedBy != admin.ID {
+		t.Fatal("showcase work must be done with a person's acceptance check")
+	}
+	for _, example := range []struct {
+		node  string
+		votes int
+	}{{showcase, 0}, {harbor, 1}} {
+		var ratings deliveryvote.Page
+		if err := api.do(admin, "", http.MethodGet, "/api/nodes/"+example.node+"/delivery-ratings", nil, http.StatusOK, &ratings, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(ratings.Sessions) != 1 || ratings.Sessions[0].Votes != example.votes {
+			t.Fatalf("ticket %s: want %d rework marks", example.node, example.votes)
+		}
+		if example.votes == 0 && ratings.Sessions[0].Mine != nil {
+			t.Fatal("showcase must not have a rework mark")
+		}
+		if example.votes == 1 && (ratings.Sessions[0].Mine == nil || !slices.Contains(ratings.Sessions[0].Mine.Tags, "rework")) {
+			t.Fatal("Harbor must retain an explicit rework example")
+		}
+	}
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.tenant_id=a.tenant_id AND n.id=a.resource_id JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.agent_principal_id JOIN approval_decisions d ON d.tenant_id=a.tenant_id AND d.request_id=a.id JOIN principals decider ON decider.tenant_id=d.tenant_id AND decider.id=d.decided_by_principal_id WHERE n.key='LT-1' AND a.scope='nodes.write' AND p.name='Lumen Scribe' AND d.decision='approved' AND decider.name='Demo Operator'`); n != 1 {
+		t.Fatal("showcase must retain a real Scribe request approved by a person")
+	}
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.tenant_id=a.tenant_id AND n.id=a.resource_id JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.agent_principal_id WHERE n.key='HT-1' AND a.scope='nodes.write' AND p.name='Harbor Clerk' AND a.expires_at>now() AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.tenant_id=a.tenant_id AND d.request_id=a.id)`); n != 1 {
+		t.Fatal("Harbor Clerk's separate approval must stay pending")
+	}
 }
 
 // Assert through the same reads used by the UI: rows alone do not prove that
