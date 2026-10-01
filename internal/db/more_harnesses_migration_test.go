@@ -41,6 +41,21 @@ func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T
         EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, name).Scan(&pending, &recorded); err != nil || pending != 10 || recorded {
 		t.Fatalf("interrupted installation: pending=%d recorded=%v err=%v", pending, recorded, err)
 	}
+	// A checkpoint from different candidate bytes must never suppress DDL.
+	var checkpoint string
+	if err := d.App.QueryRow(t.Context(), `SELECT version FROM schema_migrations WHERE version LIKE $1`, name+"#check-phase:%").Scan(&checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	const stale = name + "#check-phase:different-source:install"
+	if _, err := d.App.Exec(t.Context(), `UPDATE schema_migrations SET version=$1 WHERE version=$2`, stale, checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err == nil || !strings.Contains(err.Error(), "different source bytes") {
+		t.Fatalf("changed partial migration accepted: %v", err)
+	}
+	if _, err := d.App.Exec(t.Context(), `UPDATE schema_migrations SET version=$1 WHERE version=$2`, checkpoint, stale); err != nil {
+		t.Fatal(err)
+	}
 	var writer pgx.Tx
 	err = db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
 		switch phase {
@@ -63,17 +78,31 @@ func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T
 				return fmt.Errorf("writer-concurrent validation did not finish: %d", validated)
 			}
 			// Retiring old enums needs a short exclusive DDL lock again.
-			return writer.Rollback(t.Context())
+			if err := writer.Rollback(t.Context()); err != nil {
+				return err
+			}
+			return interrupted // Also prove restart after validation committed.
 		}
 		return nil
 	})
 	if writer != nil {
 		defer writer.Rollback(t.Context())
 	}
-	if err != nil || writer == nil {
+	if !errors.Is(err, interrupted) || writer == nil {
 		t.Fatalf("resume with writer: %v", err)
 	}
 	var checkpoints int
+	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations WHERE version LIKE $1`, name+"#check-phase:%").Scan(&checkpoints); err != nil || checkpoints != 2 {
+		t.Fatalf("interrupted validation lost phase records: %d %v", checkpoints, err)
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+		if phase == name+"#install" || phase == name+"#validate" {
+			return errors.New("completed CHECK phase repeated")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal("resume replacement:", err)
+	}
 	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations WHERE version LIKE $1`, name+"#check-phase:%").Scan(&checkpoints); err != nil || checkpoints != 0 {
 		t.Fatalf("completed migration retained temporary checkpoints: %d %v", checkpoints, err)
 	}

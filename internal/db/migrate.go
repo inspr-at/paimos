@@ -278,11 +278,11 @@ func applyMoreHarnessChecks(ctx context.Context, conn *pgxpool.Conn, name string
 	if len(stmts) != 2*count+2 || stmts[0] != "SET LOCAL lock_timeout = '5s'" || !strings.HasPrefix(stmts[len(stmts)-1], "DO $$") {
 		return fmt.Errorf("migration %s: unexpected staged CHECK shape", name)
 	}
-	add := regexp.MustCompile(`(?s)^ALTER TABLE ([a-z_]+) ADD CONSTRAINT ([a-z_]+)\s+CHECK \(.+\) NOT VALID$`)
+	add := regexp.MustCompile(`(?s)^ALTER TABLE ([a-z_][a-z0-9_]*) ADD CONSTRAINT ([a-z_][a-z0-9_]*)\s+CHECK \(.+\) NOT VALID$`)
 	for i := 0; i < count; i++ {
 		match := add.FindStringSubmatch(stmts[i+1])
 		if match == nil || strings.Join(strings.Fields(stmts[count+i+1]), " ") != "ALTER TABLE "+match[1]+" VALIDATE CONSTRAINT "+match[2] {
-			return fmt.Errorf("migration %s: CHECK installation/validation mismatch", name)
+			return fmt.Errorf("migration %s: CHECK installation/validation mismatch at check %d", name, i+1)
 		}
 	}
 	phases := []struct {
