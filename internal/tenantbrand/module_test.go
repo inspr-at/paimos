@@ -171,12 +171,40 @@ func TestBrandSettingsArePersonOnlyAudited(t *testing.T) {
 	}
 	xss := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" onload="alert(1)"><script>alert(2)</script><circle cx="20" cy="20" r="18" fill="#fff"/></svg>`
 	w = f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(xss))
+	expect(t, w, 400)
+	if !strings.Contains(w.Body.String(), "SVG attribute onload is not supported") {
+		t.Fatalf("missing refusal reason: %s", w.Body.String())
+	}
+	static := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><!-- exported logo --><circle cx="20" cy="20" r="18" fill="#fff"/></svg>`
+	w = f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(static))
 	expect(t, w, 200)
 	s = settingsOf(t, w)
 	if s.LogoDark == nil || s.LogoDark.ContentType != "image/svg+xml" || !s.Cleaned {
 		t.Fatalf("dark logo %+v cleaned %v", s.LogoDark, s.Cleaned)
 	}
+	// Refused uploads preserve the current logo and append no audit event.
+	storedDark := f.call(f.member, "GET", s.LogoDark.URL, "", nil).Body.String()
+	for _, feature := range []string{
+		`<mask id="m"><rect width="40" height="40"/></mask>`,
+		`<rect mask="inherit"/>`,
+		`<rect style="clip-path:inherit"/>`,
+		`<linearGradient id="g" href="#other"/>`,
+		`<rect fill="url(#missing)"/>`,
+		`<style>rect { fill: red }</style>`,
+	} {
+		body := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">` + feature + `</svg>`)
+		w = f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", body)
+		expect(t, w, 400)
+		var refused struct{ Error string }
+		if err := json.Unmarshal(w.Body.Bytes(), &refused); err != nil || !strings.Contains(refused.Error, "SVG") {
+			t.Fatalf("missing refusal reason: %s", w.Body.String())
+		}
+		if got := f.call(f.member, "GET", s.LogoDark.URL, "", nil).Body.String(); got != storedDark {
+			t.Fatalf("refused SVG changed the stored logo: %s", got)
+		}
+	}
 	// The same bytes again change nothing and append nothing.
+	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(static)), 200)
 	expect(t, f.call(f.admin, "PUT", "/api/settings/brand", "application/json", name("Acme Studio")), 200)
 
 	var types []string

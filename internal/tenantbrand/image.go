@@ -39,7 +39,7 @@ type Logo struct {
 	Content     []byte
 	Width       int
 	Height      int
-	// Cleaned reports that the SVG sanitizer removed something.
+	// Cleaned reports harmless SVG comments removed. Unsupported features reject.
 	Cleaned bool
 }
 

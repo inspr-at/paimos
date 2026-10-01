@@ -14,43 +14,21 @@ import (
 	"strings"
 )
 
-// SVG logos are rewritten, never passed through. The sanitizer parses the file
-// and writes a new document from an allowlist of drawing elements and
-// presentation attributes; everything else is dropped with its subtree
-// (script, style, foreignObject, image, a, animation, filters, metadata,
-// foreign namespaces), as are comments, processing instructions and DOCTYPEs.
-// Logos need no element references, so there are almost none: <use>,
-// <symbol>, <pattern> and <marker> are dropped; href survives only on a
-// gradient that inherits from one other gradient; url() is a single fragment
-// of this file on fill, stroke, clip-path and mask, and a mask or clip path
-// never names another (no chains); and the file's expanded size, every
-// element counted once per mask or clip path that draws it, stays under a
-// budget. Nothing a browser draws can multiply through references.
-// Inline style declarations become presentation attributes, so the served
-// file needs no style-src at all.
-//
-// Rewriting was chosen over server-side rasterization: it needs no renderer
-// in the binary, keeps the logo sharp at every size, and the output contains
-// nothing that can fetch or execute, even before the <img> context and the
-// response CSP (default-src 'none'; sandbox) take their turn.
-
+// SVG logos use a static drawing profile. Unsupported elements, attributes and
+// style properties refuse the upload rather than silently changing the logo.
+// There are no element references or inherited gradients: only fill and stroke
+// may name a same-document gradient. defs is an inert container for definitions.
+// Inline styles become allowlisted presentation attributes. Comments and the XML
+// declaration may be removed; output remains sharp without a server renderer.
 const svgNS = "http://www.w3.org/2000/svg"
-const xlinkNS = "http://www.w3.org/1999/xlink"
 
 var svgElements = map[string]bool{
 	"svg": true, "g": true, "defs": true, "title": true, "desc": true,
 	"path": true, "circle": true, "rect": true, "ellipse": true, "line": true, "polyline": true, "polygon": true,
 	"text": true, "tspan": true, "linearGradient": true, "radialGradient": true, "stop": true,
-	"clipPath": true, "mask": true,
 }
 
-// hrefElements may inherit from another gradient of the same file.
-var hrefElements = map[string]bool{"linearGradient": true, "radialGradient": true}
-
-// maskElements draw what another element is clipped or masked by.
-var maskElements = map[string]bool{"mask": true, "clipPath": true}
-
-// textElements keep their character data; everywhere else it is layout whitespace.
+var gradientElements = map[string]bool{"linearGradient": true, "radialGradient": true}
 var textElements = map[string]bool{"text": true, "tspan": true, "title": true, "desc": true}
 
 var svgAttributes = map[string]bool{
@@ -58,62 +36,51 @@ var svgAttributes = map[string]bool{
 	"x": true, "y": true, "x1": true, "y1": true, "x2": true, "y2": true, "cx": true, "cy": true, "r": true, "rx": true, "ry": true,
 	"fx": true, "fy": true, "fr": true, "dx": true, "dy": true, "d": true, "points": true, "transform": true, "pathLength": true,
 	"offset": true, "gradientUnits": true, "gradientTransform": true, "spreadMethod": true,
-	"clipPathUnits": true, "maskUnits": true, "maskContentUnits": true, "href": true,
 	"textLength": true, "lengthAdjust": true,
 }
 
-// presentation attributes, allowed as attributes and as style declarations.
+// presentation is also the allowlist for inline CSS; no resource properties.
 var presentation = map[string]bool{
 	"fill": true, "fill-opacity": true, "fill-rule": true, "stroke": true, "stroke-width": true, "stroke-linecap": true,
 	"stroke-linejoin": true, "stroke-miterlimit": true, "stroke-dasharray": true, "stroke-dashoffset": true, "stroke-opacity": true,
-	"opacity": true, "clip-path": true, "clip-rule": true, "mask": true, "color": true, "display": true, "visibility": true,
+	"opacity": true, "color": true, "display": true, "visibility": true,
 	"stop-color": true, "stop-opacity": true, "font-family": true, "font-size": true, "font-weight": true, "font-style": true,
 	"font-stretch": true, "letter-spacing": true, "word-spacing": true, "text-anchor": true, "dominant-baseline": true,
 	"alignment-baseline": true, "baseline-shift": true, "vector-effect": true, "paint-order": true, "shape-rendering": true,
-	"isolation": true, "mix-blend-mode": true,
+	"transform": true,
 }
 
 const fragmentID = `#[A-Za-z_][A-Za-z0-9_.:-]*`
 
 var (
-	fragmentRef = regexp.MustCompile(`^` + fragmentID + `$`)
-	// localURL is one url() naming an element of this file; what follows it is
-	// checked on its own, so a second url() can never ride along.
-	localURL = regexp.MustCompile(`(?s)^url\(\s*(?:'(` + fragmentID + `)'|"(` + fragmentID + `)"|(` + fragmentID + `))\s*\)(.*)$`)
-	// paintFallback is what may follow a paint server: a keyword, a colour name,
-	// a hex colour or an rgb()/hsl() function.
+	fragmentRef   = regexp.MustCompile(`^` + fragmentID + `$`)
+	localURL      = regexp.MustCompile(`(?s)^url\(\s*(?:'(` + fragmentID + `)'|"(` + fragmentID + `)"|(` + fragmentID + `))\s*\)(.*)$`)
 	paintFallback = regexp.MustCompile(`^(?:none|currentColor|[A-Za-z]{3,32}|#[0-9A-Fa-f]{3,8}|(?:rgb|rgba|hsl|hsla)\([0-9.%\s,/+-]*\))$`)
-	// safeValue is every other value: numbers, lengths, colours, keywords,
-	// path data, transforms and font family names. No quotes, colons, angle
-	// brackets, slashes, backslashes, semicolons or url().
+	// Numbers, paths, transforms, lengths, colours and static typography only.
 	safeValue = regexp.MustCompile(`^[A-Za-z0-9 \t\r\n#%.,()+\-_]*$`)
 )
 
 const (
 	maxSVGDepth    = 32
 	maxSVGElements = 20000
-	// maxSVGExpanded bounds the drawn elements once every mask and clip path is
-	// counted for each element that uses it.
-	maxSVGExpanded = 100000
 )
 
-// errNotSVG is returned for input whose root is not an <svg> element.
 var errNotSVG = errors.New("not an SVG document")
 
-// SanitizeSVG returns the rewritten document and whether anything was removed.
+// SanitizeSVG validates the static profile and returns canonical bytes. cleaned
+// reports harmless comments removed, not unsupported features: those are errors.
 func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
-	dec := xml.NewDecoder(bytes.NewReader(in))
+	if len(in) > MaxLogoBytes {
+		return nil, false, TooLargeError{"the SVG exceeds 256 KB"}
+	}
+	dec := xml.NewDecoder(bytes.NewReader(bytes.TrimPrefix(in, []byte("\xef\xbb\xbf"))))
 	dec.Strict = true
 	dec.Entity = map[string]string{} // only the five predefined entities
 	var buf bytes.Buffer
-	var stack []svgFrame // open kept elements
-	skip := 0            // depth inside a dropped subtree
-	elements, kept := 0, 0
-	sizes := map[string]int{}     // id -> elements in its subtree, itself included
-	maskRefs := map[string]int{}  // id -> elements naming it as clip-path or mask
-	inherits := map[string]bool{} // ids of gradients that inherit from another
-	type edge struct{ from, to string }
-	var edges []edge
+	var stack []string
+	elements := 0
+	ids := map[string]string{} // unique id -> element type
+	var paints []string
 	rootSeen, rootClosed := false, false
 	for {
 		tok, err := dec.Token()
@@ -126,12 +93,8 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			elements++
-			if elements > maxSVGElements || len(stack)+skip >= maxSVGDepth {
+			if elements > maxSVGElements || len(stack) >= maxSVGDepth {
 				return nil, false, errors.New("SVG is too complex")
-			}
-			if skip > 0 {
-				skip++
-				continue
 			}
 			if !rootSeen {
 				if t.Name.Local != "svg" || (t.Name.Space != svgNS && t.Name.Space != "") {
@@ -141,37 +104,25 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 			} else if rootClosed {
 				return nil, false, errors.New("SVG has more than one root element")
 			}
-			if (t.Name.Space != svgNS && t.Name.Space != "") || !svgElements[t.Name.Local] || (len(stack) > 0 && t.Name.Local == "svg") {
-				cleaned = true
-				skip = 1
-				continue
+			if (t.Name.Space != svgNS && t.Name.Space != "") || !svgElements[t.Name.Local] {
+				return nil, false, fmt.Errorf("SVG element <%s> is not supported; use a static logo with paths, shapes, text or gradients", t.Name.Local)
 			}
-			attrs, dropped := cleanAttributes(t.Name.Local, t.Attr)
-			// A mask or clip path never names another: no chains to multiply through.
-			nested := maskElements[t.Name.Local] || len(stack) > 0 && stack[len(stack)-1].nested
-			id := ""
-			filtered := attrs[:0]
+			if len(stack) > 0 && !svgChildAllowed(stack[len(stack)-1], t.Name.Local) {
+				return nil, false, fmt.Errorf("SVG element <%s> is not supported inside <%s>", t.Name.Local, stack[len(stack)-1])
+			}
+			attrs, refs, err := cleanAttributes(t.Attr)
+			if err != nil {
+				return nil, false, err
+			}
+			paints = append(paints, refs...)
 			for _, a := range attrs {
-				switch {
-				case (a.name == "clip-path" || a.name == "mask") && strings.HasPrefix(a.value, "url("):
-					if nested {
-						dropped = true
-						continue
+				if a.name == "id" {
+					if _, exists := ids[a.value]; exists {
+						return nil, false, errors.New("SVG ids must be unique")
 					}
-					maskRefs[fragmentOf(a.value)]++
-				case a.name == "id":
-					id = a.value
-				}
-				filtered = append(filtered, a)
-			}
-			attrs = filtered
-			for _, a := range attrs {
-				if a.name == "href" && id != "" {
-					inherits[id] = true
-					edges = append(edges, edge{id, strings.TrimPrefix(a.value, "#")})
+					ids[a.value] = t.Name.Local
 				}
 			}
-			cleaned = cleaned || dropped
 			buf.WriteByte('<')
 			buf.WriteString(t.Name.Local)
 			if len(stack) == 0 {
@@ -185,42 +136,34 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 				buf.WriteByte('"')
 			}
 			buf.WriteByte('>')
-			stack = append(stack, svgFrame{name: t.Name.Local, id: id, start: kept, nested: nested})
-			kept++
+			stack = append(stack, t.Name.Local)
 		case xml.EndElement:
-			if skip > 0 {
-				skip--
-				continue
-			}
 			if len(stack) == 0 {
-				continue
+				return nil, false, errors.New("invalid SVG: unexpected closing element")
 			}
 			top := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			if top.id != "" {
-				sizes[top.id] = max(sizes[top.id], kept-top.start)
-			}
-			buf.WriteString("</" + top.name + ">")
+			buf.WriteString("</" + top + ">")
 			if len(stack) == 0 {
 				rootClosed = true
 			}
 		case xml.CharData:
-			if skip > 0 || len(stack) == 0 {
-				continue
-			}
-			if textElements[stack[len(stack)-1].name] {
+			if len(stack) > 0 && textElements[stack[len(stack)-1]] {
 				_ = xml.EscapeText(&buf, t)
+			} else if len(bytes.TrimSpace(t)) != 0 {
+				return nil, false, errors.New("SVG character data is only supported in text, title or desc")
 			}
 		case xml.ProcInst:
-			// The XML declaration is one too; the output does not need it.
-			if t.Target != "xml" {
-				cleaned = true
+			if t.Target != "xml" || rootSeen {
+				return nil, false, errors.New("SVG processing instructions are not supported")
 			}
 		case xml.Comment:
 			cleaned = true
 		case xml.Directive:
-			// A DOCTYPE may declare entities; none are honoured, and it is dropped.
-			cleaned = true
+			return nil, false, errors.New("SVG directives and DOCTYPEs are not supported")
+		}
+		if buf.Len() > MaxLogoBytes {
+			return nil, false, TooLargeError{"the rewritten SVG exceeds 256 KB"}
 		}
 	}
 	if !rootSeen {
@@ -229,43 +172,44 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 	if !rootClosed {
 		return nil, false, errors.New("invalid SVG: unclosed root element")
 	}
-	// A gradient inherits from one other gradient at most: no chains, no cycles.
-	for _, e := range edges {
-		if inherits[e.to] {
-			return nil, false, errors.New("SVG gradients inherit from each other in a chain")
-		}
-	}
-	// Every element counts once for each mask or clip path that draws it.
-	expanded := kept
-	for id, n := range maskRefs {
-		expanded += n * sizes[id]
-		if expanded > maxSVGExpanded {
-			return nil, false, errors.New("SVG is too complex")
+	for _, id := range paints {
+		if !gradientElements[ids[id]] {
+			return nil, false, errors.New("SVG fill and stroke url() must name a gradient in this file")
 		}
 	}
 	return buf.Bytes(), cleaned, nil
 }
 
-// svgFrame is an open element that is being kept.
-type svgFrame struct {
-	name, id string
-	start    int  // kept elements before this one
-	nested   bool // this element or an ancestor is a mask or clip path
-}
-
-// fragmentOf returns the id of the url(#id) that cleanURL wrote.
-func fragmentOf(value string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(value, "url(#"), ")")
+func svgChildAllowed(parent, child string) bool {
+	if child == "svg" {
+		return false
+	}
+	switch parent {
+	case "svg", "g", "defs":
+		return child != "stop" && child != "tspan"
+	case "linearGradient", "radialGradient":
+		return child == "stop" || child == "title" || child == "desc"
+	case "text", "tspan":
+		return child == "tspan" || child == "title" || child == "desc"
+	case "title", "desc":
+		return false
+	default:
+		return child == "title" || child == "desc"
+	}
 }
 
 type attribute struct{ name, value string }
 
-// cleanAttributes keeps allowlisted attributes with safe values, in document
-// order, then applies style declarations, which win as they do in CSS.
-func cleanAttributes(element string, in []xml.Attr) ([]attribute, bool) {
+// cleanAttributes rejects every non-allowlisted attribute or declaration, even
+// if a later declaration would override it. Inline CSS wins over attributes.
+func cleanAttributes(in []xml.Attr) ([]attribute, []string, error) {
 	var out []attribute
-	dropped := false
+	var paints []string
 	set := func(name, value string) {
+		// Validate even a reference that a later style declaration overrides.
+		if (name == "fill" || name == "stroke") && strings.HasPrefix(value, "url(") {
+			paints = append(paints, value[len("url(#"):strings.IndexByte(value, ')')])
+		}
 		for i := range out {
 			if out[i].name == name {
 				out[i].value = value
@@ -275,49 +219,58 @@ func cleanAttributes(element string, in []xml.Attr) ([]attribute, bool) {
 		out = append(out, attribute{name, value})
 	}
 	var style string
+	seen := map[xml.Name]bool{}
 	for _, a := range in {
+		if seen[a.Name] {
+			return nil, nil, fmt.Errorf("SVG attribute %s is repeated", a.Name.Local)
+		}
+		seen[a.Name] = true
 		name := a.Name.Local
-		switch {
-		case a.Name.Space == "xmlns" || (a.Name.Space == "" && name == "xmlns"):
+		if a.Name.Space == "xmlns" || (a.Name.Space == "" && name == "xmlns") {
 			continue // namespace declarations are rewritten
-		case a.Name.Space == xlinkNS && name == "href":
-			// xlink:href becomes the SVG 2 href.
-		case a.Name.Space != "":
-			dropped = true
-			continue
-		case name == "style":
+		}
+		if a.Name.Space != "" || name == "href" || (!svgAttributes[name] && !presentation[name] && name != "style") {
+			return nil, nil, fmt.Errorf("SVG attribute %s is not supported in static logos", name)
+		}
+		if name == "style" {
 			style = a.Value
 			continue
 		}
 		value, ok := cleanValue(name, a.Value)
-		if !ok || (!svgAttributes[name] && !presentation[name]) || (name == "href" && !hrefElements[element]) {
-			dropped = true
-			continue
+		if !ok {
+			return nil, nil, fmt.Errorf("SVG attribute %s has an unsupported value; fill and stroke may reference only a local gradient, without inheritance", name)
 		}
 		set(name, value)
 	}
 	for _, decl := range strings.Split(style, ";") {
-		prop, value, ok := strings.Cut(decl, ":")
-		prop = strings.ToLower(strings.TrimSpace(prop))
-		if !ok && prop == "" {
+		if strings.TrimSpace(decl) == "" {
 			continue
 		}
+		prop, value, ok := strings.Cut(decl, ":")
+		prop = strings.ToLower(strings.TrimSpace(prop))
+		if !ok || !presentation[prop] {
+			return nil, nil, fmt.Errorf("SVG style property %s is not supported in static logos", prop)
+		}
 		clean, valid := cleanValue(prop, value)
-		if !ok || !presentation[prop] || !valid {
-			dropped = true
-			continue
+		if !valid {
+			return nil, nil, fmt.Errorf("SVG style property %s has an unsupported value; fill and stroke may reference only a local gradient, without inheritance", prop)
 		}
 		set(prop, clean)
 	}
-	return out, dropped
+	return out, paints, nil
 }
 
-// cleanURL accepts one url() to a fragment of this file on a property that
-// takes a paint server or a mask, rewritten without quotes or spaces. Only a
-// paint may carry a fallback, and the fallback is validated on its own.
+func inheritedPaint(v string) bool {
+	switch strings.ToLower(v) {
+	case "inherit", "initial", "unset", "revert", "revert-layer":
+		return true
+	}
+	return false
+}
+
+// cleanURL permits one local gradient on fill/stroke and a static colour fallback.
 func cleanURL(name, v string) (string, bool) {
-	paint := name == "fill" || name == "stroke"
-	if !paint && name != "clip-path" && name != "mask" {
+	if name != "fill" && name != "stroke" {
 		return "", false
 	}
 	m := localURL.FindStringSubmatch(v)
@@ -326,10 +279,10 @@ func cleanURL(name, v string) (string, bool) {
 	}
 	out := "url(" + m[1] + m[2] + m[3] + ")"
 	rest := strings.TrimSpace(m[4])
-	switch {
-	case rest == "":
+	if rest == "" {
 		return out, true
-	case paint && paintFallback.MatchString(rest):
+	}
+	if paintFallback.MatchString(rest) && !inheritedPaint(rest) {
 		return out + " " + rest, true
 	}
 	return "", false
@@ -340,14 +293,16 @@ func cleanValue(name, raw string) (string, bool) {
 	if len(v) > 100000 {
 		return "", false
 	}
-	if name == "href" {
-		return v, fragmentRef.MatchString(v)
+	if name == "id" {
+		return v, fragmentRef.MatchString("#" + v)
 	}
 	if strings.Contains(strings.ToLower(v), "url(") {
 		return cleanURL(name, v)
 	}
+	if (name == "fill" || name == "stroke") && inheritedPaint(v) {
+		return "", false
+	}
 	if name == "font-family" {
-		// Quoted family names lose their quotes; the list stays readable.
 		v = strings.NewReplacer(`"`, "", `'`, "").Replace(v)
 	}
 	return v, safeValue.MatchString(v)

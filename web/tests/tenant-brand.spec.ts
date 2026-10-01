@@ -96,8 +96,9 @@ export async function mockBrand(page: Page, w: BrandWorld, options: { admin?: bo
       return write(async () => {
         w.puts.push({ path, type, size: body.length })
         if (w.fail) return route.fulfill({ status: 400, json: { error: w.fail } })
-        const cleaned = body.includes('<script')
-        w.logos[v] = stored(body.replace(/<script[\s\S]*?<\/script>/g, ''), type)
+        if (type === 'image/svg+xml' && body.includes('<script')) return route.fulfill({ status: 400, json: { error: 'SVG element <script> is not supported; use a static logo with paths, shapes, text or gradients' } })
+        const cleaned = body.includes('<!--')
+        w.logos[v] = stored(body.replace(/<!--[\s\S]*?-->/g, ''), type)
         return route.fulfill({ json: settingsOf(w, cleaned) })
       })
     }
@@ -216,9 +217,15 @@ test('an admin sets the brand in Settings → Workspace; the header follows at o
   await expect(card.getByRole('alert')).toHaveText('The logo is 20×20 px; each side needs at least 32 px.')
   delete w.fail
 
-  // An SVG with a script is saved cleaned, and says so.
+  // Unsupported SVG refuses the upload and preserves the current brand.
   await card.getByLabel('Logo file', { exact: true }).setInputFiles({ name: 'northwind.svg', mimeType: '', buffer: Buffer.from(WIDE.replace('</svg>', '<script>alert(1)</script></svg>')) })
-  await expect(page.locator('.toast')).toContainText('Parts of the SVG that could run code or load other files were removed')
+  await expect(card.getByRole('alert')).toHaveText('SVG element <script> is not supported; use a static logo with paths, shapes, text or gradients.')
+  expect(w.logos.light).toBeUndefined()
+  await expect(lockup(page).locator('.tenant-logo img')).toHaveCount(0)
+
+  // Harmless export comments may still be removed from a static logo.
+  await card.getByLabel('Logo file', { exact: true }).setInputFiles({ name: 'northwind.svg', mimeType: '', buffer: Buffer.from(WIDE.replace('</svg>', '<!-- exported logo --></svg>')) })
+  await expect(page.locator('.toast')).toContainText('Saved. SVG comments were removed.')
   expect(w.puts.at(-1)).toMatchObject({ path: '/api/settings/brand/logo/light', type: 'image/svg+xml' })
   await expect(card.getByRole('alert')).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Replace' })).toBeVisible()

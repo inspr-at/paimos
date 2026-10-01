@@ -96,7 +96,7 @@ type Settings struct {
 	Logo      *LogoInfo  `json:"logo"`
 	LogoDark  *LogoInfo  `json:"logo_dark"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	// Cleaned is set on an SVG upload the sanitizer had to change.
+	// Cleaned is set when harmless SVG comments were removed.
 	Cleaned bool `json:"cleaned,omitempty"`
 }
 

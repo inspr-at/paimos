@@ -86,7 +86,7 @@ function upload(variant: Variant, file: File | undefined) {
       if (!response.ok) { problem.value = await message(response, 'The logo could not be saved.'); return }
       const next = await response.json() as BrandSettings
       apply(next)
-      if (next.cleaned) toast('Saved. Parts of the SVG that could run code or load other files were removed.')
+      if (next.cleaned) toast('Saved. SVG comments were removed.')
     } catch { problem.value = 'The logo could not be saved. Check the connection and try again.' } finally {
       const input = inputs[variant].value
       if (input) input.value = ''
