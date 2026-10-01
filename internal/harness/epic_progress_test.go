@@ -139,14 +139,14 @@ func TestEpicProgressRequiresCurrentUnarchivedCleanCompletion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			child := uid()
 			f.addNode(t, child, fmt.Sprintf("PROOF-%d", i+3), "ticket", epic, tc.name)
-			t.Cleanup(func() {
+			defer func() {
 				// Keep each case's child out of the next case's average, even if
 				// a fixture assertion fails before it reaches its stopped state.
 				f.tx(t, f.person, func(tx pgx.Tx) error {
 					_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, child, f.project)
 					return err
 				})
-			})
+			}()
 			lease := fmt.Sprintf("epic-proof-lease-%022d", i)
 			session := f.registerSession(t, f.agent.ID, "worker", child, fmt.Sprintf("epic-proof-ref-%016d", i), lease)
 			f.beat(t, session, lease, 1, map[string]any{"progress_pct": tc.progress})
