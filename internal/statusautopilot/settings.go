@@ -5,6 +5,7 @@
 package statusautopilot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,27 @@ type Rule struct {
 	Enabled bool `json:"enabled"`
 	Days    int  `json:"days,omitempty"`
 }
+
+// UnmarshalJSON preserves the contract's required rule toggle and rejects
+// unknown attributes; missing enabled must not silently disable a rule.
+func (r *Rule) UnmarshalJSON(raw []byte) error {
+	var in struct {
+		Enabled *bool `json:"enabled"`
+		Days    int   `json:"days,omitempty"`
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&in); err != nil {
+		return err
+	}
+	if in.Enabled == nil {
+		return fmt.Errorf("rule enabled is required")
+	}
+	r.Enabled = *in.Enabled
+	r.Days = in.Days
+	return nil
+}
+
 type Settings struct {
 	Enabled  bool            `json:"enabled"`
 	Rules    map[string]Rule `json:"rules"`

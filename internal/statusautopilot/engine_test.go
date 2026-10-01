@@ -151,6 +151,7 @@ func setup(t *testing.T) *fixture {
 		}
 		return dbtest.BindLegacyTx(t.Context(), tx, f.p.TenantID, f.p.ID)
 	})
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "owner")
 	f.project = f.add("AUT-1", "project", "open", 1, nil)
 	f.m = New(f.d.App)
 	mux := http.NewServeMux()
@@ -264,6 +265,8 @@ func TestDailyAuditUndoAndIdempotence(t *testing.T) {
 			t.Fatalf("%s changes %+v", state, ch)
 		}
 	}
+	acceptedChange := f.changes(ids["delivered"])[0]
+	f.call(f.p, "POST", fmt.Sprintf("/api/events/%d/undo", acceptedChange.EventID), "", 201)
 	ch := f.changes(ids["in_progress"])[0]
 	f.call(f.p, "POST", fmt.Sprintf("/api/events/%d/undo", ch.EventID), "", 201)
 	if f.state(ch.NodeID).State != "in_progress" {
@@ -280,6 +283,10 @@ func TestDailyAuditUndoAndIdempotence(t *testing.T) {
 	f.run(f.now.Add(3 * 24 * time.Hour))
 	if f.state(ch.NodeID).Marks["cancel_suggested"] {
 		t.Fatal("suggestion redid Undo")
+	}
+	f.run(f.now.Add(40 * 24 * time.Hour))
+	if f.state(ids["delivered"]).State != "delivered" {
+		t.Fatal("acceptance Undo was not treated as an objection")
 	}
 }
 func TestAutopilotHumanCheckObjectionAndStaleUndo(t *testing.T) {
@@ -386,7 +393,7 @@ func (f *fixture) release(ids []string) string {
 			return err
 		}
 		for _, id := range ids {
-			if _, err := tx.Exec(f.t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id) VALUES($1,$2,$3,$4)`, f.p.TenantID, id, f.project, release); err != nil {
+			if _, err := tx.Exec(f.t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position) VALUES($1,$2,$3,$4,0)`, f.p.TenantID, id, f.project, release); err != nil {
 				return err
 			}
 		}
@@ -442,6 +449,7 @@ func TestAutopilotTenantIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindRole(t, f.d, foreign.TenantID, foreign.ID, "owner")
 	f.call(foreign, "GET", "/api/projects/"+f.project+"/status-autopilot", "", 404)
 	w := f.call(foreign, "GET", "/api/status-autopilot/changes", "", 200)
 	if strings.Contains(w.Body.String(), id) {

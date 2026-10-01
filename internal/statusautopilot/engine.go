@@ -70,7 +70,7 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 		key = "blocked"
 		flag = "blocked_reminder"
 		reason = "Blocked for %d days; reminder to check the named blocker."
-	case "in_progress", "in progress", "progress":
+	case "in_progress", "in progress", "in-progress", "progress", "active":
 		key = "progress"
 		to = "open"
 		since = c.Activity
@@ -172,7 +172,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL AND n.state IN ('new','backlog','blocked','in_progress','in progress','progress','done','delivered') ORDER BY n.id`)
+		rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL AND n.state IN ('new','backlog','blocked','in_progress','in progress','in-progress','progress','active','done','delivered') ORDER BY n.id`)
 		if err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 				effective.Enabled = o.Effective
 			}
 			if d := evaluate(c, effective, day); d != nil {
-				if err = apply(ctx, tx, p, c.Node, *d, day); err != nil {
+				if err = apply(ctx, tx, p, c.Node, *d); err != nil {
 					return err
 				}
 			}
@@ -229,11 +229,11 @@ func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (ca
  coalesce((SELECT max(e.at) FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND (e.before->>'state' IS DISTINCT FROM e.after->>'state')),n.created_at),
  greatest(n.created_at,coalesce((SELECT max(e.at) FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2),n.created_at),coalesce((SELECT max(coalesce(h.heartbeat_at,h.created_at)) FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id),n.created_at)),
  EXISTS(SELECT 1 FROM harness_sessions h WHERE h.tenant_id=n.tenant_id AND h.ticket_node_id=n.id AND h.phase IN ('starting','working','stopping') AND coalesce(h.heartbeat_at,h.created_at)>=$3),
- EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND e.type IN ('comment.created','comment.updated') AND e.at>coalesce((SELECT max(d.at) FROM events d WHERE d.tenant_id=n.tenant_id AND d.node_id=n.id AND d.after->>'state'='delivered' AND d.before->>'state' IS DISTINCT FROM d.after->>'state'),n.created_at))
+ EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce((SELECT max(d.at) FROM events d WHERE d.tenant_id=n.tenant_id AND d.node_id=n.id AND d.after->>'state'='delivered' AND d.before->>'state' IS DISTINCT FROM d.after->>'state'),n.created_at))
  FROM nodes n WHERE n.id=$1`, id, Job, now.Add(-15*time.Minute)).Scan(&c.Since, &c.Activity, &c.Work, &c.Objection)
 	return c, raw, err
 }
-func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision, at time.Time) error {
+func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision) error {
 	var seen bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
 		return err
@@ -256,6 +256,7 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 		state := n.State
 		if d.To != "" {
 			state = d.To
+			n.Marks = map[string]bool{}
 		}
 		marks, err := json.Marshal(n.Marks)
 		if err != nil {
@@ -306,7 +307,16 @@ func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `SELECT ticket_node_id::text FROM journey_tickets WHERE release_node_id=$1 ORDER BY ticket_node_id`, releaseID)
+	rows, err := tx.Query(ctx, `SELECT ticket_node_id::text AS id FROM journey_tickets WHERE release_node_id=$1
+ UNION
+ SELECT n.id::text FROM journey_release_note_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.snapshot->'tickets') ticket
+ JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id::text=ticket->>'id' AND n.project_id=s.project_node_id
+ WHERE s.release_node_id=$1 AND s.project_node_id=$2
+ UNION
+ SELECT n.id::text FROM release_manifest_note_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.snapshot->'tickets') ticket
+ JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id::text=ticket->>'id' AND n.project_id=s.project_node_id
+ WHERE s.project_node_id=$2 AND s.version=$3
+ ORDER BY id`, releaseID, project, version)
 	if err != nil {
 		return err
 	}
@@ -349,7 +359,7 @@ func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error
 			d.Anchor += "/human-check/" + *n.HumanCheck
 			d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + title + " (" + version + ") was skipped."
 		}
-		if err = apply(ctx, tx, p, n, d, published); err != nil {
+		if err = apply(ctx, tx, p, n, d); err != nil {
 			return err
 		}
 	}
@@ -392,12 +402,13 @@ func (m *Module) runAll(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, id := range ids {
 		if err = m.RunTenant(ctx, id, now); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 func UndoHandlers() map[string]events.UndoFunc { return map[string]events.UndoFunc{Changed: undo} }
 func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {

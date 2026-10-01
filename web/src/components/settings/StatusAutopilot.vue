@@ -13,6 +13,7 @@ const changes = ref<AutomaticChange[]>([])
 const error = ref('')
 const pending = ref(false)
 const errors = ref<Partial<Record<RuleKey, string>>>({})
+const draftDays = ref<Partial<Record<RuleKey, string>>>({})
 const rules: { key: RuleKey; from: string; fromLabel: string; to: string; toLabel: string; glyph?: IconName; label: string; aria?: string }[] = [
   { key: 'new', from: 'new', fromLabel: 'New', to: 'triage_list', toLabel: 'Triage list', glyph: 'list', label: 'Listed for triage when untriaged for', aria: 'Days a ticket stays New before it is listed for triage' },
   { key: 'backlog', from: 'backlog', fromLabel: 'Backlog', to: 'cancelled', toLabel: 'Cancel suggested', label: 'Cancel suggested when untouched for', aria: 'Days untouched in Backlog before Cancelled is suggested' },
@@ -26,6 +27,8 @@ async function load() {
   error.value = ''
   try {
     const s = await getStatusAutopilot(); settings.value = s
+    errors.value = {}; draftDays.value = {}
+    for (const rule of rules) if (s.rules[rule.key].days !== undefined) draftDays.value[rule.key] = String(s.rules[rule.key].days)
     const p = await getProjects()
     const visible = []
     for (const project of p.items) visible.push({ id: project.id, key: project.key, title: project.title, override: await getProjectAutopilot(project.id) })
@@ -49,6 +52,7 @@ function toggleRule(key: RuleKey, event: Event) {
 function days(key: RuleKey, event: Event, persist: boolean) {
   if (!settings.value) return
   const input = event.target as HTMLInputElement, n = Number(input.value)
+  draftDays.value[key] = input.value
   const valid = input.value !== '' && Number.isInteger(n) && n >= 1 && n <= 365
   errors.value[key] = valid ? '' : '1 to 365 days'
   if (valid && persist) void save({ ...settings.value, rules: { ...settings.value.rules, [key]: { ...settings.value.rules[key], days: n } } })
@@ -81,11 +85,11 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
           <div v-for="rule in rules" :key="rule.key" class="rule" :class="{ off: !settings.rules[rule.key].enabled }">
             <div class="rule-move"><StatusIcon :state="rule.from" />{{ rule.fromLabel }}<AppIcon name="arrow" :size="12" class="arrow" /><span class="to"><AppIcon v-if="rule.glyph" :name="rule.glyph" :size="14" class="glyph" /><StatusIcon v-else :state="rule.to" />{{ rule.toLabel }}</span></div>
             <div class="rule-cond"><span class="rule-text">{{ rule.label }}</span></div>
-            <div class="rule-value"><span v-if="rule.key === 'publish'" class="limit event">On publish</span><template v-else><span class="value-in"><input :id="`days-${rule.key}`" class="days" type="number" min="1" max="365" step="1" inputmode="numeric" :value="settings.rules[rule.key].days" :aria-label="rule.aria" :aria-describedby="`err-${rule.key}`" :aria-invalid="!!errors[rule.key]" :disabled="pending || !settings.enabled || !settings.rules[rule.key].enabled" @input="days(rule.key, $event, false)" @change="days(rule.key, $event, true)" /><span class="unit">{{ settings.rules[rule.key].days === 1 ? 'day' : 'days' }}</span></span><span :id="`err-${rule.key}`" class="rule-error" :hidden="!errors[rule.key]">1 to 365 days</span></template></div>
+            <div class="rule-value"><span v-if="rule.key === 'publish'" class="limit event">On publish</span><template v-else><span class="value-in"><input :id="`days-${rule.key}`" class="days" type="number" min="1" max="365" step="1" inputmode="numeric" :value="draftDays[rule.key]" :aria-label="rule.aria" :aria-describedby="`err-${rule.key}`" :aria-invalid="!!errors[rule.key]" :disabled="pending || !settings.enabled || !settings.rules[rule.key].enabled" @input="days(rule.key, $event, false)" @change="days(rule.key, $event, true)" /><span class="unit">{{ settings.rules[rule.key].days === 1 ? 'day' : 'days' }}</span></span><span :id="`err-${rule.key}`" class="rule-error" :hidden="!errors[rule.key]">1 to 365 days</span></template></div>
             <label class="switch"><input type="checkbox" role="switch" :aria-label="`${rule.fromLabel} to ${rule.toLabel}`" :checked="settings.rules[rule.key].enabled" :disabled="pending || !settings.enabled" @change="toggleRule(rule.key, $event)" /></label>
           </div>
         </div>
-        <p class="set-note"><svg v-if="settings.enabled" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7m1 1.3 1.7 1.7 3-3.3" /></svg><AppIcon v-else name="info" :size="14" /><span>{{ settings.enabled ? 'Tickets with a human check are skipped by the moves to Delivered and Accepted, with a comment, until someone marks them checked.' : 'Off: nothing moves on its own. Suggestions are still listed.' }}</span></p>
+        <p class="set-note"><svg v-if="settings.enabled" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></svg><AppIcon v-else name="info" :size="14" /><span>{{ settings.enabled ? 'Tickets with a human check are skipped by the moves to Delivered and Accepted, with a comment, until someone marks them checked.' : 'Off: nothing moves on its own. Suggestions are still listed.' }}</span></p>
       </SettingsCard>
       <SettingsCard title="Autopilot per project" icon="folders" anchor="autopilot-projects">
         <template #lead>A project follows the workspace unless it sets its own. Its own setting wins for its tickets.</template>
@@ -95,7 +99,7 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
       </SettingsCard>
       <SettingsCard title="Recent automatic changes" icon="history" anchor="autopilot-recent">
         <template #lead>The latest moves by Status autopilot, with their reasons. The full record stays in each ticket’s Activity.</template>
-        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><RouterLink class="key-badge" :to="`/work/${change.key}`">{{ change.key }}</RouterLink><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" @undone="recent" /></div></li></ul>
+        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><RouterLink class="key-badge" :to="`/work/${change.key}`">{{ change.key }}</RouterLink><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
         <p v-if="!changes.length" class="empty">No automatic changes yet.</p>
       </SettingsCard>
     </template>

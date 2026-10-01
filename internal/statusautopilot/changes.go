@@ -14,18 +14,19 @@ import (
 )
 
 type Change struct {
-	EventID  int64     `json:"event_id"`
-	NodeID   string    `json:"node_id"`
-	Key      string    `json:"key"`
-	Title    string    `json:"title"`
-	Actor    string    `json:"actor"`
-	Rule     string    `json:"rule"`
-	Reason   string    `json:"reason"`
-	From     string    `json:"from"`
-	To       string    `json:"to"`
-	At       time.Time `json:"at"`
-	Undone   bool      `json:"undone"`
-	Undoable bool      `json:"undoable"`
+	EventID      int64     `json:"event_id"`
+	NodeID       string    `json:"node_id"`
+	Key          string    `json:"key"`
+	Title        string    `json:"title"`
+	Actor        string    `json:"actor"`
+	Rule         string    `json:"rule"`
+	Reason       string    `json:"reason"`
+	From         string    `json:"from"`
+	To           string    `json:"to"`
+	At           time.Time `json:"at"`
+	Undone       bool      `json:"undone"`
+	ChangedSince bool      `json:"changed_since"`
+	Undoable     bool      `json:"undoable"`
 }
 
 // ChangesTx reads only events and tickets already visible under the caller's
@@ -66,6 +67,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
 		return nil, err
 	}
 	for i, s := range scopes {
+		out[i].ChangedSince = !s.matches
 		if !s.matches || out[i].Undone {
 			continue
 		}

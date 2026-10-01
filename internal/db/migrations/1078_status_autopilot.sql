@@ -62,3 +62,17 @@ ALTER TABLE status_autopilot_days FORCE ROW LEVEL SECURITY;
 CREATE POLICY status_autopilot_days_tenant ON status_autopilot_days
  USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
  WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+
+-- Suggestions and reminders belong to a status episode; a person changing
+-- status clears them, so re-entry gets a fresh threshold and receipt.
+CREATE FUNCTION aeon_status_autopilot_reset_flags() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.state IS DISTINCT FROM OLD.state AND NEW.status_autopilot IS NOT DISTINCT FROM OLD.status_autopilot THEN
+  NEW.status_autopilot := '{}'::jsonb;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER nodes_status_autopilot_reset_flags BEFORE UPDATE OF state ON nodes
+ FOR EACH ROW EXECUTE FUNCTION aeon_status_autopilot_reset_flags();

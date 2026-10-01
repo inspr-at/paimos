@@ -10,7 +10,7 @@ paths:
     get:
       operationId: getStatusAutopilot
       summary: Read workspace status autopilot and live rule limits
-      security: [{session: []}, {apiKey: []}]
+      security: [{session: []}, {agentKey: []}]
       responses:
         '200':
           description: Default On; seven deterministic rules. Triage autopilot is separate.
@@ -47,7 +47,7 @@ paths:
     get:
       operationId: getProjectStatusAutopilot
       summary: Read a project's status autopilot override
-      security: [{session: []}, {apiKey: []}]
+      security: [{session: []}, {agentKey: []}]
       responses:
         '200':
           description: Effective setting and inheritance
@@ -83,7 +83,7 @@ paths:
     get:
       operationId: listStatusAutopilotChanges
       summary: Recent automatic changes with reasons and Undo state
-      security: [{session: []}, {apiKey: []}]
+      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: suggestions, in: query, schema: {type: boolean, default: false}}
@@ -8148,6 +8148,7 @@ components:
         to: {type: string}
         at: {type: string, format: date-time}
         undone: {type: boolean}
+        changed_since: {type: boolean, description: A later ticket edit made the original change stale}
         undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
     WorkspaceModelProviderSettings:
       type: object

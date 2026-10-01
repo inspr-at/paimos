@@ -100,7 +100,7 @@ defineExpose({ isDirty })
     <ol v-else class="timeline">
       <template v-for="entry in visible" :key="entry.id">
         <!-- Comment, possibly led by an agent work marker -->
-        <li v-if="entry.kind === 'automatic'" class="entry">
+        <li v-if="entry.kind === 'automatic'" class="entry automatic">
           <span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span>
           <AutomaticChangeRow :change="entry.change" @undone="emit('retry')" />
         </li>
@@ -136,7 +136,7 @@ defineExpose({ isDirty })
             <PersonAvatar :id="entry.author.id" :name="entry.author.name" :size="26" class="node avatar" />
             <div class="comment-card">
               <header class="comment-head">
-                <strong>{{ entry.author.name }}</strong>
+                <strong>{{ actorLabel(entry) }}</strong>
                 <time :datetime="entry.at" :data-tip="absoluteTime(entry.at)">{{ relativeTime(entry.at, { now, long: true }) }}</time>
                 <span v-if="(canWrite || canDelete) && commentEditable(entry, me, now) && editingId !== entry.id" class="line-actions">
                   <button v-if="canWrite" type="button" class="icon-btn sm flat" aria-label="Edit comment" data-tip="Edit · within 15 minutes" @click="startEdit(entry)"><AppIcon name="edit" :size="13" /></button>

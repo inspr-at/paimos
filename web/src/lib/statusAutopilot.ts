@@ -4,7 +4,7 @@ export type RuleKey = 'new' | 'backlog' | 'blocked' | 'progress' | 'done' | 'pub
 export interface Rule { enabled: boolean; days?: number }
 export interface AutopilotSettings { enabled: boolean; rules: Record<RuleKey, Rule>; revision: number }
 export interface ProjectOverride { mode: 'inherit' | 'on' | 'off'; effective_enabled: boolean; revision: number }
-export interface AutomaticChange { event_id: number; node_id: string; key: string; title: string; actor: 'Status autopilot'; rule: RuleKey; reason: string; from: string; to: string; at: string; undone: boolean; undoable: boolean }
+export interface AutomaticChange { event_id: number; node_id: string; key: string; title: string; actor: 'Status autopilot'; rule: RuleKey; reason: string; from: string; to: string; at: string; undone: boolean; undoable: boolean; changed_since?: boolean }
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await api(path, body === undefined ? {} : { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) throw new Error(response.status === 409 ? 'Another admin changed these settings. Reload to see their changes.' : 'Status autopilot could not be saved or loaded. Try again.')
