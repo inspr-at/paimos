@@ -131,7 +131,8 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 	if ids[0] != 2 || ids[1] != 1 || ids[2] != 3 {
 		t.Fatalf("skipped or repeated timestamp tie: %v", ids)
 	}
-	future := now.Add(2 * time.Hour)
+	// Saved cutoffs come from PostgreSQL, which stores microsecond timestamps.
+	future := now.Add(2 * time.Hour).Truncate(time.Microsecond)
 	got := call("briefing=true&since=" + url.QueryEscape(future.Format(time.RFC3339Nano)))
 	if err := json.Unmarshal(got["window"], &window); err != nil {
 		t.Fatal(err)
