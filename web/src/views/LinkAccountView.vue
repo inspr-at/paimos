@@ -48,9 +48,14 @@ async function lookup() {
     if (result.tenant_id !== session.identity?.tenant.id || result.person_id !== session.identity?.principal.id || result.state !== 'pending') throw new Error('This review belongs to another session. Enter the code again.')
     review.value = result; now.value = Date.now()
     expiryTimer = setInterval(() => { now.value = Date.now() }, 1000)
-    await nextTick(); confirmButton.value?.focus()
   } catch (cause) { if (started === turn && owner === scope.value) error.value = cause instanceof Error ? cause.message : 'Account linking is unavailable.' }
-  finally { if (started === turn) busy.value = false }
+  finally {
+    if (started === turn) {
+      busy.value = false
+      await nextTick()
+      if (started === turn && owner === scope.value && review.value && !expired.value) confirmButton.value?.focus()
+    }
+  }
 }
 async function confirm() {
   const current = review.value

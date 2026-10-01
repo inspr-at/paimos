@@ -64,6 +64,15 @@ test('agent sessions cannot look up, confirm or unlink', async ({ page }) => {
   await expect(page.getByLabel('Account code')).toHaveCount(0)
   expect(calls.writes).toHaveLength(0); expect(calls.lookups).toHaveLength(0)
 })
+test('the reviewed account can be confirmed once from the keyboard', async ({ page }) => {
+  const calls = await setup(page)
+  await page.goto('/link')
+  await page.getByLabel('Account code').fill('482913')
+  await expect(page.getByRole('button', { name: 'Link account', exact: true })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'Linked to Markus' })).toBeVisible()
+  expect(calls.writes).toHaveLength(1)
+})
 test('expired and consumed codes show a fresh-code instruction and no confirmation', async ({ page }) => {
   const calls = await setup(page, { lookupStatus: 410 })
   await page.goto('/link')
