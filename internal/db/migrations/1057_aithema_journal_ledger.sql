@@ -11,12 +11,14 @@ CREATE TABLE aithema_sessions (
     worker_generation bigint NOT NULL CHECK (worker_generation BETWEEN 1 AND 9007199254740991),
     auth_epoch bigint NOT NULL CHECK (auth_epoch BETWEEN 1 AND 9007199254740991),
     tombstone boolean NOT NULL DEFAULT false,
+    suspended boolean NOT NULL DEFAULT false,
     host_mode text NOT NULL CHECK (host_mode IN ('review', 'working_spec_only')),
     currency text NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     evidence boolean NOT NULL,
     local_lanes text[] NOT NULL DEFAULT ARRAY[]::text[],
     session_cap bigint NOT NULL CHECK (session_cap BETWEEN 0 AND 9007199254740991),
     seq bigint NOT NULL DEFAULT 0 CHECK (seq BETWEEN 0 AND 9007199254740991),
+    consumed_seq bigint NOT NULL DEFAULT 0 CHECK (consumed_seq BETWEEN 0 AND seq),
     working_rev bigint NOT NULL DEFAULT 0 CHECK (working_rev BETWEEN 0 AND 9007199254740991),
     snapshot_seq bigint,
     PRIMARY KEY (tenant_id, sid)
@@ -91,12 +93,32 @@ CREATE TABLE aithema_budget_claims (
     CHECK ((state = 'claimed') = (settled_at IS NULL AND settled_micro IS NULL))
 );
 
-DO $$
-DECLARE table_name text;
-BEGIN
-    FOREACH table_name IN ARRAY ARRAY['aithema_sessions', 'aithema_journal_records', 'aithema_budget_policy', 'aithema_budget_holds', 'aithema_budget_claims'] LOOP
-        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
-        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
-        EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (tenant_id = NULLIF(current_setting(''aeon.tenant_id'', true), '''')::uuid) WITH CHECK (tenant_id = NULLIF(current_setting(''aeon.tenant_id'', true), '''')::uuid)', table_name);
-    END LOOP;
-END $$;
+ALTER TABLE aithema_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE aithema_sessions FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON aithema_sessions
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE aithema_journal_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE aithema_journal_records FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON aithema_journal_records
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE aithema_budget_policy ENABLE ROW LEVEL SECURITY;
+ALTER TABLE aithema_budget_policy FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON aithema_budget_policy
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE aithema_budget_holds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE aithema_budget_holds FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON aithema_budget_holds
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE aithema_budget_claims ENABLE ROW LEVEL SECURITY;
+ALTER TABLE aithema_budget_claims FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON aithema_budget_claims
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);

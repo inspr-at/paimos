@@ -206,7 +206,9 @@ func (f *world) admitBody(n, max int64) []byte {
 	return budget("admit_request", map[string]any{"attempt_id": fmt.Sprintf("%s:%d:spec:%d", f.claims.SessionID, f.claims.Generation, n), "sid": f.claims.SessionID, "worker_generation": f.claims.Generation, "auth_epoch": f.claims.AuthEpoch, "lane": "spec", "max_micro": max, "currency": "EUR"})
 }
 func (f *world) hold(n, max int64) string {
-	return text(object(f.success("ledger", "admit", "POST", f.admitBody(n, max), nil)["body"])["hold_id"])
+	id := text(object(f.success("ledger", "admit", "POST", f.admitBody(n, max), nil)["body"])["hold_id"])
+	f.acknowledgeHold(id)
+	return id
 }
 func (f *world) claimBody(id string) []byte {
 	return budget("claim_request", map[string]any{"hold_id": id, "request_sha256": strings.Repeat("a", 64), "worker_generation": f.claims.Generation, "auth_epoch": f.claims.AuthEpoch})
@@ -335,7 +337,7 @@ func TestLedgerCrashBoundariesAndRepeatedRecovery(t *testing.T) {
 				_, err := f.request("ledger", "settle", "POST", append(raw, ' '), nil)
 				errorIs(t, err, 409, "idempotency_conflict")
 			}
-			// Restart uses only persistent ledger state, with no journal hold record.
+			// Restart enumerates persistent ledger state without deriving holds from journal records.
 			restarted, err := NewStore(f.database.App)
 			if err != nil {
 				t.Fatal(err)
@@ -598,6 +600,9 @@ func TestHTTPRouteMatrixAndStableStatuses(t *testing.T) {
 			want := 409
 			if route.action == "authority" {
 				want = 200
+			} else if route.action == "settle" {
+				// Settlement validates claim ownership; this request has no claim.
+				want = 400
 			}
 			if got.Code != want {
 				t.Fatalf("stale status %d want %d", got.Code, want)
@@ -692,7 +697,12 @@ func TestGenerationEpochTombstonesAndRLS(t *testing.T) {
 	}
 	// An older already committed dispatch is charged at maximum on settlement.
 	raw := budget("settle_request", map[string]any{"claim_id": claim, "outcome": "settled", "actual_micro": 1})
-	if got := object(f.success("ledger", "settle", "POST", raw, nil)["body"]); got["closed_reason"] != "unknown" || number(got["charged_micro"]) != 100 {
+	result, err := f.store.Request(t.Context(), prior, "ledger", "settle", "POST", raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := decode(result.Body)
+	if got := object(doc["body"]); got["closed_reason"] != "unknown" || number(got["charged_micro"]) != 100 {
 		t.Fatal("takeover discounted an old claim")
 	}
 	if err := f.store.Revoke(t.Context(), prior.TenantID, prior.ProjectID, prior.SessionID, "purge"); err != nil {
@@ -769,7 +779,7 @@ func TestGenerationEpochTombstonesAndRLS(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(kinds, ",") != "authz.epoch,session.control" {
+	if strings.Join(kinds, ",") != "budget.hold,budget.hold,authz.epoch,session.control" {
 		t.Fatal("control replay duplicated journal or missed write-ahead")
 	}
 }
@@ -802,6 +812,7 @@ func TestCapsDenialIdempotencyEvidenceAndLocalPolicy(t *testing.T) {
 	f := newWorld(t, generous())
 	body := map[string]any{"attempt_id": f.claims.SessionID + ":2:reaction:1", "sid": f.claims.SessionID, "worker_generation": 2, "auth_epoch": f.claims.AuthEpoch, "lane": "reaction", "max_micro": 0, "currency": "EUR", "lane_kind": "operator_local"}
 	id := text(object(f.success("ledger", "admit", "POST", budget("admit_request", body), nil)["body"])["hold_id"])
+	f.acknowledgeHold(id)
 	f.claim(id)
 	got := f.recover(id)
 	if number(got["charged_micro"]) != 0 || got["lane_kind"] != "operator_local" {

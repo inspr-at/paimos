@@ -82,16 +82,16 @@ func (s *Store) now() time.Time { return s.clock().UTC().Truncate(time.Microseco
 type session struct {
 	Tenant, ID, Project, Plugin, HostMode, Currency string
 	Authorization                                   []byte
-	Generation, Epoch, Seq, WorkingRev              int64
+	Generation, Epoch, Seq, WorkingRev, ConsumedSeq int64
 	SnapshotSeq                                     *int64
-	Tombstone, Evidence                             bool
+	Tombstone, Suspended, Evidence                  bool
 	SessionCap                                      int64
 	LocalLanes                                      []string
 }
 
 func load(ctx context.Context, tx pgx.Tx, tenant, sid string) (*session, error) {
 	st := &session{Tenant: tenant, ID: sid}
-	err := tx.QueryRow(ctx, `SELECT project_id,plugin_principal,authorization_bytes,worker_generation,auth_epoch,tombstone,host_mode,currency,evidence,session_cap,seq,working_rev,snapshot_seq,local_lanes FROM aithema_sessions WHERE tenant_id=$1 AND sid=$2 FOR UPDATE`, tenant, sid).Scan(&st.Project, &st.Plugin, &st.Authorization, &st.Generation, &st.Epoch, &st.Tombstone, &st.HostMode, &st.Currency, &st.Evidence, &st.SessionCap, &st.Seq, &st.WorkingRev, &st.SnapshotSeq, &st.LocalLanes)
+	err := tx.QueryRow(ctx, `SELECT project_id,plugin_principal,authorization_bytes,worker_generation,auth_epoch,tombstone,suspended,host_mode,currency,evidence,session_cap,seq,working_rev,consumed_seq,snapshot_seq,local_lanes FROM aithema_sessions WHERE tenant_id=$1 AND sid=$2 FOR UPDATE`, tenant, sid).Scan(&st.Project, &st.Plugin, &st.Authorization, &st.Generation, &st.Epoch, &st.Tombstone, &st.Suspended, &st.HostMode, &st.Currency, &st.Evidence, &st.SessionCap, &st.Seq, &st.WorkingRev, &st.ConsumedSeq, &st.SnapshotSeq, &st.LocalLanes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fault(404, "not_found")
 	}
@@ -125,7 +125,7 @@ func (s *Store) transaction(ctx context.Context, tenant, sid string, ledger bool
 		return fn(tx, st)
 	})
 }
-func authorize(st *session, c tokens.Claims, capability string, write bool) error {
+func authorize(st *session, c tokens.Claims, capability string) error {
 	if c.TenantID != st.Tenant || c.SessionID != st.ID || c.Subject != st.Plugin || c.Actor == nil {
 		return fault(403, "forbidden")
 	}
@@ -148,7 +148,17 @@ func authorize(st *session, c tokens.Claims, capability string, write bool) erro
 	if !permitted || !actor || capability != "aithema.authority.read" && c.ProjectID != st.Project {
 		return fault(403, "forbidden")
 	}
-	if capability != "aithema.authority.read" && (st.Tombstone || auth["withdrawn_at"] != nil || c.AuthEpoch != st.Epoch) {
+	return nil
+}
+
+// fence governs new effects and recovery. Settlement instead checks the
+// committed claim's generation/epoch after the ordinary scope checks above.
+func fence(st *session, c tokens.Claims, write bool) error {
+	auth, err := decode(st.Authorization)
+	if err != nil {
+		return fault(503, "unavailable")
+	}
+	if st.Tombstone || auth["withdrawn_at"] != nil || c.AuthEpoch != st.Epoch {
 		return fault(409, "revoked")
 	}
 	if write && c.Generation != st.Generation {
@@ -205,6 +215,7 @@ type AuthorityState struct {
 	Generation      int64           `json:"worker_generation"`
 	Epoch           int64           `json:"auth_epoch"`
 	Tombstone       bool            `json:"tombstone"`
+	Suspended       bool            `json:"suspended"`
 	Authorization   json.RawMessage `json:"authorization"`
 	IssuedAt        string          `json:"issued_at"`
 	PluginPrincipal string          `json:"-"`
@@ -240,7 +251,7 @@ func (s *Store) Current(ctx context.Context, tenant, project, sid string) (Autho
 	return out, err
 }
 func state(st *session, now time.Time) AuthorityState {
-	return AuthorityState{Generation: st.Generation, Epoch: st.Epoch, Tombstone: st.Tombstone, Authorization: bytes.Clone(st.Authorization), IssuedAt: now.Format("2006-01-02T15:04:05.000000Z"), PluginPrincipal: st.Plugin}
+	return AuthorityState{Generation: st.Generation, Epoch: st.Epoch, Tombstone: st.Tombstone, Suspended: st.Suspended, Authorization: bytes.Clone(st.Authorization), IssuedAt: now.Format("2006-01-02T15:04:05.000000Z"), PluginPrincipal: st.Plugin}
 }
 
 // Takeover is explicit resume. CAS prevents two resumptions from owning the
@@ -274,10 +285,11 @@ func (s *Store) Takeover(ctx context.Context, tenant, project, sid string, expec
 	return out, err
 }
 
-// Revoke writes host-owned epoch and control records before projecting the
-// effect, all in one transaction. Purge is a durable tombstone, not deletion.
+// Revoke applies host session controls, journaling before projection in one
+// transaction. Suspend/resume pause new work without withdrawing authority;
+// only purge advances the withdrawal epoch and creates a durable tombstone.
 func (s *Store) Revoke(ctx context.Context, tenant, project, sid, action string) error {
-	if !in(action, "suspend", "purge") {
+	if !in(action, "suspend", "resume", "purge") {
 		return fault(400, "invalid_request")
 	}
 	return s.transaction(ctx, tenant, sid, false, func(tx pgx.Tx, st *session) error {
@@ -285,7 +297,26 @@ func (s *Store) Revoke(ctx context.Context, tenant, project, sid, action string)
 			return fault(404, "not_found")
 		}
 		if st.Tombstone {
-			return nil
+			if action == "purge" {
+				return nil
+			}
+			return fault(409, "revoked")
+		}
+		if action != "purge" {
+			suspended := action == "suspend"
+			if st.Suspended == suspended {
+				return nil
+			}
+			raw := marshal(envelope("aithema.journal.record", map[string]any{"sid": sid, "client_event_id": newID(), "writer": map[string]any{"kind": "host"}, "recorded_at": s.now().Format("2006-01-02T15:04:05.000000Z"), "kind": "session.control", "data": map[string]any{"action": action}}))
+			doc, err := s.validator.Validate(raw, "aithema.journal.record")
+			if err != nil {
+				return err
+			}
+			if _, err := appendRecord(ctx, tx, st, raw, doc); err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `UPDATE aithema_sessions SET suspended=$3 WHERE tenant_id=$1 AND sid=$2`, tenant, sid, suspended)
+			return err
 		}
 		if st.Epoch == tokens.MaxSafeInteger {
 			return fault(409, "epoch_exhausted")

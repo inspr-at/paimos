@@ -77,6 +77,9 @@ func (s *Store) ledger(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		if h.Generation != st.Generation {
 			return Result{}, fault(409, "fenced_generation")
 		}
+		if err := journaledHold(ctx, tx, st, h); err != nil {
+			return Result{}, err
+		}
 		id := newID()
 		_, err = tx.Exec(ctx, `INSERT INTO aithema_budget_claims(tenant_id,sid,claim_id,hold_id,request_sha256,worker_generation,auth_epoch,state,claimed_at) VALUES($1,$2,$3,$4,$5,$6,$7,'claimed',$8)`, st.Tenant, st.ID, id, h.ID, text(body["request_sha256"]), st.Generation, st.Epoch, s.now())
 		return Result{Status: 200, Body: budget("claim_response", map[string]any{"claim_id": id})}, err
@@ -98,6 +101,11 @@ func (s *Store) ledger(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		if err != nil {
 			return Result{}, err
 		}
+		// Claim commitment is the dispatch boundary. Its original owner may
+		// finish after fencing, while a successor may only recover the hold.
+		if c.Generation != h.ClaimGeneration || c.AuthEpoch != h.ClaimEpoch {
+			return Result{}, fault(403, "forbidden")
+		}
 		if h.Settlement != nil {
 			if !bytes.Equal(raw, h.Settlement) {
 				return Result{}, fault(409, "idempotency_conflict")
@@ -105,7 +113,7 @@ func (s *Store) ledger(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 			return Result{Status: 200, Body: h.response()}, nil
 		}
 		if h.State == "closed" {
-			return Result{}, fault(409, "hold_closed")
+			return Result{Status: 200, Body: h.response()}, nil
 		}
 		reason, charged := text(body["outcome"]), number(body["actual_micro"])
 		if reason == "unknown" {
@@ -114,9 +122,9 @@ func (s *Store) ledger(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		if charged > h.Max {
 			return Result{}, fault(400, "invalid_request")
 		}
-		// A current worker can recover an older claim; a stale worker cannot settle
-		// it. Work dispatched before takeover is conservatively charged at maximum.
-		if h.Generation != st.Generation || h.Epoch != st.Epoch {
+		// The committed owner remains authorized to finish; any subsequent
+		// authority fence forces conservative charging of its late completion.
+		if fence(st, c, true) != nil {
 			reason, charged = "unknown", h.Max
 		}
 		return s.close(ctx, tx, st, h, reason, charged, raw)
@@ -130,9 +138,9 @@ func claimFault(code string) *Fault {
 }
 
 type hold struct {
-	ID, Claim, State, Reason, LaneKind string
-	Generation, Epoch, Max, Charged    int64
-	Settlement                         []byte
+	ID, Claim, State, Reason, LaneKind, Attempt, Lane, Currency  string
+	Generation, Epoch, Max, Charged, ClaimGeneration, ClaimEpoch int64
+	Settlement                                                   []byte
 }
 
 func getHold(ctx context.Context, tx pgx.Tx, st *session, id, claim string) (*hold, error) {
@@ -141,11 +149,46 @@ func getHold(ctx context.Context, tx pgx.Tx, st *session, id, claim string) (*ho
 	if id != "" && !uuid(id) || claim != "" && !uuid(claim) {
 		return nil, fault(400, "invalid_request")
 	}
-	err = tx.QueryRow(ctx, `SELECT h.hold_id::text,COALESCE(c.claim_id::text,''),h.state,COALESCE(h.closed_reason,''),h.lane_kind,h.worker_generation,h.auth_epoch,h.max_micro,COALESCE(h.charged_micro,0),h.settlement_bytes FROM aithema_budget_holds h LEFT JOIN aithema_budget_claims c USING(tenant_id,sid,hold_id) WHERE h.tenant_id=$1 AND h.sid=$2 AND h.state<>'denied' AND (CASE WHEN $3::text<>'' THEN h.hold_id::text=$3 ELSE c.claim_id::text=$4 END)`, st.Tenant, st.ID, id, claim).Scan(&h.ID, &h.Claim, &h.State, &h.Reason, &h.LaneKind, &h.Generation, &h.Epoch, &h.Max, &h.Charged, &h.Settlement)
+	err = tx.QueryRow(ctx, `SELECT h.hold_id::text,COALESCE(c.claim_id::text,''),h.state,COALESCE(h.closed_reason,''),h.lane_kind,h.worker_generation,h.auth_epoch,h.max_micro,COALESCE(h.charged_micro,0),h.settlement_bytes,h.attempt_id,h.lane,h.currency,COALESCE(c.worker_generation,0),COALESCE(c.auth_epoch,0) FROM aithema_budget_holds h LEFT JOIN aithema_budget_claims c USING(tenant_id,sid,hold_id) WHERE h.tenant_id=$1 AND h.sid=$2 AND h.state<>'denied' AND (CASE WHEN $3::text<>'' THEN h.hold_id::text=$3 ELSE c.claim_id::text=$4 END)`, st.Tenant, st.ID, id, claim).Scan(&h.ID, &h.Claim, &h.State, &h.Reason, &h.LaneKind, &h.Generation, &h.Epoch, &h.Max, &h.Charged, &h.Settlement, &h.Attempt, &h.Lane, &h.Currency, &h.ClaimGeneration, &h.ClaimEpoch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fault(404, "not_found")
 	}
 	return h, err
+}
+
+// journaledHold runs under the same session lock as claim insertion. Only a
+// committed worker acknowledgement matching every admission field permits
+// dispatch. An omitted lane_kind denotes the contract's default remote lane.
+func journaledHold(ctx context.Context, tx pgx.Tx, st *session, h *hold) error {
+	rows, err := tx.Query(ctx, `SELECT document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND kind='budget.hold'`, st.Tenant, st.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return err
+		}
+		doc, err := decode(raw)
+		if err != nil {
+			return err
+		}
+		writer, data := object(doc["writer"]), object(doc["data"])
+		kind := text(data["lane_kind"])
+		if kind == "" {
+			kind = "remote"
+		}
+		if doc["sid"] == st.ID && writer["kind"] == "worker" && number(writer["generation"]) == h.Generation &&
+			data["hold_id"] == h.ID && data["attempt_id"] == h.Attempt && data["lane"] == h.Lane &&
+			number(data["max_micro"]) == h.Max && data["currency"] == h.Currency && kind == h.LaneKind {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return fault(409, "hold_not_journaled")
 }
 func (h *hold) response() json.RawMessage {
 	body := map[string]any{"hold_id": h.ID, "closed_reason": h.Reason, "charged_micro": h.Charged}

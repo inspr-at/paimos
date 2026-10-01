@@ -120,8 +120,17 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 				return err
 			}
 		}
-		if err := authorize(st, c, cap, method == "POST"); err != nil {
+		if err := authorize(st, c, cap); err != nil {
 			return err
+		}
+		settling := area == "ledger" && action == "settle" && method == "POST"
+		if cap != "aithema.authority.read" && !settling {
+			if err := fence(st, c, method == "POST"); err != nil {
+				return err
+			}
+		}
+		if st.Suspended && method == "POST" && (area == "journal" || action == "admit" || action == "claim") {
+			return fault(409, "suspended")
 		}
 		if method == "GET" || method == "HEAD" {
 			body, err := s.read(ctx, tx, st, area, action, q)
@@ -197,8 +206,13 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		return Record{}, fault(400, "invalid_request")
 	}
 	if contract == "aithema.spec.snapshot" {
-		if doc["host_mode"] != st.HostMode || number(doc["consumed_seq"]) > st.Seq {
+		if doc["host_mode"] != st.HostMode || number(doc["consumed_seq"]) > st.Seq || number(doc["consumed_seq"]) < st.ConsumedSeq {
 			return Record{}, fault(400, "invalid_request")
+		}
+		for _, op := range array(doc["pending_ops"]) {
+			if !strings.HasPrefix(text(object(op)["op_key"]), st.ID+":") {
+				return Record{}, fault(400, "invalid_request")
+			}
 		}
 		if number(doc["expected_prev_rev"]) != st.WorkingRev {
 			return Record{}, fault(409, "snapshot_conflict")
@@ -209,7 +223,7 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		return Record{}, err
 	}
 	if contract == "aithema.spec.snapshot" {
-		_, err = tx.Exec(ctx, `UPDATE aithema_sessions SET working_rev=$3,snapshot_seq=$4 WHERE tenant_id=$1 AND sid=$2`, st.Tenant, st.ID, number(doc["working_rev"]), st.Seq)
+		_, err = tx.Exec(ctx, `UPDATE aithema_sessions SET working_rev=$3,snapshot_seq=$4,consumed_seq=$5 WHERE tenant_id=$1 AND sid=$2`, st.Tenant, st.ID, number(doc["working_rev"]), st.Seq, number(doc["consumed_seq"]))
 	}
 	return record, err
 }

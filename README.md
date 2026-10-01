@@ -67,22 +67,30 @@ epoch freshness checks remain AEON-360's responsibility. No journal is required.
 Aithema's host journal and ledger live in `internal/aithema/journal` under
 `/api/aithema/{journal,ledger}/sessions/{sid}`. Every route requires its exact
 delegated capability; person cookies and agent API keys do not grant access.
-Writes fence generation and epoch atomically with the effect, and token expiry
-is checked again after lock waits. Journal snapshots use revision CAS; records
-use session-scoped client IDs. Exact retries preserve the original result;
+New writes fence generation and epoch atomically with the effect, and token expiry
+is checked again after lock waits. Journal snapshots use revision CAS and persist
+a nondecreasing `consumed_seq`; pending operation keys must belong to the session.
+Records use session-scoped client IDs. Exact retries preserve the original result;
 changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
 cited sources, turns and design inputs; `format=stored` also returns the exact
 submitted bytes. `cursor` returns the latest snapshot and replay position.
 
 The ledger admits against session, principal/day and tenant/day caps, commits
-one digest-bound claim per hold, and settles actual cost or an unknown maximum.
+one digest-bound claim per hold after a matching worker `budget.hold` journal
+acknowledgement, and settles actual cost or an unknown maximum. Only the claim's
+original generation and epoch can settle it, including after takeover or purge;
+that late completion is charged at maximum. A successor uses recovery instead.
 `holds?state=open` provides uncached keyset pagination. Current-generation
 `recover` closes unclaimed holds as `void` and claimed holds as `unknown`;
 settled holds retain their result across repeated recovery and lost replies.
+Settlement arriving after recovery returns the recorded close without changing
+its charge; a previously committed settlement still requires byte-exact retries.
 Only host-qualified local lanes may reserve zero. `journal/.../authority`
-returns generation, epoch, authorization, tombstone and current `issued_at`
-with `Cache-Control: no-store`. Session creation, takeover and revocation are
-trusted in-process methods, with controls journaled before tombstone projection.
+returns generation, epoch, authorization, suspended state, tombstone and current
+`issued_at` with `Cache-Control: no-store`. Session creation, takeover and
+revocation are trusted in-process methods, with controls journaled before projection. Suspend
+pauses new admissions, claims and worker journal writes while allowing settlement,
+recovery and reads. Resume clears that pause; purge alone creates a tombstone.
 AEON-361 provides the store and HTTP routes; lifecycle installation and the
 AEON-360 intake adapter are wired by AEON-P04. That adapter must use
 `LockAuthority` inside its intake transaction so takeover cannot race its write.

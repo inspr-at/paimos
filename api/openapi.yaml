@@ -50,7 +50,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -109,7 +109,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -132,7 +132,7 @@ paths:
     post:
       operationId: aithemaJournalSnapshotsPost
       summary: Aithema journal snapshots
-      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Snapshot revision CAS also requires consumed_seq to be nondecreasing and no greater than the current journal sequence, and every pending operation key to begin with this session id followed by a colon.
       security: [{aithemaDelegated: []}]
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
@@ -172,7 +172,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -235,7 +235,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -293,7 +293,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -350,7 +350,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -412,7 +412,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -440,7 +440,7 @@ paths:
     post:
       operationId: aithemaLedgerClaimPost
       summary: Aithema ledger claim
-      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Dispatch requires a committed budget.hold journal record matching the session, worker generation, hold_id, attempt_id, lane, maximum, currency and lane_kind; absent acknowledgement returns 409 hold_not_journaled.
       security: [{aithemaDelegated: []}]
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
@@ -479,7 +479,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -507,7 +507,7 @@ paths:
     post:
       operationId: aithemaLedgerSettlePost
       summary: Aithema ledger settle
-      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      description: Requires the exact aithema.ledger capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; project and committed claim ownership are required. The token generation and epoch must match the claim (403 otherwise); its owner may settle after takeover, epoch change or purge, closing an open claim as unknown charged at maximum. A closed hold returns its recorded result. Exact settlement retries return that result; different bytes conflict when a settlement already committed. Responses are uncached.
       security: [{aithemaDelegated: []}]
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
@@ -546,7 +546,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -613,7 +613,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -678,7 +678,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "409":
-          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, or exhausted sequence
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -7648,6 +7648,7 @@ components:
         worker_generation: {type: integer, minimum: 1, maximum: 9007199254740991}
         auth_epoch: {type: integer, minimum: 1, maximum: 9007199254740991}
         tombstone: {type: boolean}
+        suspended: {type: boolean, description: 'Host pause; new admissions, claims and worker journal writes are refused until resume.'}
         authorization: {$ref: '../internal/aithema/journal/contracts/authz-record.schema.json#/$defs/record'}
         issued_at: {type: string, format: date-time, description: Current host timestamp; authority responses must never be cached.}
     AithemaHostError:
