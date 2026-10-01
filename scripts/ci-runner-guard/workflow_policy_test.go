@@ -85,7 +85,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			delete(mapping(mapping(w["on"])["pull_request"]), "paths")
 		})
 	}
-	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml"} {
+	for _, file := range []string{"extra.yaml", "test-runner-route.yml", "release-image-check.yml", "release.yml", "homebrew-tap.yml", "verify-live.yml"} {
 		add("copied-ci-group/"+file, file, "must not copy ci.yml", func(w map[string]any) {
 			w["concurrency"] = map[string]any{"group": ciGroup, "cancel-in-progress": true}
 		})
@@ -94,7 +94,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add(fmt.Sprintf("unknown-workflow-concurrency/%d", index), "extra.yaml", "workflow-level concurrency is not allowlisted", func(w map[string]any) { w["concurrency"] = concurrency })
 		add(fmt.Sprintf("reusable-workflow-concurrency/%d", index), "test-runner-route.yml", "reusable workflows must not define concurrency", func(w map[string]any) { w["concurrency"] = concurrency })
 	}
-	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml"} {
+	for _, file := range []string{"ci.yml", "release.yml", "homebrew-tap.yml", "release-image-check.yml", "verify-live.yml"} {
 		add("allowlisted-file-made-reusable/"+file, file, "reusable workflows must not define concurrency", func(w map[string]any) {
 			mapping(w["on"])["workflow_call"] = nil
 		})
