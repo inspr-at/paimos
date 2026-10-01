@@ -393,7 +393,7 @@ func (f *fixture) release(ids []string) string {
 			return err
 		}
 		for _, id := range ids {
-			if _, err := tx.Exec(f.t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position) VALUES($1,$2,$3,$4,0)`, f.p.TenantID, id, f.project, release); err != nil {
+			if _, err := tx.Exec(f.t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.p.TenantID, id, f.project, release); err != nil {
 				return err
 			}
 		}

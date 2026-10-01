@@ -75,7 +75,7 @@ func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string
 		if s.project != nil {
 			scope.ProjectID = *s.project
 		}
-		out[i].Undoable = authz.RequireTx(ctx, tx, p, "events.undo_other", scope) == nil && authz.RequireTx(ctx, tx, p, "nodes.update", scope) == nil
+		out[i].Undoable = authz.RequireTx(ctx, tx, p, "events.undo_other", scope) == nil && authz.RequireTx(ctx, tx, p, "nodes.write", scope) == nil
 	}
 	return out, nil
 }

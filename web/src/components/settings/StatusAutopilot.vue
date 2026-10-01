@@ -6,6 +6,7 @@ import { getAutomaticChanges, getProjectAutopilot, getStatusAutopilot, saveProje
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 import AutomaticChangeRow from '../work/AutomaticChangeRow.vue'
+import TicketLink from '../releases/TicketLink.vue'
 import SettingsCard from './SettingsCard.vue'
 const settings = ref<AutopilotSettings | null>(null)
 const projects = ref<{ id: string; key: string; title: string; override: ProjectOverride }[]>([])
@@ -99,7 +100,7 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
       </SettingsCard>
       <SettingsCard title="Recent automatic changes" icon="history" anchor="autopilot-recent">
         <template #lead>The latest moves by Status autopilot, with their reasons. The full record stays in each ticket’s Activity.</template>
-        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><RouterLink class="key-badge" :to="`/work/${change.key}`">{{ change.key }}</RouterLink><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
+        <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
         <p v-if="!changes.length" class="empty">No automatic changes yet.</p>
       </SettingsCard>
     </template>

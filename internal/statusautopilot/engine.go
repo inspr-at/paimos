@@ -427,7 +427,7 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 	if c.Node.ProjectID != nil {
 		scope.ProjectID = *c.Node.ProjectID
 	}
-	if authz.RequireTx(ctx, tx, p, "nodes.update", scope) != nil {
+	if authz.RequireTx(ctx, tx, p, "nodes.write", scope) != nil {
 		return events.Change{}, events.ErrForbidden
 	}
 	if !c.Node.Updated.Equal(after.Updated) || c.Node.State != after.State {
