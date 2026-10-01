@@ -1049,7 +1049,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
 		if errors.Is(err, errModelInvalid) {
-			s.reportModelState(entry, "invalid")
+			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
 		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
@@ -1164,9 +1164,6 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	if len(ev.ModelReports) > 0 {
 		s.reportModels(entry, ev.ModelReports)
 	}
-	if ev.SessionUsage != nil || (ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0) {
-		s.reportModelState(entry, "working")
-	}
 	if ev.ErrorCode == "model_invalid" {
 		s.reportModelState(entry, "invalid")
 	}
@@ -1217,6 +1214,19 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 			}
 		}
 		entry.mu.Unlock()
+	}
+	// Only positive, model-bound vendor usage can clear an invalid-model pause.
+	workingModel := ""
+	if ev.SessionUsage != nil && ev.SessionUsage.OutputTokens != nil && *ev.SessionUsage.OutputTokens > 0 {
+		workingModel = ev.SessionUsage.Model
+	} else if ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0 {
+		workingModel = ev.EffectiveModel
+	}
+	entry.mu.Lock()
+	confirmed := workingModel != "" && workingModel == entry.harness.Model
+	entry.mu.Unlock()
+	if confirmed {
+		s.reportModelState(entry, "working")
 	}
 	if ev.Kind == "" {
 		return

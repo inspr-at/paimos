@@ -8,18 +8,13 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// Observation contains content-free, retryable harness evidence.
-type Observation struct {
-	ReportID string `json:"report_id"`
-	Harness  string `json:"harness"`
-	Model    string `json:"model"`
-	Effort   string `json:"effort"`
-	Status   string `json:"status"`
-}
+// Observation is the shared client/server model evidence contract.
+type Observation = modelreport.Observation
 
 type ReportResult struct {
 	Recorded int `json:"recorded"`
@@ -28,11 +23,14 @@ type ReportResult struct {
 }
 
 func validateObservations(in []Observation) error {
+	if in == nil {
+		return fail(400, "model observations must be an array")
+	}
 	if len(in) > 200 {
 		return fail(400, "at most 200 model observations")
 	}
 	for _, o := range in {
-		if !uuidRE.MatchString(o.ReportID) || !validHarness(o.Harness) || len(o.Model) > 128 || !modelRE.MatchString(o.Model) || len(o.Effort) > 32 || !effortRE.MatchString(o.Effort) {
+		if !uuidRE.MatchString(o.ReportID) || !validHarness(o.Harness) || !modelreport.ValidTuple(o.Model, o.Effort) {
 			return fail(400, "invalid model observation")
 		}
 		if o.Status != "advertised" && o.Status != "working" && o.Status != "invalid" {
@@ -167,11 +165,5 @@ func observedPin(o Observation) (profileWrite, bool) {
 	return profileWrite{"observed-" + o.Harness + "-" + hex.EncodeToString(sum[:12]), "observed-1", o.Harness, family, o.Model, o.Effort, "standard"}, true
 }
 
-// EvidenceID derives a UUID-shaped id from public evidence, never from secrets.
-func EvidenceID(evidence string) string {
-	sum := sha256.Sum256([]byte(evidence))
-	sum[6] = (sum[6] & 15) | 0x50
-	sum[8] = (sum[8] & 63) | 0x80
-	h := hex.EncodeToString(sum[:16])
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
-}
+// EvidenceID derives a stable id from public evidence.
+func EvidenceID(evidence string) string { return modelreport.EvidenceID(evidence) }

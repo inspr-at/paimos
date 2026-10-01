@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/modelreport"
 )
 
 var errModelInvalid = errors.New("model invalid")
@@ -40,13 +40,13 @@ func modelStartError(message string, err error) error {
 	return errors.New(message)
 }
 
-func (r *Remote) ReportHarnessModels(ctx context.Context, s HarnessSession, observations []modelregistry.Observation) error {
+func (r *Remote) ReportHarnessModels(ctx context.Context, s HarnessSession, observations []modelreport.Observation) error {
 	return r.harnessWorker(ctx, s, "/model-reports", observations, nil)
 }
 
-func (s *Supervisor) reportModels(entry *owned, observations []modelregistry.Observation) {
+func (s *Supervisor) reportModels(entry *owned, observations []modelreport.Observation) {
 	reporter, ok := s.api.(interface {
-		ReportHarnessModels(context.Context, HarnessSession, []modelregistry.Observation) error
+		ReportHarnessModels(context.Context, HarnessSession, []modelreport.Observation) error
 	})
 	if !ok || len(observations) == 0 {
 		return
@@ -64,15 +64,20 @@ func (s *Supervisor) reportModels(entry *owned, observations []modelregistry.Obs
 	_ = reporter.ReportHarnessModels(ctx, session, observations)
 }
 
-func (s *Supervisor) reportModelState(entry *owned, status string) {
+func (s *Supervisor) reportModelState(entry *owned, status string, requested ...string) {
 	entry.mu.Lock()
 	session := entry.harness
 	runID := entry.record.RunID
 	entry.mu.Unlock()
-	if session.Model == "" || session.ReasoningEffort == "" {
+	// Only an explicit startup rejection can use the requested pin as evidence;
+	// Codex intentionally withholds session model metadata until confirmation.
+	if status == "invalid" && len(requested) == 2 {
+		session.Model, session.ReasoningEffort = requested[0], requested[1]
+	}
+	if !modelreport.ValidTuple(session.Model, session.ReasoningEffort) {
 		return
 	}
-	s.reportModels(entry, []modelregistry.Observation{{ReportID: modelregistry.EvidenceID(runID + "/" + status + "/" + session.Model + "/" + session.ReasoningEffort), Harness: session.Harness, Model: session.Model, Effort: session.ReasoningEffort, Status: status}})
+	s.reportModels(entry, []modelreport.Observation{{ReportID: modelreport.EvidenceID(runID + "/" + status + "/" + session.Model + "/" + session.ReasoningEffort), Harness: session.Harness, Model: session.Model, Effort: session.ReasoningEffort, Status: status}})
 }
 
 // Codex's authenticated app-server model/list is a content-free harness probe,
@@ -100,10 +105,13 @@ func reportCodexModels(ctx context.Context, p *wireProcess, observe func(Adapter
 		if json.Unmarshal(raw, &body) != nil {
 			return
 		}
-		reports := []modelregistry.Observation{}
+		reports := []modelreport.Observation{}
 		for _, m := range body.Data {
 			for _, e := range m.Efforts {
-				reports = append(reports, modelregistry.Observation{ReportID: modelregistry.EvidenceID(runID + "/list/" + m.Model + "/" + e.Effort), Harness: "codex", Model: m.Model, Effort: e.Effort, Status: "advertised"})
+				if !modelreport.ValidTuple(m.Model, e.Effort) {
+					continue
+				}
+				reports = append(reports, modelreport.Observation{ReportID: modelreport.EvidenceID(runID + "/list/" + m.Model + "/" + e.Effort), Harness: "codex", Model: m.Model, Effort: e.Effort, Status: "advertised"})
 			}
 		}
 		for len(reports) > 0 {

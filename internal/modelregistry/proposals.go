@@ -2,10 +2,11 @@
 package modelregistry
 
 import (
+	"net/http"
+
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
-	"net/http"
 )
 
 func (m *Module) acceptProposal(w http.ResponseWriter, r *http.Request) {

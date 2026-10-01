@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -278,7 +279,7 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			return nil, err
 		}
 	}
-	if s.ReasoningEffort != nil && out.OutputTokens != nil && *out.OutputTokens > 0 {
+	if s.ReasoningEffort != nil && modelreport.ValidTuple(out.Model, *s.ReasoningEffort) && out.OutputTokens != nil && *out.OutputTokens > 0 {
 		evidence := modelregistry.Observation{ReportID: modelregistry.EvidenceID(s.ID + "/usage/" + in.ReportID), Harness: s.Harness, Model: out.Model, Effort: *s.ReasoningEffort, Status: "working"}
 		if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, []modelregistry.Observation{evidence}); err != nil {
 			return nil, err
