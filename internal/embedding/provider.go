@@ -23,6 +23,9 @@ type Provider interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
+// Resolver selects a provider per tenant; nil means this tenant is disabled.
+type Resolver func(context.Context, string) (Provider, error)
+
 // HTTPConfig is an OpenAI-compatible embeddings endpoint.
 type HTTPConfig struct {
 	URL    string
