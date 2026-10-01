@@ -25,7 +25,8 @@ const world: AgentWorld = {
 }
 async function setup(page: Page, options: CapacityOptions & { manage?: boolean } = {}) {
   await page.clock.setSystemTime(NOW)
-  await mockWork(page, fixtures(), { admin: true })
+  const work = fixtures()
+  await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld(options)
   data.accounts = capacity.accounts as unknown as typeof data.accounts
@@ -37,7 +38,7 @@ async function setup(page: Page, options: CapacityOptions & { manage?: boolean }
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', ...(options.manage === false ? [] : ['account.manage']), 'run.create', 'run.read', 'models.read', 'work_orders.read']
     return route.fulfill({ json: answer })
   })
-  return { capacity }
+  return { capacity, work }
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
 const computer = (page: Page, name: string) => panel(page).getByRole('region', { name: `Computer ${name}` })
@@ -126,4 +127,30 @@ test('phone: stacked rows, no sideways scroll', async ({ page }) => {
   await expect(computer(page, 'studio').getByRole('status')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
   await shot(page, 'phone')
+})
+
+test('Agents working: the total and per-model targets are the person’s own, counts are the live sessions', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  const { work } = await setup(page)
+  await open(page)
+  const working = page.getByRole('region', { name: 'Agents working at once' })
+  await expect(working).toBeVisible()
+  await expect(working.locator('.big-num')).toHaveText('4')
+  await expect(working.locator('.now')).toContainText(/\d+ running now · /)
+  await working.getByRole('button', { name: 'More agents at once' }).click()
+  await expect(working.locator('.big-num')).toHaveText('5')
+  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ cap: 5 })
+  await working.getByRole('tab', { name: 'By model' }).click()
+  await expect(working.getByRole('tab', { name: 'By model' })).toHaveAttribute('aria-selected', 'true')
+  const codex = working.getByRole('listitem').filter({ hasText: 'Codex' })
+  await codex.getByRole('button', { name: 'More agents on Codex' }).click()
+  await expect(codex.locator('.target')).toHaveText('1')
+  await expect(working.locator('.foot')).toContainText('1 of 5 assigned · 4 flexible: any model takes them')
+  await expect(working).not.toContainText(/autopilot/i)
+  const axe = await new AxeBuilder({ page }).include('.working').analyze()
+  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
+  if (shots) { mkdirSync(shots, { recursive: true }); await working.screenshot({ path: `${shots}/working.png`, animations: 'disabled' }) }
+  await page.setViewportSize({ width: 390, height: 900 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
+  if (shots) await working.screenshot({ path: `${shots}/working-phone.png`, animations: 'disabled' })
 })

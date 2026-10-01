@@ -22,6 +22,7 @@ import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
@@ -285,6 +286,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
+        <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
