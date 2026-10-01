@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const (
@@ -113,10 +114,7 @@ func (s *seeder) demoProfile(profiles []modelregistry.Profile, harness string) (
 
 func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) error {
 	lease := "demo-" + work.slug + "-lease-000000000001"
-	var order struct {
-		NodeID   string `json:"node_id"`
-		Revision int64  `json:"revision"`
-	}
+	var order workorders.Order
 	if err := s.api.do(s.admin, "", http.MethodPost, "/api/work-orders", map[string]any{
 		"title": work.title, "body": "Fictional screenshot work order. No harness is running.",
 		"parent_id": work.project, "assignee_principal_id": work.agent.ID,
@@ -193,6 +191,10 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 		return fmt.Errorf("telemetry: %w", err)
 	}
 	ticket := work.ticket
+	label := work.title
+	if ticket == s.ids["LT-1"] {
+		label = work.agent.Name + " · Done"
+	}
 	var session idBody
 	if err := s.api.do(s.admin, "", http.MethodPost, "/api/projects/"+work.project+"/harness-sessions", map[string]any{
 		"agent_principal_id": work.agent.ID, "run_id": run.ID, "ticket_node_id": ticket,
@@ -200,7 +202,7 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
 		"advertised_capabilities": []string{"inbox", "status"},
 		"harness_session_ref":     "demo-" + work.slug + "-session-v1", "worker_lease": lease,
-		"display_label": work.title, "model": profile.Model, "reasoning_effort": profile.Effort,
+		"display_label": label, "model": profile.Model, "reasoning_effort": profile.Effort,
 		"account_label": work.accountLabel, "brief": work.brief,
 	}, http.StatusCreated, &session, nil); err != nil {
 		return fmt.Errorf("harness session: %w", err)
@@ -222,6 +224,33 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	if err := s.comment(work.agent, ticket, fmt.Sprintf("I work on this — session: %s (%s); role: builder; started: %s\n\nFictional demo: %s", work.title, session.ID, start, work.brief)); err != nil {
 		return err
 	}
+	if ticket == s.ids["LT-1"] {
+		if err := s.showcaseApproval(work); err != nil {
+			return err
+		}
+		// Complete real criteria and evidence through the ordinary handlers.
+		// The positive label describes the stored outcome, not runner presence.
+		for _, criterion := range order.Criteria {
+			if err := s.api.do(s.admin, "", http.MethodPost, "/api/work-orders/"+order.NodeID+"/criteria/"+criterion.ID+"/check", map[string]any{
+				"checked": true,
+			}, http.StatusOK, nil, nil); err != nil {
+				return fmt.Errorf("check showcase criterion: %w", err)
+			}
+		}
+		if err := s.api.do(work.agent, work.key, http.MethodPost, "/api/work-orders/"+order.NodeID+"/evidence", map[string]any{
+			"kind": "text", "reference": "Fictional demo: the lantern label was reviewed and Demo Operator approved the proposed edit.", "run_id": run.ID,
+		}, http.StatusCreated, nil, nil); err != nil {
+			return fmt.Errorf("showcase evidence: %w", err)
+		}
+		if err := s.api.do(s.admin, "", http.MethodGet, "/api/work-orders/"+order.NodeID, nil, http.StatusOK, &order, nil); err != nil {
+			return err
+		}
+		if err := s.api.do(s.admin, "", http.MethodPatch, "/api/work-orders/"+order.NodeID, map[string]any{
+			"expected_revision": order.Revision, "status": "done",
+		}, http.StatusOK, nil, nil); err != nil {
+			return fmt.Errorf("complete showcase work order: %w", err)
+		}
+	}
 	if err := s.comment(work.agent, ticket, fmt.Sprintf("The fictional label review is complete. [Session evidence and instruction provenance](/agents/%s) are linked to run `%s`. This is seeded history; no runner executed it.", session.ID, run.ID)); err != nil {
 		return err
 	}
@@ -235,7 +264,43 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	}, http.StatusOK, nil, workerHeaders); err != nil {
 		return fmt.Errorf("end demo session: %w", err)
 	}
+	if ticket == s.ids["HT-1"] {
+		// Keep a real rework exception on the non-showcase Harbor ticket.
+		if err := s.api.do(s.admin, "", http.MethodPut, "/api/harness-sessions/"+session.ID+"/delivery-rating", map[string]any{
+			"tags": []string{"rework"}, "comment": "Fictional demo: the berth label needs a clearer north-arrow before another review.",
+		}, http.StatusOK, nil, nil); err != nil {
+			return fmt.Errorf("Harbor rework example: %w", err)
+		}
+	}
 	return nil
+}
+
+func (s *seeder) showcaseApproval(work demoWork) error {
+	if err := s.comment(work.agent, work.ticket, "Fictional progress note: the lantern label draft is ready. I checked the shelf name and will ask a person before editing it."); err != nil {
+		return err
+	}
+	if err := s.comment(s.nia, work.ticket, "Fictional human review: the shelf name is clear. Please ask Demo Operator to approve the proposed lantern label edit."); err != nil {
+		return err
+	}
+	var approval idBody
+	if err := s.api.do(work.agent, work.key, http.MethodPost, "/api/approvals", map[string]any{
+		"scope": "nodes.write", "resource_kind": "node", "resource_id": work.ticket,
+		"rationale":  "Fictional demo: Lumen Scribe asks a person to approve the proposed lantern label edit.",
+		"expires_at": time.Now().Add(72 * time.Hour).UTC(),
+	}, http.StatusCreated, &approval, nil); err != nil {
+		return fmt.Errorf("showcase approval request: %w", err)
+	}
+	// Activity projects comments and node changes, so leave linked notes beside
+	// the real request and decision rather than inventing approval events.
+	if err := s.comment(work.agent, work.ticket, fmt.Sprintf("Fictional approval request: may I edit the lantern label? [Approval record](/approvals) `%s` is waiting for Demo Operator.", approval.ID)); err != nil {
+		return err
+	}
+	if err := s.api.do(s.admin, "", http.MethodPost, "/api/approvals/"+approval.ID+"/decision", map[string]any{
+		"decision": "approved",
+	}, http.StatusOK, nil, nil); err != nil {
+		return fmt.Errorf("showcase approval decision: %w", err)
+	}
+	return s.comment(s.admin, work.ticket, fmt.Sprintf("Fictional approval decision: approved the proposed lantern label edit requested by Lumen Scribe. [Approval record](/approvals) `%s` keeps the decision with this ticket.", approval.ID))
 }
 
 func (s *seeder) pendingApproval() error {
