@@ -21,6 +21,7 @@ import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
+import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
@@ -169,7 +170,7 @@ const hero = computed(() => { const v = liveServer(server.value, pageRuns.value)
 const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
 const eyebrow = computed(() => view.value === 'details'
   ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${releases.value.length - reservedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : [])].join(' · ')
-  : `${brand.value.wordmark} · Releases`)
+  : `${brand.value.wordmark} · Release`)
 // One status line under it: since when it runs here, or that this page is older.
 const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
 const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
@@ -412,17 +413,20 @@ const KINDS = [
           <div class="titles">
             <p class="eyebrow">{{ eyebrow }}</p>
             <h1 id="releases-title" class="hero" :class="{ named: !!hero }">
-              <ReleaseCodename v-if="hero" :version="hero" :name="heroName" />
+              <ReleaseCodename v-if="hero" :version="hero" :name="heroName" plain />
               <template v-else>{{ brand.wordmark }} releases</template>
             </h1>
-            <p v-if="notice === 'update'" class="status-line outdated" role="status">
-              <span class="status-dot" aria-hidden="true" />
-              <span>Live on the server · this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" :name="byVersion.get(pageRuns)?.codename" class="status-version" /></span>
-              <button type="button" class="reload" @click="reload"><AppIcon name="refresh" :size="13" />Reload</button>
-            </p>
-            <p v-else-if="hero" class="status-line" :data-tip="runningSince ? `Live on this server since ${absoluteTime(runningSince)}` : undefined">
-              <span class="status-dot live" aria-hidden="true" /><span>{{ liveLine }}</span>
-            </p>
+            <div v-if="hero" class="status-dock">
+              <p v-if="notice === 'update'" class="status-line outdated" role="status">
+                <span class="status-dot" aria-hidden="true" />
+                <span>Live on the server · this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" :name="byVersion.get(pageRuns)?.codename" class="status-version" /></span>
+                <button type="button" class="reload" @click="reload"><AppIcon name="refresh" :size="13" />Reload</button>
+              </p>
+              <p v-else class="status-line" :data-tip="runningSince ? `Live on this server since ${absoluteTime(runningSince)}` : undefined">
+                <span class="status-dot live" aria-hidden="true" /><span>{{ liveLine }}</span>
+              </p>
+              <ReleaseVersionCopy :value="hero" class="dock-version" />
+            </div>
           </div>
           <span class="spacer" />
           <div class="switches">
@@ -609,23 +613,18 @@ const KINDS = [
 .mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 52px; height: 52px; border-radius: 15px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
 .mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
-/* The title on frosted glass: eyebrow, the codename, one status line. */
+/* The light display title sits above one frosted glass status dock. */
 .titles {
   /* The codename keeps its line; the search field gives way first. */
   flex: 0 0 auto; max-width: 46%;
-  display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 26px 14px 22px; border-radius: 22px;
-  --glass-a: rgba(255, 255, 255, .62); --glass-b: rgba(255, 255, 255, .34); --glass-ring: rgba(255, 255, 255, .55); --glass-glow: rgba(14, 111, 108, .45);
-  background: linear-gradient(135deg, var(--glass-a), var(--glass-b));
-  -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
-  box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(32, 60, 61, .06), 0 0 0 1px var(--glass-ring), 0 0 0 1.5px var(--line), 0 18px 40px -22px var(--glass-glow);
+  display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; padding: 4px 0;
 }
-:root[data-theme="dark"] .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); } }
-.titles .eyebrow { margin: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; overflow-wrap: anywhere; }
-/* The codename leads. Its padding holds the sparkles; the margin keeps the text in line. */
-.hero { position: relative; align-self: flex-start; max-width: calc(100% + 32px); margin: -10px -18px -8px -14px; padding: 10px 18px 8px 14px; font: 800 clamp(28px, 2.9vw, 42px)/1.05 var(--font); color: var(--ink); --sparkle: 18px; }
+.titles .eyebrow { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; font: 600 10.5px/1.4 var(--font); letter-spacing: .18em; overflow-wrap: anywhere; text-align: center; }
+.titles .eyebrow::before, .titles .eyebrow::after { content: ''; flex: 1; min-width: 16px; height: 1px; background: var(--line-2); }
+.hero { max-width: 100%; margin: 0; font: 300 clamp(28px, 3.4vw, 48px)/1.1 var(--serif); color: var(--ink); text-align: center; }
 .hero:not(.named) { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; }
-.hero :deep(.rn-stamp) { font-size: 15px; padding: 8px 12px; }
+.status-dock { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 14px; max-width: 100%; min-height: 48px; padding: 6px 16px; border-radius: 24px; background: linear-gradient(135deg, var(--glass), var(--glass-2)); -webkit-backdrop-filter: blur(22px) saturate(1.4); backdrop-filter: blur(22px) saturate(1.4); box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 12px 28px -18px var(--line-2); }
+.dock-version { padding-left: 14px; border-left: 1px solid var(--line-2); }
 .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
 .status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 3px rgba(214, 155, 49, .18); }
 .status-dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); }
@@ -782,10 +781,12 @@ const KINDS = [
   .title-row { flex-wrap: wrap; gap: 10px; }
   /* The codename takes the row beside Close; the mark waits on wider screens. */
   .mark-backing { display: none; }
-  .titles { flex: 1; max-width: none; padding: 12px 16px; }
-  .hero { font-size: clamp(24px, 7.4vw, 30px); --sparkle: 15px; }
+  .titles { flex: 1; max-width: none; padding: 4px 0; gap: 10px; }
+  .hero { font-size: clamp(26px, 7.4vw, 34px); }
   .hero:not(.named) { font-size: 21px; }
-  .hero :deep(.rn-stamp) { font-size: 13px; }
+  .titles .eyebrow { letter-spacing: .12em; gap: 8px; font-size: 10px; }
+  .status-dock { gap: 2px 10px; padding: 4px 12px; border-radius: 18px; }
+  .dock-version { padding-left: 0; border-left: 0; }
   .reload { height: 44px; padding: 0 16px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }

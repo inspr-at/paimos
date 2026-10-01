@@ -198,8 +198,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .top { margin: 0; }
 /* The codename (AEON-430) is the heading, as the hero in the history's title; its version chip replaces it on hover. */
 .version { font: 500 clamp(24px, 2.2vw, 30px)/1.25 var(--mono); letter-spacing: 0; color: var(--ink); outline: none; }
-/* The padding holds the sparkles; the margin keeps the text in line. */
-.version.named { position: relative; justify-self: start; max-width: calc(100% + 34px); margin: -10px -20px -10px -14px; padding: 10px 20px 10px 14px; font: 800 clamp(30px, 3.4vw, 54px)/1.05 var(--font); --sparkle: 20px; }
+.version.named { justify-self: start; max-width: 100%; font: 300 clamp(30px, 3.4vw, 54px)/1.1 var(--serif); }
 .tech { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.6; color: var(--ink-3); overflow-wrap: anywhere; }
 .version:focus-visible { box-shadow: var(--focus-ring); border-radius: 8px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -265,7 +264,6 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
   .ext { min-height: 44px; }
   .summary { padding: 12px; }
   .summary .headline { font-size: 17px; }
-  .version.named { --sparkle: 15px; }
 }
 @media (prefers-reduced-motion: reduce) { .ev-chev { transition: none; } }
 </style>

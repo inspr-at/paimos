@@ -161,16 +161,25 @@ test('a thirty-day release gap keeps the timeline inside the phone card', async 
   expect(geometry.right).toBeLessThanOrEqual(geometry.width)
 })
 
-test('the title is the live codename with one status line; Details adds the generation and counts', async ({ page }) => {
+test('the light codename leads one glass status dock; Details adds the generation and counts', async ({ page }) => {
   const history = await open(page)
   const live = history.releases.find(r => r.version === history.current)!
   const head = sheet(page).locator('.head')
   await expect(head.getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · Releases')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · Release')
+  await expect(head.getByRole('heading', { level: 1 })).toHaveCSS('font-weight', '300')
+  await expect(head.locator('.codename-label')).toHaveCSS('text-transform', 'none')
+  await expect(head.locator('.hero .sparkle, .hero .rn-stamp')).toHaveCount(0)
+  await expect(head.locator('.status-dock')).toHaveCount(1)
   await expect(head.locator('.status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
   await expect(head.getByRole('button', { name: 'Reload' })).toHaveCount(0)
   // The old tiles are gone; nothing says it twice.
   await expect(head.getByText('Running here')).toHaveCount(0)
+  const version = head.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+  await expect(version).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(version.locator('.copy-icon')).toHaveCSS('opacity', '0')
+  await expect(version.locator('.version-pretty')).toHaveAttribute('data-canonical', history.current)
+  await expect(version.locator('.version-canonical')).toHaveText(history.current)
   await sheet(page).getByRole('radio', { name: 'Details' }).click()
   await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published · 1 reserved')
 })
@@ -182,10 +191,100 @@ test('an outdated page says so in the status line, under the codename the server
   const live = history.releases.find(r => r.version === history.current)!
   const head = sheet(page).locator('.head')
   await expect(head.getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
-  const status = head.getByRole('status')
+  const status = head.locator('.status-line[role="status"]')
   await expect(status).toHaveText(new RegExp(`^Live on the server · this page still runs ${older.codename}`))
   await expect(status.getByRole('button', { name: 'Reload' })).toBeVisible()
   await expect(sheet(page).locator('.notice')).toHaveCount(0)
+})
+
+test('the dock crossfades per character to canonical text and back over the shared second', async ({ page }) => {
+  const history = await open(page, { motion: true })
+  const button = sheet(page).locator('.status-dock').getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+  const full = button.locator('[data-version-character="canonical"]')
+  const pretty = button.locator('[data-version-character="pretty"]')
+  // Measure after the sheet's entrance animation has settled.
+  await sheet(page).locator('.shell').evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
+  const bounds = await button.boundingBox()
+  await expect(button).toHaveAttribute('data-version-view', 'pretty')
+  await expect(full).toHaveCount(history.current.length)
+  await expect(full.first()).toHaveCSS('opacity', '0')
+  await button.hover()
+  await expect(button).toHaveAttribute('data-version-view', 'revealed')
+  await expect(full.last()).toHaveCSS('opacity', '1')
+  await expect(pretty.last()).toHaveCSS('opacity', '0')
+  const transitions = await full.evaluateAll(nodes => nodes.map(el => {
+    const style = getComputedStyle(el)
+    return [Number.parseFloat(style.transitionDuration), Number.parseFloat(style.transitionDelay), style.transitionTimingFunction]
+  }))
+  expect(transitions[0]).toEqual([0.42, 0, 'ease-in-out'])
+  expect(transitions.at(-1)).toEqual([0.42, 0.58, 'ease-in-out'])
+  await expect(button.locator('.version-canonical > .ss')).toHaveCSS('opacity', '0.7')
+  await expect(button.locator('.version-canonical > .hh')).toHaveCSS('opacity', '0.94')
+  await expect(button.locator('.copy-icon')).toHaveCSS('opacity', '1')
+  expect(await button.boundingBox()).toEqual(bounds)
+  await leave(page)
+  await expect(button).toHaveAttribute('data-version-view', 'pretty')
+  await expect(full.last()).toHaveCSS('opacity', '0')
+  await expect(pretty.last()).toHaveCSS('opacity', '1')
+  await expect(button.locator('.copy-icon')).toHaveCSS('opacity', '0')
+})
+
+for (const width of [320, 390]) {
+  test(`the glass dock and canonical version fit a ${width}px phone`, async ({ page }) => {
+    const history = releaseHistory()
+    history.releases.find(r => r.version === history.current)!.codename = 'Intact Ion'
+    await open(page, { history, viewport: { width, height: 844 } })
+    const head = sheet(page).locator('.head')
+    const button = head.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+    await button.focus()
+    await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+    for (const element of [head.locator('.status-dock'), button, head.getByRole('button', { name: 'Close release history' })]) {
+      const bounds = await element.boundingBox()
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+    }
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  })
+}
+
+test('keyboard focus reveals the dock version; Enter and click copy its exact canonical value and announce it', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const history = await open(page)
+  const dock = sheet(page).locator('.status-dock')
+  const button = dock.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+  await button.focus()
+  await expect(button).toHaveAttribute('data-version-view', 'revealed')
+  await page.keyboard.press('Enter')
+  await expect(button).toHaveAttribute('data-copy-state', 'copied')
+  await expect(dock.getByRole('status')).toHaveText('Version copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
+  await page.clock.runFor(2100)
+  await button.click()
+  await expect(dock.getByRole('status')).toHaveText('Version copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
+  // Leaving the pointer alone does not dismiss keyboard-visible focus.
+  await page.mouse.move(1, 1)
+  await button.focus()
+  await expect(button).toHaveAttribute('data-version-view', 'revealed')
+  await leave(page)
+  await expect(button).toHaveAttribute('data-version-view', 'pretty')
+})
+
+test('reduced motion switches the dock instantly, including changes during a reveal', async ({ page }) => {
+  const history = await open(page)
+  const button = sheet(page).locator('.status-dock').getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+  const full = button.locator('[data-version-character="canonical"]')
+  await button.hover()
+  await expect(full.last()).toHaveCSS('opacity', '1')
+  expect(await full.evaluateAll(nodes => nodes.every(node => (node as HTMLElement).style.transition === 'none'))).toBe(true)
+  await leave(page)
+  await expect(full.last()).toHaveCSS('opacity', '0')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await button.hover()
+  expect(await full.first().evaluate(node => (node as HTMLElement).style.transition)).toContain('420ms ease-in-out')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(full.last()).toHaveCSS('opacity', '1')
+  expect(await full.evaluateAll(nodes => nodes.every(node => (node as HTMLElement).style.transition === 'none'))).toBe(true)
 })
 
 test('the range stepper walks 7 days to a year, and the choice is remembered', async ({ page }) => {
@@ -247,7 +346,7 @@ test('a clock tick preserves the chart focus, tooltip and next keyboard step', a
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  test(`axe: the header ${colorScheme}`, async ({ page }) => {
+  test(`axe: the header ${colorScheme}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme })
     await open(page)
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, colorScheme)
@@ -255,5 +354,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
     const results = await new AxeBuilder({ page }).include('.releases .head').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
     const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}`).join('\n')}`)
     expect(summary, summary.join('\n')).toEqual([])
+    await sheet(page).locator('.head').screenshot({ path: testInfo.outputPath(`release-header-${colorScheme}.png`) })
   })
 }

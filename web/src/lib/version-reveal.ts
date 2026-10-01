@@ -101,3 +101,69 @@ export function attachVersionReveal(host: HTMLElement, trigger: HTMLElement, vie
     delete host.dataset.versionView
   }
 }
+
+// Presentation layer for the release dock (AEON-488). Both text layers come
+// from renderVersion: Pretty keeps its separators/geometry, reduced supplies
+// canonical text. Split only leaf glyphs, preserving every renderer style.
+// The pinned interaction provides the total timing and revealed opacities;
+// it does not currently offer this character-by-character crossfade.
+export function attachVersionCrossfade(pretty: HTMLElement, canonical: HTMLElement, trigger: HTMLElement, view: Window = window): () => void {
+  const restorers: Array<() => void> = []
+  function characters(host: HTMLElement, layer: string) {
+    const chars: HTMLElement[] = []
+    for (const segment of host.children) {
+      if (!(segment instanceof HTMLElement) || segment.dataset.collapsed === 'true') continue
+      const leaf = segment.querySelector<HTMLElement>('.separator-glyph') ?? segment
+      const text = leaf.textContent ?? ''
+      const nodes = Array.from(text, ch => {
+        const node = host.ownerDocument.createElement('span')
+        node.textContent = ch
+        node.dataset.versionCharacter = layer
+        node.style.display = 'inline-block'
+        return node
+      })
+      leaf.replaceChildren(...nodes)
+      restorers.push(() => { leaf.textContent = text })
+      chars.push(...nodes)
+    }
+    return chars
+  }
+  for (const segment of canonical.children) {
+    if (!(segment instanceof HTMLElement)) continue
+    const original = segment.style.opacity
+    const source = [...pretty.children].find(node => node.className === segment.className) as HTMLElement | undefined
+    segment.style.opacity = String(hoverOpacity(source?.style.opacity ? Number(source.style.opacity) : 1))
+    restorers.push(() => { segment.style.opacity = original })
+  }
+  const layers = [characters(pretty, 'pretty'), characters(canonical, 'canonical')]
+  const media = view.matchMedia?.('(prefers-reduced-motion: reduce)')
+  let revealed = false, disposed = false
+  function motion(target: boolean, immediate = false) {
+    if (disposed) return
+    revealed = target
+    pretty.dataset.versionView = trigger.dataset.versionView = target ? 'revealed' : 'pretty'
+    layers.forEach((chars, layer) => chars.forEach((node, index) => {
+      const fade = duration * .42
+      const delay = (duration - fade) * index / Math.max(1, chars.length - 1)
+      node.style.transition = immediate || media?.matches ? 'none' : `opacity ${fade}ms ease-in-out ${delay}ms`
+      node.style.opacity = Number(target === (layer === 1)).toString()
+    }))
+  }
+  motion(false, true)
+  const off = watchTrigger(trigger, motion)
+  const preference = () => motion(revealed, true)
+  media?.addEventListener('change', preference)
+  const priorDuration = trigger.style.getPropertyValue('--version-reveal-duration')
+  trigger.style.setProperty('--version-reveal-duration', `${duration}ms`)
+  return () => {
+    if (disposed) return
+    disposed = true
+    off()
+    media?.removeEventListener('change', preference)
+    restorers.forEach(restore => restore())
+    if (priorDuration) trigger.style.setProperty('--version-reveal-duration', priorDuration)
+    else trigger.style.removeProperty('--version-reveal-duration')
+    delete pretty.dataset.versionView
+    delete trigger.dataset.versionView
+  }
+}
