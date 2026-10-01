@@ -211,6 +211,65 @@ jobs:
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
 
+  # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
+  footer-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - name: Install shells for web command tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Web unit tests
+        working-directory: web
+        run: npm run test:unit
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Footer and affected release/brand integration checks
+        working-directory: web
+        env:
+          AEON_SCREENSHOTS_DIR: test-results/footer-release-pill
+        run: >-
+          npx playwright test -c playwright.ui.config.ts --workers=2
+          tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts
+          tests/release-codenames.spec.ts tests/version-reveal.spec.ts
+          tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts
+          tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts
+      - name: Desktop light screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-desktop-light
+          path: web/test-results/footer-release-pill/desktop-light.png
+          if-no-files-found: error
+      - name: Desktop dark screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-desktop-dark
+          path: web/test-results/footer-release-pill/desktop-dark.png
+          if-no-files-found: error
+      - name: Phone light screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-phone-light
+          path: web/test-results/footer-release-pill/phone-light.png
+          if-no-files-found: error
+      - name: Phone dark screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-phone-dark
+          path: web/test-results/footer-release-pill/phone-dark.png
+          if-no-files-found: error
+
   release-check:
     runs-on: ubuntu-latest
     steps:
