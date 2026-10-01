@@ -370,61 +370,80 @@ func TestCodexReasoningRevisionLeavesNewModelUnknown(t *testing.T) {
 	}
 }
 
-// Round 3 review case end to end: a server that rejects reasoning above
-// output never sees such a report. Reading the same records in one beat or
-// across beats must retain the same known reasoning increase.
+// A server that rejects reasoning above output never sees such a report.
+// Missing counters and downward recovery retain the same safely observed
+// reasoning in one beat or across beats.
 func TestCodexReasoningReportsStayAcceptable(t *testing.T) {
-	for _, oneScan := range []bool{true, false} {
-		t.Run(fmt.Sprintf("oneScan=%t", oneScan), func(t *testing.T) {
-			var calls []hbCall
-			srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
-				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(b, "reasoning_tokens") > numField(b, "output_tokens") {
-					w.WriteHeader(http.StatusBadRequest)
-					_, _ = w.Write([]byte(`{"error":"reasoning tokens exceed output"}`))
-					return true
+	for _, tc := range []struct {
+		name              string
+		lines             []string
+		output, reasoning float64
+	}{
+		{"unknown baseline", []string{
+			codexContext("model-a") + codexTotalsLine(100, 100, ""),
+			codexContext("model-b") + codexTotalsLine(150, 110, "80"),
+			codexTotalsLine(200, 150, "90"),
+		}, 50, 10},
+		{"lower re-baseline", []string{
+			codexContext("model-b") + codexTotalsLine(100, 100, "20"),
+			codexTotalsLine(150, 110, ""),
+			codexTotalsLine(200, 120, "15"),
+			codexTotalsLine(250, 140, "18"),
+			codexTotalsLine(300, 150, "25"),
+		}, 150, 25},
+	} {
+		for _, oneScan := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/oneScan=%t", tc.name, oneScan), func(t *testing.T) {
+				var calls []hbCall
+				srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(b, "reasoning_tokens") > numField(b, "output_tokens") {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte(`{"error":"reasoning tokens exceed output"}`))
+						return true
+					}
+					return false
+				})
+				defer srv.Close()
+				rt, _, stderr := heartbeatRuntime(t, srv)
+				dir := fenceHome(t)
+				path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-reasoning.jsonl")
+				lines := tc.lines
+				fenceWrite(t, path, "")
+				opts := heartbeatTestOptions(dir)
+				opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+				session := openUsageSession(t, rt, opts)
+				for i, next := range lines {
+					appendFile(t, path, next)
+					if oneScan && i < len(lines)-1 {
+						continue
+					}
+					if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+						t.Fatalf("report %d: %v stderr %s", i, err, stderr.String())
+					}
 				}
-				return false
-			})
-			defer srv.Close()
-			rt, _, stderr := heartbeatRuntime(t, srv)
-			dir := fenceHome(t)
-			path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-reasoning.jsonl")
-			lines := []string{codexContext("model-a") + codexTotalsLine(100, 100, ""), codexContext("model-b") + codexTotalsLine(150, 110, "80"), codexTotalsLine(200, 150, "90")}
-			fenceWrite(t, path, "")
-			opts := heartbeatTestOptions(dir)
-			opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
-			session := openUsageSession(t, rt, opts)
-			for i, next := range lines {
-				appendFile(t, path, next)
-				if oneScan && i < len(lines)-1 {
-					continue
+				if len(session.disk.PendingUsage) != 0 || strings.Contains(stderr.String(), "rejected") {
+					t.Fatalf("queue blocked: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
 				}
+				var bOutput float64
+				var bReasoning any
+				for _, post := range usagePosts(calls) {
+					if post["model"] == "model-b" {
+						bOutput = numField(post, "output_tokens")
+						bReasoning = post["reasoning_tokens"]
+					}
+				}
+				if bOutput != tc.output || bReasoning != tc.reasoning {
+					t.Fatalf("model-b usage lost known reasoning or counted the unsafe baseline: %v", usagePosts(calls))
+				}
+				before := len(usagePosts(calls))
 				if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
-					t.Fatalf("report %d: %v stderr %s", i, err, stderr.String())
+					t.Fatal(err)
 				}
-			}
-			if len(session.disk.PendingUsage) != 0 || strings.Contains(stderr.String(), "rejected") {
-				t.Fatalf("queue blocked: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
-			}
-			var bOutput float64
-			var bReasoning any
-			for _, post := range usagePosts(calls) {
-				if post["model"] == "model-b" {
-					bOutput = numField(post, "output_tokens")
-					bReasoning = post["reasoning_tokens"]
+				if len(usagePosts(calls)) != before {
+					t.Fatalf("unchanged log was reported twice: %v", usagePosts(calls))
 				}
-			}
-			if bOutput != 50 || bReasoning != float64(10) {
-				t.Fatalf("model-b usage lost known reasoning or counted the unsafe baseline: %v", usagePosts(calls))
-			}
-			before := len(usagePosts(calls))
-			if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
-				t.Fatal(err)
-			}
-			if len(usagePosts(calls)) != before {
-				t.Fatalf("unchanged log was reported twice: %v", usagePosts(calls))
-			}
-		})
+			})
+		}
 	}
 }
 

@@ -523,20 +523,18 @@ func noteCodexTotals(line []byte, fallback string, sums map[string]usageSum, poi
 		codex.ReasoningKnown = false
 	case !codex.ReasoningKnown:
 		// A total after an unknown stretch only re-establishes the baseline;
-		// the increase cannot be attributed to the model in context.
-		codex.Reasoning, codex.ReasoningKnown = snap.Reasoning, true
+		// the increase cannot be attributed to the model in context. A
+		// downward revision must not make later recovery count as new usage.
+		codex.Reasoning, codex.ReasoningKnown = max(codex.Reasoning, snap.Reasoning), true
 	case snap.Reasoning >= codex.Reasoning:
 		delta.Reasoning, delta.ReasoningKnown = snap.Reasoning-codex.Reasoning, true
 		codex.Reasoning = snap.Reasoning
 	default:
 		// Codex can revise reasoning down while input grows; the attributed
-		// baseline never moves backwards.
-		delta.ReasoningKnown = true
+		// baseline never moves backwards. This delta remains unknown, so
+		// a new model does not acquire a falsely known zero.
 	}
 	codex.Input, codex.Output, codex.Cached = snap.Input, snap.Output, snap.Cached
-	if delta.Cached > delta.Input {
-		delta.Cached = delta.Input
-	}
 	// Reasoning is a subset of output. An increase that cannot be one is not
 	// attributed rather than reported as an impossible figure.
 	if delta.ReasoningKnown && delta.Reasoning > delta.Output {
