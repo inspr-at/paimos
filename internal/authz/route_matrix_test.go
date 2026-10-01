@@ -83,6 +83,26 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	// AEON-184: who is working where follows project visibility, so a
 	// project-only guest may ask; a customer never may.
 	checkIn("guest", guest, "GET /api/harness-sessions/live", Scope{AnyProject: true}, true)
+	reader := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Project-only session reader') RETURNING id::text`, tid).Scan(&reader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='viewer'`, tid, reader.ID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{"GET /api/me/host-labels", "PUT /api/me/host-labels"} {
+		check("project reader without project scope", reader, pattern, false)
+		checkIn("project reader", reader, pattern, Scope{AnyProject: true}, true)
+		// Seeing the guest live count alone does not grant harness.read.
+		checkIn("guest", guest, pattern, Scope{AnyProject: true}, false)
+		checkIn("customer", people["customer"], pattern, Scope{AnyProject: true}, false)
+		if !ProjectFilteredRoutes[pattern] {
+			t.Fatalf("own host labels must support project-only people: %s", pattern)
+		}
+	}
 	checkIn("customer", people["customer"], "GET /api/harness-sessions/live", Scope{AnyProject: true}, false)
 	check("member", people["member"], "GET /api/usage/dashboard", true)
 	checkIn("guest", guest, "GET /api/usage/dashboard", Scope{AnyProject: true}, false)

@@ -4,6 +4,8 @@
 // that was never published, and evidence from complete to missing.
 import type { Page } from '@playwright/test'
 
+export const RELEASE_HISTORY_NAME = /^Release history, (?:.*?, )?version /
+
 const pad = (n: number) => String(n).padStart(2, '0')
 export function calendarVersion(at: number) {
   const d = new Date(at)

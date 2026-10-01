@@ -2932,7 +2932,7 @@ paths:
     post:
       operationId: createAgentKey
       summary: Create or rotate an agent key and return its secret once
-      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and expires_at only; the server copies the old key's agent, name and scopes, creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage.
+      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and optional expires_at; the server copies the old key's agent, name and scopes unless rotation_scopes explicitly supplies a replacement scope set. It creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage. Scope codes in the dialogs select a proposed set locally and grant nothing until the person confirms.
       security:
         - session: []
         - agentKey: []
@@ -2948,6 +2948,11 @@ paths:
                   type: string
                   format: uuid
                   description: Key to replace after user confirmation. Mutually exclusive with name, principal_id and scopes. The old key stops working when the replacement is created.
+                rotation_scopes:
+                  type: [array, "null"]
+                  maxItems: 256
+                  items: {type: string}
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -3317,6 +3322,19 @@ paths:
         '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /status/help:
+    get:
+      operationId: getStatusHelp
+      summary: The same status definitions and live workspace limits for people and agents
+      description: Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility. Queued describes Open in the work queue; it is not a stored status. No status values are changed.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Definitions, rules and effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
+        '400': {description: Invalid project id}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {description: Project is not visible}
   /nodes:
     get:
       operationId: listNodes
@@ -3330,6 +3348,7 @@ paths:
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
         - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
         - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: human_check, in: query, description: 'pending or none; ! excludes. Pending means human_check contains non-empty text. Combines with other filters and applies to facets and pagination.', schema: {type: array, items: {type: string, enum: [pending, none, '!pending', '!none']}}}
         - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
         - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
@@ -3337,7 +3356,7 @@ paths:
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -5642,7 +5661,7 @@ paths:
       description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped, paused]}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, format: uuid}}
@@ -5668,6 +5687,31 @@ paths:
         '400': {description: Invalid filter or cursor}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /me/host-labels:
+    get:
+      operationId: listOwnHostLabels
+      description: Person only. Overrides for the authenticated person; host identity is the registered host, scoped to this tenant.
+      responses:
+        '200': {description: Own overrides, content: {application/json: {schema: {type: array, items: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}}
+        '403': {description: Person required}
+    put:
+      operationId: setOwnHostLabel
+      description: Save an override for yourself. A null label resets it to the registered host. Owner is always taken from authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, label]
+              properties:
+                host: {type: string, minLength: 1, maxLength: 128}
+                label: {type: [string, 'null'], minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Effective label, content: {application/json: {schema: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}
+        '400': {description: Invalid host or label}
+        '403': {description: Person required}
+        '404': {description: Host is not visible}
   /harness-sessions/live:
     get:
       operationId: listLiveAgents
@@ -5970,7 +6014,7 @@ paths:
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai or cursor and aliases codex → openai, claude → anthropic, grok → xai. pi is ambiguous; pass the model family instead.", schema: {type: string}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -8197,7 +8241,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.10']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/2.1']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12061,7 +12105,9 @@ components:
         brief: {$ref: '#/components/schemas/HarnessBrief'}
         worktree: {$ref: '#/components/schemas/HarnessWorktree'}
         branch: {$ref: '#/components/schemas/HarnessBranch'}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         host: {type: string, minLength: 1, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
@@ -12431,7 +12477,9 @@ components:
         activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
         metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         watch:
           type: object
           description: Content-free attach status, present on attached session detail only
@@ -13568,6 +13616,12 @@ components:
         scope:
           type: string
           description: Present only for missing_key_scope after role and project authority have passed in the reported check. A failed target-project retry retains the pre-resolution denial instead. Never includes resource or principal data.
+        scope_label:
+          type: string
+          description: Human label of scope, such as See history. Present only with a missing_key_scope diagnostic; error and reason also name the scope and label.
+        scope_code:
+          type: string
+          description: Non-secret proposal for the missing scope, to paste into a key dialog. aeon-scopes:v1 followed by a colon, sorted comma-separated resource.action groups (actions within a resource joined by +), a colon and eight lowercase hex digits of CRC32-IEEE over all preceding bytes. It grants nothing and is not a credential. Present only with a missing_key_scope diagnostic.
     NodeError:
       type: object
       required: [error]
@@ -14112,7 +14166,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind, human_check]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
@@ -14133,6 +14187,55 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
+    StatusHelp:
+      type: object
+      required: [definitions, queued, autopilot, triage, limits_source]
+      properties:
+        limits_source: {type: string, enum: [defaults, workspace]}
+        project_id: {type: string, format: uuid}
+        project_name: {type: string}
+        definitions:
+          type: array
+          items:
+            type: object
+            required: [state, label, meaning, hint, set_by, exit, rules]
+            properties:
+              state: {type: string}
+              label: {type: string}
+              meaning: {type: string}
+              hint: {type: string}
+              set_by: {type: string}
+              exit: {type: boolean}
+              rules: {type: array, items: {type: string}}
+        queued:
+          type: object
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Queued}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
+        autopilot:
+          type: object
+          required: [enabled, effective_enabled, project_mode, rules]
+          properties:
+            enabled: {type: boolean, description: Workspace master switch}
+            effective_enabled: {type: boolean, description: Project mode overrides the workspace master}
+            project_mode: {type: string, enum: [inherit, on, off]}
+            rules:
+              type: object
+              additionalProperties:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  days: {type: integer, minimum: 1, maximum: 365}
+        triage:
+          type: object
+          required: [mode, available]
+          description: Triage autopilot is a later package; its approved default is Apply. available=false marks the planned setting rather than claiming an active engine.
+          properties:
+            mode: {type: string, enum: [off, suggest, apply]}
+            available: {type: boolean}
     Node:
       description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
       type: object
@@ -14159,6 +14262,10 @@ components:
         fields:
           type: object
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+        human_check:
+          type: [string, 'null']
+          maxLength: 500
+          description: Optional pending person-only check. Automatic moves to Delivered and Accepted skip it. A person clears it with PATCH human_check=null; fields.human_check_completed then carries server-authored text, by (principal id) and at (UTC timestamp). Null when no pending check exists.
         state:
           type: string
         parent_id:
@@ -14240,6 +14347,7 @@ components:
       type: object
       required: [kind_id, title]
       properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: Optional pending human check; non-empty text after trimming}
         kind_id:
           type: string
           format: uuid
@@ -14273,6 +14381,7 @@ components:
       type: object
       minProperties: 1
       properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}
         estimate_hours:
           type: [number, 'null']
           exclusiveMinimum: 0

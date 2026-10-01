@@ -10,6 +10,7 @@ import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { RETRY_MS } from '../src/lib/refreshRetry'
 import { rowStore } from '../src/lib/rowStore'
 import { filtersFromQuery } from '../src/lib/ticketList'
+import { toast } from '../src/lib/toast'
 
 const api = vi.hoisted(() => ({
   getNode: vi.fn(), updateNode: vi.fn(), convertNode: vi.fn(), deleteNode: vi.fn(), moveNode: vi.fn(), bulkChange: vi.fn(),
@@ -66,6 +67,30 @@ function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), st
 
 beforeEach(() => { rowStore.clear(); for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
 afterEach(() => { scope?.stop(); scope = undefined })
+
+describe('useTicket: human-check action permissions', () => {
+  it.each(['only a person can mark a human check checked', 'only a person can undo a human check'])('keeps ticket write access after %s', async reason => {
+    api.getNode.mockResolvedValueOnce(node({ human_check: 'Touch ID' }))
+    const { ticket } = setup(undefined, item({ human_check: 'Touch ID' }))
+    await settle()
+    api.updateNode.mockRejectedValueOnce(new APIError(403, reason))
+    expect(await ticket.patch({ human_check: null })).toBe('error')
+    expect(ticket.readOnly.value).toBe(false)
+    expect(toast).toHaveBeenLastCalledWith(`PRJ-1 was not saved: ${reason}`, { tone: 'error' })
+    api.updateNode.mockResolvedValueOnce(node({ title: 'Still editable', human_check: 'Touch ID', updated_at: at(2) }))
+    expect(await ticket.setTitle('Still editable')).toBe('ok')
+  })
+
+  it('still revokes ticket write access after an ordinary forbidden save', async () => {
+    api.getNode.mockResolvedValueOnce(node())
+    const { ticket } = setup()
+    await settle()
+    api.updateNode.mockRejectedValueOnce(new APIError(403, 'forbidden'))
+    expect(await ticket.setTitle('No longer allowed')).toBe('error')
+    expect(ticket.readOnly.value).toBe(true)
+    expect(toast).toHaveBeenLastCalledWith('You can read PRJ-1 but not change it.', { tone: 'error' })
+  })
+})
 
 describe('useTicket: a read that lands during an edit', () => {
   it('AEON-385: retries a read crossing stream loss without needing a reconnect resync', async () => {
