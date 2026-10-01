@@ -85,8 +85,8 @@ func TestPausedSessionsOccupyTicketUntilResumedOrArchived(t *testing.T) {
 		id := f.add(fmt.Sprintf("AUT-%d", 800+i), "ticket", "in_progress", 20, nil)
 		at := f.now.Add(-10 * 24 * time.Hour)
 		f.tx(func(tx pgx.Tx) error {
-			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,created_at,heartbeat_at,stopped_at,stop_reason,pause_record,archived_at)
- VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$5,'stopped',$6,$6,$6,$7,jsonb_build_object('state',$8::text,'deadline_at',$6::timestamptz),CASE WHEN $9 THEN $6::timestamptz ELSE NULL END)`, f.p.TenantID, f.project, f.p.ID, id, []byte(id), at, tc.stopReason, tc.pause, tc.archived)
+			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,created_at,heartbeat_at,stopped_at,stop_reason,pause_record,archived_at,recovery_process_state,recovery_request_id,recovery_request_digest,recovery_actor_id,recovery_reason)
+ VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$5,'stopped',$6,$6,$6,$7,jsonb_build_object('state',$8::text,'deadline_at',$6::timestamptz),CASE WHEN $9 THEN $6::timestamptz ELSE NULL END,'unknown',gen_random_uuid(),$5,$3,'test archive')`, f.p.TenantID, f.project, f.p.ID, id, []byte(id), at, tc.stopReason, tc.pause, tc.archived)
 			return err
 		})
 		f.tx(func(tx pgx.Tx) error {

@@ -444,6 +444,19 @@ Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
 an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.
 Agentd forwards a heartbeat pause through its existing generation-fenced inbox
 when the adapter supports input, with the ordinary durable input receipt.
+Managed sessions must advertise `inbox`; otherwise pause returns 409 without
+creating a request. Cursor and Grok daemon runs currently lack that input path;
+their unmanaged CLI heartbeat sessions can still receive pause requests.
+
+An overdue requested or planned pause becomes `cancelled` on the database clock.
+Heartbeat, session/control reads, new pause requests and the periodic sweep
+complete its control with reason `pause_deadline_expired`, allowing a fresh
+pause and deadline. Expiry sends no process signal. Before the deadline, a
+`heartbeat_lost` close preserves the pending or claimed pause control so the
+same worker can heartbeat, plan and stop with its handover after revival.
+An unarchived paused or resume-requested generation continues to occupy its
+ticket, suppressing the status autopilot's stale-progress rule until it is
+resumed or archived.
 
 The worker must plan a safe stopping point, finish or roll back the current
 step, commit WIP on its own branch, then submit a handover and exit cleanly:
@@ -469,7 +482,7 @@ full handover in `continuation.brief` rather than truncating it to the short
 metadata label. Old run and process ownership are never reused. Resume paused
 coordinators before their paused children; the new coordinator adopts those
 children for continuation. Generation registration does not itself launch a
-vendor executable. Agentd automatic launch after login and a deadline executor
+vendor executable. Agentd automatic launch after login and a hard-stop deadline executor
 are separate runtime integration: any hard stop must use the existing exact
 owned-process controls, and these HTTP endpoints never signal a process.
 
