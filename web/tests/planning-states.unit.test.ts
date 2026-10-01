@@ -55,9 +55,9 @@ describe('server list payload planning hovers', () => {
   })
   it('preserves the subscription marker beside an unreported session', () => {
     const r = serverRow('HOVER-8')
-    expect(r.planning!.tokens).toMatchObject({ spent: 1_000_000, unreported: 1, sessions: 2, running: 1 })
+    expect(r.planning!.tokens).toMatchObject({ spent: 1_000_000, unreported: 1, sessions: 2, running: 0 })
     expect(r.planning!.cost).toMatchObject({ list_unpriced: false, paid_unknown: false, billing_modes: ['subscription'], plans: ['Pro'] })
-    expect(listCostCell(r)).toMatchObject({ plan: true, tip: 'Measured so far $2.00\nIncluded in your plan · at list prices\nSubscription: not charged per use\nPro' })
+    expect(listCostCell(r)).toMatchObject({ plan: true, tip: 'Included in your plan · list value $2.00\nSubscription: not charged per use\nPro' })
   })
 })
 

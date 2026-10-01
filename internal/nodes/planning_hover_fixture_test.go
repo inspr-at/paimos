@@ -54,13 +54,13 @@ func TestPlanningListHoverFixture(t *testing.T) {
 		w.session(t, n.ID, "cursor", "grok-4.7", "xhigh", usageModel, 1, 100_000, 0, 0, billing, "")
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
-		// One live session per ticket except HOVER-2, which has stopped without
-		// reporting usage. Older measured sessions remain stopped.
+		// One live session per ticket except the usage-less stopped HOVER-2
+		// and finished subscription HOVER-8. Older measured sessions stay stopped.
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET
             stopped_at=NULL,stop_reason=NULL,phase='working'
             WHERE id IN (SELECT DISTINCT ON (ticket_node_id) id FROM harness_sessions
-                WHERE tenant_id=$1 AND ticket_node_id<>$2
-                ORDER BY ticket_node_id,created_at DESC,id DESC)`, w.admin.TenantID, w.nodes["HOVER-2"].ID)
+                WHERE tenant_id=$1 AND ticket_node_id<>$2 AND ticket_node_id<>$3
+	                ORDER BY ticket_node_id,created_at DESC,id DESC)`, w.admin.TenantID, w.nodes["HOVER-2"].ID, w.nodes["HOVER-8"].ID)
 		return err
 	})
 	if err != nil {

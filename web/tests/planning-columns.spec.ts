@@ -67,7 +67,7 @@ test('server list response preserves exact usage-less and mixed-session hovers',
     await assertTip(key, 'c-list-cost', `Measured so far ${value}\nAPI-billed · at list prices`)
   }
   await assertTip('HOVER-7', 'c-list-cost', 'Measured so far $2.00\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record')
-  await assertTip('HOVER-8', 'c-list-cost', 'Measured so far $2.00\nIncluded in your plan · at list prices\nSubscription: not charged per use\nPro')
+  await assertTip('HOVER-8', 'c-list-cost', 'Included in your plan · list value $2.00\nSubscription: not charged per use\nPro')
   await expect(row(page, 'HOVER-8').locator('.c-list-cost .plan-tag')).toHaveText('plan')
 })
 
