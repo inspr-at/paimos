@@ -83,6 +83,11 @@ Always-on Gemini previews suggest
 Rules import accepts both harness selectors while refusing their private vendor
 stores. Rendering preserves exact bytes; installing a preview remains explicit.
 
+The closed reporter harness enum changes the declared status/heartbeat contract
+from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
+their shape. Strict Pharos/Janus consumers need coordinator adoption before this
+draft can roll out; the worker does not update those repositories or deploy it.
+
 ### Default worker launch
 
 Use the paired **aeon-agentd managed run** path for workers: connect the approved
