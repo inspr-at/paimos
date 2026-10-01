@@ -3,7 +3,9 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -121,18 +124,164 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 		}
 		return ""
 	case "codex":
-		if id == "" || o.CodexHome == "" {
+		if o.CodexHome == "" {
 			return ""
+		}
+		if id == "" {
+			return discoverCodexRollout(o.CodexHome, o.Worktree, o.UsageStartedAt)
 		}
 		return findCodexRollout(o.CodexHome, id)
 	case "grok":
-		if id == "" || o.GrokHome == "" {
+		if o.GrokHome == "" {
 			return ""
+		}
+		if id == "" {
+			return discoverGrokUsage(o.GrokHome, o.Worktree, o.UsageStartedAt)
 		}
 		return findGrokUsage(o.GrokHome, o.Worktree, id)
 	default:
 		return ""
 	}
+}
+
+// Discovery belongs to the registered generation, including after a helper
+// restart. Pin its first match so another session cannot inherit its cursor.
+func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession) (usageTarget, error) {
+	if session == nil || o.UsageFile != "" || o.Transcript != "" || o.UsageID != "" || validUUID(o.SourceSession) {
+		return resolveHeartbeatUsage(o)
+	}
+	o.Worktree = session.disk.BoundWorktree
+	o.UsageStartedAt = session.disk.RegisteredAt
+	if o.UsageStartedAt.IsZero() && session.disk.StartedUnix > 0 {
+		o.UsageStartedAt = time.Unix(session.disk.StartedUnix, 0)
+	}
+	source := usageSourceOf(o)
+	if source != "codex" && source != "grok" {
+		return resolveHeartbeatUsage(o)
+	}
+	if session.disk.UsagePath != "" {
+		if session.disk.UsageSource != source {
+			return usageTarget{}, usagef("usage source differs from the registered log")
+		}
+		o.UsageFile = session.disk.UsagePath
+		return resolveHeartbeatUsage(o)
+	}
+	target, err := resolveHeartbeatUsage(o)
+	if err == nil && target.Path != "" {
+		session.disk.UsageSource, session.disk.UsagePath = source, target.Path
+		if err = saveHeartbeatSession(session); err != nil {
+			return usageTarget{}, err
+		}
+	}
+	return target, err
+}
+
+func discoverCodexRollout(home, worktree string, started time.Time) string {
+	if worktree == "" || started.IsZero() {
+		return ""
+	}
+	root := filepath.Join(home, "sessions")
+	var found string
+	var newest time.Time
+	n := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		n++
+		if n > usageWalkLimit {
+			return errors.New("usage walk limit")
+		}
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 || credentialUsageName(d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		f, err := openHarnessFile(harnessCodexRollout, path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		reader := bufio.NewReader(io.LimitReader(f, heartbeatUsageLineMax+1))
+		line, err := reader.ReadBytes('\n')
+		if err != nil || len(line) > heartbeatUsageLineMax {
+			return nil
+		}
+		var meta struct {
+			Type    string `json:"type"`
+			Payload struct {
+				CWD       string    `json:"cwd"`
+				Timestamp time.Time `json:"timestamp"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(line, &meta) != nil || meta.Type != "session_meta" || meta.Payload.CWD != worktree || !meta.Payload.Timestamp.After(started) {
+			return nil
+		}
+		if meta.Payload.Timestamp.After(newest) || meta.Payload.Timestamp.Equal(newest) && path > found {
+			found, newest = path, meta.Payload.Timestamp
+		}
+		return nil
+	})
+	if err != nil {
+		// A bounded walk may not have reached the latest matching rollout.
+		// Leave discovery unpinned so a partial result cannot own its cursor.
+		return ""
+	}
+	return found
+}
+
+func discoverGrokUsage(home, worktree string, started time.Time) string {
+	if worktree == "" || started.IsZero() {
+		return ""
+	}
+	// Grok encodes the exact cwd in the parent name. updatedAt in usage.json
+	// proves activity, not session creation: use summary.json's created_at.
+	root := filepath.Join(home, "sessions", encodeURIComponent(worktree))
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) > usageWalkLimit {
+		// A partial listing cannot prove which session is newest. Leave the
+		// generation unpinned, as with an incomplete Codex discovery walk.
+		return ""
+	}
+	var found string
+	var newest time.Time
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !usageID(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), "usage.json")
+		if !regularUsageFile("grok", path) {
+			continue
+		}
+		created := grokSessionCreated(filepath.Join(root, entry.Name(), "summary.json"))
+		if !created.After(started) {
+			continue
+		}
+		if created.After(newest) || created.Equal(newest) && path > found {
+			found, newest = path, created
+		}
+	}
+	return found
+}
+
+func grokSessionCreated(path string) time.Time {
+	f, err := openHarnessFile(harnessGrokSummary, path)
+	if err != nil {
+		return time.Time{}
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, heartbeatTitleScanMax+1))
+	var meta struct {
+		Created time.Time `json:"created_at"`
+	}
+	if err != nil || len(raw) > int(heartbeatTitleScanMax) || json.Unmarshal(raw, &meta) != nil {
+		return time.Time{}
+	}
+	return meta.Created
 }
 
 func usageID(id string) bool {
@@ -211,33 +360,43 @@ func findCodexRollout(home, thread string) string {
 		return ""
 	}
 	suffix := "-" + thread + ".jsonl"
-	var found string
-	n := 0
-	stop := errors.New("usage walk limit")
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		n++
-		if n > usageWalkLimit {
-			return stop
+	// Codex's YYYY/MM/DD directories sort by date. Spend the bounded
+	// search on the newest dates first so old history cannot hide a recent
+	// explicit id. Stop at the first fenced suffix match.
+	n := 1 // Count the root, as in the metadata discovery walk.
+	sessionsRoot := root
+	var walk func(string) string
+	walk = func(root string) string {
+		// Each recursion lists a directory root only. File reads still use
+		// the harness fence, and matches must remain inside sessionsRoot.
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return ""
 		}
-		if err != nil || d == nil {
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			if d.IsDir() {
-				return fs.SkipDir
+		for i := len(entries) - 1; i >= 0; i-- {
+			n++
+			if n > usageWalkLimit {
+				return ""
 			}
-			return nil
+			entry := entries[i]
+			if entry.Type()&os.ModeSymlink != 0 || credentialUsageName(entry.Name()) {
+				continue
+			}
+			path := filepath.Join(root, entry.Name())
+			if entry.IsDir() {
+				if found := walk(path); found != "" {
+					return found
+				}
+				if n > usageWalkLimit {
+					return ""
+				}
+			} else if strings.HasPrefix(entry.Name(), "rollout-") && strings.HasSuffix(entry.Name(), suffix) && regularUsageFile("codex", path) && pathInsideRoot(sessionsRoot, path) {
+				return path
+			}
 		}
-		name := d.Name()
-		if !d.IsDir() && strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, suffix) && path > found {
-			found = path
-		}
-		return nil
-	})
-	if !regularUsageFile("codex", found) || !pathInsideRoot(root, found) {
 		return ""
 	}
-	return found
+	return walk(root)
 }
 
 func findGrokUsage(home, worktree, id string) string {
@@ -364,20 +523,18 @@ func noteCodexTotals(line []byte, fallback string, sums map[string]usageSum, poi
 		codex.ReasoningKnown = false
 	case !codex.ReasoningKnown:
 		// A total after an unknown stretch only re-establishes the baseline;
-		// the increase cannot be attributed to the model in context.
-		codex.Reasoning, codex.ReasoningKnown = snap.Reasoning, true
+		// the increase cannot be attributed to the model in context. A
+		// downward revision must not make later recovery count as new usage.
+		codex.Reasoning, codex.ReasoningKnown = max(codex.Reasoning, snap.Reasoning), true
 	case snap.Reasoning >= codex.Reasoning:
 		delta.Reasoning, delta.ReasoningKnown = snap.Reasoning-codex.Reasoning, true
 		codex.Reasoning = snap.Reasoning
 	default:
 		// Codex can revise reasoning down while input grows; the attributed
-		// baseline never moves backwards.
-		delta.ReasoningKnown = true
+		// baseline never moves backwards. This delta remains unknown, so
+		// a new model does not acquire a falsely known zero.
 	}
 	codex.Input, codex.Output, codex.Cached = snap.Input, snap.Output, snap.Cached
-	if delta.Cached > delta.Input {
-		delta.Cached = delta.Input
-	}
 	// Reasoning is a subset of output. An increase that cannot be one is not
 	// attributed rather than reported as an impossible figure.
 	if delta.ReasoningKnown && delta.Reasoning > delta.Output {
@@ -415,12 +572,10 @@ func addUsageDelta(sums map[string]usageSum, poisoned map[string]bool, parsed se
 }
 
 func addUsageReasoning(cur usageSum, parsed sessionusage.HeartbeatLine) (int64, bool, bool) {
-	fresh := cur.input == 0 && cur.output == 0 && cur.cached == 0 && cur.reasoning == 0 && !cur.reasoningKnown
-	if fresh {
-		return parsed.Reasoning, parsed.ReasoningKnown, true
-	}
-	if !cur.reasoningKnown || !parsed.ReasoningKnown {
-		return 0, false, true
+	// Sum only observed reasoning deltas. An unavailable delta must neither
+	// erase earlier observations nor hide later ones within the same scan.
+	if !parsed.ReasoningKnown {
+		return cur.reasoning, cur.reasoningKnown, true
 	}
 	next, ok := addTokens(cur.reasoning, parsed.Reasoning)
 	return next, true, ok
@@ -459,6 +614,11 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 			continue
 		}
 		reasoning, reasoningKnown := holdReasoning(prev, sum.reasoning, sum.reasoningKnown)
+		var valid bool
+		if reasoning, reasoningKnown, valid = fitUsageReport(prev, sum.input, sum.output, sum.cached, reasoning, reasoningKnown); !valid {
+			fmt.Fprintf(rt.stderr, "heartbeat: usage for %s is not a valid cumulative report; skipped\n", model)
+			continue
+		}
 		if prev != nil && sum.input == prev.Input && sum.output == prev.Output && sum.cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
 			continue
 		}
@@ -524,7 +684,7 @@ func snapshotCaughtUp(path, fallback string, session *heartbeatSession) bool {
 }
 
 func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil || target.Path == "" {
 		return err == nil
 	}
@@ -535,7 +695,7 @@ func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
 }
 
 func usageOutstanding(o heartbeatOptions, session *heartbeatSession) bool {
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil || session == nil || target.Path == "" {
 		return false
 	}
