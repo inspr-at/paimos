@@ -140,3 +140,16 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 		t.Fatalf("backward clock replay: %+v", window)
 	}
 }
+
+func TestBriefingClockWindowCapUsesElapsedDaysRegression(t *testing.T) {
+	d, p, _ := fixture(t)
+	old := time.Now().Add(-400 * 24 * time.Hour)
+	m := New(d.App).(*module)
+	got, err := m.read(t.Context(), p, "", 0, 50, eventRange{briefing: true, since: &old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Window == nil || got.Window.First || !got.Window.Capped || got.Window.To.Sub(got.Window.From) != 366*24*time.Hour {
+		t.Fatalf("wrong elapsed-day cap: %+v", got.Window)
+	}
+}

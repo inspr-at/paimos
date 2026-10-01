@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { briefingCost, briefingDue, briefingRange, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
+import { briefingCost, briefingDue, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
 import { usageDashboard } from './usage-data'
 
 const now = new Date('2026-10-01T08:00:00Z')
 const outcome: BriefingOutcome = { id: 'out-1', kind: 'ticket_done', ticket_key: 'AEON-454', ticket_node_id: 'ticket', project_id: 'project', session_id: null, rules_version: null, release_title: null, recorded_at: '2026-10-01T07:00:00Z', payload: { to_state: 'done' } }
 afterEach(() => vi.unstubAllGlobals())
-it('uses a person’s visit, bounded first use and a local daily reminder', () => {
-  expect(briefingRange(null, now)).toMatchObject({ from: '2026-09-30T08:00:00.000Z', first: true, capped: false })
-  expect(briefingRange({ last_visit: '2026-09-29T08:00:00Z' }, now)).toMatchObject({ from: '2026-09-29T08:00:00.000Z', first: false })
-  expect(briefingRange({ last_visit: '2024-09-29T08:00:00Z' }, now).capped).toBe(true)
-  expect(briefingRange({ last_visit: '2027-01-01T08:00:00Z' }, now).first).toBe(false)
+it('uses a person’s saved visit and a local daily reminder', () => {
   const local = new Date(2026, 9, 1, 8, 30)
   expect(briefingDue({ time: '09:00' }, local)).toBe(false)
   expect(briefingDue({ time: '08:00' }, local)).toBe(true)
@@ -48,7 +44,7 @@ it('continues each existing log without dropping or repeating rows', async () =>
     if (path.pathname === '/api/outcomes') return new Response(JSON.stringify(path.searchParams.has('cursor') ? { outcomes: [{ ...outcome, id: 'out-2' }], next_cursor: null } : { outcomes: [outcome], next_cursor: 'next' }), { status: 200 })
     return new Response(JSON.stringify(path.searchParams.get('cursor') === 'time-next' ? { items: [], next_cursor: null } : { items: [{ id: 42 }], next_cursor: 'time-next' }), { status: 200 })
   }))
-  const range = briefingRange(null, now)
+  const range = { from: '2026-09-30T08:00:00.000Z', to: now.toISOString(), first: true, capped: false }
   expect((await loadBriefingOutcomes(range)).items.map(o => o.id)).toEqual(['out-1', 'out-2'])
   expect((await loadBriefingEvents(range)).items).toHaveLength(1)
   expect(requests[1]).toContain('cursor=next')
@@ -58,7 +54,7 @@ it('continues each existing log without dropping or repeating rows', async () =>
 })
 it('rejects nonadvancing pagination rather than marking a partial visit read', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ outcomes: [outcome], next_cursor: 'same' }), { status: 200 })))
-  await expect(loadBriefingOutcomes(briefingRange(null, now))).rejects.toThrow('pagination did not advance')
+  await expect(loadBriefingOutcomes({ from: '2026-09-30T08:00:00.000Z', to: now.toISOString(), first: true, capped: false })).rejects.toThrow('pagination did not advance')
 })
 
 it('gets the cutoff from the server log snapshot and preserves its submillisecond precision', async () => {

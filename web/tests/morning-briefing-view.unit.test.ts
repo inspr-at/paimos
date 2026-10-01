@@ -26,7 +26,7 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string } = {}) {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string } = {}) {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed')
@@ -44,7 +44,7 @@ async function mount(options: { denied?: boolean; fullQueue?: boolean; pendingFa
       if (options.pendingFailure) throw new APIError(500, 'failed')
       return options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ ...pending, id: `approval-${i}` })) : []
     }
-    if (path.includes('/messages')) return { items: options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, kind: 'human_request', status: 'held', body: 'A check' })) : [] }
+    if (path.includes('/messages')) return { items: options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, is_action_request: true, human_resolution_outcome: null, body: 'A check' })) : [] }
     if (path.includes('/journey')) {
       const next_action = { key: options.action ?? 'wait_for_build', label: options.action ?? 'Wait', available: true }
       return path.startsWith('/journey/next-actions') ? { items: projects.map(p => ({ project_node_id: p.id, next_action })) } : { next_action }
@@ -53,7 +53,7 @@ async function mount(options: { denied?: boolean; fullQueue?: boolean; pendingFa
   }
   const modules: Record<string, unknown> = {
     vue: { ...Vue, vModelText: {} },
-    '../lib/api': { APIError, listNodes: async () => ({ items: [] }) },
+    '../lib/api': { APIError, listNodes: async () => { if (options.detailsFailure) throw new APIError(500, 'failed'); return { items: [] } } },
     '../lib/authz': { can, ensurePermissions: async () => 'known', refreshPermissions: async () => {}, onAccessChange: () => () => {} },
     '../lib/identityScope': Scope, '../lib/agentState': AgentState,
     '../lib/usageDashboard': { loadUsageDashboard: async (params: { project?: string }) => { paths.push(`/usage/dashboard${params.project ? `?project=${params.project}` : ''}`); return dashboard } },
@@ -119,4 +119,8 @@ it('loads merge telemetry for project-only harness readers', async () => {
 it('renders measured in visible cost text for screen readers', async () => {
   const { root } = await mount()
   expect(textOf(root)).toMatch(/measured/i)
+})
+
+it('keeps a pending-only detail failure separate from completed logs', async () => {
+  expect((await mount({ fullQueue: true, detailsFailure: true })).saves).toHaveLength(1)
 })

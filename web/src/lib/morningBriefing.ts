@@ -6,7 +6,6 @@ import { formatDollars } from './planning.ts'
 import type { UsageGroup, UsageDashboard } from './usageFormat.ts'
 
 export const BRIEFING_KEY = 'morning-briefing'
-const DAY = 86_400_000
 export interface BriefingPreference { time?: string; last_visit?: string }
 export interface BriefingRange { from: string; to: string; first: boolean; capped: boolean }
 export interface BriefingOutcome extends OutcomeEvent { ticket_node_id: string; project_id: string; session_id: string | null }
@@ -16,14 +15,6 @@ export interface BriefingNeed { id: string; title: string; detail: string; href:
 export interface BriefingPage<T> { items: T[]; truncated: boolean }
 
 export const validBriefingTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-export function briefingRange(pref: BriefingPreference | null, now: Date): BriefingRange {
-  const last = Date.parse(pref?.last_visit ?? '')
-  const end = now.getTime()
-  const first = !Number.isFinite(last)
-  const start = first ? end - DAY : last
-  const floor = end - 366 * DAY
-  return { from: new Date(Math.max(start, floor)).toISOString(), to: new Date(Math.max(end, first ? end : last)).toISOString(), first, capped: start < floor }
-}
 export function briefingDue(pref: BriefingPreference | null, now = new Date()): boolean {
   const time = validBriefingTime(pref?.time) ? pref.time : '08:00'
   const [hour, minute] = time.split(':').map(Number)

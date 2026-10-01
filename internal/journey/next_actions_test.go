@@ -16,6 +16,9 @@ import (
 func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 	f := newFixture(t)
 	ids := []string{}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO events(tenant_id,id,actor_principal_id,type,after) VALUES($1,1,$2,'test.fixture','{}')`, f.tenant, f.person.ID); err != nil {
+		t.Fatal(err)
+	}
 	for i, state := range []string{"new", "accepted", "planning", "building", "candidate", "deploying", "refused", "access", "released", "imported"} {
 		project := f.node(t, "project", "BAT-"+strconv.Itoa(100+i), state)
 		ids = append(ids, project)
@@ -49,7 +52,15 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 			f.setReleaseState(t, release, state)
 		}
 		for _, scope := range []string{journey.ScopeBuild, journey.ScopeCandidate, journey.ScopeDeploy, journey.ScopeAccess} {
-			f.grant(t, f.agent.ID, f.person.ID, scope, release)
+			approval := f.grant(t, f.agent.ID, f.person.ID, scope, release)
+			if scope == journey.ScopeCandidate && (state == "deploying" || state == "refused") {
+				if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1,$2,$3,'candidate',$4)`, f.tenant, project, release, approval); err != nil {
+					t.Fatal(err)
+				}
+				if state == "refused" {
+					f.revoke(t, approval)
+				}
+			}
 		}
 		if state == "deploying" {
 			f.handoff(t, project, release, "deploy", "deploy", 1, "succeeded", "")

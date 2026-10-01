@@ -157,10 +157,10 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 			var body []byte
 			err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
 			 bounds AS MATERIALIZED (
-			 SELECT greatest(coalesce($2::timestamptz,at-interval '24 hours'),at-interval '366 days') AS start,
+			 SELECT greatest(coalesce($2::timestamptz,at-interval '24 hours'),at-interval '8784 hours') AS start,
 			        greatest(at,coalesce($2::timestamptz,at)) AS finish,
 			        $2::timestamptz IS NULL AS first,
-			        $2::timestamptz < at-interval '366 days' AS capped FROM clock)
+			        $2::timestamptz < at-interval '8784 hours' AS capped FROM clock)
 			 SELECT start,finish,first,coalesce(capped,false),
 			        coalesce((SELECT jsonb_agg(e ORDER BY e.at,e.id) FROM (
 			          SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of

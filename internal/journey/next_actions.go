@@ -144,7 +144,7 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  'BuildStarter',coalesce((SELECT actor_principal_id::text FROM events WHERE node_id=p.id AND type='journey.build_started' ORDER BY id DESC LIMIT 1),''),
  'RequirementsDecider',coalesce((SELECT d.decided_by_principal_id::text FROM journey_gates g JOIN approval_decisions d ON d.tenant_id=g.tenant_id AND d.request_id=g.approval_request_id WHERE g.project_node_id=p.id AND g.gate='requirements' ORDER BY g.created_at DESC LIMIT 1),'')),
  'Cap',coalesce((SELECT after->>'approved_cap_hours' FROM events WHERE node_id=p.id AND type='journey.decided' AND after->>'decision' IN ('go','reduce_scope') AND coalesce(after->>'approved_cap_hours','')<>'' ORDER BY id DESC LIMIT 1),''),
- 'Gates',coalesce((SELECT jsonb_agg(jsonb_build_object('Gate',g.gate,'Release',g.release,'Approval',g.approval,'Live',g.live) ORDER BY g.gate,g.release,g.live DESC,g.created_at DESC,g.id DESC) FROM (
+ 'Gates',coalesce((SELECT jsonb_agg(jsonb_build_object('Gate',g.gate,'Release',g.release,'Approval',g.approval,'Live',g.live) ORDER BY g.gate,nullif(g.release,'')::uuid,g.live DESC,g.created_at DESC,g.id DESC) FROM (
 
 		SELECT g.gate, coalesce(g.release_node_id::text, '') AS release, g.approval_request_id::text AS approval, a_target.target, a_target.target_digest_sha256, g.created_at,g.id,
 		       EXISTS (
