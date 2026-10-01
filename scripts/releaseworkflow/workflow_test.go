@@ -482,7 +482,17 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 			}
 		}
 	}
-	ci := readWorkflow(t, "ci.yml")
+	// CI has scalar and list needs; only parse the steps used by this check.
+	var ci struct {
+		Jobs map[string]struct{ Steps []step }
+	}
+	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &ci); err != nil {
+		t.Fatal(err)
+	}
 	found := false
 	for _, s := range ci.Jobs["release-check"].Steps {
 		found = found || strings.Contains(s.Run, "node --test scripts/release-pin-pr.test.mjs")
