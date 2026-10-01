@@ -81,10 +81,14 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(dialog.getByRole('textbox')).toBeEnabled()
     await dialog.getByRole('textbox').fill('A'.repeat(128))
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(workerHost.locator('.host-name')).toHaveText('A'.repeat(128))
     expect(await workerHost.locator('.host-name').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true)
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
     await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
   }
   // Keep the same row focused in both captures so the existing tint is comparable.
   await page.locator(`[data-row="s:${ai.id}"]`).focus()
