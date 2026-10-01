@@ -64,7 +64,7 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 
 func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
 	f := fixtureFor(t)
-	f.m.pairing = agentpairing.New(f.db.App, testOrigin, "phone-test", "")
+	f.m.pairing = agentpairing.New(f.db.App, testOrigin, "phone-test", nil)
 	project := f.project(t, "PHONE-ATTACH")
 	var key, pairing, computer, id string
 	queries := []struct {
