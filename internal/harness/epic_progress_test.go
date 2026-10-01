@@ -139,12 +139,25 @@ func TestEpicProgressRequiresCurrentUnarchivedCleanCompletion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			child := uid()
 			f.addNode(t, child, fmt.Sprintf("PROOF-%d", i+3), "ticket", epic, tc.name)
+			t.Cleanup(func() {
+				// Keep each case's child out of the next case's average, even if
+				// a fixture assertion fails before it reaches its stopped state.
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, child, f.project)
+					return err
+				})
+			})
 			lease := fmt.Sprintf("epic-proof-lease-%022d", i)
 			session := f.registerSession(t, f.agent.ID, "worker", child, fmt.Sprintf("epic-proof-ref-%016d", i), lease)
 			f.beat(t, session, lease, 1, map[string]any{"progress_pct": tc.progress})
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped', stopped_at=clock_timestamp(), stop_reason=$2,
-					archived_at=CASE WHEN $3 THEN clock_timestamp() END WHERE id=$1`, session, tc.reason, tc.archived)
+					archived_at=CASE WHEN $3 THEN clock_timestamp() END,
+					recovery_process_state=CASE WHEN $3 THEN 'unknown' END,
+					recovery_request_id=CASE WHEN $3 THEN gen_random_uuid() END,
+					recovery_request_digest=CASE WHEN $3 THEN 'fixture'::bytea END,
+					recovery_actor_id=CASE WHEN $3 THEN agent_principal_id END,
+					recovery_reason=CASE WHEN $3 THEN 'fixture' END WHERE id=$1`, session, tc.reason, tc.archived)
 				return err
 			})
 			if tc.deleted {
