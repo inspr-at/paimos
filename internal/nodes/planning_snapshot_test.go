@@ -126,7 +126,7 @@ func TestWorkStartSnapshotFixedProgressBuckets(t *testing.T) {
 	w := planningSetup(t)
 	for i, state := range []string{"in_progress", "inprogress", "active", "qa", " IN--PROGRESS "} {
 		t.Run(state, func(t *testing.T) {
-			n := w.node(t, fmt.Sprintf("START-%d", i), "ticket", w.root.ID, state, map[string]any{"estimate_hours": 2})
+			n := w.node(t, fmt.Sprintf("START-%d", i+1), "ticket", w.root.ID, state, map[string]any{"estimate_hours": 2})
 			snap := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q="+n.Key)[n.Key].Snapshot
 			if snap == nil || snap.Source != "status" || snap.Hours == nil || *snap.Hours != 2 {
 				t.Fatalf("%q did not capture a status baseline: %+v", state, snap)
@@ -161,7 +161,7 @@ func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *tes
 
 	for i, state := range []string{"building", "working", "executing"} {
 		t.Run(state, func(t *testing.T) {
-			n := w.node(t, fmt.Sprintf("CATEGORY-%d", i), "ticket", w.root.ID, "open", map[string]any{"estimate_hours": 2})
+			n := w.node(t, fmt.Sprintf("CATEGORY-%d", i+1), "ticket", w.root.ID, "open", map[string]any{"estimate_hours": 2})
 			code, body := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
 			decode[nodeJSON](t, code, body, 200)
 			snap := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q="+n.Key)[n.Key].Snapshot
@@ -173,10 +173,11 @@ func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *tes
 
 	for i, terminal := range []string{"shipped", "discarded", "retired"} {
 		t.Run(terminal, func(t *testing.T) {
-			n := w.node(t, fmt.Sprintf("CLOSE-%d", i), "ticket", w.root.ID, "open", map[string]any{
+			fields := map[string]any{
 				"estimate_hours": 2, "pill_en": "Planning works now", "pill_de": "Planung geht jetzt",
 				"benefit_en": "Planning shows real numbers.", "benefit_de": "Die Planung zeigt echte Zahlen.",
-			})
+			}
+			n := w.node(t, fmt.Sprintf("CLOSE-%d", i+1), "ticket", w.root.ID, "open", fields)
 			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 				return CapturePlanningStart(t.Context(), tx, n.ID, "session")
 			}); err != nil {
@@ -185,8 +186,13 @@ func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *tes
 			path := "/api/nodes?within=" + w.root.ID + "&q=" + n.Key
 			first := planningOf(t, w.admin, path)[n.Key].Snapshot
 			// Categories win: even the literal "done" is open for this kind.
+			fields["estimate_hours"] = 4
 			for _, state := range []string{"done", "qa"} {
-				code, body := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":{"estimate_hours":4}}`, state))
+				raw, err := json.Marshal(map[string]any{"state": state, "fields": fields})
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, body := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, string(raw))
 				decode[nodeJSON](t, code, body, 200)
 				assertPlanningEpisodeRows(t, w.admin.TenantID, n.ID, 1, 1)
 			}
