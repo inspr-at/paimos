@@ -3,10 +3,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type cliVersion struct {
@@ -120,12 +123,9 @@ func (rt *runtime) cmdDoctor() *Command {
 			brand = v.Brand.Product
 		}
 		checks = append(checks, doctorCheck{Name: "health", Status: "ok", Detail: "service=" + brand + " version=" + v.Version})
-		var me struct {
-			Principal struct {
-				Name string `json:"name"`
-			} `json:"principal"`
-		}
-		if err := rt.do(http.MethodGet, "/api/me", nil, &me); err != nil {
+		// Use the same identity request as auth whoami, including its client.
+		me, err := client.New(inst.URL, inst.APIKey).Me(context.Background())
+		if err != nil {
 			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: "API key rejected or auth unavailable"})
 			return rt.renderDoctor(checks)
 		}
