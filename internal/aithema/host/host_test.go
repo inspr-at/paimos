@@ -172,6 +172,20 @@ func (f *fixture) cap(sid, design string, mutate func(map[string]any)) string {
 	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(f.private, []byte(input)))
 }
 
+func TestSessionCreationRefusesNonObjectAuthorization(t *testing.T) {
+	f := newFixture(t, nil)
+	for _, authorization := range []any{nil, []any{}, "record"} {
+		w := f.call("POST", "/api/projects/"+f.project+"/aithema/sessions", map[string]any{"authorization": authorization, "host_mode": "review"})
+		if w.Code != 400 {
+			t.Fatal("non-object authorization was not rejected")
+		}
+	}
+	var sessions int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM aithema_sessions WHERE tenant_id=$1`, f.p.TenantID).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatal("invalid authorization created a session")
+	}
+}
+
 func TestSessionCreationNormalizesHostClockToContractPrecision(t *testing.T) {
 	f := newFixture(t, nil)
 	// Linux clocks provide nanoseconds; the pinned timestamp profile permits

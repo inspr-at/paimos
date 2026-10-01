@@ -76,7 +76,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	var auth map[string]any
 	d := json.NewDecoder(bytes.NewReader(in.Authorization))
 	d.UseNumber()
-	if d.Decode(&auth) != nil {
+	if d.Decode(&auth) != nil || auth == nil {
 		writeError(w, fail(400, "invalid_request"))
 		return
 	}
