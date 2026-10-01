@@ -9,7 +9,8 @@ export const activityOf = (view: SessionView) => view.session as typeof view.ses
 
 export function currentStep(view: SessionView, workers = 0) {
   if (view.status.reasons?.length) return view.status.reasons[0].detail
-  const note = view.session.agent_activity_mode === undefined ? activityOf(view).activity_note?.trim() : currentActivity(view, Date.now())
+  const mode = view.session.agent_activity_mode
+  const note = currentActivity(view, Date.now()) || (mode === undefined || mode === 'agent_summary' ? activityOf(view).activity_note?.trim() : '')
   if (note) return note
   if (view.status.state === 'done') return 'All work reported'
   if (view.status.group === 'stopped') return view.status.label === STATE_LABEL.stopped ? 'Session ended' : view.status.label

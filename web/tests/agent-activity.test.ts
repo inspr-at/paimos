@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { currentActivity, workerActivity, activityDurations } from '../src/components/agents/activity.ts'
+import { currentActivity, currentStep, workerActivity, activityDurations } from '../src/components/agents/activity.ts'
 import type { SessionView } from '../src/stores/agents.ts'
 
 const now = Date.parse('2026-10-01T21:00:00Z')
@@ -16,6 +16,11 @@ test('policy and freshness govern the current line, including stopped sessions',
 })
 test('coordinator summaries combine testing workers and exclude disabled or ended activity', () => {
   assert.equal(workerActivity([view('Running Go tests'), view('Running web tests'), view('Running browser tests'), view('Waiting for CI'), view('Pushing', 'auto', 0, 'off')], now), '3 workers testing · 1 worker waiting for CI')
+})
+test('summary policy preserves the existing heartbeat note for older reporters', () => {
+  const legacy = { session: { agent_activity_mode: 'agent_summary', activity_note: 'Reviewing the change' }, status: { state: 'working' } } as unknown as SessionView
+  assert.equal(currentStep(legacy), 'Reviewing the change')
+  assert.equal(currentStep({ ...legacy, session: { ...legacy.session, agent_activity_mode: 'off' } }), 'Working on this project')
 })
 test('history reports phase durations using the next change and stops at session end', () => {
   const history = [{ text: 'Committing', source: 'auto' as const, at: new Date(now - 300_000).toISOString() }, { text: 'Running Go tests', source: 'auto' as const, at: new Date(now - 1_020_000).toISOString() }]
