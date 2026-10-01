@@ -10,8 +10,8 @@ a database owner that is **not** a superuser and cannot bypass row-level securit
 ## Prerequisites
 
 Use a dedicated Linux Docker host with Docker Engine, the Docker Compose v2
-plugin (`docker compose`), Bash, OpenSSL, and curl. The release image supports
-Linux amd64 and arm64. Have storage for the database, uploaded files, and backups;
+plugin (`docker compose`), Bash, OpenSSL, and curl. The published server image
+targets Linux amd64. Have storage for the database, uploaded files, and backups;
 size CPU/RAM for your workload, including Chromium used for quote PDFs.
 
 Provide an HTTPS hostname and a reverse proxy on the same host, plus an OIDC
