@@ -29,6 +29,7 @@ func ensureAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal)
 		return err
 	}
 	added := []Profile{}
+	ids := map[string]string{}
 	for _, profile := range catalogProfiles() {
 		if profile.Harness != "gemini" && profile.Harness != "opencode" {
 			continue
@@ -45,11 +46,29 @@ func ensureAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal)
 			return err
 		}
 		added = append(added, row)
+		ids[profile.Slug] = row.ID
 	}
 	if len(added) == 0 {
 		return nil
 	}
+	routes := []Route{}
+	for _, route := range defaultRoutes(catalogProfiles()) {
+		id := ids[route.Slug]
+		if id == "" {
+			continue
+		}
+		var priority int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(max(priority),0)+1 FROM model_role_routes WHERE role=$1`, route.Role).Scan(&priority); err != nil {
+			return err
+		}
+		stored := Route{Role: route.Role, Priority: priority, ProfileID: id, State: "available"}
+		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
+			return err
+		}
+		routes = append(routes, stored)
+	}
 	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
 		Profiles []Profile `json:"profiles"`
-	}{added})
+		Routes   []Route   `json:"routes"`
+	}{added, routes})
 }

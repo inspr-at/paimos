@@ -46,7 +46,7 @@ func classifyGeminiNative(fields map[string]json.RawMessage) (usageRecord, int, 
 			return usageRecord{}, outcomeIgnore, ErrAmbiguous
 		}
 		snap := snapshot{input: in, output: out, cached: cached, reasoning: thought, inputKnown: true, cachedKnown: true, reasoningKnown: true}
-		return usageRecord{accounting: accountingCumulative, model: model, cumulative: &snap}, outcomeUse, nil
+		return usageRecord{accounting: accountingVendor, model: model, cumulative: &snap}, outcomeUse, nil
 	}
 	return usageRecord{}, outcomeIgnore, ErrRejected
 }
@@ -97,7 +97,7 @@ func classifyOpenCodeNative(fields map[string]json.RawMessage) (usageRecord, int
 		}
 	}
 	if raw, exists := part["cost"]; exists {
-		if _, ok := usdMicros(raw); !ok {
+		if _, ok := vendorMicros(raw); !ok {
 			return usageRecord{}, outcomeIgnore, ErrRejected
 		}
 	}

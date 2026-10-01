@@ -12801,6 +12801,7 @@ components:
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
+            effort_level: {type: integer, minimum: 0, maximum: 5, description: "Normalized Gemini fixed thinking-budget bucket from the immutable effort pin; omitted when unknown."}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]

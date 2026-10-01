@@ -1034,7 +1034,7 @@ function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undef
   }
   if (reason === 'binding_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   if (['harness_failed', 'cli_unavailable', 'profile_permissions', 'probe_timeout', 'probe_failed', 'capacity_timeout'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
-  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
+  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : harness === 'gemini' ? 'gemini' : harness === 'opencode' ? 'opencode auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
 }
 
 /** The repair kind and exact command for one reason; exported for the shared-vocabulary test. */

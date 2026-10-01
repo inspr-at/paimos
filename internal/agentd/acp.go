@@ -67,6 +67,7 @@ func (a *ACPAdapter) CaptureCapacity(context.Context, string) []capacity.Reading
 
 type acpTurn struct {
 	id       string
+	hadTools bool
 	accepted chan struct{}
 	once     sync.Once
 	err      error
@@ -117,6 +118,12 @@ func (p *acpProcess) Wait() (err error) {
 		p.mu.Lock()
 		if !p.closed {
 			p.finishLocked(errors.New("ACP child exited before session completion"))
+		}
+		p.mu.Unlock()
+	case <-p.readDone:
+		p.mu.Lock()
+		if !p.closed {
+			p.finishLocked(errors.New("ACP event stream ended before session completion"))
 		}
 		p.mu.Unlock()
 	}
@@ -254,6 +261,9 @@ func (p *acpProcess) event(raw json.RawMessage) {
 			p.turn.accept()
 		}
 		if frame.Params.Update.Kind == "tool_call" {
+			if p.turn != nil {
+				p.turn.hadTools = true
+			}
 			p.observe(AdapterEvent{Kind: "tool"})
 		}
 		if c := frame.Params.Update.Cost; frame.Params.Update.Kind == "usage_update" && c != nil && c.Currency == "USD" {
@@ -284,6 +294,12 @@ func (p *acpProcess) event(raw json.RawMessage) {
 		return
 	}
 	model := p.model
+	// OpenCode v1.14.48's prompt response contains only the last assistant
+	// message. A tool turn can have earlier billable steps; never report the
+	// last step as a complete turn. Its cumulative USD updates remain usable.
+	if p.harness == OpenCode && p.turn.hadTools {
+		model = ""
+	}
 	// Gemini may switch models during a turn. Aggregated counters cannot be
 	// split across those models, so leave that measurement unknown.
 	if p.harness == Gemini && (len(result.Meta.Quota.Models) != 1 || result.Meta.Quota.Models[0].Model != model) {
@@ -324,7 +340,7 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
-	if r.ManagedPolicy || r.Tools != nil {
+	if r.ManagedPolicy {
 		return nil, ErrUnsupported
 	}
 	env, err := a.environment(r.AccountKey)
@@ -364,7 +380,12 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 	if err != nil || decodeProbeJSON(raw, &init) != nil || init.Version != 1 {
 		return w.failStart(errors.New("ACP initialize failed"))
 	}
-	raw, err = w.request(op, "jsonrpc", "session/new", map[string]any{"cwd": r.Workspace, "mcpServers": []any{}})
+	mcpServers := []any{}
+	if r.Tools != nil {
+		mcpServers = append(mcpServers, map[string]any{"name": "aeon", "type": "http", "url": r.Tools.URL,
+			"headers": []map[string]string{{"name": "Authorization", "value": "Bearer " + r.Tools.Token}}})
+	}
+	raw, err = w.request(op, "jsonrpc", "session/new", map[string]any{"cwd": r.Workspace, "mcpServers": mcpServers})
 	var session struct {
 		ID     string `json:"sessionId"`
 		Models struct {
@@ -377,6 +398,7 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 	w.eventMu.Lock()
 	w.sessionID = session.ID
 	w.eventMu.Unlock()
+	confirmedEffort := ""
 	if a.Harness == OpenCode {
 		// Current OpenCode returns the applied model and variant as ACP config
 		// options. An RPC acknowledgement without those values is insufficient.
@@ -398,14 +420,15 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 		}
 		if r.Profile.Effort != "default" || hasEffort {
 			raw, err = w.request(op, "jsonrpc", "session/set_config_option", map[string]string{"sessionId": session.ID, "configId": "effort", "value": r.Profile.Effort})
-			if err != nil || decodeProbeJSON(raw, &config) != nil || !acpOption(config.Options, "effort", r.Profile.Effort) {
+			if err != nil || decodeProbeJSON(raw, &config) != nil || !acpOption(config.Options, "effort", r.Profile.Effort) || !acpOption(config.Options, "model", r.Profile.Model) {
 				return w.failStart(errors.New("OpenCode effective effort unavailable"))
 			}
+			confirmedEffort = r.Profile.Effort
 		}
 	} else if session.Models.Current != r.Profile.Model {
 		return w.failStart(errors.New("Gemini effective model mismatch"))
 	}
-	observe(AdapterEvent{VendorSessionID: session.ID, HarnessModel: r.Profile.Model, EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
+	observe(AdapterEvent{VendorSessionID: session.ID, HarnessModel: r.Profile.Model, HarnessEffort: confirmedEffort, EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
 	prompt := r.Prompt
 	if r.Rules != "" {
 		prompt = r.Rules + "\n\n" + prompt

@@ -29,6 +29,7 @@ ALTER TABLE rule_served_manifests ADD CONSTRAINT rule_served_manifests_harness_c
 ALTER TABLE work_order_reviews DROP CONSTRAINT work_order_reviews_author_family_check;
 ALTER TABLE work_order_reviews ADD CONSTRAINT work_order_reviews_author_family_check
     CHECK (author_family IN ('openai','anthropic','xai','cursor','google','local'));
-ALTER TABLE work_order_reviews DROP CONSTRAINT work_order_reviews_reviewer_family_check;
+-- The original multi-column inline CHECK has PostgreSQL's table-level name.
+ALTER TABLE work_order_reviews DROP CONSTRAINT work_order_reviews_check;
 ALTER TABLE work_order_reviews ADD CONSTRAINT work_order_reviews_reviewer_family_check
     CHECK (reviewer_family IN ('openai','anthropic','xai','cursor','google','local') AND reviewer_family<>author_family);

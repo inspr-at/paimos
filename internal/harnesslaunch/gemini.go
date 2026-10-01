@@ -23,11 +23,48 @@ func GeminiBudget(effort string) (int, error) {
 	return n, nil
 }
 
+// GeminiBudgetForModel rejects unsupported settings rather than letting the
+// vendor silently use its default. These are the qualified 2.5 budget ranges.
+func GeminiBudgetForModel(model, effort string) (int, error) {
+	budget, err := GeminiBudget(effort)
+	if err != nil {
+		return 0, err
+	}
+	switch model {
+	case "gemini-2.5-flash":
+		if budget <= 24576 {
+			return budget, nil
+		}
+	case "gemini-2.5-pro":
+		if budget >= 128 && budget <= 32768 {
+			return budget, nil
+		}
+	}
+	return 0, errors.New("Gemini model/thinking budget is not qualified")
+}
+
+// GeminiEffortLevel is AEON-511C's common 0–5 budget scale. Named or dynamic
+// vendor settings remain unknown. This never changes the vendor's budget.
+func GeminiEffortLevel(effort string) *int {
+	budget, err := GeminiBudget(effort)
+	if err != nil {
+		return nil
+	}
+	level := 5
+	for i, maximum := range []int{0, 1024, 4096, 16384, 32768} {
+		if budget <= maximum {
+			level = i
+			break
+		}
+	}
+	return &level
+}
+
 // GeminiSettings creates only a fresh, credential-free system override. Both
 // the CLI wrapper and ACP use it; persistent user and repository settings stay
 // untouched. The private directory is retained as local launch evidence.
 func GeminiSettings(model, effort string) (string, error) {
-	budget, err := GeminiBudget(effort)
+	budget, err := GeminiBudgetForModel(model, effort)
 	if err != nil {
 		return "", err
 	}
