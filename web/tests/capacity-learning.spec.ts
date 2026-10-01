@@ -53,7 +53,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     await page.setViewportSize({ width, height: 1000 })
     const capacity = await setup(page, theme)
     await page.goto('/agents')
-    const card = page.getByRole('region', { name: 'Accounts', exact: true })
+    const card = page.getByRole('region', { name: 'Accounts and computers', exact: true })
     await expect(card).toBeVisible()
     if (!process.env.LEARNED_BASELINE) {
       await expect(card.getByText('Estimated · ±20% · 2 limit hits')).toBeVisible()
