@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-355: the Accounts card stays inside itself from 390 to 2560, with the
-// session panel open and closed, and with Sprint or Hold on every pool. Long
-// names, one unbroken account name, one pool of three accounts and pools of
-// one, including an account with no reading yet. Claude and Grok stay on one
-// line. The card, main and the document have no horizontal overflow.
+// AEON-355, on the computer-first panel of AEON-499: Accounts and computers
+// stays inside itself from 390 to 2560, with the session panel open and closed,
+// and with Sprint or Hold on every pool. Long names, one unbroken account name,
+// a computer with six accounts and one with one, including an account with no
+// reading yet. Vendor names stay on one line. The panel, main and the document
+// have no horizontal overflow.
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -23,7 +24,7 @@ const world: AgentWorld = {
   },
 }
 const shots = process.env.AEON355_SHOTS
-// Email-shaped account name with no spaces, so the plan sentence has to break inside it.
+// Email-shaped account name with no spaces: shown whole or with a middle ellipsis, never spilling.
 const UNBROKEN = 'productionreleaseautomation@engineering.example.org'
 
 async function setup(page: Page): Promise<CapacityWorld> {
@@ -46,7 +47,7 @@ async function setup(page: Page): Promise<CapacityWorld> {
   return capacity
 }
 
-/** Sprint or Hold on every pool, so the badge shares the header with the name. */
+/** Sprint or Hold on every pool, so every row carries its note or state. */
 function setBadges(capacity: CapacityWorld, override: '' | 'sprint' | 'hold') {
   for (let i = capacity.schedules.length - 1; i >= 0; i--) {
     if (capacity.schedules[i].scope === 'pool') capacity.schedules.splice(i, 1)
@@ -73,7 +74,7 @@ async function fit(page: Page) {
     const documentOver = Math.max(root.scrollWidth - root.clientWidth, root.scrollWidth - window.innerWidth)
     const main = document.querySelector('main')
     const mainOver = main ? main.scrollWidth - main.clientWidth : null
-    const card = document.querySelector('.cap')
+    const card = document.querySelector('.ac')
     if (!card) return { missing: true as const, documentOver, mainOver, offenders: [], pageOffender: '' }
     const edge = card.getBoundingClientRect().right
     const describe = (el: Element) => {
@@ -102,7 +103,7 @@ async function fit(page: Page) {
     }
     // A flex item's own box is one rect even when its text wraps, so the line
     // count comes from the text range.
-    const names = [...card.querySelectorAll('.pool-name')].map(el => {
+    const names = [...card.querySelectorAll('.vendor-name')].map(el => {
       const range = document.createRange()
       range.selectNodeContents(el)
       const rects = [...range.getClientRects()].filter(r => r.width > 0.5 && r.height > 0.5)
@@ -113,24 +114,22 @@ async function fit(page: Page) {
   })
 }
 
-test('accounts card fits every width, panel open and closed', async ({ page }) => {
+test('accounts and computers fit every width, panel open and closed', async ({ page }) => {
   test.setTimeout(600_000)
   const errors = watchErrors(page)
   const capacity = await setup(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  const card = page.getByRole('region', { name: 'Accounts' })
-  await expect(card.locator('.pool[data-pool="codex"] .acct')).toHaveCount(3)
-  await expect(card.locator('.pool[data-pool="claude"] .acct')).toHaveCount(1)
-  await expect(card.locator('.pool[data-pool="grok"] .acct')).toHaveCount(1)
-  await expect(card.locator('.pool[data-pool="cursor"] .acct')).toHaveCount(1)
-  await expect(card.locator('.pool[data-pool="pi"] .acct')).toHaveCount(1)
-  await expect(card.locator('.pool[data-pool="pi"] .plan')).toContainText('No reading yet')
-  await expect(card.locator('.pool[data-pool="pi"] .today')).toHaveText('no reading yet')
-  await expect(card.locator('.pool[data-pool="pi"] .source')).toHaveText('')
-  await expect(card.locator('.pool[data-pool="codex"] .nm').first()).toHaveAttribute('title', UNBROKEN)
-  await expect(card.locator('.pool[data-pool="codex"] .plan')).toContainText(UNBROKEN)
+  const card = page.getByRole('region', { name: 'Accounts and computers' })
+  const mbp = card.getByRole('region', { name: 'Computer mbp2607' })
+  await expect(mbp.getByRole('row')).toHaveCount(6)
+  await expect(card.getByRole('region', { name: 'Computer studio' }).getByRole('row')).toHaveCount(1)
+  // No reading is never taken as "no limit": it is said as such, with Check now.
+  const pi = mbp.getByRole('row').filter({ hasText: 'Pi on the home server' })
+  await expect(pi).toContainText('No reading yet')
+  await expect(pi.getByRole('button', { name: 'Check now' })).toBeVisible()
+  await expect(mbp.locator('.identity').filter({ hasText: /^production/ })).toHaveAttribute('title', UNBROKEN)
   if (shots) mkdirSync(shots, { recursive: true })
 
   const problems: string[] = []
@@ -148,7 +147,7 @@ test('accounts card fits every width, panel open and closed', async ({ page }) =
       else if (result.mainOver > 1) problems.push(`${label} ${width}px main scrolls by ${Math.round(result.mainOver * 10) / 10}px`)
       if (!result.missing) {
         for (const n of result.names) {
-          if ((n.name === 'Claude' || n.name === 'Grok') && n.lines !== 1) problems.push(`${label} ${width}px ${n.name} is ${n.lines} lines`)
+          if (n.lines !== 1) problems.push(`${label} ${width}px ${n.name} is ${n.lines} lines`)
         }
       }
     }
@@ -156,19 +155,21 @@ test('accounts card fits every width, panel open and closed', async ({ page }) =
   const pass = async (label: string) => {
     await page.goto('/agents')
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    const badge = label.startsWith('sprint') ? 'Sprint' : label.startsWith('hold') ? 'On hold' : ''
+    const badge = label.startsWith('sprint') ? 'Sprint: all of it' : label.startsWith('hold') ? 'On hold' : ''
+    const row = (vendor: string) => card.getByRole('row').filter({ has: page.locator('.vendor-name', { hasText: vendor }) })
     if (badge) {
-      await expect(card.locator('.pool[data-pool="claude"] .override')).toContainText(badge)
-      await expect(card.locator('.pool[data-pool="grok"] .override')).toContainText(badge)
+      await expect(row('Claude')).toContainText(badge)
+      await expect(row('Grok')).toContainText(badge)
     } else {
-      await expect(card.locator('.override')).toHaveCount(0)
+      await expect(card).not.toContainText('Sprint: all of it')
+      await expect(card).not.toContainText('On hold')
     }
     await sweep(label ? `${label}-closed` : 'closed')
     await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
     await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
     if (badge) {
-      await expect(card.locator('.pool[data-pool="claude"] .override')).toContainText(badge)
-      await expect(card.locator('.pool[data-pool="grok"] .override')).toContainText(badge)
+      await expect(row('Claude')).toContainText(badge)
+      await expect(row('Grok')).toContainText(badge)
     }
     await sweep(label ? `${label}-panel` : 'panel')
   }
