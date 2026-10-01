@@ -64,4 +64,8 @@ jobs:
         env:
           CGO_ENABLED: "1"
           GOMAXPROCS: "2"
-        run: go test -p 2 -tags aeon_enclave ./internal/agentsecurity/... ./cmd/aeon-agentd/...
+        # The unsigned daemon integration fixtures use the file-backed vault;
+        # enclave-tagged cmd tests require a signed Keychain fixture (AEON-487).
+        run: |
+          go test -p 2 -tags aeon_enclave ./internal/agentsecurity/...
+          go test -p 2 ./cmd/aeon-agentd/...

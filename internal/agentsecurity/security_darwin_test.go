@@ -81,6 +81,8 @@ func TestVaultAccessShape(t *testing.T) {
 		{"extra simple entry without authorizations", 0},
 		{"missing application grant", 0},
 		{"extra integrity entry", 0},
+		{"extra non-simple entry", 0},
+		{"non-simple authorization sets in a different order", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := vaultAccessShapeFixture(scenario); got != tc.want {
