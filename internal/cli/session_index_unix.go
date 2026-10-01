@@ -718,15 +718,20 @@ func writeHookActivity(vendor, session, text string) {
 	if dir == "" {
 		return
 	}
-	id, _, bound := readBoundGeneration(dir)
-	if !bound || id != session {
-		return
-	}
 	fd, err := openValidatedIndexDir(dir)
 	if err != nil {
 		return
 	}
 	defer unix.Close(fd)
+	idRaw, err := readIndexFileAt(fd, "session.id", 256)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(idRaw)), session) {
+		return
+	}
+	stateRaw, err := readIndexFileAt(fd, "state.json", 1<<20)
+	var state heartbeatDisk
+	if err != nil || json.Unmarshal(stateRaw, &state) != nil || state.Schema != heartbeatSchema || !strings.EqualFold(state.SessionID, session) || state.Terminal || state.Closed {
+		return
+	}
 	raw, err := readIndexFileAt(fd, "activity-mode.json", 512)
 	var policy struct {
 		Session string `json:"session_id"`

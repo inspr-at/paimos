@@ -12,11 +12,16 @@ import (
 
 func TestHookActivityStaysInItsLivePrivateGeneration(t *testing.T) {
 	setupHookTest(t)
-	dir, err := filepath.EvalSymlinks(t.TempDir())
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Chmod(dir, 0700); err != nil {
+	dir := filepath.Join(home, "activity-state")
+	if err = os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir, err = filepath.EvalSymlinks(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	hold, err := openHeartbeatHold(dir)
