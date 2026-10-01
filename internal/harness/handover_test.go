@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -38,7 +39,7 @@ func TestCoordinatorHandover(t *testing.T) {
 				// live children once the heartbeat-lost window passes.
 				w := f.call(f.person, "POST", base, body, "")
 				expect(t, w, 409)
-				if decode(t, w)["error"] != "active generation conflicts with registration" {
+				if decode(t, w)["error"] != harness.RegistrationLeaseConflict {
 					t.Fatal("unclean restart did not return the retryable conflict")
 				}
 				age(t, f, old["id"].(string), "20 minutes", false)
