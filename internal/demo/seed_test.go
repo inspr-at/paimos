@@ -359,8 +359,11 @@ func assertHarnessMix(t *testing.T, api *api, admin tenant.Principal) {
 			t.Fatal(err)
 		}
 		model := account.Models[0]
-		if session.RunID == nil || session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem || session.AccountLabel == nil || *session.AccountLabel != expected.label || session.Model == nil || *session.Model != model.Model || session.ReasoningEffort == nil || *session.ReasoningEffort != model.Efforts[0].Effort {
-			t.Fatalf("%s session must have matching account/model, completed evidence and no fabricated heartbeat or problem", item.Harness)
+		if session.RunID == nil || session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem {
+			t.Fatalf("%s session must have completed evidence and no fabricated heartbeat or problem", item.Harness)
+		}
+		if session.AccountLabel == nil || *session.AccountLabel != expected.label || session.Model == nil || *session.Model != model.Model || session.ReasoningEffort == nil || *session.ReasoningEffort != model.Efforts[0].Effort {
+			t.Fatalf("%s session account/model must match its enrollment", item.Harness)
 		}
 	}
 }
@@ -395,7 +398,7 @@ func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seeder := &seeder{ctx: t.Context(), pool: database.App, slug: "missing-harness-demo"}
+	seeder := &seeder{ctx: t.Context(), pool: database.App, slug: "missing-harness-demo", tenantID: tenantID}
 	admin, err := seeder.person("demo-operator", "Demo Operator", "admin")
 	if err != nil {
 		t.Fatal(err)
