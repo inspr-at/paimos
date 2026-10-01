@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { onAccessChange, can } from '../lib/authz'
 import { useIdentityScope } from '../lib/useIdentityScope'
 import { useSession } from '../stores/session'
+import { brand } from '../lib/brand'
 import { decidePhone, phoneError, phoneRequest, reviewPath, type PhoneKind, type PhoneReview } from '../lib/phoneApprovals'
 import { scopeLabel } from '../lib/agentState'
 import TargetSummary from '../components/deploy/TargetSummary.vue'
@@ -63,7 +64,7 @@ onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
       <template v-if="review.attach">
         <h2>{{ review.attach.snapshot.mode === 'lease' ? 'Link terminal session' : 'Watch terminal session' }}</h2>
         <dl><dt>Computer</dt><dd>{{ review.attach.snapshot.host }}</dd><dt>Agent</dt><dd>{{ review.attach.snapshot.harness }}</dd><dt>Workspace</dt><dd>{{ review.attach.snapshot.process.cwd }}</dd><dt>Process</dt><dd>{{ review.attach.snapshot.process.executable }} · PID {{ review.attach.snapshot.process.pid }}</dd><dt>Project</dt><dd>{{ review.attach.snapshot.project_id }}</dd><dt>Ticket</dt><dd>{{ review.attach.snapshot.ticket_id }}</dd></dl>
-        <p>{{ review.attach.snapshot.mode === 'lease' ? 'Links this process to its ticket. It does not read the transcript or send input.' : 'Lets Aeon read this terminal transcript and, when permitted, send input to the session.' }}</p>
+        <p>{{ review.attach.snapshot.mode === 'lease' ? 'Links this process to its ticket. It does not read the transcript or send input.' : `Lets ${brand.short_name} read this terminal transcript and, when permitted, send input to the session.` }}</p>
         <p v-if="review.attach.consent_mode === 'local_auth'">After approving here, confirm with Touch ID on the paired Mac. Phone verification does not replace that confirmation.</p>
         <RouterLink to="/agents">Open session context</RouterLink>
       </template>
