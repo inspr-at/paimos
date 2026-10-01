@@ -7,10 +7,15 @@ import { mockStartAgent } from './start-agent-fixtures'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
 async function open(page: Page, ticket = false) {
-  await page.goto(ticket ? '/p/PHAROS/PHAROS-11' : '/agents')
-  const button = ticket ? page.getByRole('button', { name: 'Start agent', exact: true }) : page.locator('button.start-agent')
-  await button.click()
+  // Ticket dispatch now uses the Queue/assignee menu (work-queue.spec.ts).
+  // Keep the explicit account cascade covered through its retained /agents entry.
+  await page.goto('/agents')
+  await page.locator('button.start-agent').click()
   await expect(dialog(page)).toBeVisible()
+  if (ticket) {
+    await dialog(page).getByRole('searchbox').fill('PHAROS-11')
+    await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  }
 }
 async function ready(page: Page, ticket = false) {
   if (!ticket) {
@@ -53,7 +58,7 @@ test('creates, readies and queues a ticket, then follows claim and managed regis
   await expect(dialog(page).getByRole('link', { name: 'Open session' })).toHaveAttribute('href', '/agents/managed-1')
 })
 
-test('ticket panel preselects its ticket and retry reuses the created work order', async ({ page }) => {
+test('advanced launch retains its selected ticket and retry reuses the created work order', async ({ page }) => {
   const mock = await mockStartAgent(page, { failQueue: true })
   await open(page, true)
   await expect(dialog(page).getByText('PHAROS-11', { exact: true })).toBeVisible()

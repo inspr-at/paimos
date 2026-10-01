@@ -206,7 +206,7 @@ test('the compact worker name stays fully visible and clear of Copy', async ({ p
     await sample.hover()
     const nameBox = await name.boundingBox()
     // Hidden on a phone (display: none), so it is not a role until the row is wide enough to hover.
-    const copy = sample.locator('.row-actions button[aria-label="Copy PHAROS-14"]')
+    const copy = sample.locator('.row-actions .q-btn')
     const copyBox = await copy.boundingBox()
     expect(nameBox).toBeTruthy()
     if (width === 390) {

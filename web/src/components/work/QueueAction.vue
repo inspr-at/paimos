@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ListItem } from '../../lib/api'
+import { APIError, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -13,7 +13,7 @@ const props = defineProps<{ row: ListItem; projectId: string; label?: boolean }>
 const queue = useWorkQueue(), session = useSession()
 const readyAnchor = ref<HTMLElement | null>(null)
 const button = ref<HTMLElement>()
-const entry = computed(() => queue.entry(props.projectId, props.row.id))
+const entry = computed(() => queueable(props.row) ? queue.entry(props.projectId, props.row.id) : null)
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('run.create', props.projectId))
 const eligible = computed(() => queueable(props.row))
 const gaps = computed(() => readyGaps(props.row))
@@ -25,12 +25,15 @@ async function toggle() {
   try {
     if (entry.value) { await queue.remove(props.projectId, props.row.id); toast(`${props.row.key} left the queue`) }
     else { await queue.add(props.projectId, props.row.id); toast(`${props.row.key} queued`) }
-  } catch (e) { toast(e instanceof Error ? e.message : 'The queue change was not saved.', { tone: 'error' }) }
+  } catch (e) {
+    if (e instanceof APIError && e.status === 422 && e.body.code === 'queue_not_ready') readyAnchor.value = button.value ?? null
+    else toast(e instanceof Error ? e.message : 'The queue change was not saved.', { tone: 'error' })
+  }
 }
 defineExpose({ toggle })
 </script>
 <template>
-  <button ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
+  <button ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-haspopup="!entry && gaps.length ? 'dialog' : undefined" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) || (!entry && gaps.length) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
     <AppIcon v-if="!entry" name="queue-add" :size="label ? 14 : 13" />
     <template v-else><AppIcon name="queue-on" class="g-on" :size="label ? 14 : 13" /><AppIcon name="queue-off" class="g-remove" :size="label ? 14 : 13" /></template>
     <span v-if="label" class="q-label">{{ entry ? `Queued #${entry.position}` : 'Queue' }}</span>

@@ -374,7 +374,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
-    case 'status': return statusMeta(value).label
+    case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'type': return kindLabel(value)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'

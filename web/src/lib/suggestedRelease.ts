@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Release } from './releases.ts'
+import { normaliseState } from './work.ts'
 
 export interface ReleaseSuggestion { text: string; kind: 'shipped' | 'planned' | 'empty'; tip: string; version?: string }
 export interface SuggestionInput {
@@ -26,6 +27,7 @@ export function releaseCadence(releases: Release[]): { hours: number; latest: nu
 }
 
 export function suggestedRelease(row: SuggestionInput, releases: Release[], now: number, queue?: QueueTiming | null): ReleaseSuggestion {
+  row = { ...row, state: normaliseState(row.state) }
   const empty = (tip: string): ReleaseSuggestion => ({ text: '—', kind: 'empty', tip })
   if (row.kind_slug === 'epic') return empty('Releases are suggested for tickets, not epics')
   if (row.state === 'delivered' || row.state === 'accepted') {
@@ -41,7 +43,7 @@ export function suggestedRelease(row: SuggestionInput, releases: Release[], now:
     const eta = instant(row.eta?.eta_ready_at)
     if (eta !== null) { ready = Math.max(now, eta) + HOUR; why = `ETA ~${when(eta)} + review ~1 h` }
   } else if (row.state === 'qa') { ready = now + HOUR; why = 'In QA: review ~1 h' }
-  else if (queue) {
+  else if (queue && ['new', 'open', 'backlog', 'blocked'].includes(row.state)) {
     const start = instant(queue.expected_start)
     const hours = queue.estimate_hours ?? row.fields.estimate_hours
     if (start !== null && typeof hours === 'number' && Number.isFinite(hours) && hours > 0) {
@@ -54,5 +56,5 @@ export function suggestedRelease(row: SuggestionInput, releases: Release[], now:
   const interval = cadence.hours * HOUR
   const next = cadence.latest + Math.max(1, Math.floor((now - cadence.latest) / interval) + 1) * interval
   const offset = Math.max(0, Math.ceil((ready - next) / interval))
-  return { text: offset ? `Next +${offset}` : 'Next', kind: 'planned', tip: `${offset ? `Likely ${offset + 1} releases from now` : 'Likely the next release'}\n${why} → ready ~${when(ready)}\nNext release ~${when(next)}\n${basis}` }
+  return { text: offset ? `Next +${offset}` : 'Next', kind: 'planned', tip: `${offset ? `Likely ${offset + 1} releases from now` : 'Likely the next release'}\n${why}; ready ~${when(ready)}\nNext release ~${when(next)}\n${basis}` }
 }

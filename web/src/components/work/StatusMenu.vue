@@ -36,10 +36,13 @@ function move(event: KeyboardEvent) {
         <span v-else class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
       </button>
     </div>
+    <p class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
   </FloatingPanel>
 </template>
 
 <style scoped>
+.menu-help { display: flex; align-items: flex-start; gap: 7px; margin: 6px 4px 0; padding: 8px 6px 2px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+.menu-help svg { flex: none; margin-top: 2px; color: var(--teal-ink); }
 .menu-title { padding: 6px 10px 4px; }
 .menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
