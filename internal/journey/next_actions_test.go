@@ -53,7 +53,10 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 		f.ticket(t, project, release, "BAT-"+strconv.Itoa(300+i), "1.25", false, false)
 		f.setTicketState(t, "BAT-"+strconv.Itoa(300+i), "done")
 		if state == "released" {
-			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, release); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, release)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 		} else if state != "planning" {
