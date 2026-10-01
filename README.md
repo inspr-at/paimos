@@ -206,6 +206,13 @@ between the text block and counts. Reduced motion, narrow screens and sparse
 graphs suppress it; hover exposes Open graph and Pause. Header framing and text
 separation are covered by `web/tests/header-glimpse.spec.ts`.
 
+Graph **Focus** fills the viewport and hides the app chrome. It prefers browser
+fullscreen when permitted and keeps the in-app full-frame layout when the API
+is absent, refused or ignored. Escape or **Exit** returns to the same graph,
+filters and selection. Open `/p/AEON/tickets?view=graph&focus=1` directly for
+in-app focus; knowledge graphs use the same parameters on their knowledge route.
+Focus preserves the graph's reduced-motion preference.
+
 ## Command line
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.

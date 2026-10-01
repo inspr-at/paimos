@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphControls from './GraphControls.vue'
 import { createGraphRenderer, type GraphData, type GraphDimension, type GraphFPS, type GraphLabels, type GraphNode, type GraphRenderer, type MotionPhase } from '../../lib/graphRenderer'
 import { useGraphMotion } from '../../lib/graphMotion'
+import { exitGraphFullscreen, requestGraphFullscreen } from '../../lib/graphFocus'
 
 // TG1: supply GraphData, a tenant/principal viewerKey and selectedId. Selection
 // and open events return adapter node fields (href is advisory, never auto-
@@ -37,6 +38,7 @@ const surfaceLabel = computed(() => `${props.title}: ${props.summary}. Left and 
 let renderer: GraphRenderer | null = null, controller: AbortController | undefined, resize: ResizeObserver | undefined, theme: MutationObserver | undefined
 let focusFrame = 0
 let mounted = false, beforeFocus: HTMLElement | null = null
+let requestNativeFocus = false, nativeFocused = false
 let background: { el: HTMLElement; inert: boolean }[] = []
 function loadLabels(key: string, previous?: string) {
   // An empty key is "the person is not known yet", not "this person prefers Smart".
@@ -98,9 +100,23 @@ function fit() { renderer?.interact(); renderer?.fit() }
 function setDimension(value: GraphDimension) { if (dimension.value !== value) { dimension.value = value; hovered.value = ''; emit('hover', null); void start() } }
 function toggleMotion() { paused.value = !paused.value; renderer?.motion(paused.value) }
 function setFPS(value: GraphFPS) { rate.value = value; emit('update:fps', value) }
-function toggleFocus() { void router.replace({ query: { ...route.query, [props.focusQuery]: focused.value ? undefined : '1' }, hash: route.hash }) }
+async function toggleFocus() {
+  requestNativeFocus = !focused.value
+  const failure = await router.replace({ query: { ...route.query, [props.focusQuery]: focused.value ? undefined : '1' }, hash: route.hash })
+  if (failure) requestNativeFocus = false
+}
+function fullscreenChanged() {
+  const wasNative = nativeFocused
+  nativeFocused = document.fullscreenElement === root.value
+  // Native Escape is handled by the browser before our keyboard listener.
+  if (wasNative && !nativeFocused && focused.value) void toggleFocus()
+  measure()
+}
 function unlock() { for (const { el, inert } of background) el.inert = inert; background = [] }
 async function syncFocus(value: boolean) {
+  const tryNative = value && requestNativeFocus
+  requestNativeFocus = false
+  if (!value && root.value) void exitGraphFullscreen(root.value)
   if (value) beforeFocus = document.activeElement instanceof HTMLElement && root.value?.contains(document.activeElement) ? document.activeElement : host.value ?? null
   unlock(); await nextTick()
   if (!mounted || value !== focused.value) return
@@ -115,6 +131,9 @@ async function syncFocus(value: boolean) {
     focusFrame = requestAnimationFrame(() => { if (mounted) (beforeFocus?.isConnected ? beforeFocus : host.value)?.focus({ preventScroll: true }) })
   }
   measure()
+  // Wait for Teleport to settle: moving a fullscreen element would exit it.
+  // Deep links use in-app focus directly; native fullscreen needs a gesture.
+  if (tryNative && root.value) void requestGraphFullscreen(root.value, () => mounted && focused.value)
 }
 function keydown(event: KeyboardEvent) {
   if (props.glimpse || event.defaultPrevented || !props.keyboardActive) return
@@ -155,11 +174,14 @@ onMounted(() => {
   theme = new MutationObserver(retheme); theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] })
   media.addEventListener('change', onReduced); scheme.addEventListener('change', retheme)
   window.addEventListener('resize', measure); if (!props.glimpse) window.addEventListener('keydown', keydown, true)
+  if (!props.glimpse) document.addEventListener('fullscreenchange', fullscreenChanged)
   if (focused.value) void syncFocus(true)
   measure(); void start()
 })
 onBeforeUnmount(() => {
-  mounted = false; cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
+  mounted = false; document.removeEventListener('fullscreenchange', fullscreenChanged)
+  if (root.value) void exitGraphFullscreen(root.value)
+  cancelAnimationFrame(focusFrame); controller?.abort(); resize?.disconnect(); theme?.disconnect(); renderer?.dispose(); unlock()
   media.removeEventListener('change', onReduced); scheme.removeEventListener('change', retheme)
   window.removeEventListener('resize', measure); window.removeEventListener('keydown', keydown, true)
 })
