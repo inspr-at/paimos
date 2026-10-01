@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import StatusAutopilot from './StatusAutopilot.vue'
 
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
@@ -76,6 +77,7 @@ async function saveInterval() {
       <label class="interval" for="lost-minutes">Minutes without a heartbeat</label>
       <input id="lost-minutes" v-model.number="lostMinutes" class="minutes" type="number" min="5" max="1440" inputmode="numeric" @change="saveLost" />
     </SettingsCard>
+    <StatusAutopilot v-if="can('settings.manage')" />
     <SettingsCard v-if="can('members.read')" title="People and agents" icon="users" anchor="members">
       <template #lead>Members, invites, roles, project access and agent keys have their own place.</template>
       <template #aside><RouterLink class="btn sm" to="/settings/access">Open Access<AppIcon name="arrow" :size="13" /></RouterLink></template>

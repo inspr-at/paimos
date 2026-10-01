@@ -33,7 +33,7 @@ func (m *Module) linkAlias(w http.ResponseWriter, r *http.Request) {
 		if err := m.authorizeMutation(r.Context(), tx, p, "members.manage", nil); err != nil {
 			return err
 		}
-		out, err := apply.Apply(r.Context(), tx, p.TenantID, body.FromPrincipalID, id)
+		out, err := apply.Apply(r.Context(), tx, p.TenantID, body.FromPrincipalID, id, p.ID)
 		if err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ func (m *Module) unlinkAlias(w http.ResponseWriter, r *http.Request) {
 		if linked == nil || *linked != id {
 			return errNotAlias
 		}
-		out, err := apply.Apply(r.Context(), tx, p.TenantID, from, "")
+		out, err := apply.Apply(r.Context(), tx, p.TenantID, from, "", p.ID)
 		if err != nil {
 			return err
 		}

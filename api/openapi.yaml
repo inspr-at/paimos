@@ -6,6 +6,99 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/status-autopilot:
+    get:
+      operationId: getStatusAutopilot
+      summary: Read workspace status autopilot and live rule limits
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Default On; seven deterministic rules. Triage autopilot is separate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+    put:
+      operationId: putStatusAutopilot
+      summary: Save status autopilot as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/StatusAutopilotSettings'}
+                - type: object
+                  required: [expected_revision]
+                  properties:
+                    expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved settings and new revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+        '400': {description: Rules must contain all seven keys; day limits are integers from 1 to 365}
+        '403': {description: Person with workspace settings.manage required}
+        '409': {description: Settings changed since they were read}
+  /projects/{projectId}/status-autopilot:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectStatusAutopilot
+      summary: Read a project's status autopilot override
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Effective setting and inheritance
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '404': {description: Project not visible}
+    put:
+      operationId: putProjectStatusAutopilot
+      summary: Save Inherit, On or Off for a project
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, expected_revision]
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [inherit, on, off]}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved override
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '403': {description: Person with workspace settings.manage required}
+        '404': {description: Project not visible}
+        '409': {description: Override changed since it was read}
+  /status-autopilot/changes:
+    get:
+      operationId: listStatusAutopilotChanges
+      summary: Recent automatic changes with reasons and Undo state
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: suggestions, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Latest 50 visible changes; suggestions=true lists every currently flagged visible ticket (triage, cancellation, blocked reminder and missed release), independent of the recent-change window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StatusAutopilotChange'}
   /from-classic/api/{legacyPath}:
     servers:
       - url: /
@@ -2328,7 +2421,7 @@ paths:
     post:
       operationId: createMemberInvite
       summary: Create an invite and return its join link once
-      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance.
+      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance. Imported people without a sign-in identity can be invited. Acceptance links a unique active, unlinked imported person with the same email in this tenant to the new person, preserving the imported identity and history. Email matching is exact apart from ASCII letter case; Unicode characters remain distinct. Multiple unlinked matches require manual linking, including inactive records or records that already have aliases. Inactive records and existing link targets are never auto-linked. The invited roles determine access; imported roles are not inherited.
       requestBody:
         required: true
         content:
@@ -2348,7 +2441,7 @@ paths:
                   account: {$ref: '#/components/schemas/InviteAccountResult'}
         '400': {description: 'Invalid email, expiry, role or project, or provisioning requested without a configured provisioner'}
         '403': {description: Permission denied or the role exceeds the inviter}
-        '409': {description: Email already belongs to an active member}
+        '409': {description: Email already belongs to an active member with a sign-in identity}
   /members/invites/{id}:
     delete:
       operationId: revokeMemberInvite
@@ -2656,7 +2749,7 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         "302":
-          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member; provider availability failures use unavailable; other failures use failed.
+          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed.
           headers:
             Location:
               schema: {type: string}
@@ -2674,7 +2767,7 @@ paths:
     post:
       operationId: authDevLogin
       summary: Sign in by email when AEON_ENV=dev
-      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email.
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email. Bootstrap admin matching, email lookup and dev identity subjects fold only ASCII letter case; Unicode characters remain distinct.
       security: []
       requestBody:
         required: true
@@ -8043,6 +8136,55 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    StatusAutopilotRule:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean, default: true}
+        days: {type: integer, minimum: 1, maximum: 365, description: Absent on publish}
+    StatusAutopilotSettings:
+      type: object
+      required: [enabled, rules, revision]
+      properties:
+        enabled: {type: boolean, default: true}
+        revision: {type: integer, minimum: 0, readOnly: true}
+        rules:
+          type: object
+          additionalProperties: false
+          required: [new, backlog, blocked, progress, done, publish, accept]
+          properties:
+            new: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untriaged 7 days to triage list}
+            backlog: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untouched 90 days to cancellation suggestion}
+            blocked: {$ref: '#/components/schemas/StatusAutopilotRule', description: Reminder after 14 days}
+            progress: {$ref: '#/components/schemas/StatusAutopilotRule', description: No session or branch or PR activity for 3 days to Open}
+            done: {$ref: '#/components/schemas/StatusAutopilotRule', description: Merged but not released for 14 days to missed-release flag}
+            publish: {$ref: '#/components/schemas/StatusAutopilotRule', description: On release publish to Delivered}
+            accept: {$ref: '#/components/schemas/StatusAutopilotRule', description: Delivered 30 days without objection to Accepted}
+    StatusAutopilotOverride:
+      type: object
+      required: [mode, effective_enabled, revision]
+      properties:
+        mode: {type: string, enum: [inherit, on, off], default: inherit}
+        effective_enabled: {type: boolean}
+        revision: {type: integer, minimum: 0}
+    StatusAutopilotChange:
+      type: object
+      required: [event_id, node_id, key, title, actor, rule, reason, from, to, at, undone, undoable]
+      properties:
+        event_id: {type: integer}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        actor: {type: string, const: Status autopilot}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string}
+        at: {type: string, format: date-time}
+        undone: {type: boolean}
+        changed_since: {type: boolean, description: A later ticket edit made the original change stale}
+        undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -12197,6 +12339,29 @@ components:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
           enum: [area, review_gate, registry]
+        models:
+          description: 'Actually used models from visible sessions on this node and its open/done work descendants. Ordered by measured tokens descending, then harness/model. Session profile identity wins; normalized model and raw metadata are fallbacks. Contains no billing or prices.'
+          type: array
+          items:
+            type: object
+            required: [label, harness, model, sessions]
+            properties:
+              label: {type: string, description: Short model label without effort.}
+              harness: {type: string}
+              model: {type: string}
+              sessions:
+                type: array
+                items:
+                  type: object
+                  required: [id, effort, role, running, tokens]
+                  properties:
+                    id: {type: string, format: uuid}
+                    profile_id: {type: string, format: uuid}
+                    model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
+                    effort: {type: string}
+                    role: {type: string}
+                    running: {type: boolean}
+                    tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
         tokens:
           type: object
           required: [spent, input, output, cached, sessions, unreported, estimated]
@@ -12206,6 +12371,7 @@ components:
             output: {type: integer, minimum: 0}
             cached: {type: integer, minimum: 0}
             sessions: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
             estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
             calibration:
@@ -12224,11 +12390,12 @@ components:
           properties:
             list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
             list_estimated: {type: [string, 'null'], description: 'The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
-            list_unpriced: {type: boolean, description: Some usage or the route's model has no list price.}
+            list_unpriced: {type: boolean, description: 'Some reported usage or the route''s model has no list price. A session without a usage row does not set this flag.'}
             paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
             paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
-            paid_unknown: {type: boolean, description: Some usage or the route's harness has no billing on record.}
+            paid_unknown: {type: boolean, description: 'Some reported usage or the route''s harness has no billing on record. A session without a usage row does not set this flag.'}
             plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
+            billing_modes: {type: array, items: {type: string, enum: [api, subscription, unknown]}, description: Billing modes of actual visible usage only; requires harness.read on source and row projects.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
@@ -13774,6 +13941,7 @@ components:
       type: object
       required: [id, at, type, author]
       properties:
+        automatic_change: {$ref: '#/components/schemas/StatusAutopilotChange'}
         id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
         at: {type: string, format: date-time}
         type: {type: string, enum: [comment, change, created]}

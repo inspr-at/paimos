@@ -9,6 +9,7 @@
   --ink: #203c3d;
   --ink-2: #4c6163;
   --ink-3: #5f7274;
+  --mark-measured: rgba(32, 60, 61, 0.55);
   --teal: #0e6f6c;
   --teal-ink: #0b5c59;
   --aqua: #a4e5df;
@@ -132,7 +133,7 @@
 
 :root[data-theme="dark"] {
   --canvas: #102327;
-  --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead;
+  --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
   --teal: #a4e5df; --teal-ink: #bff0eb;
   --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
   --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --warn-ink: #e2b45a; --danger: #ef9d95;
@@ -175,7 +176,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --canvas: #102327;
-    --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead;
+    --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --teal: #a4e5df; --teal-ink: #bff0eb;
     --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
     --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --warn-ink: #e2b45a; --danger: #ef9d95;
