@@ -982,8 +982,9 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
-The release history leads with the live codename in light display type, above
-one glass dock holding live status and the Pretty version. Hover or keyboard
+The release history leads with the live codename in light display type with the
+heading's spacing, above one glass dock holding live status and the Pretty
+version. Its separators use the theme's muted ink. Hover or keyboard
 focus crossfades the renderer's characters to the full canonical version over
 one second; reduced motion switches instantly. Click or Enter copies the exact
 canonical value, including `.0.0`, and announces “Version copied”. This character

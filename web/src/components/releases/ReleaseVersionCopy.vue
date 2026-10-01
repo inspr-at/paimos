@@ -72,6 +72,8 @@ onBeforeUnmount(() => {
 .version-layers { display: inline-grid; align-items: center; }
 .version-layers > span { grid-area: 1 / 1; }
 .version-pretty { color: var(--ink-2); }
+/* The renderer supplies an inline separator colour; the dock uses its theme ink. */
+.version-pretty :deep(.separator) { color: var(--ink-2) !important; }
 .version-canonical { color: var(--ink); }
 .copy-icon { flex: none; color: var(--ink-2); opacity: 0; transition: opacity var(--version-reveal-duration, 1000ms) ease-in-out; }
 .version-copy[data-version-view="revealed"] .copy-icon, .version-copy[data-copy-state] .copy-icon { opacity: 1; }

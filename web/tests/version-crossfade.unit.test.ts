@@ -59,11 +59,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 const asHTML = (node: Element) => node as unknown as HTMLElement
-function layers() {
+function layers(prepare?: (pretty: Element) => void) {
   const pretty = new Element(), full = new Element(), trigger = new Element()
   for (const [host, mode] of [[pretty, 'pretty'], [full, 'reduced']] as const) {
     renderVersion(asHTML(host), VERSION, CALENDAR_DISPLAY_SCHEME, { config: display, mode, interactive: false, brand: '#9a6b12' })
   }
+  prepare?.(pretty)
   const stop = attachVersionCrossfade(asHTML(pretty), asHTML(full), asHTML(trigger), view)
   const chars = (host: Element) => host.children.flatMap(child => child.className === 'separator' ? child.querySelector('.separator-glyph')!.children : child.children)
   return { pretty, full, trigger, stop, chars }
@@ -80,6 +81,25 @@ it('copies the canonical renderer value with its suffix, without a decorative v 
 it('refuses to copy a host without a canonical renderer value', async () => {
   expect(await copyRenderedVersion(asHTML(new Element()), view)).toBe(false)
   expect(written).not.toHaveBeenCalled()
+})
+
+it.each([['0', '0.7'], ['0.8', '0.94'], ['', '1'], [undefined, '1']])('reveals seconds with shared opacity for a Pretty value of %s', (opacity, expected) => {
+  const { pretty, full, trigger, stop } = layers(host => {
+    const seconds = host.querySelector('.ss')!
+    if (opacity === undefined) host.children = host.children.filter(node => node !== seconds)
+    else seconds.style.opacity = opacity
+  })
+  try {
+    pointer(trigger, 'pointerenter')
+    expect(trigger.dataset.versionView).toBe('revealed')
+    expect(full.querySelector('.ss')!.style.opacity).toBe(expected)
+    expect(full.textContent).toBe(VERSION)
+    if (opacity === '0') {
+      expect(pretty.querySelector('.ss')!.dataset.collapsed).toBe('true')
+      expect(full.querySelector('.ss')!.style.opacity).toBe('0.7')
+    }
+  } finally { stop() }
+  expect(full.querySelector('.ss')!.style.opacity).toBe('')
 })
 
 it('crossfades every character using the shared total duration and segment opacities, preserving renderer output', () => {

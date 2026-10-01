@@ -169,6 +169,9 @@ test('the light codename leads one glass status dock; Details adds the generatio
   await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · Release')
   await expect(head.getByRole('heading', { level: 1 })).toHaveCSS('font-weight', '300')
   await expect(head.locator('.codename-label')).toHaveCSS('text-transform', 'none')
+  const headingSpacing = await head.getByRole('heading', { level: 1 }).evaluate(el => getComputedStyle(el).letterSpacing)
+  expect(Number.parseFloat(headingSpacing)).toBeLessThan(0)
+  await expect(head.locator('.codename-label')).toHaveCSS('letter-spacing', headingSpacing)
   await expect(head.locator('.hero .sparkle, .hero .rn-stamp')).toHaveCount(0)
   await expect(head.locator('.status-dock')).toHaveCount(1)
   await expect(head.locator('.status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
@@ -182,6 +185,23 @@ test('the light codename leads one glass status dock; Details adds the generatio
   await expect(version.locator('.version-canonical')).toHaveText(history.current)
   await sheet(page).getByRole('radio', { name: 'Details' }).click()
   await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published · 1 reserved')
+})
+
+test('Pretty dock separators use the muted ink in both themes and after a live theme change', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' })
+  await open(page)
+  const pretty = sheet(page).locator('.status-dock .version-pretty')
+  const separators = pretty.locator('.separator:not([data-collapsed="true"]) .separator-glyph')
+  await expect(separators).toHaveCount(4)
+  const colors: string[] = []
+  for (const colorScheme of ['light', 'dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme })
+    const mutedInk = await pretty.evaluate(el => getComputedStyle(el).color)
+    colors.push(mutedInk)
+    for (const glyph of await separators.all()) await expect(glyph).toHaveCSS('color', mutedInk)
+  }
+  expect(colors[0]).not.toBe(colors[1])
+  expect(colors[2]).toBe(colors[0])
 })
 
 test('an outdated page says so in the status line, under the codename the server runs', async ({ page }) => {

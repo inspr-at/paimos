@@ -132,7 +132,8 @@ export function attachVersionCrossfade(pretty: HTMLElement, canonical: HTMLEleme
     if (!(segment instanceof HTMLElement)) continue
     const original = segment.style.opacity
     const source = [...pretty.children].find(node => node.className === segment.className) as HTMLElement | undefined
-    segment.style.opacity = String(hoverOpacity(source?.style.opacity ? Number(source.style.opacity) : 1))
+    const opacity = source?.style.opacity ?? ''
+    segment.style.opacity = String(hoverOpacity(opacity === '' ? 1 : Number(opacity)))
     restorers.push(() => { segment.style.opacity = original })
   }
   const layers = [characters(pretty, 'pretty'), characters(canonical, 'canonical')]

@@ -23,7 +23,7 @@ const label = computed(() => props.name || codenameOf(props.version))
 .codename { display: contents; }
 .codename-label, .codename :deep(.rn-name) {
   white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
-  text-transform: none; letter-spacing: .12em; font-weight: 300; color: inherit;
+  text-transform: none; font-weight: 300; color: inherit;
 }
 .quiet { color: var(--ink-2); }
 .codename :deep(.rn-stamp) { letter-spacing: 0; }
