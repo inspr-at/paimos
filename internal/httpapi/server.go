@@ -41,6 +41,10 @@ type Server struct {
 	Brand *brand.Brand
 	// Codename names a release version (AEON-430); nil, or "", serves no name.
 	Codename func(version string) string
+	// AithemaOrigin enables browser microphone/WS policy on application
+	// documents, including documents that later navigate to the journey in
+	// Vue. Empty preserves the default policy everywhere.
+	AithemaOrigin string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
@@ -121,7 +125,11 @@ func (s *Server) build() {
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
 	// The catalog and roadmap HTML patterns are the public declarations for those pages.
 	spa := commonMiddleware(spaHandler(s.Web, s.brand()))
+	if s.AithemaOrigin != "" {
+		spa = commonMiddleware(aithemaViewPolicy(s.AithemaOrigin, spaHandler(s.Web, s.brand())))
+	}
 	if publicMounted {
+		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))

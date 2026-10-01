@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -105,6 +106,23 @@ func securityMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func aithemaViewPolicy(origin string, next http.Handler) http.Handler {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SPA navigation cannot relax the document's Permissions-Policy. The
+		// app document must allow same-origin capture before entering Journey.
+		// Public portal documents retain their microphone denial.
+		if r.URL.Path != "/portal" && !strings.HasPrefix(r.URL.Path, "/portal/") {
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; connect-src 'self' wss://"+u.Host+"; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
