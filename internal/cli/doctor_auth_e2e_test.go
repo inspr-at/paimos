@@ -103,14 +103,14 @@ func TestProjectOnlyAgentDoctorAuth(t *testing.T) {
 	hc := &http.Client{}
 	header := http.Header{"Authorization": {"Bearer " + key.Token}}
 	for _, path := range []string{"/api/members", "/api/agent-keys", "/api/events", "/api/models", "/api/me/profile", "/api/me/greeting", "/api/me/permissions"} {
-		if status, _, _ := doJSON(t, hc, http.MethodGet, srv.URL+path, "", header); status != http.StatusForbidden {
+		if status, _ := doJSON(t, hc, http.MethodGet, srv.URL+path, "", header); status != http.StatusForbidden {
 			t.Errorf("project-only key reached %s: %d", path, status)
 		}
 	}
-	if status, _, _ := doJSON(t, hc, http.MethodGet, srv.URL+"/api/nodes/"+projectID, "", header); status != http.StatusOK {
+	if status, _ := doJSON(t, hc, http.MethodGet, srv.URL+"/api/nodes/"+projectID, "", header); status != http.StatusOK {
 		t.Fatalf("project-only key lost its project access: %d", status)
 	}
-	if status, _, _ := doJSON(t, hc, http.MethodGet, srv.URL+"/api/nodes/"+otherProjectID, "", header); status != http.StatusForbidden && status != http.StatusNotFound {
+	if status, _ := doJSON(t, hc, http.MethodGet, srv.URL+"/api/nodes/"+otherProjectID, "", header); status != http.StatusForbidden && status != http.StatusNotFound {
 		t.Fatalf("project-only key reached another project: %d", status)
 	}
 }
