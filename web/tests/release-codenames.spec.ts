@@ -80,7 +80,7 @@ test('the footer names the running release; hover reveals its version without mo
   await mockReleases(page, history)
   await page.route('**/api/version', route => route.fulfill({ json: { version: history.current, scheme: 'inspr-calver-3', codename: CODENAMES[5] } }))
   await page.goto('/')
-  const pill = page.locator('footer.app-footer .version-pill')
+  const pill = page.locator('footer.app-footer .footer-name')
   const name = pill.locator('.rn-name')
   await expect(name).toHaveText(CODENAMES[5])
   await expect(pill).toHaveAccessibleName(new RegExp(`${CODENAMES[5]}, version ${history.current.replace(/\./g, '\\.')}`))
@@ -109,7 +109,7 @@ async function openNamed(page: Page) {
   await mockReleases(page, history, { codename: CODENAMES[5] })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-  await expect(page.locator('footer.app-footer .version-pill .rn-name')).toHaveText(CODENAMES[5])
+  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toHaveText(CODENAMES[5])
   return history
 }
 const accountMenu = async (page: Page) => {
@@ -152,7 +152,7 @@ test('the account menu names the release; focus reveals its version, and the ite
 
 test('the footer pill, a history row and the detail heading describe themselves by their stamp', async ({ page }) => {
   const history = await openNamed(page)
-  const pill = page.locator('footer.app-footer .version-pill')
+  const pill = page.locator('footer.app-footer .footer-name')
   await expect(pill).toHaveAccessibleDescription(STAMP)
   // The name inside the control is not the described element.
   await expect(pill.locator('.release-name')).not.toHaveAttribute('aria-describedby', /.+/)
@@ -172,7 +172,7 @@ test('the footer pill, a history row and the detail heading describe themselves 
 
 test('a description the control already had stays beside the stamp, and goes with the name', async ({ page }) => {
   await openNamed(page)
-  const pill = page.locator('footer.app-footer .version-pill')
+  const pill = page.locator('footer.app-footer .footer-name')
   const stampId = await pill.evaluate(el => el.getAttribute('aria-describedby'))
   expect(stampId).toMatch(/\S+/)
   await pill.evaluate(el => el.setAttribute('aria-describedby', 'owner-hint'))

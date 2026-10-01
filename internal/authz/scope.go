@@ -20,7 +20,8 @@ import (
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
-// workspace configuration every reader needs (kinds), or the caller's own
+// workspace configuration every reader needs (kinds, the workspace logo that
+// /api/me links, read under tenant row-level security), or the caller's own
 // profile and preferences. Every other route without a project in its path is
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
@@ -50,6 +51,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/kinds":                              true,
 	"GET /api/kinds/{kindId}":                     true,
 	"GET /api/me":                                 true,
+	"GET /api/brand/logo/{variant}":               true,
 	"GET /api/me/greeting":                        true,
 	"GET /api/me/profile":                         true,
 	"PATCH /api/me/profile":                       true,

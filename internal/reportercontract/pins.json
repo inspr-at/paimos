@@ -2403,8 +2403,8 @@
     ]
   },
   "me": {
-    "version": "me/1.0",
-    "sha256": "465ed2c221370e2964ee074fe4955f02fe13562b3faf3e8074867f8cf7856141",
+    "version": "me/1.1",
+    "sha256": "b0fbf80bf6a67d3f61e656801ff75ba08bae4fb76d08d9598045692944b0c31e",
     "shape": {
       "GET /me 200": {
         "properties": {
@@ -2494,6 +2494,61 @@
           },
           "tenant": {
             "properties": {
+              "brand": {
+                "properties": {
+                  "logo": {
+                    "properties": {
+                      "height": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "logo_dark": {
+                    "properties": {
+                      "height": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "maximum": 4096,
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "short_name": {
+                    "maxLength": 32,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
               "id": {
                 "format": "uuid",
                 "type": "string"

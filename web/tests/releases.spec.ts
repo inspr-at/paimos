@@ -539,5 +539,5 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
     expect((await row.locator('[data-collapsed="true"]').first().boundingBox())?.width ?? 0).toBe(0)
   }
   // AEON-430: the footer leads with the marketing name; its version is the hover chip.
-  await expect(page.locator('footer.app-footer .pill-version .rn-name')).toBeVisible()
+  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toBeVisible()
 })

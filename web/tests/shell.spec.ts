@@ -73,7 +73,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('h1')).toBeVisible()
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
-        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+        else await expect(page.locator('footer.app-footer .footer-name .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.

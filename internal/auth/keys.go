@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenantbrand"
 )
 
 var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -30,6 +31,8 @@ type tenantJSON struct {
 	ID   string `json:"id"`
 	Slug string `json:"slug"`
 	Name string `json:"name"`
+	// Brand is the workspace's own header brand (AEON-431); absent when unset.
+	Brand *tenantbrand.Public `json:"brand,omitempty"`
 }
 
 type identityJSON struct {
@@ -79,7 +82,7 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 			Email:    v.Email,
 			Roles:    roles,
 		},
-		Tenant: tenantJSON{ID: v.TenantID, Slug: v.Slug, Name: v.Name},
+		Tenant: tenantJSON{ID: v.TenantID, Slug: v.Slug, Name: v.Name, Brand: v.Brand},
 	}
 	if v.Identity != nil {
 		out.Identity = &identityJSON{
