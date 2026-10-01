@@ -8,6 +8,7 @@ import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import ModelRefreshSettings from './ModelRefreshSettings.vue'
 
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
@@ -63,6 +64,7 @@ async function saveInterval() {
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
     </SettingsCard>
+    <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">
       <template #lead>How often a working agent reports when a ticket will be ready, and when it will be live.</template>

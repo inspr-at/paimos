@@ -56,6 +56,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -97,6 +98,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage", "harness.read", false, 200, m.sessionUsage},
 		{"POST /api/model-prices", "models.manage", false, 201, m.createUsagePrice},
 		{"GET /api/model-prices", "harness.read", false, 200, m.listUsagePrices},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports", "harness.worker", true, 200, m.modelReports},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"GET /api/settings/eta-interval", "settings.manage", false, 200, m.getEtaInterval},
 		{"PUT /api/settings/eta-interval", "settings.manage", false, 200, m.putEtaInterval},
@@ -564,7 +566,8 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
-	SucceedsID *string `json:"succeeds_session_id"`
+	ModelReports []modelregistry.Observation `json:"model_reports"`
+	SucceedsID   *string                     `json:"succeeds_session_id"`
 	rules.ClientReport
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
@@ -758,6 +761,9 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
 			return nil, err
 		}
+	}
+	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, in.ModelReports); err != nil {
+		return nil, workorders.Fail(400, "invalid model evidence")
 	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
 		return nil, err
@@ -1026,6 +1032,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		ModelReports []modelregistry.Observation `json:"model_reports"`
 		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity `json:"process_ownership"`
 		Phase            string                 `json:"phase"`
@@ -1165,6 +1172,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
+	}
+	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, in.ModelReports); err != nil {
+		return nil, workorders.Fail(400, "invalid model evidence")
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err

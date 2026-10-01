@@ -1048,6 +1048,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
+		if errors.Is(err, errModelInvalid) {
+			s.reportModelState(entry, "invalid")
+		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1158,6 +1161,15 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if len(ev.ModelReports) > 0 {
+		s.reportModels(entry, ev.ModelReports)
+	}
+	if ev.SessionUsage != nil || (ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0) {
+		s.reportModelState(entry, "working")
+	}
+	if ev.ErrorCode == "model_invalid" {
+		s.reportModelState(entry, "invalid")
+	}
 	s.observeBudget(entry, ev)
 	if ev.VendorLimit != nil {
 		s.observeVendorLimit(entry, ev.VendorLimit)

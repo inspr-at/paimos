@@ -112,9 +112,9 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "build"
 	}
-	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate"}, role) ||
+	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate", "review-gate-security"}, role) ||
 		(family != "" && !slices.Contains([]string{"openai", "anthropic", "xai", "cursor"}, family)) ||
-		(role == "review-gate" && family == "") {
+		(strings.HasPrefix(role, "review-gate") && family == "") {
 		writeErr(w, fail(http.StatusBadRequest, "invalid role or author family"))
 		return
 	}
@@ -186,8 +186,12 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,r.priority
 		FROM model_profiles p LEFT JOIN model_role_routes r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
+		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE p.enabled
-		  AND ($1 <> 'review-gate' OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
+		  AND p.model NOT IN ('gpt-6-terra','gpt-6.1-astra','gpt-6.1-luna','gpt-6.1-terra')
+		  AND (o.suppressed_until IS NULL OR o.suppressed_until <= $3)
+		  AND ($1 <> 'review-gate-security' OR p.family <> 'anthropic')
+		  AND ($1 NOT IN ('review-gate','review-gate-security') OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
 		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $3)
 		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now)
 	if err != nil {

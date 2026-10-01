@@ -14,7 +14,7 @@ import (
 
 var (
 	modelRoles = map[string]bool{
-		"scout": true, "mechanical": true, "build": true, "build-hard": true, "review-gate": true,
+		"scout": true, "mechanical": true, "build": true, "build-hard": true, "review-gate": true, "review-gate-security": true,
 	}
 	modelHarnesses = map[string]bool{
 		"codex": true, "claude": true, "pi": true, "cursor": true, "grok": true,
@@ -57,7 +57,7 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if err != nil {
 		return usagef("%s", err)
 	}
-	if role == "review-gate" && author == "" {
+	if strings.HasPrefix(role, "review-gate") && author == "" {
 		return usagef("review-gate requires --author-family")
 	}
 	harness = strings.TrimSpace(harness)
@@ -75,7 +75,7 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if err := rt.do(http.MethodGet, "/api/models/resolve?"+q.Encode(), nil, &result); err != nil {
 		return err
 	}
-	if role == "review-gate" && result.Profile != nil && result.Profile.Family == author {
+	if strings.HasPrefix(role, "review-gate") && result.Profile != nil && result.Profile.Family == author {
 		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
 	}
 	var profiles []modelProfile

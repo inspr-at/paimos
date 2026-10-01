@@ -715,7 +715,7 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 		}
 		// Model discovery is part of every generated agent role. It does not
 		// add a key scope or bypass the key creator's live ceiling.
-		rolePermissions := []string{"models.read"}
+		rolePermissions := []string{"models.read", "models.report", "models.refresh"}
 		for key := range requested {
 			if !slices.Contains(rolePermissions, key) {
 				rolePermissions = append(rolePermissions, key)

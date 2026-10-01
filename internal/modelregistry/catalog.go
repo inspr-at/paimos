@@ -4,8 +4,8 @@ package modelregistry
 
 import "strings"
 
-// CatalogVersion is the classic dispatch catalog pin seeded for a new tenant.
-const CatalogVersion = "2"
+// CatalogVersion is the dispatch catalog pin seeded and upgraded automatically.
+const CatalogVersion = "3"
 
 type seedProfile struct {
 	Slug    string
@@ -31,12 +31,16 @@ type seedRoute struct {
 	Slug     string
 }
 
-// Classic model authority. Slugs follow the paimos catalog ids. Dots are
+// Pinned model authority. Slugs follow the paimos catalog ids. Dots are
 // rewritten to hyphens because an AEON slug cannot contain '.'; the vendor
 // model id is stored unchanged.
 var seedModels = []seedModel{
 	{"codex", "gpt-6-luna", "openai", "fast", []string{"medium", "high", "xhigh"}},
-	{"codex", "gpt-6-terra", "openai", "standard", []string{"medium", "high", "xhigh"}},
+	{"codex", "gpt-6.1-sol", "openai", "strong", []string{"medium", "high", "xhigh"}},
+	{"grok", "grok-4.7", "xai", "frontier", []string{"high", "xhigh"}},
+	{"grok", "grok-4.7-build-fast", "xai", "standard", []string{"high"}},
+	{"grok", "grok-4.6", "xai", "strong", []string{"high", "xhigh"}},
+	{"grok", "grok-4.5", "xai", "standard", []string{"high"}},
 	{"codex", "gpt-6-sol", "openai", "strong", []string{"medium", "high", "xhigh"}},
 	{"codex", "gpt-6-astra", "openai", "frontier", []string{"medium", "high", "xhigh"}},
 	{"claude", "haiku", "anthropic", "fast", []string{"medium", "high"}},
@@ -78,8 +82,10 @@ func catalogProfiles() []seedProfile {
 func catalogSlug(model seedModel, effort string) string {
 	id := model.Harness + "-" + model.ID + "-" + effort
 	switch model.Harness {
+	case "grok":
+		id = model.ID + "-" + effort
 	case "codex":
-		id = "codex-" + strings.TrimPrefix(model.ID, "gpt-6-") + "-" + effort
+		id = "codex-" + strings.TrimPrefix(strings.TrimPrefix(model.ID, "gpt-6-"), "gpt-") + "-" + effort
 	case "pi":
 		id = "pi-anthropic-" + strings.TrimSuffix(strings.TrimPrefix(model.ID, "anthropic/claude-"), "-5") + "-" + effort
 	case "cursor":
@@ -117,10 +123,12 @@ func roleByName(name string) (roleDef, bool) {
 var roleLadder = []roleDef{
 	{name: "scout", tier: "fast", effort: "medium"},
 	{name: "mechanical", tier: "fast", effort: "high"},
-	{name: "build", tier: "standard", effort: "high"},
-	{name: "build-hard", tier: "strong", effort: "xhigh"},
+	{name: "build", tier: "standard", effort: "high", ladder: []string{"codex-6-1-sol-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"}},
+	{name: "build-hard", tier: "strong", effort: "xhigh", ladder: []string{"codex-6-1-sol-xhigh", "codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"}},
 	{name: "review-gate", tier: "frontier", effort: "xhigh", cross: true, readOnly: true,
-		ladder: []string{"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh"}},
+		ladder: []string{"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "grok-4-7-xhigh", "cursor-grok-xhigh"}},
+	{name: "review-gate-security", tier: "frontier", effort: "xhigh", cross: true, readOnly: true,
+		ladder: []string{"grok-4-7-xhigh", "cursor-grok-xhigh", "codex-6-1-sol-xhigh"}},
 }
 
 func defaultRoutes(profiles []seedProfile) []seedRoute {
@@ -129,7 +137,7 @@ func defaultRoutes(profiles []seedProfile) []seedRoute {
 	var out []seedRoute
 	for _, role := range roleLadder {
 		var slugs []string
-		if role.cross {
+		if len(role.ladder) > 0 {
 			slugs = append(slugs, role.ladder...)
 		} else {
 			for _, harness := range []string{"codex", "claude", "pi", "cursor"} {

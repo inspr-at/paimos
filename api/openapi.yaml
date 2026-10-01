@@ -5077,6 +5077,7 @@ paths:
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
                 account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+                model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
                 harness_version: {$ref: '#/components/schemas/HarnessVersion'}
                 brief: {$ref: '#/components/schemas/HarnessBrief'}
                 worktree: {$ref: '#/components/schemas/HarnessWorktree'}
@@ -5090,6 +5091,20 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/model-reports:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: reportHarnessModels
+      description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. No extra key grant is needed. Evidence is validated, idempotent and content-free; no profile metadata or ladder writes accepted.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Evidence recorded}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions/{sessionId}/yield:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5702,6 +5717,81 @@ paths:
         '201': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /models/refresh:
+    get:
+      operationId: getModelRefreshStatus
+      security: *auth
+      responses:
+        '200': {description: Settings, last refresh result, pending models and observations; no credentials, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
+    post:
+      operationId: refreshModelCatalog
+      description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every run writes one audit event; outages keep the last good catalog and mark that source stale.
+      security: *auth
+      responses:
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /models/reports:
+    post:
+      operationId: reportModelObservations
+      description: Requires models.report. Reports observed CLI availability or explicit invalid-model failures. Replayed report ids are idempotent. Repeated failures suppress routing for 24 hours independently of person overrides. New profiles are auto-added by default, with conservative mapping; no reports reorder ladders. Unknown families are proposed for person acceptance.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Report result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /models/proposals/accept:
+    post:
+      operationId: acceptModelProposal
+      description: Person with models.manage accepts a previously observed model using its declared conservative mapping. Unmapped families require explicit person-managed profile creation. No ladder changes.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness, model, effort]
+              properties:
+                harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                model: {type: string, maxLength: 128}
+                effort: {type: string, maxLength: 32}
+      responses:
+        '200': {description: Accepted profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /models/refresh/settings:
+    put:
+      operationId: setModelRefreshSettings
+      description: Person with models.manage configures reporting, profile acceptance and optional API discovery. Ladders are never automatically reordered by discovery.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettings'}}}}
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /models/refresh/credentials/{accountId}:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: setModelDiscoveryCredential
+      description: Person with models.manage stores a vendor model-list key encrypted and bound to this tenant/account. Empty key revokes it. Secrets never enter responses or audit events. Only fixed vendor model-list endpoints are used; redirects are refused.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vendor, api_key]
+              properties:
+                vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}
+                api_key: {type: string, maxLength: 4096, writeOnly: true}
+      responses:
+        '200': {description: Credential configured or revoked; no key material}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /models/routes:
     put:
       operationId: replaceModelRoutes
@@ -5717,7 +5807,7 @@ paths:
       description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai or cursor and aliases codex → openai, claude → anthropic, grok → xai. pi is ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
       responses:
@@ -5964,7 +6054,7 @@ paths:
       description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
       security: [{session: []}]
       parameters:
-        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor]}}
       responses:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
@@ -11715,6 +11805,7 @@ components:
         model: {$ref: '#/components/schemas/HarnessModel'}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
         brief: {$ref: '#/components/schemas/HarnessBrief'}
         worktree: {$ref: '#/components/schemas/HarnessWorktree'}
@@ -12494,6 +12585,34 @@ components:
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
+    ModelObservationWrite:
+      type: object
+      additionalProperties: false
+      required: [report_id, harness, model, effort, status]
+      properties:
+        report_id: {type: string, format: uuid, description: Stable evidence id. Retrying the same evidence never counts another failure.}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        model: {type: string, minLength: 1, maxLength: 128}
+        effort: {type: string, minLength: 1, maxLength: 32}
+        status: {type: string, enum: [advertised, working, invalid], description: Invalid means an explicit model-not-found or unsupported-model failure, never a generic HTTP 400.}
+    ModelRefreshSettings:
+      type: object
+      additionalProperties: false
+      required: [agent_reports_enabled, auto_add_profiles, api_enabled, interval_minutes]
+      properties:
+        agent_reports_enabled: {type: boolean, default: true}
+        auto_add_profiles: {type: boolean, default: true}
+        api_enabled: {type: boolean, default: false}
+        interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
+    ModelRefreshStatus:
+      type: object
+      required: [settings, sources, observations, last_result]
+      properties:
+        settings: {$ref: '#/components/schemas/ModelRefreshSettings'}
+        last_run_at: {type: [string, 'null'], format: date-time}
+        last_result: {type: object, additionalProperties: true}
+        sources: {type: array, items: {type: object, required: [account_id, vendor], properties: {account_id: {type: string, format: uuid}, vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}}}}
+        observations: {type: array, items: {type: object, additionalProperties: true}}
     ModelProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfileWrite'}
@@ -12507,7 +12626,7 @@ components:
       type: object
       required: [role, priority, profile_id, state]
       properties:
-        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
         priority: {type: integer, minimum: 1}
         profile_id: {type: string, format: uuid}
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}

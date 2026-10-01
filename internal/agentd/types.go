@@ -7,6 +7,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
@@ -241,7 +242,8 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
-	VendorLimit *capacity.LimitHit
+	ModelReports []modelregistry.Observation
+	VendorLimit  *capacity.LimitHit
 
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading

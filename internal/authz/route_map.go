@@ -18,6 +18,14 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/models/refresh":  "models.read",
+	"POST /api/models/refresh": "models.refresh",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports": "harness.worker",
+	"POST /api/models/proposals/accept":                                         "models.manage",
+	"POST /api/models/reports":                                                  "models.report",
+	"PUT /api/models/refresh/settings":                                          "models.manage",
+	"PUT /api/models/refresh/credentials/{accountId}":                           "models.manage",
+
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",

@@ -66,7 +66,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return upgradeCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
 		return err
@@ -75,7 +75,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return upgradeCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -102,6 +102,9 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 			return err
 		}
 		routes = append(routes, stored)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return err
 	}
 	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
 		Profiles []Profile `json:"profiles"`

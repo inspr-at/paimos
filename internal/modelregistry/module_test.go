@@ -215,7 +215,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	astra := profileBySlug(profiles, "codex-astra-xhigh")
 	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
 		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 4 || gate.Ladder[1].SkipReasons[0] != "author family" {
+		len(gate.Ladder) != 5 || gate.Ladder[1].SkipReasons[0] != "author family" {
 		t.Fatalf("gate %+v", gate)
 	}
 	otherGate := decode[Resolution](t, &other, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude", "", http.StatusOK)

@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -202,6 +203,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if s.ReasoningEffort != "" {
+			body["model_reports"] = []modelregistry.Observation{{ReportID: modelregistry.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
@@ -246,6 +250,9 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if s.ReasoningEffort != "" && s.Harness != "" {
+			body["model_reports"] = []modelregistry.Observation{{ReportID: modelregistry.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: s.Harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort

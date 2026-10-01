@@ -37,7 +37,7 @@ var CoordinatorPermissions = authz.CoordinatorKeyScopes
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 const VerificationSeconds = 60
 
-var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
+var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "models.report", "models.refresh", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
