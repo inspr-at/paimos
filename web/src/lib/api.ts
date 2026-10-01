@@ -112,6 +112,7 @@ export interface Kind {
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
 export interface WorkNode {
+  human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
   fields: Record<string, unknown>; state: string; parent_id: string | null
@@ -120,10 +121,11 @@ export interface WorkNode {
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface SearchHit { node: WorkNode; score: number }
 export interface NodeCreate {
+  human_check?: string | null
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
   state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
 }
-export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state'>>
+export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>>
 
 export class APIError extends Error {
   readonly status: number
@@ -211,6 +213,7 @@ export interface ListItem extends WorkNode {
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
+  human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
@@ -266,6 +269,7 @@ export interface BulkChange {
 export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string; code?: string }[] }
 export const bulkChange = (body: BulkChange) => writing(() => json<BulkResult>('/nodes/bulk', 'POST', body), (result, sent) => { for (const node of result.items ?? []) rowStore.wrote(node, sent) })
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
+export const getStatusHelp = (projectId?: string, signal?: AbortSignal) => json<import('./statusDefinitions').StatusHelp>(`/status/help${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`, 'GET', undefined, {}, signal)
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
   .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })
 // Shared project groups (AEON-136): everyone reads them; admins write, and every
@@ -279,7 +283,7 @@ export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/proj
 export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
 export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
-export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind'
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind' | 'human_check'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'

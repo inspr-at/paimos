@@ -14,7 +14,7 @@ ALTER TABLE model_profiles ADD CONSTRAINT model_profiles_family_v2_check
 ALTER TABLE agent_accounts ADD CONSTRAINT agent_accounts_harness_v2_check
     CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode')) NOT VALID;
 ALTER TABLE harness_sessions ADD CONSTRAINT harness_sessions_harness_v2_check
-    CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode')) NOT VALID;
+    CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode','media','terminal')) NOT VALID;
 ALTER TABLE account_groups ADD CONSTRAINT account_groups_harness_v2_check
     CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode')) NOT VALID;
 ALTER TABLE account_ticket_pins ADD CONSTRAINT account_ticket_pins_harness_v2_check

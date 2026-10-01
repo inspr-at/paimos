@@ -123,7 +123,7 @@ func TestMoreHarnessesMigrationPreservesReviewChecks(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			var pairingBefore string
+			var pairingBefore, runLabelsBefore string
 			err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
 				if name != "1088_more_harnesses.sql" {
 					return nil
@@ -132,6 +132,10 @@ func TestMoreHarnessesMigrationPreservesReviewChecks(t *testing.T) {
                     WHERE conrelid='work_order_reviews'::regclass AND contype='c'
                     AND pg_get_constraintdef(oid) LIKE '%reviewer_profile_id IS NULL%'
                     AND pg_get_constraintdef(oid) LIKE '%reviewer_family IS NULL%'`).Scan(&pairingBefore); err != nil {
+					return err
+				}
+				if err := d.App.QueryRow(t.Context(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                    WHERE conrelid='harness_sessions'::regclass AND conname='harness_run_label_check'`).Scan(&runLabelsBefore); err != nil {
 					return err
 				}
 				if !renamed {
@@ -207,6 +211,23 @@ func TestMoreHarnessesMigrationPreservesReviewChecks(t *testing.T) {
 			}
 			if pairingBefore == "" || pairingAfter != pairingBefore {
 				t.Fatalf("null pairing changed: before=%s after=%s", pairingBefore, pairingAfter)
+			}
+			var harnessEnum, runLabelsAfter string
+			if err := d.App.QueryRow(t.Context(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                WHERE conrelid='harness_sessions'::regclass AND conname='harness_sessions_harness_v2_check'`).Scan(&harnessEnum); err != nil {
+				t.Fatal(err)
+			}
+			for _, harness := range []string{"codex", "claude", "pi", "cursor", "grok", "gemini", "opencode", "media", "terminal"} {
+				if !strings.Contains(harnessEnum, "'"+harness+"'::text") {
+					t.Fatalf("missing %s in widened session enum: %s", harness, harnessEnum)
+				}
+			}
+			if err := d.App.QueryRow(t.Context(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                WHERE conrelid='harness_sessions'::regclass AND conname='harness_run_label_check'`).Scan(&runLabelsAfter); err != nil {
+				t.Fatal(err)
+			}
+			if runLabelsBefore == "" || runLabelsAfter != runLabelsBefore {
+				t.Fatalf("media/terminal label rule changed: before=%s after=%s", runLabelsBefore, runLabelsAfter)
 			}
 			for _, def := range []string{reviewerEnum, authorEnum} {
 				for _, family := range []string{"openai", "anthropic", "xai", "cursor", "google", "local"} {
