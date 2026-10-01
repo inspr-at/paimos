@@ -33,6 +33,9 @@ var workflowConcurrency = map[string]map[string]any{
 	"homebrew-tap.yml": {
 		"group": `homebrew-tap-${{ github.event.release.tag_name }}`, "cancel-in-progress": false,
 	},
+	"verify-live.yml": {
+		"group": "aeon-live-verification", "cancel-in-progress": false,
+	},
 	"release-image-check.yml": {
 		"group": `release-image-check-${{ github.ref }}`, "cancel-in-progress": true,
 	},
