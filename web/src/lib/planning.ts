@@ -110,12 +110,16 @@ export interface ModelCell { text: string; tip: string; state: 'none' | 'planned
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
 }
+// Match aeon_session_model_key: profile models may carry a trailing effort,
+// while the session roll-up uses the base model. Other suffixes stay intact.
+function sessionModelKey(model: string): string { return model.trim().replace(/^(.+)-(low|medium|high|xhigh|max|ultra)$/, '$1') }
 function planLine(row: PlanningRow, models: PlanningModel[] = []): string {
   const route = plannedRoute(row)
-  if (!route) return 'No model planned: set a role and area'
-  const asUsed = models.every(model => model.harness === route.harness && model.model === route.model &&
-    (model.model_version === undefined || route.model_version === undefined || model.model_version === route.model_version))
-  const suffix = models.length ? asUsed ? ', as used' : ' (a different model ran)' : ` (${route.model})`
+  if (!route) return models.length ? 'No model planned: no role set' : 'No model planned: set a role and area'
+  const used = models.length === 1 ? models[0] : undefined
+  const asUsed = used && used.harness === route.harness && sessionModelKey(used.model) === sessionModelKey(route.model) &&
+    (used.model_version === undefined || route.model_version === undefined || used.model_version === route.model_version)
+  const suffix = used ? asUsed ? ', as used' : ' (a different model ran)' : models.length ? '' : ` (${route.model})`
   return `Planned: ${fullModelName(route)}${route.effort ? ` · ${route.effort}` : ''}${suffix}`
 }
 function usedLines(models: PlanningModel[]): string[] {
@@ -124,9 +128,8 @@ function usedLines(models: PlanningModel[]): string[] {
     const levels = [...new Set(model.sessions.map(session => effortTip(session.effort_level)).filter(Boolean))]
     const reported = model.sessions.filter(session => session.tokens !== null)
     const total = reported.reduce((sum, session) => sum + session.tokens!, 0)
-    const review = model.sessions.length > 0 && model.sessions.every(session => session.role === 'reviewer')
     return [fullModelName(model), ...efforts, ...levels, `${model.sessions.length} session${model.sessions.length === 1 ? '' : 's'}${model.sessions.some(session => session.running) ? ', running' : ''}`,
-      ...(models.length > 1 ? [reported.length ? `${formatTokenCount(total)}${review ? ' (review)' : ''}` : 'usage not reported yet'] : [])].join(' · ')
+      ...(models.length > 1 ? [reported.length ? formatTokenCount(total) : 'usage not reported yet'] : [])].join(' · ')
   })
 }
 export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): ModelCell {

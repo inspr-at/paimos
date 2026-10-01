@@ -265,9 +265,13 @@ each includes session identity, effort, role, running state and reported tokens.
 The Model cell shows the leading used model plus a count of other models, with
 planned versus used details grouped by model in its hover: effort, session count,
 running state and token totals, without session IDs. The planned comparison uses
-the work-start route. Running Tokens/Cost hovers put measured usage before the
-snapshot estimate and its percentage. Column fitting measures visible values,
-and the empty Cost note appears only while Cost is ticked. Cost and actual billing
+the work-start route, comparing base model keys with embedded effort removed.
+Only a single used model adds “as used” or “a different model ran”; mixed-model
+hovers end with the planned label alone. Usage without a planned route says
+“No model planned: no role set”. Session roles identify workers or coordinators,
+so they do not imply that a run was a review. Running Tokens/Cost hovers put
+measured usage before the snapshot estimate and its percentage. Column fitting
+measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 
 The Display panel saves Effort meter On/Off (default On), Model names Full/Short
