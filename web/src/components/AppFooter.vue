@@ -219,9 +219,11 @@ const label = computed(() => {
   .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }
   .app-footer.hidden { transform: translateY(100%); }
   .footer-name { font-size: 9px; letter-spacing: .18em; }
+  /* Let the name shrink on narrow phones while retaining room for the flow. */
+  .version-pill { max-width: calc(100% - 48px); }
   .pill-face { height: 30px; gap: 6px; }
   .release-slot { gap: 6px; }
-  .footer-codename { flex-basis: 48px; width: 48px; font-size: 11px; }
+  .footer-codename { flex-basis: 72px; width: 72px; font-size: 11px; }
   .pill-version { font-size: 11.5px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }

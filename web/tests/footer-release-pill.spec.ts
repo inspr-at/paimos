@@ -55,12 +55,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(await pill(page).locator('.pill-face').evaluate(el => [...el.querySelectorAll('svg, .footer-codename, .calendar-version, .new-badge')].map(child => child.tagName === 'svg' ? 'history' : child.className.split(' ')[0]))).toEqual(['history', 'footer-codename', 'calendar-version', 'new-badge'])
       await insideFooter(page)
       await page.evaluate(() => document.fonts.ready)
+      const codename = pill(page).locator('.footer-codename')
+      expect(await codename.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
       mkdirSync(screenshots, { recursive: true })
       await page.screenshot({ path: join(screenshots, `${width < 600 ? 'phone' : 'desktop'}-${colorScheme}.png`) })
       await pill(page).hover()
       await expect(version(page)).toHaveAttribute('data-version-view', 'revealed')
       await expect(version(page).locator('.ss')).toHaveCSS('transition', 'none')
       await expect(pill(page).locator('.footer-codename')).toBeVisible()
+      expect(await codename.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
       await insideFooter(page)
       await page.mouse.move(1, 1)
       await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
@@ -84,6 +87,7 @@ test('opt-in flow avoids the release pill, including during the version reveal',
       await expect(version(page)).toHaveAttribute('data-version-view', reveal ? 'revealed' : 'pretty')
       await expect.poll(async () => {
         const flow = await bounds(chip)
+        expect(flow.width).toBeGreaterThan(0)
         return flow.x + flow.width - (await bounds(pill(page))).x
       }).toBeLessThanOrEqual(0)
       await insideFooter(page)
@@ -247,6 +251,9 @@ for (const width of [1440, 390, 320]) {
     releaseVersion()
     await expect(badge).toHaveText('New')
     await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}, new releases since your last visit`)
+    if (width === 390) {
+      expect(await pill(page).locator('.footer-codename').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+    }
     await staysPut()
     releaseHistory()
     await expect(badge).toHaveText('3 new')
