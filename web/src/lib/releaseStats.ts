@@ -53,12 +53,14 @@ function onDay(at: number, now: number) {
 
 // ---------- Numbers, rounded honestly ----------
 const whole = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 })
-// A rate as people say it: whole numbers from 10, one decimal below ("2.5", "7").
+const smallRate = new Intl.NumberFormat('en-GB', { maximumSignificantDigits: 2, useGrouping: false })
+// Whole numbers from 10, one decimal below, and two significant digits for
+// rates under a tenth so sparse histories keep their actual order of magnitude.
 export function rate(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0'
+  if (n < 0.1) return smallRate.format(n)
   if (n >= 9.95) return whole.format(Math.round(n))
-  const r = Math.round(n * 10) / 10
-  return r === 0 ? '0.1' : String(r)
+  return String(Math.round(n * 10) / 10)
 }
 // Large figures to two significant digits: "5,200", "380".
 export function roughly(n: number): string {
@@ -121,7 +123,7 @@ export const STAT_KEYS: readonly StatKey[] = ['perweek', 'features', 'since', 'm
 export type StatViz =
   | { kind: 'cumulative'; points: number[]; total: number; from: string; pace: string; aria: string }
   | { kind: 'stacked'; bars: { features: number; fixes: number }[]; from: string; aria: string }
-  | { kind: 'timeline'; ticks: number[]; last: number; lastName: string; gap: string; marks: { at: number; label: string }[]; aria: string }
+  | { kind: 'timeline'; ticks: number[]; last: number; lastBeforeWindow: boolean; lastName: string; gap: string; marks: { at: number; label: string }[]; aria: string }
   | { kind: 'histogram'; buckets: { label: string; n: number }[]; median: number; medianLabel: string; aria: string }
   | { kind: 'week'; days: { letter: string; n: number | null; today: boolean }[]; aria: string }
   | { kind: 'streak'; days: number[]; from: string; to: string; labels: string[]; aria: string }
@@ -202,6 +204,7 @@ export function releaseStats(releases: Release[], now: number): Stat[] {
   const verb = last.release.published_at ? 'published' : 'tagged'
   const shown = Math.max(40 * HOUR, Math.min(14 * DAY, sinceLast + 4 * HOUR))
   const start = now - shown
+  const lastBeforeWindow = last.at < start
   const marks: { at: number; label: string }[] = []
   for (let d = addDays(dayStart(start), 1); d < now; d = addDays(d, 1)) marks.push({ at: (d - start) / shown, label: dayMonth(d) })
   stats.push({
@@ -209,9 +212,9 @@ export function releaseStats(releases: Release[], now: number): Stat[] {
     sub: `${last.release.codename ? `${last.release.codename}, ${verb}` : verb.charAt(0).toUpperCase() + verb.slice(1)} ${onDay(last.at, now)} at ${clock(last.at)}`,
     chips: median ? [sinceLast < median ? 'within the median gap' : `${times(sinceLast / median)} the median gap`] : [],
     viz: {
-      kind: 'timeline', ticks: all.filter(x => x.at >= start && x !== last).map(x => (x.at - start) / shown), last: (last.at - start) / shown,
+      kind: 'timeline', ticks: all.filter(x => x.at >= start && x.at <= now && x !== last).map(x => (x.at - start) / shown), last: Math.max(0, Math.min(1, (last.at - start) / shown)), lastBeforeWindow,
       lastName: nameOf(last.release), gap: span(sinceLast), marks,
-      aria: `Release times over the last ${Math.round(shown / HOUR)} hours; ${span(sinceLast)} since ${nameOf(last.release)}`,
+      aria: `Release times over the last ${Math.round(shown / HOUR)} hours; ${span(sinceLast)} since ${nameOf(last.release)}${lastBeforeWindow ? ', before this window' : ''}`,
     },
   })
 
@@ -315,6 +318,8 @@ export const rangeOf = (value: unknown): RangeKey => RANGES.some(r => r.key === 
 export const releaseRangeKey = (principalId: string) => `aeon.release-history.range.${principalId}`
 
 export interface Slot {
+  // Stable calendar identity, independent of the slot's changing count or label.
+  start: number
   // Short label under the bar ('' when the axis skips it) and the full one for the tooltip.
   label: string; full: string
   n: number
@@ -370,7 +375,7 @@ export function cadence(releases: Release[], now: number, key: RangeKey): Cadenc
     }
     const firstRelease = inside[0], lastRelease = inside.length > 1 ? inside[inside.length - 1] : undefined
     return {
-      label, full, n: inside.length, current,
+      start, label, full, n: inside.length, current,
       first: firstRelease ? at(firstRelease) : '', last: lastRelease ? at(lastRelease) : '',
       weekend: range.unit === 'day' && (wd === 0 || wd === 6),
       before: firstAt !== null && end !== Infinity && end <= firstAt,

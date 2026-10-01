@@ -128,6 +128,11 @@ defineExpose({ navigationSettled })
 const phoneQuery = window.matchMedia('(max-width: 760px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
+// Once the overview stacks, both cards belong in the scrolling list, including
+// tablet landscape widths where the list and detail still sit side by side.
+const scrollStatsQuery = window.matchMedia('(max-width: 900px)')
+const scrollStats = ref(scrollStatsQuery.matches)
+const onScrollStats = (event: MediaQueryListEvent) => { scrollStats.value = event.matches }
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
@@ -354,6 +359,7 @@ onMounted(async () => {
   opener = document.activeElement as HTMLElement | null
   setOverlayTitle('Releases')
   phoneQuery.addEventListener('change', onPhone)
+  scrollStatsQuery.addEventListener('change', onScrollStats)
   clock = setInterval(() => { now.value = Date.now() }, 30_000)
   dialog.value?.showModal()
   dialog.value?.focus()
@@ -369,6 +375,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   phoneQuery.removeEventListener('change', onPhone)
+  scrollStatsQuery.removeEventListener('change', onScrollStats)
   clearInterval(clock)
   setOverlayTitle('')
   // Leave the top layer first: the page is inert while the modal is open.
@@ -444,14 +451,14 @@ const KINDS = [
           <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :releases="releases" :now="now" />
-        <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 2" :key="i" class="skeleton" /></div>
+        <ReleaseStats v-if="releases.length && !scrollStats" class="stats" :releases="releases" :now="now" />
+        <div v-else-if="!scrollStats && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 2" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
-          <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :releases="releases" :now="now" />
+          <!-- Stacked cards scroll away with the list, inside its gutter. -->
+          <ReleaseStats v-if="releases.length && scrollStats" compact class="stats" :releases="releases" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -643,7 +650,6 @@ const KINDS = [
 .notice svg { color: var(--teal-ink); }
 .stats-placeholder { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; height: 300px; }
 .stats-placeholder .skeleton { border-radius: 20px; }
-@media (max-width: 900px) { .stats-placeholder { grid-template-columns: minmax(0, 1fr); height: 600px; } }
 
 /* ---------- Body ---------- */
 .body { display: grid; grid-template-columns: minmax(360px, 460px) minmax(0, 1fr); gap: 28px; min-height: 0; }

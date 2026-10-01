@@ -42,7 +42,8 @@ const byKey = (stats: Stat[]) => Object.fromEntries(stats.map(s => [s.key, s]))
 
 describe('numbers as people say them', () => {
   it('rounds rates, large figures and multiples honestly', () => {
-    expect([rate(100.3), rate(14.33), rate(7), rate(2.46), rate(0.04), rate(0)]).toEqual(['100', '14', '7', '2.5', '0.1', '0'])
+    expect([rate(100.3), rate(14.33), rate(7), rate(2.46), rate(0.04), rate(0)]).toEqual(['100', '14', '7', '2.5', '0.04', '0'])
+    expect([rate(0.002747), rate(0.00000123)]).toEqual(['0.0027', '0.0000012'])
     expect([roughly(5235), roughly(4297), roughly(380.4), roughly(12.6)]).toEqual(['5,200', '4,300', '380', '13'])
     expect([times(1.99), times(3.04), times(3.2), times(1.43), times(2)]).toEqual(['2×', '3×', '≈ 3×', '≈ 1.4×', '2×'])
   })
@@ -114,6 +115,13 @@ describe('the seven stats', () => {
     expect(byKey(releaseStats([rel(at(8))], at(13))).features.chips).toEqual(['no feature tickets told yet'])
   })
 
+  it('one feature over 52 weeks keeps its daily pace below a hundredth', () => {
+    const releases = [rel(NOW - 53 * 7 * DAY), told(NOW - DAY, [['AEON-1', 'features']])]
+    const features = byKey(releaseStats(releases, NOW)).features
+    expect(features.value).toBe('0.019')
+    expect(features.chips).toEqual(['≈ 0.0027 a day'])
+  })
+
   it('since the last release names it and compares the wait with the median gap', () => {
     expect(s.since.value).toBe('3 h 4 min')
     expect(s.since.sub).toBe('Name 113, published today at 09:56')
@@ -126,6 +134,17 @@ describe('the seven stats', () => {
     // 40 hours back: 30 Sep and 1 Oct begin inside the strip.
     expect(viz.marks.map(m => m.label)).toEqual(['30 Sep', '1 Oct'])
     expect(viz.last).toBeCloseTo(1 - (3 * HOUR + 4 * MIN) / (40 * HOUR), 5)
+  })
+
+  it('a release older than the timeline window has a bounded, explicitly older marker', () => {
+    const since = byKey(releaseStats([rel(NOW - 30 * DAY)], NOW)).since
+    const viz = since.viz
+    if (viz.kind !== 'timeline') throw new Error(viz.kind)
+    expect(viz.last).toBe(0)
+    expect(viz.lastBeforeWindow).toBe(true)
+    expect(viz.aria).toContain('before this window')
+    expect(viz.gap).toBe('30 days')
+    expect(viz.marks.every(m => m.at >= 0 && m.at <= 1)).toBe(true)
   })
 
   it('the median gap comes with the mean and the 90th percentile, and a histogram that marks it', () => {

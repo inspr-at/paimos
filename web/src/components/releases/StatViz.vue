@@ -57,19 +57,20 @@ const shapes = computed<Shape[]>(() => {
     if (n > 1) text(x(n - 1), 62, 'today', 'label-on')
   } else if (v.kind === 'timeline') {
     const x = (p: number) => L + p * (R - L)
-    const lx = x(v.last), nx = R - .6, nameX = clamp(lx, 40, 306)
+    const lx = x(v.last), nx = R - .6, nameX = v.lastBeforeWindow ? L : clamp(lx, 40, 306)
     line(L, 34, R, 34, 'base')
     for (const m of v.marks) {
       line(x(m.at), 22, x(m.at), 46, 'grid')
       if (Math.abs(x(m.at) + 3 - nameX) > 64 && x(m.at) < 300) text(x(m.at) + 3, 60, m.label, 'label', 'start')
     }
     for (const t of v.ticks) line(x(t), 27, x(t), 41, 'tick')
-    line(lx, 24, lx, 44, 'tick-on')
+    if (v.lastBeforeWindow) out.push({ t: 'path', d: `M${L + 4} 27 L${L} 34 L${L + 4} 41`, c: 'earlier' })
+    else line(lx, 24, lx, 44, 'tick-on')
     if (nx - 5 > lx + 4) line(lx + 4, 34, nx - 5, 34, 'wait')
     out.push({ t: 'circle', x: f(nx), y: 34, r: 4.2, c: 'now' })
     out.push({ t: 'path', d: `M${f(lx)} 17 V13 H${f(nx)} V17`, c: 'bracket' })
     text(clamp((lx + nx) / 2, 24, 324), 9, v.gap, 'label-gold')
-    text(nameX, 60, v.lastName, 'label-on')
+    text(nameX, 60, `${v.lastName}${v.lastBeforeWindow ? ' · earlier' : ''}`, 'label-on', v.lastBeforeWindow ? 'start' : 'middle')
   } else if (v.kind === 'histogram') {
     const w = 45, gap = (R - L - 6 * w) / 5, x = (i: number) => L + i * (w + gap)
     const max = Math.max(1, ...v.buckets.map(b => b.n)), on = Math.floor(v.median)
@@ -155,6 +156,7 @@ const shapes = computed<Shape[]>(() => {
 .placeholder { fill: none; stroke: var(--line-2); stroke-width: 1.2; stroke-dasharray: 2 2; }
 .tick { stroke: color-mix(in srgb, var(--teal) 42%, transparent); stroke-width: 2.2; stroke-linecap: round; }
 .tick-on { stroke: var(--teal); stroke-width: 2.8; stroke-linecap: round; }
+.earlier { fill: none; stroke: var(--teal); stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
 .wait { stroke: var(--gold-ink); stroke-width: 2.4; stroke-dasharray: 3 3; stroke-linecap: round; }
 .now { fill: var(--surface); stroke: var(--gold-ink); stroke-width: 2.2; }
 .bracket { fill: none; stroke: var(--gold-ink); stroke-width: 1.2; stroke-linejoin: round; }

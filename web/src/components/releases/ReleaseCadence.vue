@@ -65,8 +65,19 @@ const labelOf = (s: Slot, i: number) => thin.value && (N.value - 1 - i) % 2 ? ''
 // Hover and focus show one slot; the keyboard keeps one bar in the tab order.
 const active = ref<number | null>(null)
 const focusAt = ref(0)
-watch(slots, list => { focusAt.value = list.length - 1; active.value = null }, { immediate: true })
 const bars: HTMLElement[] = []
+watch(slots, (list, previous) => {
+  // Counts and relative labels change on clock ticks. Keep the same bar and
+  // tooltip unless the calendar window itself moves or the range changes.
+  if (previous?.length === list.length && list.every((s, i) => s.start === previous[i]?.start)) return
+  const hadFocus = bars[focusAt.value] === document.activeElement
+  const nextFocus = list.findIndex(s => s.start === previous?.[focusAt.value]?.start && !s.before)
+  const activeStart = active.value === null ? undefined : previous?.[active.value]?.start
+  const nextActive = list.findIndex(s => s.start === activeStart && !s.before)
+  focusAt.value = nextFocus >= 0 ? nextFocus : list.length - 1
+  active.value = nextActive >= 0 ? nextActive : null
+  if (hadFocus) void nextTick(() => bars[focusAt.value]?.focus())
+}, { immediate: true })
 const usable = computed(() => slots.value.flatMap((s, i) => s.before ? [] : [i]))
 function keys(event: KeyboardEvent) {
   const list = usable.value
@@ -121,7 +132,7 @@ const tipStyle = computed(() => {
       <p v-if="beforeNote" class="before-note" :style="{ width: `calc((100% - var(--axis)) * ${beforeCount / N})` }" aria-hidden="true">{{ beforeNote }}</p>
       <ol class="bars" :class="{ dense }" role="list" :aria-label="data.aria" :style="cols" @keydown="keys">
         <li
-          v-for="(s, i) in slots" :key="`${data.range.key}-${i}`" :ref="el => { if (el) bars[i] = el as HTMLElement }"
+          v-for="(s, i) in slots" :key="`${data.range.key}-${s.start}`" :ref="el => { if (el) bars[i] = el as HTMLElement }"
           class="slot" :class="{ before: s.before, weekend: s.weekend, peak: i === data.peak, current: s.current, active: active === i }"
           :tabindex="s.before ? undefined : i === focusAt ? 0 : -1" :aria-label="aria(s)"
           @mouseenter="active = s.before ? null : i" @mouseleave="active = null" @focus="active = i; focusAt = i" @blur="active = null"

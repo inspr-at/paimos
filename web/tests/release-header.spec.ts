@@ -14,11 +14,12 @@ const card = (page: Page) => sheet(page).getByRole('region', { name: 'Release st
 const slide = (page: Page, n: number, label: string) => card(page).getByRole('group', { name: `${n} of 7: ${label}` })
 const chart = (page: Page) => sheet(page).getByRole('region', { name: 'Release cadence' })
 
-async function open(page: Page, options: { motion?: boolean; running?: (h: ReturnType<typeof releaseHistory>) => string } = {}) {
-  await page.setViewportSize({ width: 1440, height: 1000 })
+async function open(page: Page, options: { motion?: boolean; running?: (h: ReturnType<typeof releaseHistory>) => string; viewport?: { width: number; height: number }; history?: ReturnType<typeof releaseHistory>; now?: number } = {}) {
+  await page.setViewportSize(options.viewport ?? { width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: options.motion ? 'no-preference' : 'reduce' })
-  await page.clock.install()
-  const history = releaseHistory()
+  const now = options.now ?? Date.now()
+  await page.clock.install({ time: new Date(now) })
+  const history = options.history ?? releaseHistory(now)
   await mockWork(page, fixtures())
   await mockReleases(page, history, { running: options.running?.(history) })
   await page.goto('/releases')
@@ -105,6 +106,61 @@ test('with reduced motion the card never moves by itself', async ({ page }) => {
   }
 })
 
+test('Resume respects reduced motion, including live preference changes', async ({ page }) => {
+  await open(page)
+  const resume = card(page).getByRole('button', { name: 'Resume automatic rotation' })
+  await resume.click()
+  await leave(page)
+  await page.clock.runFor(15_000)
+  await expect(slide(page, 1, 'Releases per week')).toBeVisible()
+  await expect(slide(page, 1, 'Releases per week')).toHaveAttribute('aria-live', 'polite')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await resume.click()
+  await leave(page)
+  await page.clock.runFor(7100)
+  await expect(slide(page, 2, 'Features per week')).toBeVisible()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(resume).toBeVisible()
+  await resume.click()
+  await leave(page)
+  await page.clock.runFor(15_000)
+  await expect(slide(page, 2, 'Features per week')).toBeVisible()
+  await expect(slide(page, 2, 'Features per week')).toHaveAttribute('aria-live', 'polite')
+})
+
+for (const width of [761, 800, 900]) {
+  test(`at ${width}×360 the stacked cards scroll and release rows stay reachable`, async ({ page }) => {
+    await open(page, { viewport: { width, height: 360 } })
+    await expect(sheet(page).locator('.head .stats')).toHaveCount(0)
+    await expect(sheet(page).locator('.list-pane .stats')).toHaveCount(1)
+    const pane = sheet(page).locator('.list-pane')
+    const bounds = await pane.boundingBox()
+    expect(bounds!.height).toBeGreaterThan(80)
+    await pane.evaluate(el => { el.scrollTop = el.scrollHeight })
+    const row = sheet(page).getByRole('option').last()
+    await expect(row).toBeInViewport()
+    const statBounds = await card(page).boundingBox()
+    expect(statBounds!.y + statBounds!.height).toBeLessThanOrEqual(bounds!.y)
+  })
+}
+
+test('a thirty-day release gap keeps the timeline inside the phone card', async ({ page }) => {
+  const now = Date.now()
+  await open(page, { now, history: releaseHistory(now - 30 * 86_400_000), viewport: { width: 390, height: 844 } })
+  await card(page).getByRole('button', { name: 'Next stat' }).click()
+  await card(page).getByRole('button', { name: 'Next stat' }).click()
+  const viz = slide(page, 3, 'Since the last release').getByRole('img')
+  await expect(viz).toHaveAttribute('aria-label', /before this window/)
+  await expect(viz.locator('text').last()).toContainText('earlier')
+  const geometry = await viz.evaluate(el => {
+    const svg = el as SVGSVGElement
+    const drawn = svg.getBBox()
+    return { left: drawn.x, right: drawn.x + drawn.width, width: svg.viewBox.baseVal.width }
+  })
+  expect(geometry.left).toBeGreaterThanOrEqual(0)
+  expect(geometry.right).toBeLessThanOrEqual(geometry.width)
+})
+
 test('the title is the live codename with one status line; Details adds the generation and counts', async ({ page }) => {
   const history = await open(page)
   const live = history.releases.find(r => r.version === history.current)!
@@ -172,6 +228,22 @@ test('the bars are one keyboard stop; arrows walk them and the tooltip names the
   await page.keyboard.press('Home')
   expect(await sheet(page).getByRole('option', { selected: true }).getAttribute('id')).toBe(selected)
   await expect(chart(page).locator('.tip')).toBeVisible()
+})
+
+test('a clock tick preserves the chart focus, tooltip and next keyboard step', async ({ page }) => {
+  await open(page, { now: new Date('2026-10-01T12:00:00Z').getTime() })
+  const bars = chart(page).getByRole('listitem')
+  await bars.last().focus()
+  await page.keyboard.press('ArrowLeft')
+  const label = await bars.nth(5).getAttribute('aria-label')
+  const tooltip = await chart(page).locator('.tip').textContent()
+  await page.clock.runFor(30_100)
+  await expect(bars.nth(5)).toBeFocused()
+  await expect(bars.nth(5)).toHaveAttribute('tabindex', '0')
+  await expect(bars.nth(5)).toHaveAttribute('aria-label', label!)
+  await expect(chart(page).locator('.tip')).toHaveText(tooltip!)
+  await page.keyboard.press('ArrowLeft')
+  await expect(bars.nth(4)).toBeFocused()
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {

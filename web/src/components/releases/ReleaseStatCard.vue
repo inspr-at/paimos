@@ -17,11 +17,13 @@ const ROTATE_MS = 7000
 const index = ref(0)
 const stat = computed(() => props.stats[Math.min(index.value, props.stats.length - 1)])
 const reduce = window.matchMedia('(prefers-reduced-motion: reduce)')
+const reducedMotion = ref(reduce.matches)
 const stopped = ref(reduce.matches)
+const paused = computed(() => stopped.value || reducedMotion.value)
 const hovered = ref(false)
 const focused = ref(false)
 const elapsed = ref(0)
-const progress = computed(() => stopped.value ? 1 : Math.min(1, elapsed.value / ROTATE_MS))
+const progress = computed(() => paused.value ? 1 : Math.min(1, elapsed.value / ROTATE_MS))
 const card = ref<HTMLElement>()
 watch(() => props.stats.length, n => { if (index.value >= n) index.value = 0 })
 
@@ -30,11 +32,11 @@ let timer: ReturnType<typeof setInterval> | undefined
 function tick() {
   const now = Date.now(), step = Math.min(250, Math.max(0, now - last))
   last = now
-  if (stopped.value || hovered.value || focused.value || document.hidden || props.stats.length < 2) return
+  if (reduce.matches || paused.value || hovered.value || focused.value || document.hidden || props.stats.length < 2) return
   elapsed.value += step
   if (elapsed.value >= ROTATE_MS) { index.value = (index.value + 1) % props.stats.length; elapsed.value = 0 }
 }
-const onReduce = (event: MediaQueryListEvent) => { if (event.matches) stopped.value = true }
+const onReduce = (event: MediaQueryListEvent) => { reducedMotion.value = event.matches; if (event.matches) { stopped.value = true; elapsed.value = 0 } }
 onMounted(() => { last = Date.now(); timer = setInterval(tick, 100); reduce.addEventListener('change', onReduce) })
 onBeforeUnmount(() => { clearInterval(timer); reduce.removeEventListener('change', onReduce) })
 
@@ -45,7 +47,7 @@ function go(delta: number) {
   stopped.value = true
   elapsed.value = 0
 }
-function toggle() { stopped.value = !stopped.value; elapsed.value = 0 }
+function toggle() { stopped.value = reduce.matches || !stopped.value; elapsed.value = 0 }
 function focusOut(event: FocusEvent) { if (!card.value?.contains(event.relatedTarget as Node | null)) focused.value = false }
 
 // The stat's leading icon, on the 24 grid of the design.
@@ -65,7 +67,7 @@ const ICONS: Record<StatKey, string[]> = {
     ref="card" class="stat-card" :class="{ compact }" aria-roledescription="carousel" aria-label="Release stats"
     @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="focusOut"
   >
-    <div v-if="stat" class="slide" role="group" aria-roledescription="slide" :aria-label="`${index + 1} of ${stats.length}: ${stat.label}`" :aria-live="stopped ? 'polite' : 'off'">
+    <div v-if="stat" class="slide" role="group" aria-roledescription="slide" :aria-label="`${index + 1} of ${stats.length}: ${stat.label}`" :aria-live="paused ? 'polite' : 'off'">
       <div :key="stat.key" class="slide-in">
         <p class="label">
           <span class="icon" aria-hidden="true">
@@ -92,8 +94,8 @@ const ICONS: Record<StatKey, string[]> = {
         <span v-for="(s, i) in stats" :key="s.key" class="dot" :class="{ on: i === index }"><span class="fill" :style="{ width: i === index ? `${progress * 100}%` : '0%' }" /></span>
       </span>
       <span class="pos">{{ index + 1 }} / {{ stats.length }}</span>
-      <button type="button" class="nav pause" :aria-label="stopped ? 'Resume automatic rotation' : 'Pause automatic rotation'" @click="toggle">
-        <AppIcon :name="stopped ? 'play' : 'pause'" :size="12" />
+      <button type="button" class="nav pause" :aria-label="paused ? 'Resume automatic rotation' : 'Pause automatic rotation'" @click="toggle">
+        <AppIcon :name="paused ? 'play' : 'pause'" :size="12" />
       </button>
     </div>
   </section>
