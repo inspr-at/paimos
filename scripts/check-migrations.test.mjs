@@ -189,7 +189,7 @@ test('the static guard runs on PR and merge-group checkouts with full release-ta
   assert.match(workflow, /^  migration-compat:/m);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /node scripts\/check-migrations.mjs --base-ref/);
-  assert.match(workflow, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1/);
+  assert.match(workflow, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$'\s*$/m);
   assert.doesNotMatch(workflow, /if:.*pull_request/);
 });
 
