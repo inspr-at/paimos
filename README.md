@@ -206,6 +206,13 @@ between the text block and counts. Reduced motion, narrow screens and sparse
 graphs suppress it; hover exposes Open graph and Pause. Header framing and text
 separation are covered by `web/tests/header-glimpse.spec.ts`.
 
+Graph **Focus** fills the viewport and hides the app chrome. It prefers browser
+fullscreen when permitted and keeps the in-app full-frame layout when the API
+is absent, refused or ignored. Escape or **Exit** returns to the same graph,
+filters and selection. Open `/p/AEON/tickets?view=graph&focus=1` directly for
+in-app focus; knowledge graphs use the same parameters on their knowledge route.
+Focus preserves the graph's reduced-motion preference.
+
 ## Command line
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
@@ -339,6 +346,12 @@ and shared-inbox obligations stay outside the session thread.
 
 ### Agent work estimates
 
+Setting a ticket/task estimate also fills missing `route_role`, `area` and `complexity`. The server uses title and string labels/tags, then the nearest ancestor's classification or title hints, then `build` / `backend`. Explicit values win. Every server suggestion carries `<field>_source: "suggested"`, the acting principal's `<field>_by`, UTC `<field>_at`, and `<field>_confirmed: false`. A person can confirm a suggestion or an unconfirmed agent classification by resubmitting the same value without source/by/at, or with `aeon issue update KEY --role build --area backend --complexity S`. Agent values remain unconfirmed; client-supplied stamps cannot confer confirmation. Existing ticket rows are not backfilled.
+
+Complexity defaults to **S** for estimates up to 2 hours, **M** above 2 and up to 8 hours, and **L** above 8 hours. `build-hard` promotes one bucket (S → M, M → L, L → L). This is a deterministic suggestion, not a measured model-performance claim. Unconfirmed server-derived complexity follows estimate or role changes; explicit complexity retains its provenance. `aeon issue update KEY --estimate 2 --role build --area backend --complexity S` supplies all three, and issue JSON returns their stamps and confirmation flags.
+
+Harness sessions return `model_profile_id` for a unique tenant registry match by harness, model and effort. Recognized trailing effort suffixes (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`) move into `reasoning_effort`; `model_raw` retains the cleaned original string for audit. Unknown models, absent effort, conflicting explicit effort, and ambiguous profile versions stay unresolved. There is no inferred model alias or cross-tenant match. Model/effort heartbeats refresh the identity. An effort-only heartbeat preserves the stored original model string when a legacy session has no `model_raw`. The additive migration 1063 backfills only uniquely matched sessions, under tenant and project RLS, without changing registration replay digests. `SELECT aeon_backfill_session_model_profiles()` can repeat inside an authorized tenant transaction; it returns the updated-row count and leaves resolved and unknown rows unchanged.
+
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
 Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
 
@@ -346,7 +359,7 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.8`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it.
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.9`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -408,6 +421,16 @@ automatically. For a different native session, pass `--succeeds OLD_SESSION_UUID
 to `harness register` or `harness run-heartbeat`. The predecessor must belong to
 the same principal and project. A handed-over generation cannot revive through
 a late heartbeat.
+
+A Claude coordinator can register Claude children with the same authenticated
+`--agent`, `--parent-session LEAD_UUID` and a distinct private session reference
+and worker lease for each child. Child registration ignores the launcher's
+ambient `CLAUDE_CODE_SESSION_ID`, which belongs to the parent. For a child's own
+native binding, give `harness run-heartbeat` that child's `--source-session UUID`;
+manual registration can use the child's native ID as its private session ref.
+Explicit vendor references remain unique among active generations per tenant and
+agent across all harnesses. Registration conflicts name the conflicting field
+without returning private values.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
@@ -1450,7 +1473,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.8`:
+The reporter contract is `harness-session/1.9`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

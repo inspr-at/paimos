@@ -127,6 +127,49 @@ func TestRunHeartbeatRecordsVendorSessionRef(t *testing.T) {
 	}
 }
 
+func TestChildHeartbeatVendorSessionRef(t *testing.T) {
+	const ambient = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const nativeChild = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	for _, tc := range []struct {
+		name, harness, parent, source, want string
+	}{
+		{"claude parent", "claude", "", "", ambient},
+		{"claude child inherits parent", "claude", transcriptEntryID, "", ""},
+		{"claude child explicit source", "claude", transcriptEntryID, nativeChild, nativeChild},
+		{"codex child", "codex", transcriptEntryID, "", ambient},
+		{"grok child", "grok", transcriptEntryID, "", ""},
+		{"cursor child", "cursor", transcriptEntryID, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []hbCall
+			srv := heartbeatFixture(t, &calls, "", "")
+			defer srv.Close()
+			rt, stdout, stderr := heartbeatRuntime(t, srv)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", ambient)
+			t.Setenv("CODEX_SESSION_ID", ambient)
+			opts := heartbeatTestOptions(t.TempDir())
+			opts.Harness, opts.Parent, opts.SourceSession = tc.harness, tc.parent, tc.source
+			if err := rt.runHeartbeat(t.Context(), opts, heartbeatDeps{
+				alive: func(int) bool { return true },
+				wait:  func(context.Context, int, time.Duration) error { return errOwnerExited },
+			}); err != nil {
+				t.Fatal(err)
+			}
+			regs := hbWhere(calls, http.MethodPost, "/harness-sessions")
+			if len(regs) != 1 {
+				t.Fatal("missing heartbeat registration")
+			}
+			got, _ := regs[0].body["vendor_session_ref"].(string)
+			if got != tc.want || (tc.parent != "" && regs[0].body["parent_harness_session_id"] != tc.parent) {
+				t.Fatal("child vendor binding or parent changed")
+			}
+			if strings.Contains(stdout.String()+stderr.String(), ambient) || strings.Contains(stdout.String()+stderr.String(), nativeChild) {
+				t.Fatal("heartbeat output exposed a vendor session reference")
+			}
+		})
+	}
+}
+
 func TestInboxHookBindsVendorSession(t *testing.T) {
 	const (
 		vendorA = "claude-session-aaaaaaaa"
