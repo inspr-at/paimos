@@ -96,7 +96,7 @@ func deduplicateContent(ctx context.Context, tx pgx.Tx, st *session, raw []byte,
 	if !equal(prior["data"], doc["data"]) {
 		return Record{}, false, fault(409, "idempotency_conflict")
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO aithema_journal_content_events(tenant_id,sid,client_event_id,seq,original_bytes) VALUES($1,$2,$3,$4,$5)`, st.Tenant, st.ID, text(doc["client_event_id"]), number(prior["seq"]), raw)
+	_, err = tx.Exec(ctx, `INSERT INTO aithema_journal_content_events(tenant_id,sid,client_event_id,seq,wire_sha256) VALUES($1,$2,$3,$4,$5)`, st.Tenant, st.ID, text(doc["client_event_id"]), number(prior["seq"]), digest(raw))
 	return Record{Document: projection, Bytes: string(original)}, true, err
 }
 

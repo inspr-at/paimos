@@ -300,7 +300,7 @@ func backfillWorkMetadata(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-// The first-line opt-out is deliberately narrow: exactly one CREATE INDEX
+// The first-line opt-out is deliberately narrow: exactly one CREATE [UNIQUE] INDEX
 // CONCURRENTLY with unqualified, lowercase identifiers. It is not a general
 // escape hatch for arbitrary nontransactional migration batches.
 func concurrentIndex(body string, stmts []string) (string, string, error) {
@@ -309,7 +309,7 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 		return "", "", nil
 	}
 	if len(stmts) == 1 {
-		pattern := `^CREATE INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
+		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
 		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
 			return match[1], match[2], nil
 		}
@@ -339,17 +339,22 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 	// leave either a valid index before recording, or an invalid partial build.
 	// Reuse only a valid index on the expected table; rebuild an invalid one.
 	var valid bool
+	var unique bool
+	requiresUnique := strings.HasPrefix(stmt, "CREATE UNIQUE INDEX ")
 	var existingTable string
-	err := conn.QueryRow(ctx, `SELECT i.indisvalid, t.relname
+	err := conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
 		FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
 		JOIN pg_namespace n ON n.oid=c.relnamespace
 		JOIN pg_class t ON t.oid=i.indrelid
-		WHERE n.nspname=current_schema() AND c.relname=$1`, index).Scan(&valid, &existingTable)
+		WHERE n.nspname=current_schema() AND c.relname=$1`, index).Scan(&valid, &unique, &existingTable)
 	if err != nil && err != pgx.ErrNoRows {
 		return fmt.Errorf("inspect %s: %w", name, err)
 	}
 	if err == nil && existingTable != table {
 		return fmt.Errorf("migrate %s: index %s belongs to unexpected table %s", name, index, existingTable)
+	}
+	if err == nil && unique != requiresUnique {
+		return fmt.Errorf("migrate %s: index %s has unexpected uniqueness", name, index)
 	}
 	if err == nil && !valid {
 		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY `+pgx.Identifier{index}.Sanitize()); err != nil {
@@ -362,8 +367,8 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 		}
 		// IF NOT EXISTS may also skip a conflicting non-index relation. Never
 		// record a skipped or incomplete build as a successful migration.
-		if err := conn.QueryRow(ctx, `SELECT indisvalid AND indrelid=$2::regclass
-			FROM pg_index WHERE indexrelid=to_regclass($1)`, index, table).Scan(&valid); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT indisvalid AND indrelid=$2::regclass AND indisunique=$3
+			FROM pg_index WHERE indexrelid=to_regclass($1)`, index, table, requiresUnique).Scan(&valid); err != nil {
 			return fmt.Errorf("verify %s: %w", name, err)
 		}
 		if !valid {

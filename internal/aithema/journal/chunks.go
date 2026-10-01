@@ -16,6 +16,9 @@ import (
 
 const journalChunkBytes = 256 << 10
 const maxUnfinishedUploads = 64
+const maxStagedBytes = 16 << 20
+const maxInlineBytes = 1 << 20
+const maxResponseBytes = 4 << 20
 
 // Staging is durable across replicas but never advances a journal cursor.
 // The caller holds the session lock and rechecks delegated authority per chunk.
@@ -33,6 +36,11 @@ func (s *Store) upload(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	encoded, chunkOK := doc["chunk"].(string)
 	if len(doc) != 3 || !offsetOK || !totalOK || total <= 1<<20 || offset >= total || !chunkOK || len(encoded) > base64.StdEncoding.EncodedLen(journalChunkBytes) {
 		return nil, fault(400, "invalid_request")
+	}
+	// Reject before decoding a chunk, creating staging, or allocating the
+	// completion buffer. The 16 MiB ceiling includes the 13 MB contract case.
+	if total > maxStagedBytes {
+		return nil, fault(413, "too_large")
 	}
 	part, err := base64.StdEncoding.Strict().DecodeString(encoded)
 	if err != nil || base64.StdEncoding.EncodeToString(part) != encoded || int64(len(part)) != min(int64(journalChunkBytes), total-offset) {
@@ -81,11 +89,16 @@ func (s *Store) upload(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		return nil, err
 	}
 	var complete bytes.Buffer
+	complete.Grow(int(total))
 	for rows.Next() {
 		var chunk []byte
 		if err := rows.Scan(&chunk); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if int64(complete.Len()+len(chunk)) > total {
+			rows.Close()
+			return nil, fault(409, "idempotency_conflict")
 		}
 		complete.Write(chunk)
 	}
@@ -118,9 +131,8 @@ func readChunk(ctx context.Context, tx pgx.Tx, st *session, q url.Values) (json.
 	}
 	var total int64
 	var part []byte
-	// PostgreSQL bytea range reads keep each transfer bounded, including rows
-	// whose original UTF-8 document spans many transport chunks.
-	err := tx.QueryRow(ctx, `SELECT octet_length(original_bytes),substring(original_bytes FROM $4::integer FOR $5::integer) FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3`, st.Tenant, st.ID, seq, min(offset+1, int64(1<<31-1)), length).Scan(&total, &part)
+	// octet_length reads TOAST size metadata without detoasting the document.
+	err := tx.QueryRow(ctx, `SELECT octet_length(original_bytes) FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3`, st.Tenant, st.ID, seq).Scan(&total)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fault(404, "not_found")
 	}
@@ -129,6 +141,43 @@ func readChunk(ctx context.Context, tx pgx.Tx, st *session, q url.Values) (json.
 	}
 	if offset >= total {
 		return nil, fault(400, "invalid_request")
+	}
+	length = min(length, total-offset)
+	if total <= maxInlineBytes {
+		// This fallback may detoast at most 1 MiB, including pre-AIT-89 rows.
+		if err := tx.QueryRow(ctx, `SELECT substring(original_bytes FROM $4::integer FOR $5::integer) FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3 AND octet_length(original_bytes)<=$6`, st.Tenant, st.ID, seq, offset+1, length, maxInlineBytes).Scan(&part); err != nil {
+			return nil, err
+		}
+	} else {
+		start := offset / journalChunkBytes * journalChunkBytes
+		end := (offset + length - 1) / journalChunkBytes * journalChunkBytes
+		// An arbitrary range crosses at most two independently toasted chunks.
+		rows, err := tx.Query(ctx, `SELECT chunk_offset,bytes FROM aithema_journal_record_chunks WHERE tenant_id=$1 AND sid=$2 AND seq=$3 AND chunk_offset BETWEEN $4 AND $5 ORDER BY chunk_offset`, st.Tenant, st.ID, seq, start, end)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		part = make([]byte, 0, int(length))
+		next := start
+		for rows.Next() {
+			var position int64
+			var chunk []byte
+			if err := rows.Scan(&position, &chunk); err != nil {
+				return nil, err
+			}
+			if position != next || int64(len(chunk)) != min(int64(journalChunkBytes), total-position) {
+				return nil, fault(503, "unavailable")
+			}
+			lo, hi := max(offset-position, 0), min(offset+length-position, int64(len(chunk)))
+			part = append(part, chunk[lo:hi]...)
+			next += journalChunkBytes
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if int64(len(part)) != length {
+			return nil, fault(503, "unavailable")
+		}
 	}
 	return marshal(map[string]any{"seq": seq, "offset": offset, "total": total, "chunk": base64.StdEncoding.EncodeToString(part)}), nil
 }

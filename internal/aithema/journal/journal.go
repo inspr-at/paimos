@@ -44,6 +44,13 @@ func appendRecord(ctx context.Context, tx pgx.Tx, st *session, raw []byte, doc m
 	if err != nil {
 		return Record{}, err
 	}
+	if len(raw) > maxInlineBytes {
+		for offset := 0; offset < len(raw); offset += journalChunkBytes {
+			if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_record_chunks(tenant_id,sid,seq,chunk_offset,bytes) VALUES($1,$2,$3,$4,$5)`, st.Tenant, st.ID, st.Seq, offset, raw[offset:min(offset+journalChunkBytes, len(raw))]); err != nil {
+				return Record{}, err
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE aithema_sessions SET seq=$3 WHERE tenant_id=$1 AND sid=$2`, st.Tenant, st.ID, st.Seq); err != nil {
 		return Record{}, err
 	}
@@ -121,7 +128,13 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 			cap = "aithema.authority.read"
 		}
 	}
-	err := s.transaction(ctx, c.TenantID, c.SessionID, area == "ledger" && method == "POST", func(tx pgx.Tx, st *session) error {
+	err := s.transaction(ctx, c.TenantID, c.SessionID, area == "ledger" && method == "POST", func(tx pgx.Tx, st *session) (requestErr error) {
+		defer func() {
+			if requestErr == nil && len(out.Body) > maxResponseBytes {
+				out.Body = nil
+				requestErr = fault(413, "too_large")
+			}
+		}()
 		if verifyAtUse != nil {
 			if err := verifyAtUse(); err != nil {
 				return err
@@ -210,11 +223,12 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	if !uuid(id) {
 		return Record{}, fault(400, "invalid_request")
 	}
-	var prior, original, document []byte
-	err = tx.QueryRow(ctx, `SELECT original_bytes,original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND client_event_id=$3
-		UNION ALL SELECT e.original_bytes,r.original_bytes,r.document FROM aithema_journal_content_events e JOIN aithema_journal_records r USING(tenant_id,sid,seq) WHERE e.tenant_id=$1 AND e.sid=$2 AND e.client_event_id=$3`, st.Tenant, st.ID, id).Scan(&prior, &original, &document)
+	var original, document []byte
+	var aliasDigest *string
+	err = tx.QueryRow(ctx, `SELECT NULL::text,original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND client_event_id=$3
+		UNION ALL SELECT e.wire_sha256,r.original_bytes,r.document FROM aithema_journal_content_events e JOIN aithema_journal_records r USING(tenant_id,sid,seq) WHERE e.tenant_id=$1 AND e.sid=$2 AND e.client_event_id=$3`, st.Tenant, st.ID, id).Scan(&aliasDigest, &original, &document)
 	if err == nil {
-		if !bytes.Equal(raw, prior) {
+		if aliasDigest != nil && digest(raw) != *aliasDigest || aliasDigest == nil && !bytes.Equal(raw, original) {
 			return Record{}, fault(409, "idempotency_conflict")
 		}
 		return Record{Document: document, Bytes: string(original)}, nil
@@ -300,7 +314,10 @@ func (s *Store) read(ctx context.Context, tx pgx.Tx, st *session, area, action s
 				snapshot = map[string]any{"seq": *st.SnapshotSeq}
 			} else {
 				var raw, doc []byte
-				if err := tx.QueryRow(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3`, st.Tenant, st.ID, *st.SnapshotSeq).Scan(&raw, &doc); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3 AND octet_length(original_bytes)<=$4`, st.Tenant, st.ID, *st.SnapshotSeq, maxInlineBytes).Scan(&raw, &doc); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						return nil, fault(413, "too_large")
+					}
 					return nil, err
 				}
 				snapshot = formatRecord(Record{Document: doc, Bytes: string(raw)}, stored)
@@ -335,18 +352,41 @@ func (s *Store) read(ctx context.Context, tx pgx.Tx, st *session, area, action s
 			ids = append(ids, n)
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND (CASE WHEN $3::boolean THEN seq=ANY($4::bigint[]) ELSE seq>$5 END) ORDER BY seq`, st.Tenant, st.ID, q.Has("ids"), ids, after)
+	// Inspect only size metadata before fetching any selected large value.
+	var large bool
+	const selection = `tenant_id=$1 AND sid=$2 AND (CASE WHEN $3::boolean THEN seq=ANY($4::bigint[]) ELSE seq>$5 END)`
+	args := []any{st.Tenant, st.ID, q.Has("ids"), ids, after, maxInlineBytes}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM aithema_journal_records WHERE `+selection+` AND octet_length(original_bytes)>$6)`, args...).Scan(&large); err != nil {
+		return nil, err
+	}
+	if large {
+		return nil, fault(413, "too_large")
+	}
+	rows, err := tx.Query(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE `+selection+` AND octet_length(original_bytes)<=$6 ORDER BY seq`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	records := []any{}
+	var body bytes.Buffer
+	body.WriteByte('[')
 	for rows.Next() {
 		var raw, doc []byte
 		if err := rows.Scan(&raw, &doc); err != nil {
 			return nil, err
 		}
-		records = append(records, formatRecord(Record{Document: doc, Bytes: string(raw)}, stored))
+		record := marshal(formatRecord(Record{Document: doc, Bytes: string(raw)}, stored))
+		separator := 0
+		if body.Len() > 1 {
+			separator = 1
+		}
+		if body.Len()+separator+len(record)+1 > maxResponseBytes {
+			return nil, fault(413, "too_large")
+		}
+		if separator != 0 {
+			body.WriteByte(',')
+		}
+		body.Write(record)
 	}
-	return marshal(records), rows.Err()
+	body.WriteByte(']')
+	return body.Bytes(), rows.Err()
 }

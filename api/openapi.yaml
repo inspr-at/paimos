@@ -318,7 +318,7 @@ paths:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
         - {name: ack, in: query, schema: {type: string, enum: [seq]}, description: Return only the committed host sequence.}
-        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit."}
+        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit; total is capped at 16 MiB."}
       requestBody:
         required: true
         content:
@@ -362,7 +362,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "413":
-          description: Encoded request exceeds 1 MiB
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -388,7 +388,7 @@ paths:
         - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 9007199254740991}, description: "Read original byte chunks for one ids sequence. Exclusive of after and digests."}
         - {name: length, in: query, schema: {type: integer, minimum: 1, maximum: 262144, default: 262144}, description: Requires offset; returns canonical base64 of the original UTF-8 byte range.}
         - {name: after, in: query, schema: {type: integer, minimum: 0, maximum: 9007199254740991, default: 0}}
-        - {name: ids, in: query, schema: {type: string}, description: "Comma-separated host sequences; takes precedence over after. Fetch all cited sources, turns, summary leaves and design inputs by their sequences."}
+        - {name: ids, in: query, schema: {type: string}, description: "Comma-separated host sequences; takes precedence over after. Inline reads require each selected record to be at most 1 MiB and the encoded response at most 4 MiB; otherwise 413 too_large. Fetch all cited sources, turns, summary leaves and design inputs by their sequences."}
       responses:
         "200":
           description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
@@ -433,7 +433,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "413":
-          description: Encoded request exceeds 1 MiB
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -457,7 +457,7 @@ paths:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
         - {name: ack, in: query, schema: {type: string, enum: [seq]}, description: Return only the committed host sequence.}
-        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit."}
+        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit; total is capped at 16 MiB."}
       requestBody:
         required: true
         content:
@@ -501,7 +501,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "413":
-          description: Encoded request exceeds 1 MiB
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -588,7 +588,7 @@ paths:
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
-        - {name: snapshot, in: query, schema: {type: string, enum: [seq]}, description: Return only the snapshot sequence for bounded chunk hydration.}
+        - {name: snapshot, in: query, schema: {type: string, enum: [seq]}, description: Return only the snapshot sequence for bounded chunk hydration. Required for snapshots larger than 1 MiB; inline cursor otherwise returns 413 too_large.}
       responses:
         "200":
           description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
@@ -624,7 +624,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
         "413":
-          description: Encoded request exceeds 1 MiB
+          description: Inline snapshot exceeds 1 MiB or encoded response exceeds 4 MiB; use snapshot=seq and range hydration (too_large).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AithemaHostError"}
@@ -8299,7 +8299,7 @@ components:
       required: [offset, total, chunk]
       properties:
         offset: {type: integer, minimum: 0, maximum: 9007199254740991}
-        total: {type: integer, minimum: 1048577, maximum: 9007199254740991}
+        total: {type: integer, minimum: 1048577, maximum: 16777216}
         chunk: {type: string, contentEncoding: base64, minLength: 4, maxLength: 349528}
     AithemaJournalUploadProgress:
       type: object
@@ -8307,7 +8307,7 @@ components:
       required: [offset, total]
       properties:
         offset: {type: integer, minimum: 1, maximum: 9007199254740991}
-        total: {type: integer, minimum: 1048577, maximum: 9007199254740991}
+        total: {type: integer, minimum: 1048577, maximum: 16777216}
     AithemaJournalReadChunk:
       type: object
       additionalProperties: false

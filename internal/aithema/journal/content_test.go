@@ -193,6 +193,17 @@ func TestPendingContentDedupePreservesEveryEventConflict(t *testing.T) {
 	if number(f.success("journal", "cursor", "GET", nil, nil)["seq"]) != 1 {
 		t.Fatal("deduplicated content consumed journal sequences")
 	}
+	var aliasDigest string
+	var copies, aliases, byteColumns int
+	if err := f.database.Admin.QueryRow(t.Context(), `SELECT wire_sha256 FROM aithema_journal_content_events WHERE client_event_id=$1`, duplicate["client_event_id"]).Scan(&aliasDigest); err != nil || aliasDigest != digest(dupBytes) {
+		t.Fatalf("alias did not retain the exact wire digest: %v", err)
+	}
+	if err := f.database.Admin.QueryRow(t.Context(), `SELECT
+		(SELECT count(*) FROM aithema_journal_records),
+		(SELECT count(*) FROM aithema_journal_content_events),
+		(SELECT count(*) FROM information_schema.columns WHERE table_name='aithema_journal_content_events' AND data_type='bytea')`).Scan(&copies, &aliases, &byteColumns); err != nil || copies != 1 || aliases != writers+1 || byteColumns != 0 {
+		t.Fatalf("alias volume copied content bytes: copies=%d aliases=%d byteColumns=%d %v", copies, aliases, byteColumns, err)
+	}
 	// Lookup, original-byte hydration and alias conflicts survive a store restart.
 	f.store, err = NewStore(f.database.App)
 	if err != nil {
@@ -524,6 +535,14 @@ func TestPendingContentLargeSnapshotsAndOrdinaryEventBound(t *testing.T) {
 	cursor := f.success("journal", "cursor", "GET", nil, url.Values{"snapshot": {"seq"}})
 	if number(cursor["seq"]) != 1 || number(object(cursor["snapshot"])["seq"]) != 1 {
 		t.Fatal("large snapshot was not committed with its revision")
+	}
+	for _, format := range []string{"projection", "stored"} {
+		_, err := f.request("journal", "cursor", "GET", nil, url.Values{"format": {format}})
+		errorIs(t, err, 413, "too_large")
+	}
+	part := f.success("journal", "records", "GET", nil, url.Values{"ids": {"1"}, "offset": {fmt.Sprint(journalChunkBytes - 2)}, "length": {"8"}})
+	if part["chunk"] != base64.StdEncoding.EncodeToString(raw[journalChunkBytes-2:journalChunkBytes+6]) {
+		t.Fatal("large snapshot range did not use durable original bytes")
 	}
 	// Chunking does not remove the existing ordinary-event size restriction.
 	ordinary := f.record("turn")
