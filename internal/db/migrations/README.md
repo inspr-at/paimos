@@ -71,6 +71,32 @@ migration; CI runs it explicitly with Node installed. The tokenizer keeps
 quoted identifiers and string/dollar literals separate from executable SQL.
 Every statement must be allowlisted; unknown forms fail closed.
 
+A bare validated foreign key is also allowed when the same `ALTER TABLE` adds
+at least one of its referencing columns with the built-in `uuid` type, no
+default and no constraints. Every existing row has NULL in that new column, and PostgreSQL's
+default `MATCH SIMPLE` exempts the entire key. This narrow form excludes
+`IF NOT EXISTS`, a foreign key on existing columns alone, separate statements,
+domain types, `MATCH FULL`, referential-action suffixes and any other unsafe
+ALTER action.
+
+Merged but unreleased contract steps must not be disguised as expansion or
+added to historical grandfathering. `scripts/migration-policy-exceptions.json`
+is a separate, explicit review artifact naming each file, its SHA-256, owning
+ticket and rollout reason. The guard prints every exception, rejects malformed
+or duplicate entries and changed/removed files, and retains number uniqueness
+and published/baseline immutability checks. An exception does not make its SQL
+expand-safe and does not skip runtime compatibility. Coordinator review of
+each exception is required before merge/release; workers only measure draft CI.
+
+The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
+the reservation guard immediately. Existing accounts start unconfirmed, so
+self-reported fingerprints cease to authorize shared-pool reservations until
+a person confirms the pool. Existing active holds can release/settle. The
+previous binary's read probes do not test these writes. The owner must accept
+that intentional safety contract change before release, or commission a
+follow-up migration that stages a compatible guard until a later release;
+never infer consent by backfilling confirmation from self-reported hints.
+
 `scripts/migration-policy-baseline.json` explicitly grandfathers a set of
 filenames, each pinned by exact SHA-256 content from the published release and
 the main commit this policy started from. These source commits are recorded,

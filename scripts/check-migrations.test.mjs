@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkMigrations, contractMarker, destructive, publishedMigrations } from './check-migrations.mjs';
@@ -228,4 +228,86 @@ test('published migrations are immutable and retain historical SQL without new m
 
 test('candidate migration filename format fails closed', () => {
   assert.match(checkMigrations(new Map([['migration.sql', 'SELECT 1;']])).join('\n'), /expected NNNN_name.sql/);
+});
+
+test('a validated foreign key may include a newly added NULL column in the same ALTER', () => {
+  for (const sql of [
+    'ALTER TABLE intake_drafts ADD COLUMN requester_principal_id uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (tenant_id, requester_principal_id) REFERENCES principals(tenant_id, id);',
+    'ALTER TABLE public.drafts ADD requester uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES public.principals(id);',
+    'ALTER TABLE drafts ADD COLUMN "requester" uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+  ]) assert.equal(destructive(sql), false, sql);
+  for (const sql of [
+    'ALTER TABLE drafts ADD CONSTRAINT requester_fk FOREIGN KEY (tenant_id, requester) REFERENCES principals(tenant_id, id);',
+    'ALTER TABLE drafts ADD COLUMN extra uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    'ALTER TABLE drafts ADD COLUMN IF NOT EXISTS requester uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    "ALTER TABLE drafts ADD COLUMN requester uuid DEFAULT '00000000-0000-0000-0000-000000000000', ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);",
+    'ALTER TABLE drafts ADD COLUMN requester uuid DEFAULT gen_random_uuid(), ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    'ALTER TABLE drafts ADD COLUMN requester uuid NOT NULL, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    'ALTER TABLE drafts ADD COLUMN requester custom_uuid_domain, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    'ALTER TABLE drafts ADD COLUMN requester uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (tenant_id, requester) REFERENCES principals(tenant_id, id) MATCH FULL;',
+    'ALTER TABLE drafts ADD COLUMN requester uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id) ON DELETE CASCADE;',
+    'ALTER TABLE drafts ADD COLUMN requester uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id), ALTER COLUMN title TYPE text;',
+    'ALTER TABLE drafts ADD COLUMN requester uuid; ALTER TABLE drafts ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+    'ALTER TABLE drafts ADD COLUMN "Requester" uuid, ADD CONSTRAINT requester_fk FOREIGN KEY (requester) REFERENCES principals(id);',
+  ]) assert.equal(destructive(sql), true, sql);
+});
+
+test('1056 is expand-safe without allowing replacements or opaque RLS blocks', () => {
+  const sql = readFileSync(new URL('../internal/db/migrations/1056_intake_replacements.sql', import.meta.url), 'utf8');
+  assert.equal(destructive(sql), false);
+  assert.deepEqual(checkMigrations(new Map([['1056_intake_replacements.sql', sql]])), []);
+  assert.equal(destructive(sql.replace('requester_principal_id uuid,', 'requester_principal_id uuid DEFAULT gen_random_uuid(),')), true);
+  assert.equal(destructive('CREATE OR REPLACE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$;'), true);
+  assert.equal(destructive("CREATE TABLE extra(id text); DO $$ BEGIN EXECUTE 'ALTER TABLE extra ENABLE ROW LEVEL SECURITY'; END $$;"), true);
+});
+
+test('contract exceptions pin exact filenames and bytes with a ticket and reason', () => {
+  const name = '1054_contract.sql', sql = 'CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;';
+  const entry = {file: name, sha256: createHash('sha256').update(sql).digest('hex'), ticket: 'AEON-415', reason: 'Explicit contract behavior change for coordinator review.'};
+  const manifest = entries => ({schema: 'aeon.migration-policy-exceptions.v1', exceptions: entries});
+  const check = (files, entries = [entry]) => checkMigrations(files, new Map(), null, {exceptions: manifest(entries)});
+  assert.deepEqual(check(new Map([[name, sql]])), []);
+  assert.match(check(new Map([[name, sql + '\nDROP TABLE nodes;']])).join('\n'), /exception migration changed/);
+  assert.match(check(new Map()).join('\n'), /exception migration removed/);
+  assert.match(check(new Map([[name, sql], ['1055_adjacent.sql', sql]])).join('\n'), /1055_adjacent.sql: non-allowlisted/);
+  assert.match(check(new Map([[name, sql], ['1054_duplicate.sql', 'CREATE TABLE extra(id text);']])).join('\n'), /duplicate migration number/);
+  assert.match(check(new Map([[name, sql]]), [entry, entry]).join('\n'), /duplicate migration exception/);
+  for (const invalid of [{file: '*.sql'}, {sha256: 'bad'}, {ticket: ''}, {reason: ''}, {reason: 42}]) {
+    const problems = check(new Map([[name, sql]]), [{...entry, ...invalid}]).join('\n');
+    assert.match(problems, /invalid migration exception/);
+    assert.match(problems, /non-allowlisted/);
+  }
+  for (const exceptions of [{}, {schema: 'unknown', exceptions: [entry]}, {schema: manifest([]).schema, exceptions: {}}]) {
+    assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {exceptions}).join('\n'), /invalid migration exception manifest/);
+  }
+  assert.match(checkMigrations(new Map([[name, sql]]), new Map([[name, 'original']]), null, {exceptions: manifest([entry])}).join('\n'), /published migration changed/);
+  const baseline = {grandfatheredFiles: {[name]: createHash('sha256').update('original').digest('hex')}};
+  assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
+});
+
+test('the only integration exception is the unchanged merged 1054 contract migration', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
+  assert.equal(manifest.exceptions.length, 1);
+  const [entry] = manifest.exceptions;
+  assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
+  assert.equal(entry.ticket, 'AEON-397');
+  assert.match(entry.reason, /contract|unconfirmed|person/i);
+  const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
+  assert.ok(source);
+  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8'), source);
+  assert.equal(destructive(source), true);
+});
+
+test('the current tree passes only with the explicit 1054 contract exception', () => {
+  const directory = new URL('../internal/db/migrations/', import.meta.url);
+  const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
+  const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
+  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
+  assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
+  const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
+  assert.equal(withoutException.length, 1);
+  assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
 });

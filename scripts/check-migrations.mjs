@@ -173,6 +173,37 @@ function safeAlter(action) {
   const notNull = definition.some((_, index) => starts(definition.slice(index), 'NOT', 'NULL'));
   return !notNull || (!!value && !value.isNull);
 }
+function identifierKey(token) { return token.kind === 'word' ? token.value.toLowerCase() : token.value; }
+function addedNullColumn(action) {
+  if (!starts(action, 'ADD') || starts(action.slice(1), 'CONSTRAINT')) return null;
+  const i = starts(action.slice(1), 'COLUMN') ? 2 : 1;
+  // Only a fresh built-in UUID column with no default/constraints. A domain
+  // type could supply its own default or NOT NULL; IF NOT EXISTS could reuse
+  // populated data. Neither provides NULL-row evidence.
+  if (starts(action.slice(i), 'IF', 'NOT', 'EXISTS') || !identifier(action[i])) return null;
+  return starts(action.slice(i + 1), 'UUID') && action.length === i + 2 ? identifierKey(action[i]) : null;
+}
+function identifierList(list, start) {
+  if (list[start]?.kind !== 'symbol' || list[start].value !== '(') return null;
+  const names = []; let i = start + 1;
+  while (identifier(list[i])) {
+    names.push(identifierKey(list[i++]));
+    if (list[i]?.kind === 'symbol' && list[i].value === ')') return {names, end: i + 1};
+    if (list[i]?.kind !== 'symbol' || list[i++].value !== ',') return null;
+  }
+  return null;
+}
+function nullColumnForeignKey(action, addedColumns) {
+  if (!starts(action, 'ADD', 'CONSTRAINT') || !identifier(action[2]) || !starts(action.slice(3), 'FOREIGN', 'KEY')) return false;
+  const columns = identifierList(action, 5);
+  if (!columns || !columns.names.some(name => addedColumns.has(name)) || !starts(action.slice(columns.end), 'REFERENCES')) return false;
+  const tableStart = columns.end + 1, tableEnd = nameEnd(action, tableStart);
+  if (tableEnd === tableStart) return false;
+  const referenced = identifierList(action, tableEnd);
+  // Bare REFERENCES uses MATCH SIMPLE: one new NULL component exempts every
+  // old row. MATCH FULL and all other suffixes deliberately fail closed.
+  return !!referenced && referenced.names.length === columns.names.length && referenced.end === action.length;
+}
 function expandSafe(statement, createdTables) {
   if (starts(statement, 'CREATE')) {
     const kind = statement[1]?.value;
@@ -204,7 +235,9 @@ function expandSafe(statement, createdTables) {
     if (end === i) return false;
     const action = statement.slice(end);
     if (createdTables.has(nameKey(statement, i, end)) && (starts(action, 'ENABLE', 'ROW', 'LEVEL', 'SECURITY') || starts(action, 'FORCE', 'ROW', 'LEVEL', 'SECURITY')) && action.length === 4) return true;
-    return split(action, ',').every(safeAlter);
+    const actions = split(action, ',');
+    const addedColumns = new Set(actions.map(addedNullColumn).filter(name => name !== null));
+    return actions.every(action => safeAlter(action) || nullColumnForeignKey(action, addedColumns));
   }
   return starts(statement, 'COMMENT', 'ON') || starts(statement, 'GRANT') || starts(statement, 'INSERT', 'INTO') || starts(statement, 'UPDATE') || starts(statement, 'SET', 'LOCAL');
 }
@@ -251,6 +284,22 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
   const problems = [], numbers = new Map();
   const grandfathered = options.baseline?.grandfatheredFiles ?? {};
   const sha256 = sql => createHash('sha256').update(sql).digest('hex');
+  const exceptions = new Map();
+  if (options.exceptions !== undefined) {
+    const manifest = options.exceptions;
+    if (!manifest || manifest.schema !== 'aeon.migration-policy-exceptions.v1' || !Array.isArray(manifest.exceptions)) {
+      problems.push('invalid migration exception manifest');
+    } else for (const entry of manifest.exceptions) {
+      if (!entry || typeof entry.file !== 'string' || !/^\d{4}_[a-z0-9_]+\.sql$/.test(entry.file) || typeof entry.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(entry.sha256) || typeof entry.ticket !== 'string' || !/^[A-Z][A-Z0-9]*-\d+$/.test(entry.ticket) || typeof entry.reason !== 'string' || !entry.reason.trim()) {
+        problems.push('invalid migration exception: expected exact filename, SHA-256, ticket and reason');
+        continue;
+      }
+      if (exceptions.has(entry.file)) problems.push(`${entry.file}: duplicate migration exception`);
+      exceptions.set(entry.file, entry);
+      if (!files.has(entry.file)) problems.push(`${entry.file}: exception migration removed`);
+      else if (sha256(files.get(entry.file)) !== entry.sha256) problems.push(`${entry.file}: exception migration changed; add a new migration instead`);
+    }
+  }
   for (const [name, sql] of files) {
     const match = /^(\d{4})_[a-z0-9_]+\.sql$/.exec(name);
     if (!match) { problems.push(`${name}: expected NNNN_name.sql`); continue; }
@@ -263,7 +312,9 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
     // Classify all SQL; grandfather explicit published filenames and exact legacy
     // content, while still checking names, duplicates and immutability above.
     const requiresContract = destructive(sql);
-    if (requiresContract && !published.has(name) && !legacy) {
+    const exception = exceptions.get(name);
+    const excepted = exception && exception.sha256 === sha256(sql);
+    if (requiresContract && !published.has(name) && !legacy && !excepted) {
       const evidence = markerEvidence(sql, previousVersion);
       if (!expansionReleased(evidence, options.previousTag ?? (previousVersion ? `v${previousVersion}` : evidence?.tag), options.repository)) problems.push(`${name}: non-allowlisted SQL requires -- aeon:contract-phase TICKET-N expanded-in=vYYMMDDhhmmss.0.0 expansion-migration=NNNN_name.sql (existing expansion release tag, at or before and ancestral to the previous release, containing the expansion migration)`);
     }
@@ -286,9 +337,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const directory = 'internal/db/migrations';
     const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).sort().map(name => [name, readFileSync(`${directory}/${name}`, 'utf8')]));
     const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
+    const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
     const published = publishedMigrations(`refs/tags/${args[1]}`);
-    const problems = checkMigrations(files, published, args[1].slice(1), {baseline, previousTag: args[1]});
+    const problems = checkMigrations(files, published, args[1].slice(1), {baseline, exceptions, previousTag: args[1]});
     if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
-    else console.log(`migration guard: ${files.size} unique numbers; published and grandfathered files unchanged; expand-safe allowlist enforced for every new filename`);
+    else {
+      for (const entry of exceptions.exceptions) console.log(`migration exception: ${entry.file} sha256=${entry.sha256} ${entry.ticket}: ${entry.reason}`);
+      console.log(`migration guard: ${files.size} unique numbers; published, grandfathered and exception files unchanged; expand-safe allowlist or explicit pinned contract exception enforced for every new filename`);
+    }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
