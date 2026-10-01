@@ -3,7 +3,14 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, liveAgent, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
-test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
+test.beforeEach(async ({ page }) => {
+  await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
+  // These fixtures exercise polling; an unmocked stream failure races with the first read.
+  await page.addInitScript(() => {
+    class Quiet { addEventListener() {} close() {} }
+    Object.assign(window, { EventSource: Quiet })
+  })
+})
 
 const at = Date.parse('2026-09-23T12:00:00Z')
 const ticket = (id: string, key: string, title: string, project_id = 'p-pharos') => ({ id, key, title, project_id })
@@ -226,10 +233,12 @@ test('rebinding follows the next poll, and leaving the list stops it', async ({ 
   const data = withWorkers()
   const calls = await mockWork(page, data)
   await page.goto('/p/PHAROS')
-  await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')
+  await expect(row(page, 'PHAROS-14').locator('.c-assignee').getByRole('link', { name: /nova/ })).toBeVisible()
   const nova = data.live.find(agent => agent.session_id === 's-nova')!
   nova.ticket = ticket('n-1', 'PHAROS-11', 'Connect Hetzner Cloud for managed provisioning')
-  await page.clock.fastForward(21_000)
+  // Run each timer normally: skipping them simulates display sleep and triggers a stream resync.
+  await page.clock.runFor(21_000)
+  await expect.poll(() => liveCalls(calls).length).toBe(2)
   // AEON-316: the list snapshot owns the assignee lead, so a live poll alone does
   // not move it; the next list load does.
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toContainText('nova')
