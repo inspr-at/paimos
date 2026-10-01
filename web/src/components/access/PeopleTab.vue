@@ -16,13 +16,14 @@ import RowMenu from '../business/RowMenu.vue'
 import ChoicePicker from '../settings/ChoicePicker.vue'
 import RolePicker from './RolePicker.vue'
 import StatusChip from './StatusChip.vue'
+import type { InvitePrefill } from './InviteSheet.vue'
 import { problem, deactivatePoints } from './accessText'
 
 // Everyone who works here, one row per person: imported classic identities that
 // are linked show as "also known as" under their person. Unlinked ones wait in a
-// folded group with a Link to person action. Status reads apart from the
+// folded group with invite and Link to person actions. Status reads apart from the
 // actions; actions I may not take are left out or say why they are off.
-const emit = defineEmits<{ invite: [] }>()
+const emit = defineEmits<{ invite: [prefill?: InvitePrefill] }>()
 const access = useAccess()
 const session = useSession()
 const router = useRouter()
@@ -108,6 +109,17 @@ function contextMenu(event: MouseEvent, person: Person) { event.preventDefault()
 
 // ---------- Imported classic identities ----------
 const linking = ref<{ id: string; name: string; anchor: HTMLElement } | null>(null)
+function importedPerson(id: string) { return access.members?.people.find(p => p.principal_id === id) }
+function inviteImported(id: string) {
+  const person = importedPerson(id)
+  if (!person || !manage.value) return
+  const roleKey = ({ super_admin: 'owner', admin: 'admin', member: 'member', reviewer: 'member', customer: 'customer' } as Record<string, string>)[person.classic_role ?? '']
+  emit('invite', {
+    email: person.email ?? '',
+    workspaceRoleId: person.workspace_role?.id ?? access.roles.find(r => r.builtin && r.key === roleKey)?.id ?? null,
+    projectRoles: person.project_roles.map(r => ({ project_id: r.project_id, role_id: r.role.id })),
+  })
+}
 const linkChoices = computed(() => access.people.filter(p => p.status === 'active').map(p => ({ value: p.principal_id, label: p.name, detail: identityLine(p) })))
 async function link(personId: string) {
   const from = linking.value
@@ -180,13 +192,16 @@ async function link(personId: string) {
           <AppIcon name="chevron" :size="12" class="chev" :class="{ open: importedOpen }" />Imported from classic, no sign-in<span class="n mono">{{ access.imported.length }}</span>
         </button>
       </h3>
-      <p v-if="importedOpen" class="imported-lead">Identities that came over from classic Paimos and never signed in here. Link one to the person it belongs to, and its history shows under that person.</p>
+      <p v-if="importedOpen" class="imported-lead">Invite them to sign in here. A unique account with the same verified email is linked on acceptance, so its history shows under their name. If several accounts share an email, link the right one to a person yourself.</p>
       <ul v-if="importedOpen" id="imported-rows" class="imported-rows">
         <li v-for="i in access.imported" :key="i.principal_id">
           <Avatar :id="i.principal_id" :name="i.name" :size="26" />
           <span class="i-name mono">{{ i.name }}</span>
           <span class="i-role">{{ i.classic_role ? `classic ${i.classic_role.replace('_', ' ')}` : '' }}</span>
-          <button v-if="manage" type="button" class="btn sm" :aria-label="`Link ${i.name} to a person`" @click="linking = { id: i.principal_id, name: i.name, anchor: $event.currentTarget as HTMLElement }"><AppIcon name="link" :size="13" />Link to person</button>
+          <span v-if="manage" class="i-actions">
+            <button type="button" class="btn sm" :aria-label="`Invite ${i.name}`" @click="inviteImported(i.principal_id)"><AppIcon name="plus" :size="13" />Invite this person</button>
+            <button type="button" class="btn sm" :aria-label="`Link ${i.name} to a person`" @click="linking = { id: i.principal_id, name: i.name, anchor: $event.currentTarget as HTMLElement }"><AppIcon name="link" :size="13" />Link to person</button>
+          </span>
         </li>
       </ul>
     </section>
@@ -251,6 +266,7 @@ async function link(personId: string) {
 .imported-rows li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 46px; border-top: 1px solid var(--line); }
 .i-name { font-size: 12.5px; color: var(--ink); }
 .i-role { font-size: 12px; color: var(--ink-3); }
+.i-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 1100px) { .c-last, .people thead th.c-last { display: none; } }
 @media (max-width: 900px) { .c-id, .people thead th.c-id, .c-proj, .people thead th.c-proj { display: none; } .id-inline { display: block; font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; } }
 @media (max-width: 600px) {
@@ -271,7 +287,8 @@ async function link(personId: string) {
   .c-act { grid-area: act; width: auto; }
   .more { width: 44px; height: 44px; }
   .role-btn { height: 44px; }
-  .imported-rows li { grid-template-columns: 26px minmax(0, 1fr) auto; }
+  .imported-rows li { grid-template-columns: 26px minmax(0, 1fr); padding: 8px 0; }
+  .i-actions { grid-column: 2; }
   .i-role { display: none; }
   .imported-rows .btn { height: 44px; }
 }
