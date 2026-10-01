@@ -9,7 +9,7 @@
       "reason": "Contract behavior change already merged before policy integration: the replacement reservation guard requires person-confirmed quota_pool_fingerprint instead of self-reported quota_fingerprint. Existing accounts start unconfirmed, so new/reactivated shared-pool holds stop until a person confirms; existing active holds may still release/settle. This is not expand-safe and previous-binary read probes do not prove quota-write compatibility. AEON-415 draft PR #71 exposes this exact-byte exception for coordinator review; owner acceptance of the rollout or a staged follow-up migration is required before release."
     },
     {
-      "file": "1063_run_kinds.sql",
+      "file": "1064_run_kinds.sql",
       "sha256": "2b8877cc3537051d2095fbdd0e83c0fd9842c317856af9593b51c39fbd586303",
       "ticket": "AEON-501",
       "reason": "Expand-only family widening: replace the existing harness check with its strict superset (media and terminal). No existing value, row, column, or route is removed; nullable execution labels preserve previous-binary writes. The classifier conservatively flags DROP CONSTRAINT. This exact-byte exception is exposed in the draft PR for coordinator review, with previous-binary migration compatibility exercised in CI."

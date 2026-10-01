@@ -1,6 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 name: Agents execution column
 on:
+  # Measure this worker's HEAD even while the coordinator integrates shared files.
+  push:
+    branches: ['work/aeon-501-run-kinds']
+    paths:
+      - 'web/src/components/agents/SessionList.vue'
+      - 'web/src/components/agents/SessionHost.vue'
+      - 'web/src/components/agents/ExecutionMark.vue'
+      - 'web/src/components/agents/sessionRow.ts'
+      - 'web/tests/run-kinds*'
+      - '.github/workflows/agents-run-kinds.yml'
   pull_request:
     paths:
       - 'web/src/components/agents/SessionList.vue'
@@ -36,7 +46,7 @@ jobs:
       - name: Capture the base table and test the candidate table
         working-directory: web
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}
           AEON_501_SHOTS: ${{ runner.temp }}/aeon-501-shots
         run: |
           set -euo pipefail

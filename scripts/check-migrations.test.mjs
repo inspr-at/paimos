@@ -292,7 +292,7 @@ test('integration exceptions pin the unchanged merged contract and run-kind expa
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   const runKinds = manifest.exceptions[1];
-  assert.equal(runKinds.file, '1063_run_kinds.sql');
+  assert.equal(runKinds.file, '1064_run_kinds.sql');
   assert.equal(runKinds.ticket, 'AEON-501');
   const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
   assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
@@ -317,5 +317,5 @@ test('the current tree requires both exact-byte contract exceptions', () => {
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
   assert.equal(withoutException.length, 2);
   assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
-  assert.match(withoutException[1], /^1063_run_kinds.sql: non-allowlisted/);
+  assert.match(withoutException[1], /^1064_run_kinds.sql: non-allowlisted/);
 });

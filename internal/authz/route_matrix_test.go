@@ -82,6 +82,13 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	// AEON-184: who is working where follows project visibility, so a
 	// project-only guest may ask; a customer never may.
 	checkIn("guest", guest, "GET /api/harness-sessions/live", Scope{AnyProject: true}, true)
+	for _, pattern := range []string{"GET /api/me/host-labels", "PUT /api/me/host-labels"} {
+		checkIn("guest", guest, pattern, Scope{AnyProject: true}, true)
+		checkIn("customer", people["customer"], pattern, Scope{AnyProject: true}, false)
+		if !ProjectFilteredRoutes[pattern] {
+			t.Fatalf("own host labels must support project-only people: %s", pattern)
+		}
+	}
 	checkIn("customer", people["customer"], "GET /api/harness-sessions/live", Scope{AnyProject: true}, false)
 	check("member", people["member"], "GET /api/usage/dashboard", true)
 	checkIn("guest", guest, "GET /api/usage/dashboard", Scope{AnyProject: true}, false)
