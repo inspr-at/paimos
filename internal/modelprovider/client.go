@@ -24,9 +24,36 @@ import (
 // Endpoint selection belongs only to settings.manage persons. Loopback and LAN
 // are intentional for local models. Block special-use metadata addresses, dial
 // only validated resolved addresses, bypass ambient proxies, and refuse redirects.
+var blockedProviderPrefixes = [...]netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("168.63.129.16/32"), // Azure platform/metadata endpoint.
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("fd00:ec2::254/128"), // AWS IPv6 metadata inside ULA.
+}
+
 func allowedIP(ip netip.Addr) bool {
 	ip = ip.Unmap()
-	return ip.IsValid() && !ip.IsUnspecified() && !ip.IsMulticast() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && ip != netip.MustParseAddr("255.255.255.255") && ip != netip.MustParseAddr("fd00:ec2::254")
+	if !ip.IsValid() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+	for _, prefix := range blockedProviderPrefixes {
+		if prefix.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func endpoint(base, path string) (string, error) {

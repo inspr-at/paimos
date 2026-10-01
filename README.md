@@ -21,8 +21,9 @@ an installed chat model. Save, then use **Test connection**: it sends only a
 small synthetic prompt, including while AI is off. Saving never contacts a model.
 The endpoint is resolved from the Aeon server; in Docker, `localhost` means the
 Aeon container. Use an address reachable from that container for a separate
-model service. Public, loopback and LAN endpoints are supported; redirects and
-link-local/metadata addresses are refused.
+model service. Public, loopback and LAN endpoints are supported; redirects,
+link-local/metadata addresses, CGNAT, NAT64 and other special-use ranges are
+refused.
 
 The first connected feature is **Rewrite customer notes with AI**. Also enable
 the `business_crm` plugin with its `tools.invoke` permission. A person with
@@ -1501,7 +1502,7 @@ This is the canonical inventory of server egress; there is no global switch that
 | --- | --- | --- |
 | OIDC discovery, signing keys and token exchange at the configured identity provider | No issuer/client configured | `AEON_OIDC_ISSUER` and `AEON_OIDC_CLIENT_ID`; requests follow sign-in/token verification. Clear the issuer/client to disable. |
 | Zitadel user lookup, creation and invitations | No provisioner | `AEON_IDENTITY_PROVISIONER=zitadel` plus `AEON_ZITADEL_URL`, tenant/org and token-file configuration; authorized invite operations. `none` or unset disables it. |
-| Embedding requests to the configured endpoint | Lexical search only | `AEON_EMBEDDING_URL` with model configuration enables query/queue embeddings. Unset the URL to disable. |
+| Workspace model chat and embedding requests to the configured OpenAI-compatible endpoint | Off by default; lexical search only | A person with `settings.manage` enables the workspace provider and selects each feature. Disabling the provider or deselecting a feature stops its model calls. **Test connection** is the only model call while the provider is disabled; it requires an explicit person request and sends a synthetic prompt. Saving never contacts the model. |
 | Inbox webhook delivery, including target DNS checks | No registered webhook receivers | An authorized receiver registers its webhook target; unregister/replace it to disable. Delivery workers run by default but have no external destination until configured. |
 | Messaging routine webhook wakes | No registered routine webhook targets; messaging off in production without a key file | `AEON_MESSAGING_KEY_FILE` enables messaging (development uses an ephemeral key); an authorized routine receiver selects a webhook target. Remove that target to disable wakes. |
 | GitHub doctrine metadata/tree/blob reads | No registered remote sources or requested sync | Authorized doctrine source registration and explicit sync/proposal operations select the repository and immutable pin. Private reads additionally require `AEON_DOCTRINE_CREDENTIALS_DIR` and a tenant/repository allowlist. Remove the source to disable future reads. |

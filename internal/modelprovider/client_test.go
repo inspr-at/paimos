@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,95 @@ func TestEndpointAndAddressPolicy(t *testing.T) {
 			t.Fatal("unsafe resolved address accepted")
 		}
 	}
+}
+
+func TestSpecialUseAddressesRefusedBeforeDial(t *testing.T) {
+	client := newClient()
+	transport := client.Transport.(*http.Transport)
+	defer transport.CloseIdleConnections()
+	for _, raw := range []string{
+		"0.1.2.3", "0.255.255.255", "100.64.0.0", "100.100.100.200", "100.127.255.255",
+		"168.63.129.16", "169.254.169.254", "192.0.0.1", "192.0.2.1", "192.88.99.1",
+		"198.18.0.1", "198.19.255.255", "198.51.100.1", "203.0.113.1", "240.0.0.1", "255.255.255.255",
+		"100::1", "2001:db8::1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::a9fe:a9fe", "fec0::1", "fd00:ec2::254",
+	} {
+		ip := netip.MustParseAddr(raw)
+		addresses := []netip.Addr{ip}
+		if ip.Is4() {
+			addresses = append(addresses, netip.AddrFrom16(ip.As16()))
+		}
+		for _, addr := range addresses {
+			t.Run(addr.String(), func(t *testing.T) {
+				if allowedIP(addr) {
+					t.Fatal("unsafe resolved address accepted")
+				}
+				base := "http://" + net.JoinHostPort(addr.String(), "11434") + "/v1"
+				for _, path := range []string{"chat/completions", "embeddings"} {
+					if _, err := endpoint(base, path); err == nil {
+						t.Fatal("unsafe literal endpoint accepted")
+					}
+				}
+				// Cancellation prevents real network traffic even if the guard regresses.
+				// Address refusal must still happen before any attempt to dial.
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				conn, err := transport.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), "11434"))
+				if conn != nil {
+					conn.Close()
+				}
+				if err == nil || err.Error() != "provider address refused" {
+					t.Fatalf("unsafe address reached dial: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestLocalAndPublicModelAddressesRemainAllowed(t *testing.T) {
+	for _, raw := range []string{
+		"127.0.0.1", "127.0.0.2", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.2.3",
+		"::1", "fc00::1", "fd00::1", "fd00:ec2::253", "fd00:ec2::255",
+		"8.8.8.8", "2606:4700:4700::1111", "100.63.255.255", "100.128.0.0", "168.63.129.15", "168.63.129.17",
+		"::ffff:127.0.0.1", "::ffff:192.168.2.3",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			addr := netip.MustParseAddr(raw)
+			if !allowedIP(addr) {
+				t.Fatal("supported model address refused")
+			}
+			if _, err := endpoint("http://"+net.JoinHostPort(raw, "11434")+"/v1", "chat/completions"); err != nil {
+				t.Fatal("supported model endpoint refused")
+			}
+		})
+	}
+	if allowedIP(netip.Addr{}) {
+		t.Fatal("invalid address accepted")
+	}
+}
+
+func TestOutboundInventoryUsesWorkspaceModelOptIn(t *testing.T) {
+	raw, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inventory, found := strings.Cut(string(raw), "## Server outbound calls")
+	if !found {
+		t.Fatal("server outbound inventory missing")
+	}
+	if strings.Contains(inventory, "AEON_EMBEDDING_URL") {
+		t.Fatal("server outbound inventory names the retired host embedding switch")
+	}
+	for _, row := range strings.Split(inventory, "\n") {
+		if strings.HasPrefix(row, "| Workspace model chat and embedding requests ") {
+			for _, term := range []string{"Off by default", "settings.manage", "feature", "Test connection", "disabled"} {
+				if !strings.Contains(row, term) {
+					t.Fatalf("workspace model egress inventory omits %q", term)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("workspace model provider missing from server outbound inventory")
 }
 
 func TestCompatibleChatAndSanitizedFailures(t *testing.T) {
