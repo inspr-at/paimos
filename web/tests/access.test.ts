@@ -2,11 +2,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AccessError, agentDeactivatePoints, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, groupPermissions, inviteRoles,
+  AccessError, agentDeactivatePoints, agentDescription, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, grantablePresetScopes, groupPermissions, inviteRoles, matchesScope, suggestAgentRole, TICKET_WORKER_SCOPES,
   isLastOwner, permissionLabel, projectRolesOf, projectSummary, splitAgents, validEmail, workspaceRolesOf, type Agent, type Permission, type Role,
 } from '../src/lib/access.ts'
 
-const P = (key: string, group: string, risk: Permission['risk'], project = true): Permission => ({ key, group, description: key, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'] })
+const P = (key: string, group: string, risk: Permission['risk'], project = true): Permission => ({ key, group, description: key, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'], agent_grantable: true })
 const registry = [P('nodes.read', 'Work', 'low'), P('nodes.delete', 'Work', 'high'), P('members.manage', 'People', 'high'), P('audit.read', 'People', 'medium', false), P('portal.quotes', 'Portal', 'low', false)]
 const role = (id: string, key: string, permissions: string[], builtin = true): Role => ({ id, key, name: key[0]!.toUpperCase() + key.slice(1), description: '', builtin, permissions, based_on: null, member_count: 0 })
 
@@ -15,6 +15,52 @@ test('permissions read as words and group in registry order', () => {
   assert.equal(permissionLabel('nodes.read'), 'See work')
   assert.equal(permissionLabel('widgets.frob'), 'Frob widgets')
   assert.deepEqual(groupPermissions(registry).map(g => [g.group, g.items.length]), [['Work', 2], ['People', 2], ['Portal', 1]])
+})
+
+const ticketRegistry = TICKET_WORKER_SCOPES.map(key => P(key, key === 'search.read' ? 'Search' : 'Work', key.endsWith('.read') ? 'low' : 'medium'))
+test('Ticket worker presets are bounded by creator, role, project scope and agent-grantability', () => {
+  assert.deepEqual(TICKET_WORKER_SCOPES, ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'search.read'])
+  const r = role('project-role', 'ticket-worker', TICKET_WORKER_SCOPES, false)
+  const projectAgent = agent('worker', { project_roles: [{ project_id: 'p', project_key: 'P', project_title: 'Project', role: r }] })
+  const catalog = [...ticketRegistry, P('account.manage', 'Accounts', 'high', false), { ...P('roles.manage', 'Roles', 'high', false), agent_grantable: false }]
+  const creator = new Set(['nodes.read', 'comments.read', 'account.manage', 'roles.manage'])
+  const ceiling = agentScopeCeiling(projectAgent, [r], catalog)!
+  const held = new Set([...creator].filter(key => ceiling.has(key)))
+  assert.deepEqual(grantablePresetScopes([...TICKET_WORKER_SCOPES, 'account.manage', 'roles.manage', 'retired.scope'], held, catalog), ['nodes.read', 'comments.read'])
+  assert.deepEqual(grantablePresetScopes(['roles.manage', 'account.manage'], creator, catalog), ['account.manage'])
+  assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, new Set(), catalog), [])
+  assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, new Set(TICKET_WORKER_SCOPES), []), [])
+})
+
+test('role suggestions cover the full preset, choose the smallest grant, and never default to Admin', () => {
+  const viewer = role('viewer', 'viewer', ['nodes.read'])
+  const member = role('member', 'member', [...TICKET_WORKER_SCOPES, 'knowledge.read'])
+  const admin = role('admin', 'admin', [...member.permissions, 'roles.manage'])
+  const narrow = role('worker', 'ticket-worker', TICKET_WORKER_SCOPES, false)
+  const mine = new Set([...admin.permissions, 'account.manage'])
+  const catalog = [...ticketRegistry, P('knowledge.read', 'Knowledge', 'low'), P('account.manage', 'Accounts', 'high', false)]
+  assert.equal(suggestAgentRole([admin, viewer, member], TICKET_WORKER_SCOPES, 'project', catalog, mine)?.id, 'member')
+  assert.equal(suggestAgentRole([admin, member, narrow], TICKET_WORKER_SCOPES, 'project', catalog, mine)?.id, 'worker')
+  assert.equal(suggestAgentRole([admin, viewer], TICKET_WORKER_SCOPES, 'project', catalog, mine), undefined)
+  assert.equal(suggestAgentRole([member], TICKET_WORKER_SCOPES, 'project', catalog, new Set(['nodes.read'])), undefined)
+  assert.equal(suggestAgentRole([role('beyond', 'beyond', [...TICKET_WORKER_SCOPES, 'account.manage'], false)], TICKET_WORKER_SCOPES, 'project', catalog, new Set(TICKET_WORKER_SCOPES)), undefined)
+  assert.equal(suggestAgentRole([member], ['account.manage'], 'project', catalog, mine), undefined)
+  assert.equal(suggestAgentRole([member], ['retired.scope'], 'workspace', catalog, mine), undefined)
+  assert.equal(suggestAgentRole([member], [], 'workspace', catalog, mine), undefined)
+})
+
+test('scope search accepts names, technical ids, groups and registry explanations', () => {
+  const permission = { ...P('nodes.read', 'Work', 'low'), description: 'Read tickets and project details' }
+  for (const term of [' See work ', 'NODES.READ', 'work', 'project details', '']) assert.equal(matchesScope(permission, term), true)
+  assert.equal(matchesScope(permission, 'Manage roles'), false)
+})
+
+test('description prefills identify the preset and selected projects within the server limit', () => {
+  assert.equal(agentDescription('Ticket worker', 'projects', ['AGM', 'AEON']), 'Ticket worker for AGM, AEON')
+  assert.equal(agentDescription('Ticket worker', 'projects', []), 'Ticket worker for selected projects')
+  assert.equal(agentDescription('Coordinator', 'workspace', []), 'Coordinator for the workspace')
+  assert.equal(agentDescription('', 'workspace', []), 'CLI or script agent for the workspace')
+  assert.equal(agentDescription('Ticket worker', 'projects', ['A'.repeat(1200)]).length, 1000)
 })
 
 test('a role’s effect puts its riskiest permissions first; diffs and escalation', () => {
