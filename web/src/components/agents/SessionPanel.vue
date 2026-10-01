@@ -2,10 +2,10 @@
 <script setup lang="ts">
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
-import { api, getNode } from '../../lib/api'
+import { getNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Approval, HarnessSessionDetail, SessionControl } from '../../lib/agents'
+import type { Approval, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
@@ -26,7 +26,7 @@ import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import LiveWatch from './LiveWatch.vue'
-import { activityOf, currentStep, type ActivitySession } from './activity'
+import { activityOf, currentStep } from './activity'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
@@ -75,20 +75,22 @@ function selectTab(next: SessionTab) {
 }
 watch(() => route.query.tab, value => { if (value === 'messages' || value === 'overview') tab.value = value })
 useVisualViewport(root)
-const detail = ref<(HarnessSessionDetail & ActivitySession) | null>(null)
 const ticketState = ref('')
 
 const s = computed(() => props.view?.session)
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
-const activity = computed(() => detail.value?.id === s.value?.id ? detail.value : props.view ? activityOf(props.view) : null)
-const reported = computed(() => detail.value?.id === s.value?.id ? detail.value : s.value)
+// The detail read lands in the ledger like every other copy of the session, so what is
+// shown here is always the row the ledger holds: a detail that arrives late never
+// replaces a newer list row, and the list never hides the detail's history (AEON-449).
+const activity = computed(() => props.view ? activityOf(props.view) : null)
+const reported = computed(() => s.value)
 // A watched session has no Messages tab, so it always shows the overview with the live view.
 const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.activity_history ?? [])
-const metadataHistory = computed(() => metadataChanges(detail.value?.id === s.value?.id ? detail.value?.metadata_history : undefined))
+const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
 const step = computed(() => {
   if (!props.view) return ''
   return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
@@ -115,11 +117,7 @@ watch([
   const controller = new AbortController()
   onCleanup(() => controller.abort())
   try {
-    const response = await api(`/projects/${encodeURIComponent(current.project_id)}/harness-sessions/${encodeURIComponent(current.id)}`, { signal: controller.signal })
-    if (response.ok) {
-      const body = await response.json() as HarnessSessionDetail & ActivitySession
-      if (!controller.signal.aborted && s.value?.id === current.id) detail.value = body
-    }
+    await agents.loadSessionDetail(current.project_id, current.id, controller.signal)
   } catch { /* The list still shows the latest step if detail is unavailable. */ }
 }, { immediate: true })
 watch(() => props.view?.ticket?.id, async id => {
@@ -215,7 +213,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">
           <span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ view.session.stopped_at ? 'Ran' : 'Running' }} {{ elapsed(view.session, now) }}</span>
-          <template v-if="view.session.stopped_at"> · {{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
+          <template v-if="view.session.stopped_at"> · {{ view.status.state === 'done' ? 'Done' : stopReasonLabel(view.session.stop_reason) || 'Ended' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>

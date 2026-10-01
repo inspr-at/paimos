@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
@@ -76,7 +77,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	modules := []httpapi.Module{
-		authModule, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), relations.New(nil),
+		authModule, &tokens.Module{}, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), relations.New(nil),
 		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),

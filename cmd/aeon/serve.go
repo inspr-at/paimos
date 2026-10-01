@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
@@ -139,6 +141,22 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		closeListener()
 		return err
+	}
+	// The host-wide signer is owned by the bootstrap tenant for forced RLS.
+	// Reuse the existing host session-key file with a separate vault derivation.
+	// HTTP-only dev hosts publish 503 until an HTTPS issuer is configured.
+	tokenMod := &tokens.Module{}
+	if strings.HasPrefix(cfg.PublicURL, "https://") && (authCfg.Env != "dev" || os.Getenv("AEON_SESSION_KEY_FILE") != "") {
+		var signingOwner string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug=$1`, cfg.BootstrapTenantSlug).Scan(&signingOwner); err != nil {
+			closeListener()
+			return fmt.Errorf("signing key owner: %w", err)
+		}
+		tokenMod.Keys, err = tokens.New(ctx, &tokens.PostgresStore{Pool: pool, TenantID: signingOwner}, authCfg.SessionKey, tokens.Config{Issuer: cfg.PublicURL, Audience: cfg.PublicURL})
+		if err != nil {
+			closeListener()
+			return fmt.Errorf("aithema signing keys: %w", err)
+		}
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin}
@@ -272,6 +290,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		Web:      webFS,
 		Modules: []httpapi.Module{
 			authMod,
+			tokenMod,
 			// ADR-003: permissions, roles, members, project members, invites and
 			// access audit. P1 shipped with it unmounted, so /api/me/permissions answered 403.
 			authz.NewWithProvisioner(pool, provisioner),
@@ -325,7 +344,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
-		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, (doctrine.Credentials{Dir: cfg.DoctrineCredentialsDir}).CatalogMiddleware, events.PositionMiddleware(pool)},
 	}
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)

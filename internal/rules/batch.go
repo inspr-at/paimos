@@ -123,7 +123,7 @@ func (m *Module) publishBatch(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		}
 	}
 	out := BatchResult{BatchID: uuidFrom(digest), Versions: make([]Snapshot, len(in.Items))}
-	now := time.Now().UTC()
+	now := m.versionNow().UTC()
 	for i, item := range in.Items {
 		s := sets[i]
 		version := item.Version

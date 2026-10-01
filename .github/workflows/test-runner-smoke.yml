@@ -8,13 +8,13 @@ permissions:
   contents: read
 
 jobs:
-  runner-route:
+  smoke-route:
     uses: ./.github/workflows/test-runner-route.yml
 
   smoke:
-    needs: runner-route
+    needs: smoke-route
     # Event/ref/attempt guards are independent of the router's runner selection.
-    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.smoke-route.outputs.run_attempt == github.run_attempt && needs.smoke-route.outputs.runs_on || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

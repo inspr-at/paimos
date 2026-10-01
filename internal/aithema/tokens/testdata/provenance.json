@@ -1,0 +1,14 @@
+{
+  "source": "aithema-public/contracts/fixtures",
+  "source_revision": "8579f6904fb4a7b0c7360a6f93d50a7c0618f237",
+  "note": "Copied byte-for-byte from the accepted AIT-35 binding contracts; never modified. Only public contract examples, no live tokens or private keys.",
+  "sha256": {
+    "valid/token.session.json": "60e4cc2e5d20cc716b6b1439fcd30366db7f190231c48ac0c1a1463232ff2c88",
+    "valid/token.delegated.json": "044d32bfa5d007e01aeed60a33a74268de2571cbc9149825e8b9c23a7d15a16d",
+    "canonical/rfc8785-golden.json": "d40f1ed836d9b286ee03b94c56fe410922fa92019aeaf018357f0d362337cb3a",
+    "invalid/token.session-wrong-audience.json": "c10ebf7d04371ff2a7b986e3295b02afcead904c920df842378cc3d3a82f9ba4",
+    "invalid/token.delegated-with-acceptance.json": "4971cf503eab44ae5c1c3358f8d7c7ad13d08fc9dd6746d707ae557fcd97095c",
+    "invalid/token.delegated-unlisted-capability.json": "5a684222ce6ed06d25bdad81433a6453c6620c3aa699fb86a86a1e3c2b1f5c20",
+    "invalid/token.lifetime-over-15-min.json": "33c55fea5825662e6404d518562f86ab8ab4f9a590a37686d35e77a46ab62d2b"
+  }
+}

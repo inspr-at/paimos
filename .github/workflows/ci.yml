@@ -8,6 +8,7 @@ on:
     branches: [main]
   pull_request:
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 # A newer push to the same pull request supersedes its older run; main and the queue always finish.
@@ -154,6 +155,9 @@ jobs:
         run: npm ci
       - working-directory: web
         run: npm run typecheck
+      # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
+      - working-directory: web
+        run: npm run lint
       - working-directory: web
         run: npm run build
 
@@ -239,3 +243,53 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
+
+  # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
+  migration-compat:
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Resolve the latest published stable release
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")"
+          tag="$(jq -r '.tag_name' <<< "$release")"
+          [[ "$tag" =~ ^v[0-9]{12}\.0\.0$ ]] || { echo 'Expected a published calendar release' >&2; exit 1; }
+          digest="$(jq -r '.body' <<< "$release" | sed -nE 's/^Digest: (sha256:[a-f0-9]{64})\r?$/\1/p')"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one published image digest' >&2; exit 1; }
+          git show-ref --verify "refs/tags/$tag" >/dev/null
+          echo "Previous published release: $tag; image: ghcr.io/inspr-at/aeon@$digest"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Static migration policy
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          node --test scripts/check-migrations.test.mjs
+          node scripts/check-migrations.mjs --base-ref "$PREVIOUS_TAG"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26"
+          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Checker and migration runner SQL splitter parity
+        run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
+      - name: Previous binary on the candidate schema
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+          PREVIOUS_DIGEST: ${{ steps.previous.outputs.digest }}
+        run: |
+          python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py
+          bash scripts/migration-compat.sh "$PREVIOUS_TAG" "$PREVIOUS_DIGEST"

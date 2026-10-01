@@ -2,10 +2,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRepositoryWorkflows(t *testing.T) {
@@ -16,6 +19,19 @@ func TestRepositoryWorkflows(t *testing.T) {
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
 	}
+}
+
+// Runner unit fixtures deliberately omit the CI trigger/job contract. Full
+// workflow tests and directory mutations exercise checkWorkflow instead.
+func checkRunnerWorkflow(name string, body []byte) ([]string, error) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		return nil, err
+	}
+	if len(mapping(workflow["jobs"])) == 0 {
+		return nil, fmt.Errorf("workflow has no jobs")
+	}
+	return checkRunnerJobs(name, workflow), nil
 }
 
 func TestUntrustedRunnerSelections(t *testing.T) {
@@ -31,7 +47,7 @@ func TestUntrustedRunnerSelections(t *testing.T) {
 	} {
 		t.Run(selection, func(t *testing.T) {
 			body := "on: [pull_request, push]\npermissions: {contents: read}\njobs:\n  tests:\n    runs-on: " + selection + "\n    steps: [{run: echo test}]\n"
-			problems, err := checkWorkflow("ci.yml", []byte(body))
+			problems, err := checkRunnerWorkflow("ci.yml", []byte(body))
 			if err != nil || len(problems) == 0 {
 				t.Fatalf("unsafe selection not rejected: %v %v", problems, err)
 			}
@@ -64,7 +80,7 @@ func TestProtectedJobsAndSecrets(t *testing.T) {
 		{"ci.yml", "tests", "    steps: [{run: 'gh attestation verify --deny-self-hosted-runners'}]\n"},
 	} {
 		t.Run(tc.file+"/"+tc.id+tc.extra, func(t *testing.T) {
-			problems, err := checkWorkflow(tc.file, []byte(routedWorkflow(tc.id, tc.extra)))
+			problems, err := checkRunnerWorkflow(tc.file, []byte(routedWorkflow(tc.id, tc.extra)))
 			if err != nil || len(problems) == 0 {
 				t.Fatalf("protected job not rejected: %v %v", problems, err)
 			}
@@ -92,13 +108,13 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 		"    strategy: {matrix: {artifact: [tool-arm64, tool-x64]}}\n",
 	} {
 		t.Run(extra, func(t *testing.T) {
-			problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
+			problems, err := checkRunnerWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
 			if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "Linux ARM64") {
 				t.Fatalf("incompatible artifact not rejected: %v %v", problems, err)
 			}
 			// The same artifact remains valid on a hosted runner.
 			hosted := strings.Replace(routedWorkflow("tests", extra), routedRunner, "ubuntu-latest", 1)
-			problems, err = checkWorkflow("ci.yml", []byte(hosted))
+			problems, err = checkRunnerWorkflow("ci.yml", []byte(hosted))
 			if err != nil || len(problems) != 0 {
 				t.Fatalf("hosted artifact rejected: %v %v", problems, err)
 			}
@@ -110,13 +126,13 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 		"env: {ARTIFACT: tool_linux_x86-64}\n",
 		"defaults: {run: {working-directory: artifacts/i686}}\n",
 	} {
-		problems, err := checkWorkflow("ci.yml", []byte(inherited+routedWorkflow("tests", "")))
+		problems, err := checkRunnerWorkflow("ci.yml", []byte(inherited+routedWorkflow("tests", "")))
 		if err != nil || len(problems) != 1 || !strings.Contains(problems[0], "Linux ARM64") {
 			t.Fatalf("inherited incompatible artifact not rejected: %v %v", problems, err)
 		}
 	}
 	compatible := "    # Hosted release jobs may use amd64/x86_64/x64.\n    steps: [{uses: 'actions/setup-node@sha', with: {architecture: arm64}}, {run: 'curl -fLO https://example.invalid/tool-linux-aarch64.tar.gz'}]\n    services: {postgres: {image: 'pgvector/pgvector:pg18'}}\n"
-	problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", compatible)))
+	problems, err := checkRunnerWorkflow("ci.yml", []byte(routedWorkflow("tests", compatible)))
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("ARM64-compatible job rejected: %v %v", problems, err)
 	}
@@ -126,7 +142,7 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 		"    steps: [{run: 'echo prefix64 x64suffix x640'}]\n",
 	} {
 		t.Run(extra, func(t *testing.T) {
-			problems, err := checkWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
+			problems, err := checkRunnerWorkflow("ci.yml", []byte(routedWorkflow("tests", extra)))
 			if err != nil || len(problems) != 0 {
 				t.Fatalf("harmless architecture substring rejected: %v %v", problems, err)
 			}
@@ -136,7 +152,7 @@ func TestRoutedJobsRejectAMD64Artifacts(t *testing.T) {
 
 func TestCanonicalEventGuard(t *testing.T) {
 	body := routedWorkflow("tests", "    steps: [{run: go test ./...}]\n")
-	problems, err := checkWorkflow("ci.yml", []byte(body))
+	problems, err := checkRunnerWorkflow("ci.yml", []byte(body))
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("safe route rejected: %v %v", problems, err)
 	}
@@ -151,7 +167,7 @@ func TestCanonicalEventGuard(t *testing.T) {
 		strings.Replace(body, "contains(fromJSON", "!contains(fromJSON", 1),
 		"env: {KEY: '${{ secrets.APP_KEY }}'}\n" + body,
 	} {
-		problems, err = checkWorkflow("ci.yml", []byte(replacement))
+		problems, err = checkRunnerWorkflow("ci.yml", []byte(replacement))
 		if err != nil || len(problems) == 0 {
 			t.Fatalf("broken route not rejected: %v %v", problems, err)
 		}
@@ -168,7 +184,7 @@ func TestRoutedShardMatrixGuard(t *testing.T) {
 		"[1, 2, 3, 4]",
 	} {
 		body := routedWorkflow("go-test", "    strategy:\n      matrix:\n        shard: "+selection+"\n")
-		problems, err := checkWorkflow("ci.yml", []byte(body))
+		problems, err := checkRunnerWorkflow("ci.yml", []byte(body))
 		if err != nil || (len(problems) == 0) != (selection == routedGoShards) {
 			t.Fatalf("matrix selection %s: %v %v", selection, problems, err)
 		}
@@ -188,8 +204,8 @@ func TestMatrixRunnerLabels(t *testing.T) {
 		{"{include: [{runner: [self-hosted, mbp2606]}]}", false},
 		{"${{ fromJSON(needs.matrix.outputs.runners) }}", false},
 	} {
-		body := "on: pull_request\njobs:\n  tests:\n    runs-on: ${{ matrix.runner }}\n    strategy:\n      matrix: " + tc.matrix + "\n"
-		problems, err := checkWorkflow("ci.yml", []byte(body))
+		body := "on: {pull_request: {paths: [src/**]}}\njobs:\n  tests:\n    runs-on: ${{ matrix.runner }}\n    strategy:\n      matrix: " + tc.matrix + "\n"
+		problems, err := checkRunnerWorkflow("ci.yml", []byte(body))
 		if err != nil || (len(problems) == 0) != tc.safe {
 			t.Fatalf("matrix %s: %v %v", tc.matrix, problems, err)
 		}
@@ -198,8 +214,8 @@ func TestMatrixRunnerLabels(t *testing.T) {
 
 func TestHostedLabelAllowlist(t *testing.T) {
 	for _, label := range []string{"ubuntu-latest", "ubuntu-24.04", "ubuntu-24.04-arm", "macos-15", "macos-15-intel"} {
-		body := "on: pull_request\njobs:\n  test:\n    runs-on: " + label + "\n"
-		problems, err := checkWorkflow("ci.yml", []byte(body))
+		body := "on: {pull_request: {paths: [src/**]}}\njobs:\n  test:\n    runs-on: " + label + "\n"
+		problems, err := checkRunnerWorkflow("ci.yml", []byte(body))
 		if err != nil || len(problems) != 0 {
 			t.Fatalf("hosted label %s rejected: %v %v", label, problems, err)
 		}
@@ -217,7 +233,7 @@ func TestGuardScansCaseInsensitiveWorkflowExtensions(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, label := range []string{"mbp2606", "ubuntu-2mbp2606"} {
-				if err := os.WriteFile(path, []byte("on: pull_request\njobs:\n  test:\n    runs-on: "+label+"\n"), 0600); err != nil {
+				if err := os.WriteFile(path, []byte("on: {pull_request: {paths: [src/**]}}\njobs:\n  test:\n    runs-on: "+label+"\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				problems, err := checkDirectory(dir)
@@ -234,7 +250,7 @@ func TestGuardDiscoversNewWorkflowsAndRejectsInvalidYAML(t *testing.T) {
 	if _, err := checkDirectory(dir); err == nil {
 		t.Fatal("empty directory accepted")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "new.yaml"), []byte("on: pull_request\njobs:\n  test:\n    runs-on: mbp2606\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "new.yaml"), []byte("on: {pull_request: {paths: [src/**]}}\njobs:\n  test:\n    runs-on: mbp2606\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	problems, err := checkDirectory(dir)
@@ -250,7 +266,7 @@ func TestGuardDiscoversNewWorkflowsAndRejectsInvalidYAML(t *testing.T) {
 	}
 	for _, body := range []string{
 		"on: pull_request_target\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
-		"on: pull_request\njobs:\n  test:\n    uses: other/repo/.github/workflows/tests.yml@main\n",
+		"on: {pull_request: {paths: [src/**]}}\njobs:\n  test:\n    uses: other/repo/.github/workflows/tests.yml@main\n",
 		"on: push\njobs:\n  release:\n    uses: ./.github/workflows/test-runner-smoke.yml\n",
 	} {
 		problems, err := checkWorkflow("ci.yml", []byte(body))

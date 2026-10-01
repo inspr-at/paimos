@@ -82,6 +82,7 @@ export const router = createRouter({
     // One record for the overview and its open session, so opening the panel never remounts the page.
     { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
     // Earlier separate pages now live inside Agents.
+    // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
     { path: '/pacing', redirect: '/agents' },

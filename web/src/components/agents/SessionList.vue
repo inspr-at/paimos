@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { reparentSession, undoRemoval, type SessionControl } from '../../lib/agents'
+import type { SessionControl } from '../../lib/agents'
+import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
 import { useAgents } from '../../stores/agents'
 import { GROUPS, controlBlocked, elapsed, sessionForest, type SessionBranch, type SessionGroup } from '../../lib/agentState'
@@ -58,7 +59,7 @@ const forest = computed(() => orderForest(sessionForest(showRemoved.value ? prop
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
 type Bucket = 'attention' | 'live' | 'stopped'
-const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Stopped' }]
+const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
@@ -208,7 +209,7 @@ async function move(worker: SessionView, lead: SessionView) {
   moveMenu.value = null
   try {
     const result = await reparentSession(worker.session, lead.session)
-    agents.recordRemoval({ ...result.session, adopted_from_id: result.session.adopted_from_id ?? null })
+    agents.recordSession(result.session)
     toast(`Moved ${worker.name} to ${lead.name}`, result.undoable ? { timeout: 8000, action: { label: 'Undo', run: () => void undoMove(result.event_id, worker.name) } } : {})
   } catch (error) { toast(error instanceof Error ? error.message : 'Move failed. Refresh and retry.', { tone: 'error' }) }
   finally { moving.value = false }
@@ -216,7 +217,7 @@ async function move(worker: SessionView, lead: SessionView) {
 async function undoMove(event: number, label: string) {
   try {
     const restored = await undoRemoval(event)
-    agents.recordRemoval({ ...restored, adopted_from_id: restored.adopted_from_id ?? null })
+    agents.recordSession(restored)
     toast(`Move of ${label} undone`)
   }
   catch (error) { toast(error instanceof Error ? error.message : 'Could not undo this move.', { tone: 'error' }) }

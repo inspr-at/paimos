@@ -105,6 +105,9 @@ type heartbeatSession struct {
 	lease string
 	disk  heartbeatDisk
 	hold  heartbeatHold
+	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
+	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
+	stopReason string
 }
 
 func validStateName(name string) bool {

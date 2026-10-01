@@ -96,6 +96,12 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 			WriteError(w, err)
 			return
 		}
+		// An explicit error response returned as the result is emitted after
+		// commit, for mutations that release an obsolete hold before a conflict.
+		if failure, ok := result.(*Error); ok {
+			WriteError(w, failure)
+			return
+		}
 		if page, ok := result.(orderPage); ok {
 			if page.Next != "" {
 				w.Header().Set("X-Next-Cursor", page.Next)

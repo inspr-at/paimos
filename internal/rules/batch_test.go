@@ -29,15 +29,27 @@ import (
 )
 
 func TestNextVersionAndBatchIdentity(t *testing.T) {
-	now := time.Date(2026, 9, 28, 21, 30, 5, 0, time.UTC)
-	if got := nextVersion(now, ""); got != "260928213005.0.0" {
-		t.Fatal(got)
-	}
-	if got := nextVersion(now, "260928213005.0.0"); got != "260928213006.0.0" {
-		t.Fatal("same second must move on:", got)
-	}
-	if got := nextVersion(now, "260928235959.0.0"); got != "260929000000.0.0" {
-		t.Fatal("a later publication must be passed:", got)
+	for _, tc := range []struct {
+		name, clock, published, want string
+	}{
+		{"first", "2026-09-28T21:30:05Z", "", "260928213005.0.0"},
+		{"same_second", "2026-09-28T21:30:05Z", "260928213005.0.0", "260928213006.0.0"},
+		{"clock_backwards", "2026-09-28T21:30:05Z", "260928235959.0.0", "260929000000.0.0"},
+		{"utc_midnight", "2026-09-30T23:59:59.9Z", "260930235959.0.0", "261001000000.0.0"},
+		{"after_midnight", "2026-10-01T00:00:01Z", "260930235959.0.0", "261001000001.0.0"},
+		{"year_rollover", "2026-12-31T23:59:59Z", "261231235959.0.0", "270101000000.0.0"},
+		{"leap_day", "2028-02-28T23:59:59Z", "280228235959.0.0", "280229000000.0.0"},
+		{"utc_offset", "2026-10-01T01:59:59+02:00", "260930235959.0.0", "261001000000.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now, err := time.Parse(time.RFC3339Nano, tc.clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := nextVersion(now, tc.published); got != tc.want {
+				t.Fatalf("nextVersion(%s, %q) = %q, want %q", tc.clock, tc.published, got, tc.want)
+			}
+		})
 	}
 	a := requestDigest("t", "p", []batchItem{{"b", 2, "auto"}, {"a", 1, "auto"}}, "n")
 	b := requestDigest("t", "p", []batchItem{{"a", 1, "auto"}, {"b", 2, "auto"}}, "n")
@@ -61,6 +73,11 @@ type batchWorld struct {
 }
 
 func newBatchWorld(t testing.TB, slug string) *batchWorld {
+	return newBatchWorldWithClock(t, slug, time.Now)
+}
+
+func newBatchWorldWithClock(t testing.TB, slug string, now func() time.Time) *batchWorld {
+	t.Helper()
 	d := dbtest.Open(t)
 	w := &batchWorld{t: t, d: d, mux: http.NewServeMux()}
 	if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,'Rules batch') RETURNING id::text`, slug).Scan(&w.tid); err != nil {
@@ -72,7 +89,9 @@ func newBatchWorld(t testing.TB, slug string) *batchWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	New(d.App).Mount(w.mux)
+	m := New(d.App).(*Module)
+	m.versionNow = now
+	m.Mount(w.mux)
 	return w
 }
 func (w *batchWorld) principal(kind tenant.PrincipalKind, name, role string) tenant.Principal {
@@ -184,7 +203,33 @@ func bulky(prefix string, n int) []Rule {
 }
 
 func TestBatchPublishIsOneAtomicPersonApproval(t *testing.T) {
-	w := newBatchWorld(t, "rules-batch")
+	// Freeze even the real-time sample so repeated approvals exercise the
+	// same-second allocator without sleeping. Explicit follow-up versions must
+	// belong to that clock, rather than a fixed future date the clock overtakes.
+	realNow := time.Now().UTC().Truncate(time.Second)
+	for _, tc := range []struct {
+		name, clock, first, second, single string
+	}{
+		{"fixed", "2026-09-28T21:30:05Z", "260928213005.0.0", "260928213006.0.0", "260928213007.0.0"},
+		{"before_midnight", "2026-09-30T23:59:59Z", "260930235959.0.0", "261001000000.0.0", "261001000001.0.0"},
+		{"subsecond_midnight", "2026-09-30T23:59:59.9Z", "260930235959.0.0", "261001000000.0.0", "261001000001.0.0"},
+		{"after_midnight", "2026-10-01T00:00:01Z", "261001000001.0.0", "261001000002.0.0", "261001000003.0.0"},
+		{"real_time", realNow.Format(time.RFC3339), realNow.Format("060102150405") + ".0.0", realNow.Add(time.Second).Format("060102150405") + ".0.0", realNow.Add(2*time.Second).Format("060102150405") + ".0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now, err := time.Parse(time.RFC3339Nano, tc.clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("publication clock: %s", tc.clock)
+			testBatchPublishIsOneAtomicPersonApproval(t, now, tc.first, tc.second, tc.single)
+		})
+	}
+}
+
+func testBatchPublishIsOneAtomicPersonApproval(t *testing.T, now time.Time, firstVersion, secondVersion, singleVersion string) {
+	t.Helper()
+	w := newBatchWorldWithClock(t, "rules-batch", func() time.Time { return now })
 	admin := w.principal(tenant.Person, "owner", "admin")
 	member := w.principal(tenant.Person, "member", "member")
 	agent := w.principal(tenant.Agent, "builder", "admin")
@@ -268,7 +313,7 @@ func TestBatchPublishIsOneAtomicPersonApproval(t *testing.T) {
 	}
 	for i, s := range []Set{safety, git, style} {
 		v := got.Versions[i]
-		if v.SetID != s.ID || v.Note != "First setup." || v.SHA256 != SnapshotDigest(v) || w.published(s.ID) != v.Version {
+		if v.SetID != s.ID || v.Version != firstVersion || v.Note != "First setup." || v.SHA256 != SnapshotDigest(v) || w.published(s.ID) != v.Version {
 			t.Fatalf("set %s: %+v", s.Name, v)
 		}
 	}
@@ -281,10 +326,9 @@ func TestBatchPublishIsOneAtomicPersonApproval(t *testing.T) {
 		t.Fatalf("replay changed the answer\nfirst  %s\nreplay %s", first, replay)
 	}
 	// The same revisions with another note are a new request: new versions.
-	time.Sleep(1100 * time.Millisecond)
 	second := w.call(admin, "POST", "/api/rules/publish", batch("Second note.", item(safety, "auto")), 200)
 	var noted BatchResult
-	if err := json.Unmarshal(second, &noted); err != nil || noted.BatchID == got.BatchID || noted.Versions[0].Version <= got.Versions[0].Version {
+	if err := json.Unmarshal(second, &noted); err != nil || noted.BatchID == got.BatchID || noted.Versions[0].Version != secondVersion {
 		t.Fatalf("a second note did not publish anew: %s", second)
 	}
 	// Replaying the first request now still returns its stored answer, with
@@ -305,6 +349,9 @@ func TestBatchPublishIsOneAtomicPersonApproval(t *testing.T) {
 	var their BatchResult
 	if err := json.Unmarshal(theirs, &their); err != nil || their.BatchID == got.BatchID {
 		t.Fatalf("another person's request was answered with the first result: %s", theirs)
+	}
+	if their.Versions[1].Version != secondVersion {
+		t.Fatalf("another person's publication did not advance Git's version: %s", theirs)
 	}
 	if n := w.events(`AND after->>'batch_id'=$2`, their.BatchID); n != 3 {
 		t.Fatal("another person's request did not publish its own versions:", n)
@@ -330,8 +377,10 @@ func TestBatchPublishIsOneAtomicPersonApproval(t *testing.T) {
 	}
 	// The single-set publication route is unchanged.
 	var fresh Set
-	json.Unmarshal(w.call(other, "GET", "/api/rules/sets/"+git.ID, nil, 200), &fresh)
-	w.call(other, "POST", "/api/rules/sets/"+git.ID+"/publish", map[string]any{"expected_revision": fresh.Revision, "version": "261001000000.0.0"}, 200)
+	if err := json.Unmarshal(w.call(other, "GET", "/api/rules/sets/"+git.ID, nil, 200), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	w.publish(other, fresh, singleVersion)
 }
 
 // A demotion that commits while a batch waits is seen before anything is

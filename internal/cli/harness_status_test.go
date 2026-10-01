@@ -13,7 +13,34 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 )
+
+// The CLI's separate harness transport also accepts a response's new required
+// field when an older consumer type does not declare it.
+func TestHarnessLegacyDecoderIgnoresFinished(t *testing.T) {
+	for _, finished := range []bool{false, true} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			t.Run(method+"/"+map[bool]string{false: "false", true: "true"}[finished], func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set(reportercontract.Header, reportercontract.HarnessSession)
+					_ = json.NewEncoder(w).Encode(harness.Session{ID: transcriptSessionID, Finished: finished})
+				}))
+				defer server.Close()
+				rt, _, _ := heartbeatRuntime(t, server)
+				var legacy struct {
+					ID string `json:"id"`
+				}
+				if err := rt.harnessDo(method, harnessPath(transcriptProjectID, transcriptSessionID), "", nil, &legacy); err != nil {
+					t.Fatal(err)
+				}
+				if legacy.ID != transcriptSessionID {
+					t.Fatalf("existing response field lost: %q", legacy.ID)
+				}
+			})
+		}
+	}
+}
 
 func TestStatusFileProgressParsingAndFence(t *testing.T) {
 	home, err := filepath.EvalSymlinks(t.TempDir())

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
-import { agentData, mockAgents } from './agents-fixtures'
+import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 
 const now = Date.parse('2026-09-28T20:00:00Z')
 async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
@@ -64,6 +64,17 @@ test('send targets the selected generation and a concurrent stop disables the co
   expect(sent?.recipient_session_id).toBe(worker.id)
   await expect(panel.getByText('This session has ended.', { exact: true })).toHaveCount(1)
   await expect(panel.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0)
+})
+
+test('an accepted message reads the lists again', async ({ page }) => {
+  const { worker, calls } = await setup(page)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await panel.getByRole('textbox', { name: 'Message to Current lead' }).fill('Ship it')
+  const before = sessionListReads(calls)
+  await panel.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(async () => { await page.clock.runFor(100); return sessionListReads(calls) }).toBeGreaterThan(before)
+  expect(calls.filter(c => c.method === 'POST' && /\/messages$/.test(c.path))).toHaveLength(1)
 })
 
 for (const width of [1600, 390]) {
