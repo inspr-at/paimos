@@ -37,6 +37,36 @@ func usagePayload() map[string]any {
 		"cached_input_tokens": 40, "provisional": true, "billing_mode": "unknown"}
 }
 
+func TestUsageInheritsDeclaredAccountBilling(t *testing.T) {
+	f := fixture(t)
+	expect(t, usagePrice(t, f, 1, "2.5"), 201)
+	var account string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,billing_mode,plan)
+            VALUES($1,'billing','codex','test',$2,'Account','subscription','Synthetic plan') RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&account)
+	})
+	path, _, lease := usageSession(t, f, "unmanaged")
+	report := usagePayload()
+	report["account_id"] = account
+	out, replayed := usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	if replayed || out.BillingMode != "subscription" || out.SubscriptionLabel == nil || *out.SubscriptionLabel != "Synthetic plan" || out.EstimatedCostUSD != nil {
+		t.Fatalf("account billing: %+v", out)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET billing_mode='api' WHERE id=$1`, account)
+		return err
+	})
+	out, replayed = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	if !replayed || out.BillingMode != "subscription" {
+		t.Fatal("retry changed with account settings")
+	}
+	report["report_id"], report["sequence"] = uid(), 2
+	out, _ = usageResult(t, f.call(f.agent, "POST", path+"/usage", report, lease))
+	if out.BillingMode != "api" || out.EstimatedCostUSD == nil || out.SubscriptionLabel != nil {
+		t.Fatalf("api billing: %+v", out)
+	}
+}
+
 func usagePrice(t *testing.T, f *harnessFixture, version int, rate string) *httptest.ResponseRecorder {
 	t.Helper()
 	return f.call(f.person, "POST", "/api/model-prices", map[string]any{"model": "test-model", "version": version,

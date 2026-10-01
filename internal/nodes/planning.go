@@ -49,7 +49,8 @@ const (
 )
 
 type planningView struct {
-	Route *planningRoute `json:"route"`
+	Snapshot *planningSnapshot `json:"estimate_snapshot,omitempty"`
+	Route    *planningRoute    `json:"route"`
 	// RouteGap says why a role has no model: "area" (no area set),
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
@@ -789,6 +790,10 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			return nil, err
 		}
 	}
+	snapshots, err := loadPlanningSnapshots(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
 	own := map[string]planRow{}
 	children := map[string][]planRow{}
 	for _, r := range rows {
@@ -804,7 +809,17 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			continue
 		}
 		m := money[item.ID]
-		if view := pl.view(self, children[item.ID], usage[item.ID], visible(item), &m); view != nil {
+		view := pl.view(self, children[item.ID], usage[item.ID], visible(item), &m)
+		if snap := snapshots[item.ID]; snap != nil {
+			if view == nil {
+				view = &planningView{}
+			}
+			if !visible(item) || !cost(snap.CostProject) {
+				snap.hideCost()
+			}
+			view.Snapshot = snap
+		}
+		if view != nil {
 			out[item.ID] = view
 		}
 	}

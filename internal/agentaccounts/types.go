@@ -21,6 +21,7 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	BillingMode          string              `json:"billing_mode"`
 	Provider             string              `json:"provider,omitempty"`
 	Model                string              `json:"model,omitempty"`
 	ModelStatus          string              `json:"model_status,omitempty"`
@@ -99,11 +100,13 @@ type Reservation struct {
 
 // RouteResult is the account chosen for a queued run.
 type RouteResult struct {
-	AccountID    string        `json:"account_id"`
-	AccountKey   string        `json:"account_key"`
-	AccountLabel string        `json:"account_label"`
-	DaemonID     string        `json:"daemon_id"`
-	Reservations []Reservation `json:"reservations"`
+	BillingMode       string        `json:"billing_mode"`
+	SubscriptionLabel string        `json:"subscription_label,omitempty"`
+	AccountID         string        `json:"account_id"`
+	AccountKey        string        `json:"account_key"`
+	AccountLabel      string        `json:"account_label"`
+	DaemonID          string        `json:"daemon_id"`
+	Reservations      []Reservation `json:"reservations"`
 }
 
 // HarnessHealth summarises whether a harness can take new work.

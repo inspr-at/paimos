@@ -83,11 +83,11 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		got  ProbeStatus
 		want ProbeStatus
 	}{
-		{"codex signed in", codex("Logged in using ChatGPT", 0), ProbeStatus{OK: true}},
+		{"codex signed in", codex("Logged in using ChatGPT", 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"codex signed out", codex("Not logged in", 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"codex unreadable", codex("segmentation fault", 2), ProbeStatus{Failure: ProbeUnavailable}},
 		{"codex signed in but failing", codex("Logged in using ChatGPT", 1), ProbeStatus{Failure: ProbeUnavailable}},
-		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true}},
+		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
@@ -197,7 +197,7 @@ func TestProbeStatusRejectsDuplicateKeys(t *testing.T) {
 		{"claude case alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","LOGGEDIN":false}`), unavailable},
 		{"claude escaped alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","logged\u0049n":false}`), unavailable},
 		{"claude duplicate unknown key", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","x":1,"x":2}`), unavailable},
-		{"claude clean answer", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), ProbeStatus{OK: true}},
+		{"claude clean answer", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"cursor duplicate identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"42","userId":"7"}}`), unavailable},
 		{"cursor duplicate identity other first", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"7","userId":"42"}}`), unavailable},
 		{"cursor duplicate authenticated", cursor(`{"status":"unauthenticated","isAuthenticated":true,"isAuthenticated":false}`), unavailable},
