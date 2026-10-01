@@ -50,6 +50,7 @@ func TestTicketQueueDeleteCommitsWithGeneratedChild(t *testing.T) {
 			if removeFirst {
 				f.call(t, f.person, "DELETE", "/api/queue/"+id, nil, 200, nil)
 				f.call(t, f.person, "GET", "/api/nodes/"+id, nil, 200, nil)
+				f.call(t, f.person, "GET", "/api/nodes/"+e.Run.OrderID, nil, 404, nil)
 			}
 			f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
 			f.call(t, f.person, "GET", "/api/nodes/"+id, nil, 404, nil)
@@ -199,14 +200,17 @@ func TestTicketQueueConcurrentPatchAndAddFinish(t *testing.T) {
 
 type ticketDeadlockEvent struct{}
 
-func (ticketDeadlockEvent) WriteEvent(_ context.Context, _ pgx.Tx, e nodes.Event) error {
+func (ticketDeadlockEvent) WriteEvent(ctx context.Context, tx pgx.Tx, e nodes.Event) error {
+	if e.Type != "node.updated" {
+		return (nodes.SQLWriter{}).WriteEvent(ctx, tx, e)
+	}
 	return fmt.Errorf("write %s: %w", e.Type, &pgconn.PgError{Code: "40P01", Message: "deadlock detected"})
 }
 
 func TestTicketQueuePatchDeadlockReturnsRetryableConflict(t *testing.T) {
 	f := setup(t)
-	id := f.ticket(t, "open", "high", nil)
 	nodes.New(f.d.App, ticketDeadlockEvent{}).Mount(f.mux)
+	id := f.apiQueueTicket(t, nil)
 	var response struct{ Error, Code string }
 	f.call(t, f.person, "PATCH", "/api/nodes/"+id, map[string]string{"title": "Should roll back"}, 409, &response)
 	if response.Code != "retryable_conflict" || !strings.Contains(response.Error, "retry") {

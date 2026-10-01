@@ -297,6 +297,7 @@ func TestTicketQueueTerminalCancellationRollsBackWithTicket(t *testing.T) {
 	if n := f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state='open'`, id); n != 1 {
 		t.Fatal("failed patch changed ticket")
 	}
+	f.call(t, f.person, "GET", "/api/nodes/"+e.Run.OrderID, nil, 200, nil)
 }
 
 func TestTicketQueueBulkArchiveCancelsOnlyQueuedWork(t *testing.T) {
