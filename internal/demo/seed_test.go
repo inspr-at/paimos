@@ -514,7 +514,12 @@ func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	// An incomplete registry must not borrow another harness's profile or
 	// commit Scribe's completed history before finding Claude unavailable.
 	// Pins are immutable, so create this state rather than updating a pin.
+	// Pin the current catalog: an older catalog would intentionally upgrade
+	// and fill in the missing harness before the demo accesses it.
 	err = db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2)`, tenantID, modelregistry.CatalogVersion); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
 			VALUES($1::uuid,'demo-enabled-codex','1','codex','openai','test-model','high','standard',true),
 			      ($1::uuid,'demo-disabled-claude','1','claude','anthropic','test-model','high','standard',false)`, tenantID)

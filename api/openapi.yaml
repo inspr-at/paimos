@@ -5782,7 +5782,7 @@ paths:
       operationId: getModelRefreshStatus
       security: *auth
       responses:
-        '200': {description: Settings, last refresh result, pending models and observations; no credentials, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
+        '200': {description: 'Settings, last refresh result, pending models and observations; no credentials', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
     post:
       operationId: refreshModelCatalog
       description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. All callers and the scheduler share interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.
@@ -12729,7 +12729,7 @@ components:
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
-        status: {type: string, enum: [advertised, working, invalid], description: Invalid means an explicit model-not-found or unsupported-model failure, never a generic HTTP 400.}
+        status: {type: string, enum: [advertised, working, invalid], description: 'Invalid means an explicit model-not-found or unsupported-model failure, never a generic HTTP 400.'}
     ModelRefreshSettings:
       type: object
       additionalProperties: false

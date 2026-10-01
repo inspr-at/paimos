@@ -157,12 +157,18 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	}
 	grantModelReporter(t, p, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
-	enrollEvidenceHarness(t, p, agent, "codex")
+	account := enrollEvidenceHarness(t, p, agent, "codex")
 	seedEvidenceSession(t, p, agent, "codex", "gpt-6.1-sol", "high")
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	sol := profileBySlug(profiles, "codex-6-1-sol-high")
 	until := time.Now().Add(time.Hour)
 	inRegistry(t, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='fixture' WHERE id=$1`, account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '2 days','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
 		return err
 	})
@@ -189,6 +195,11 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		}
 		if len(out.Ladder[0].SkipReasons) < 2 {
 			t.Fatalf("lost independent override/suppression: %+v", out.Ladder)
+		}
+		// Account readiness is independent of model health. Keep the account's
+		// probe current at the simulated horizon to test only suppression expiry.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2 WHERE id=$1`, account, now.Add(25*time.Hour)); err != nil {
+			return err
 		}
 		out, err = resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now.Add(25*time.Hour))
 		if err != nil {

@@ -201,6 +201,7 @@ func TestFailuresMustBeSpacedAndReceiptsAreBounded(t *testing.T) {
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
+	enrollEvidenceHarness(t, owner, agent, "codex")
 	seedEvidenceSession(t, owner, agent, "codex", "gpt-6.1-sol", "high")
 	o := Observation{ReportID: EvidenceID("first"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "invalid"}
 	second := o
