@@ -76,7 +76,7 @@ func nodeInProject(ctx context.Context, tx pgx.Tx, nodeID, projectID string) (st
 		WHERE target.id = $1::uuid AND target.deleted_at IS NULL
 		  AND EXISTS (SELECT 1 FROM chain WHERE id = $2::uuid)`, nodeID, projectID).Scan(&slug)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", fail(http.StatusConflict, "target is not in this project")
+		return "", refusal(http.StatusConflict, "target_changed", "target is not in this project")
 	}
 	return slug, err
 }

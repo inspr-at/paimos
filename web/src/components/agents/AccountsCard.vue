@@ -190,7 +190,7 @@ async function backInPool(account: AgentAccount) {
             <p v-if="useLine(a)" class="use-line">{{ useLine(a) }}</p>
             <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
             <AccountDetail
-              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
+              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
               :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
             />
           </li>

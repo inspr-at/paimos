@@ -16,10 +16,10 @@ func TestCancelQueuedRunIsPersonOnlyAndReleasesHolds(t *testing.T) {
 	f.reserve(t, run)
 	sibling := uuid()
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint) VALUES($1,$2::uuid,$2::text,'codex','other-daemon',$3,'Sibling',repeat('ab',32))`, f.agent.TenantID, sibling, f.other.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint,quota_pool_fingerprint) VALUES($1,$2::uuid,$2::text,'codex','other-daemon',$3,'Sibling',repeat('ab',32),repeat('ab',32))`, f.agent.TenantID, sibling, f.other.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32) WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32),quota_pool_fingerprint=repeat('ab',32) WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET account_id=$2 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, sibling)
