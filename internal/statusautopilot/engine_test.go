@@ -408,12 +408,25 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 	flagged := f.add("AUT-3", "ticket", "done", 15, &human)
 	cancelled := f.add("AUT-4", "ticket", "cancelled", 15, nil)
 	accepted := f.add("AUT-5", "ticket", "accepted", 15, nil)
-	release := f.release([]string{done, flagged, cancelled, accepted})
+	unshipped := map[string]string{}
+	for i, state := range []string{"new", "backlog", "open", "blocked", "in_progress", "qa", "archived"} {
+		unshipped[state] = f.add(fmt.Sprintf("AUT-%d", i+6), "ticket", state, 15, nil)
+	}
+	ids := []string{done, flagged, cancelled, accepted}
+	for _, id := range unshipped {
+		ids = append(ids, id)
+	}
+	release := f.release(ids)
 	publish := func() { f.tx(func(tx pgx.Tx) error { return PublishTx(t.Context(), tx, f.p.TenantID, release) }) }
 	publish()
 	publish()
 	if f.state(done).State != "delivered" || f.state(flagged).State != "done" || f.state(cancelled).State != "cancelled" || f.state(accepted).State != "accepted" {
 		t.Fatal("publish status/flag failure")
+	}
+	for state, id := range unshipped {
+		if f.state(id).State != state {
+			t.Fatalf("release shipped unfinished %s", state)
+		}
 	}
 	ch := f.changes(done)
 	if len(ch) != 1 || !strings.Contains(ch[0].Reason, "Azimuth") || !strings.Contains(ch[0].Reason, "260930120000.0.0") {
@@ -423,6 +436,19 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 	publish()
 	if f.state(done).State != "done" {
 		t.Fatal("publish replay redid Undo")
+	}
+	// A fresh Done episode after publication is work for a later release.
+	later := f.add("AUT-20", "ticket", "done", 15, nil)
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.p.TenantID, later, f.project, release); err != nil {
+			return err
+		}
+		_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &later, Type: "node.updated", Before: map[string]string{"state": "open"}, After: map[string]string{"state": "done"}})
+		return err
+	})
+	publish()
+	if f.state(later).State != "done" {
+		t.Fatal("historical publish shipped a later Done episode")
 	}
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET human_check=NULL WHERE id=$1`, flagged)

@@ -343,7 +343,9 @@ func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error
 			return err
 		}
 		n := c.Node
-		if n.ProjectID == nil || *n.ProjectID != project || n.State == "accepted" || n.State == "delivered" || n.State == "cancelled" || n.State == "archived" {
+		// The approved transition is Done → Delivered. A historical release
+		// must not ship a reopened ticket or a newer Done episode on replay.
+		if n.ProjectID == nil || *n.ProjectID != project || n.State != "done" || c.Since.After(published) {
 			continue
 		}
 		d := decision{Rule: "publish", To: "delivered", Anchor: releaseID, Reason: fmt.Sprintf("Shipped in release %s (%s).", title, version)}
