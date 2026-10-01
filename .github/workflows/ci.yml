@@ -159,6 +159,11 @@ jobs:
       - working-directory: web
         run: npm run lint
       - working-directory: web
+        run: npm run test:unit
+      - name: Browser runner safety (no browsers)
+        working-directory: web
+        run: npm run test:browser-safety
+      - working-directory: web
         run: npm run build
 
   release-check:
@@ -223,7 +228,11 @@ jobs:
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Measure Chromium shell cleanup on success, failure and interruption
+        env:
+          AEON_BROWSER_LIFECYCLE: '1'
+        run: node --test --test-concurrency=1 scripts/playwright-safe.test.mjs
       - name: Start server and run smoke
         run: |
           set -euo pipefail

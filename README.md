@@ -962,11 +962,51 @@ When Connect is disabled, its reason appears beside the button.
 ```sh
 cd web
 npm run test:unit
-npx playwright install chromium
-npm test
+npm run test:browser-safety # tiny Node process fixtures; no browser locally
+# Full UI suites: prefer draft PR CI (including AEON-410's sharded UI jobs).
+# Or test committed HEAD on the approved mbp2606 lane:
+AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
+# Locally, only one targeted file, one worker, when there is a technical reason:
+npm test -- tests/authz.spec.ts --workers=1
 ```
 
-The Playwright suite starts Vite on port 5175, intercepts all `/api/*` calls,
+`just ui-remote` is the same remote entry point from the repository root; extra
+arguments select files or reporters. Set `AEON_REMOTE_CONTROL_DIR` to the existing
+coordinator directory containing `remote-test.sh` and its OPS hold controls. The
+runner respects holds and capture reservations, refuses an active builder pool,
+Mailina's console session, a non-ci console idle less than ten minutes, unknown
+presence/load, load above 18, or any existing heavy-run reservation. It reserves
+one remote browser lane before setup and checks presence/capacity again. Refusal
+or unreachability returns exit 3 and never starts a local suite. It streams only
+committed HEAD through `git archive` (no extra Git push), runs at one worker, and
+copies logs and test artifacts to `web/test-results/remote/<run>/`. The remote
+checkout and artifacts remain for inspection; no other worker's state is cleaned.
+OPS-247 owns the one-time pinned browser install: a missing headless shell refuses
+the run rather than installing one. When its shared lane launcher is available,
+`AEON_HEAVY_JOB_LANE=/absolute/launcher` wraps the job using `browser -- COMMAND ARGS`;
+the coordinator must confirm that adapter contract before enabling it.
+
+All three Playwright configs default to one worker locally; `PW_WORKERS` is an
+explicit positive-integer override. UI test-level parallelism is enabled only
+in CI, whose worker/shard budget remains owned by CI (AEON-410). Local UI runs use
+one project and Playwright's bundled [Chromium headless shell](https://playwright.dev/docs/browsers#chromium-headless-shell)
+with GPU disabled. Smoke and performance runs use the same browser policy.
+
+Use `npm test`, `npm run e2e`, or `npm run audit:ui` to keep the shared per-user
+host lock and process supervisor active, including across worktrees. Direct local
+`npx playwright test` is refused by global setup before browsers start. A second
+suite prints the lock path and owner PID and refuses to start. An interrupted or
+failed run terminates only its own process groups, checks that they are empty, and
+then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
+and wall time. A Node preload records detached browser groups when they spawn,
+preserving Playwright's normal browser shutdown behavior. Forced supervisor
+termination (SIGKILL) cannot run cleanup: if a
+stale lock remains, confirm its recorded owner and descendants have exited before
+moving that exact lock to trash. Never kill other workers' or desktop browsers.
+
+The Playwright UI suite starts Vite on a stable port derived from its worktree
+path; `PLAYWRIGHT_PORT` overrides it. Set `PLAYWRIGHT_REUSE=1` only for a dev server
+already running from this same worktree. It intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
