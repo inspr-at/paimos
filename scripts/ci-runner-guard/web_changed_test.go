@@ -40,11 +40,11 @@ func webSelection(t *testing.T) (string, string) {
 			}
 			snapshot = command
 		}
-		if command == "bash ../scripts/ci-web-tests.sh run" {
+		if strings.Contains(command, "bash ../scripts/ci-web-tests.sh run") {
 			if step["working-directory"] != "web" || step["if"] != nil {
 				t.Fatal("selection must run in web on every CI event")
 			}
-			for _, output := range []string{"event", "base_sha", "refs_hash", "paths_hash", "require_tests"} {
+			for _, output := range []string{"event", "base_sha", "refs_hash", "paths_hash", "require_tests", "selected_specs", "script_hash", "guard_hash"} {
 				if mapping(step["env"])["SNAPSHOT_"+strings.ToUpper(output)] != "${{ steps.snapshot.outputs."+output+" }}" {
 					t.Fatalf("run must consume the sealed snapshot output %s", output)
 				}
@@ -97,7 +97,8 @@ func runWebSelection(t *testing.T, scenario webScenario) webResult {
 		}
 	}
 	write("web/src/fixture.vue", "base\n")
-	git("add", "web/src/fixture.vue")
+	write("web/tests/existing.spec.ts", "base spec\n")
+	git("add", "web/src/fixture.vue", "web/tests/existing.spec.ts")
 	git("-c", "user.name=Markus Barta", "-c", "user.email=markus@barta.com", "commit", "-m", "base")
 	base := git("rev-parse", "HEAD")
 	path := scenario.path
@@ -131,8 +132,32 @@ func runWebSelection(t *testing.T, scenario webScenario) webResult {
 'use strict';
 if (process.argv[2] === 'list') console.log('Total: 1 test in 1 file');
 else console.log('{"stats":{"expected":1,"skipped":0,"unexpected":0,"flaky":0},"errors":[]}');
+if (process.argv[3].endsWith('-cleared-stack')) {
+  Error.prepareStackTrace = () => 'no repository frames';
+  Error.stackTraceLimit = 0;
+}
 if (process.argv[3].endsWith('-kill')) process.kill(process.pid, 'SIGTERM');
+else if (process.argv[3].endsWith('-reallyExit')) process.reallyExit(0);
 else process.exit(0);
+`)
+	write("scripts/shrink.cjs", `
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const index = '../.git/index';
+const originalIndex = fs.readFileSync(index);
+const originalSource = fs.readFileSync('src/fixture.vue');
+process.on('exit', () => {
+  fs.writeFileSync(index, originalIndex);
+  fs.writeFileSync('src/fixture.vue', originalSource);
+});
+cp.execFileSync('git', ['read-tree', process.env.PR_BASE_SHA]);
+fs.writeFileSync('src/fixture.vue', 'base\n');
+// Mutable diff selection sees only a new passing spec, then restores on exit.
+fs.writeFileSync('tests/passing.spec.ts', 'passing\n');
+cp.execFileSync('git', ['add', 'tests/passing.spec.ts']);
+const mutableSelection = process.argv.some(arg => arg.startsWith('--only-changed='));
+if (process.argv.includes('--list')) console.log('Total: ' + (mutableSelection ? '1 test in 1 file' : '2 tests in 2 files'));
+else console.log('{"stats":{"expected":1,"skipped":0,"unexpected":0,"flaky":0},"errors":[]}');
 `)
 	stub := `#!/bin/bash
 printf 'CALL\n' >> "$INVOCATION_LOG"
@@ -148,6 +173,12 @@ case "$MUTATION" in
     git read-tree "$PR_BASE_SHA"
     git show "$PR_BASE_SHA:web/src/fixture.vue" > src/fixture.vue
     git diff --no-renames --name-only -z "$PR_BASE_SHA" -- > "$RUNNER_TEMP/aeon-web-selection/paths"
+    ;;
+  "$phase-guard") printf 'process.exit(0);\n' > ../scripts/ci-web-exit-guard.cjs ;;
+  "$phase-copy-guard") printf 'process.exit(0);\n' > "$RUNNER_TEMP/aeon-web-selection/guard.cjs" ;;
+  "$phase-restore")
+    node ../scripts/shrink.cjs "$@"
+    exit 0
     ;;
   "$phase-rewrite-only") printf '' > "$RUNNER_TEMP/aeon-web-selection/paths" ;;
 esac
@@ -203,6 +234,12 @@ fi
 			}
 			vars = append(vars, "SNAPSHOT_"+strings.ToUpper(key)+"="+value)
 		}
+		if scenario.mutation == "before-script" || scenario.mutation == "before-both" {
+			write("scripts/ci-web-tests.sh", "exit 0\n")
+		}
+		if scenario.mutation == "before-guard" || scenario.mutation == "before-both" {
+			write("scripts/ci-web-exit-guard.cjs", "process.exit(0);\n")
+		}
 		if strings.HasPrefix(scenario.mutation, "before-") {
 			write("temp/aeon-web-selection/paths", "")
 			write("temp/aeon-web-selection/base", base)
@@ -244,14 +281,14 @@ func TestWebSelectionByEvent(t *testing.T) {
 					t.Fatalf("list and run must retain %s: %s", flag, got.calls)
 				}
 			}
-			if strings.Contains(got.calls, "--pass-with-no-tests") || strings.Contains(got.calls, "tests/") {
-				t.Fatal("must not allow empty suites or restrict the full spec tree")
+			if strings.Contains(got.calls, "--pass-with-no-tests") || strings.Contains(got.calls, "--only-changed") {
+				t.Fatal("must not allow empty suites or mutable diff selection")
 			}
 			if event == "pull_request" {
-				if strings.Count(got.calls, "--only-changed="+got.base+"\n") != 2 || strings.Contains(got.calls, "origin/main") {
-					t.Fatal("PR must use its immutable event base, even when main has matching end content")
+				if strings.Count(got.calls, "/web/tests/theme\\.spec\\.ts$\n") != 2 || strings.Contains(got.calls, "existing") {
+					t.Fatalf("spec-only PR must pass the sealed literal file to both invocations: %s", got.calls)
 				}
-			} else if strings.Contains(got.calls, "--only-changed") {
+			} else if strings.Contains(got.calls, "tests/") {
 				t.Fatal("non-PR coverage, including merge_group, must run the full suite")
 			}
 			if !strings.Contains(got.summary, "Total: 1 test in 1 file") {
@@ -263,7 +300,7 @@ func TestWebSelectionByEvent(t *testing.T) {
 
 func TestWebSelectionEmptyPRWithoutUIChanges(t *testing.T) {
 	got := runWebSelection(t, webScenario{event: "pull_request", list: "Total: 0 tests in 0 files"})
-	if got.err != nil || strings.Count(got.calls, "CALL\n") != 1 || !strings.Contains(got.summary, "empty selection accepted") {
+	if got.err != nil || got.calls != "" || !strings.Contains(got.summary, "empty selection accepted") {
 		t.Fatalf("only non-UI PRs may accept an empty selection: %+v", got)
 	}
 }
@@ -300,7 +337,7 @@ func TestWebSelectionInvalidInputsFailBeforePlaywright(t *testing.T) {
 func TestWebSelectionRejectsMissingOrInvalidTotals(t *testing.T) {
 	for _, list := range []string{"Listing tests:", "Total: 0", "Total: 1 test in 1 file\nTotal: 0 tests in 0 files"} {
 		t.Run(list, func(t *testing.T) {
-			got := runWebSelection(t, webScenario{event: "pull_request", list: list})
+			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", list: list})
 			if got.err == nil || strings.Count(got.calls, "CALL\n") != 1 || !strings.Contains(got.output, "invalid Playwright list total") {
 				t.Fatalf("a real unambiguous list total is required even for non-UI PRs: %+v", got)
 			}
@@ -352,9 +389,9 @@ func TestWebSelectionRejectsSnapshotRewrite(t *testing.T) {
 }
 
 func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
-	for _, source := range []string{"tests", "src"} {
+	for _, source := range []string{"tests", "src", ".", "../scripts"} {
 		for _, phase := range []string{"list", "run"} {
-			for _, operation := range []string{"exit", "kill"} {
+			for _, operation := range []string{"exit", "kill", "reallyExit", "cleared-stack"} {
 				t.Run(source+"/"+phase+"/"+operation, func(t *testing.T) {
 					got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts",
 						mutation: phase + "-forged-" + operation, forgedSource: source})
@@ -362,7 +399,11 @@ func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
 					if phase == "run" {
 						wantCalls = 2
 					}
-					if got.err == nil || strings.Count(got.calls, "CALL\n") != wantCalls || !strings.Contains(got.output, "UI check rejected process."+operation) {
+					diagnostic := operation
+					if operation == "cleared-stack" {
+						diagnostic = "exit"
+					}
+					if got.err == nil || strings.Count(got.calls, "CALL\n") != wantCalls || !strings.Contains(got.output, "UI check rejected process."+diagnostic) {
 						t.Fatalf("forged list/JSON plus process termination must fail: %+v", got)
 					}
 				})
@@ -378,7 +419,7 @@ func TestWebExitGuardLocksFunctionsAndAllowsRunnerShutdown(t *testing.T) {
 	}
 	cmd := exec.Command("node", "--require", hook, "-e", `
 const assert = require('node:assert/strict');
-for (const name of ['exit', 'kill']) {
+for (const name of ['exit', 'kill', 'reallyExit']) {
   const descriptor = Object.getOwnPropertyDescriptor(process, name);
   assert.equal(descriptor.writable, false);
   assert.equal(descriptor.configurable, false);
@@ -395,7 +436,7 @@ process.exit(0);
 func TestWebSelectionPropagatesPlaywrightFailures(t *testing.T) {
 	for _, stage := range []string{"list", "run"} {
 		t.Run(stage, func(t *testing.T) {
-			got := runWebSelection(t, webScenario{event: "pull_request", failList: stage == "list", failRun: stage == "run"})
+			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", failList: stage == "list", failRun: stage == "run"})
 			wantCalls := 2
 			if stage == "list" {
 				wantCalls = 1
@@ -404,5 +445,40 @@ func TestWebSelectionPropagatesPlaywrightFailures(t *testing.T) {
 				t.Fatalf("Playwright failure must fail the check: %+v", got)
 			}
 		})
+	}
+}
+
+func TestWebSelectionRejectsCIFileReplacement(t *testing.T) {
+	for _, mutation := range []string{"before-script", "before-guard", "before-both", "list-guard", "list-copy-guard", "run-guard", "run-copy-guard"} {
+		t.Run(mutation, func(t *testing.T) {
+			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", mutation: mutation})
+			calls := 0
+			if strings.HasPrefix(mutation, "list-") {
+				calls = 1
+			}
+			if strings.HasPrefix(mutation, "run-") {
+				calls = 2
+			}
+			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls || !strings.Contains(got.output, "changed after snapshot") {
+				t.Fatalf("replaced verifier or guard must fail before the next invocation: %+v", got)
+			}
+		})
+	}
+}
+
+func TestWebSelectionRejectsDiffShrinkRestoredOnExit(t *testing.T) {
+	got := runWebSelection(t, webScenario{event: "pull_request", path: "web/src/fixture.vue", mutation: "list-restore"})
+	if got.err == nil || strings.Contains(got.calls, "--only-changed") || !strings.Contains(got.calls, "existing\\.spec\\.ts$") ||
+		!strings.Contains(got.output, "Playwright did not complete") || strings.Contains(got.output, "Changed paths changed") {
+		t.Fatalf("restored Git inputs must not shrink sealed selection or forge completed coverage: %+v", got)
+	}
+}
+
+func TestWebSelectionSharedInputsRunAllSpecs(t *testing.T) {
+	for _, path := range []string{"web/src/fixture.vue", "web/tests/shared-fixture.ts", "web/playwright.ui.config.ts", "scripts/ci-web-tests.sh", ".github/workflows/ci.yml"} {
+		got := runWebSelection(t, webScenario{event: "pull_request", path: path})
+		if got.err != nil || strings.Count(got.calls, "/web/tests/existing\\.spec\\.ts$\n") != 2 {
+			t.Fatalf("shared inputs must select the complete UI tree: %+v", got)
+		}
 	}
 }

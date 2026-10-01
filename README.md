@@ -1068,20 +1068,21 @@ and covers sign-in, auth errors, logout, theme switching, version interactions,
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
 
-The PR `web` check uses `--only-changed=<PR base SHA>` with a full-history checkout,
-two workers and zero retries. CI validates that immutable event base and records
-hashes of changed paths and Git refs plus the coverage requirement in sealed
-GitHub step outputs before Node runs. Later checks compare live Git to those
-outputs, never to writable scratch files. The job summary lists selected tests;
-UI or spec changes must select at least one test, and missing list totals or changes
-to the captured Git inputs fail the check. Only a PR with no UI/spec paths may pass
-with zero selected tests. Non-empty runs must produce a completed JSON test report
-matching the selected count. A Node preload locks the process exit/kill functions
-and rejects calls from `web/tests` or `web/src`, including forged reporter output
-followed by an early successful process exit.
-Selection follows Playwright's test import graph, so
-browser-loaded Vue components are not automatically mapped to their specs; an
-unmapped UI change fails for explicit coverage rather than silently passing.
+The PR `web` check snapshots literal spec paths before any repository JavaScript
+runs, with full checkout history, two workers and zero retries. Spec-only changes
+select those specs; source, shared fixtures, configuration, deleted specs and CI
+control changes conservatively select every UI spec. Selection does not query a
+mutable diff after loading specs. GitHub seals the paths, immutable event base,
+Git/path hashes, coverage requirement and both CI-script hashes in step outputs.
+The workflow verifies the scripts before execution; each Playwright invocation
+verifies and requires a copy of the hashed guard bytes. Later Git checks compare
+against sealed outputs rather than writable scratch files.
+The job summary lists selected tests. UI/spec changes and full-suite events
+require a non-empty selection and an unambiguous list total. Non-empty runs must
+produce a completed JSON test report matching that count. The Node preload locks
+`exit`, `kill`, `reallyExit` and startup stack formatting, rejecting process
+termination from repository code outside `node_modules` (including modules
+outside `web/tests` and `web/src`). Only non-UI PRs may accept no selected specs.
 Other CI events, including `merge_group`, run the complete UI suite without changed
 file or spec filters, with two workers and zero retries. The full sharded main/nightly
 lane and quarantine remain owned by AEON-410 (draft PR #29); this change does not

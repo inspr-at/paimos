@@ -1,22 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use strict';
 
-// Preload in the CLI and its workers before spec/source code can forge successful
-// reporter output and terminate the process. Playwright's own shutdown is allowed.
+// Preload before repository JavaScript; permit Playwright/node_modules shutdown.
 const exit = process.exit.bind(process);
 const kill = process.kill.bind(process);
+const reallyExit = process.reallyExit.bind(process);
 const write = require('node:fs').writeSync;
-const StackError = Error;
-const repositoryCaller = /[\\/]web[\\/](?:tests|src)[\\/]/;
+const { resolve } = require('node:path');
+const repository = resolve(process.env.AEON_CI_REPO_ROOT || resolve(__dirname, '..'));
+const prepareStackTrace = Error.prepareStackTrace;
+// A private realm retains the startup formatter and stack depth, while allowing
+// Playwright's source maps to adjust the public Error constructor as usual.
+const StackError = require('node:vm').runInNewContext('Error');
+Object.defineProperty(StackError, 'prepareStackTrace', {
+  configurable: false, writable: false, value: prepareStackTrace,
+});
+Object.defineProperty(StackError, 'stackTraceLimit', {
+  configurable: false, writable: false, value: 100,
+});
 
 function checkCaller(operation) {
-  if (repositoryCaller.test(new StackError().stack)) {
-    write(2, `UI check rejected process.${operation} from web/tests or web/src\n`);
-    exit(1);
+  const frames = String(new StackError().stack).split('\n');
+  if (frames.some(frame => frame.includes(repository + '/') &&
+      !frame.includes('/node_modules/') && !frame.includes(__filename))) {
+    write(2, `UI check rejected process.${operation} from repository code\n`);
+    reallyExit(1);
   }
 }
 
-for (const [name, original] of [['exit', exit], ['kill', kill]]) {
+for (const [name, original] of [['exit', exit], ['kill', kill], ['reallyExit', reallyExit]]) {
   Object.defineProperty(process, name, {
     configurable: false,
     writable: false,

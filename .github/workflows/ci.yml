@@ -184,9 +184,19 @@ jobs:
           SNAPSHOT_REFS_HASH: ${{ steps.snapshot.outputs.refs_hash }}
           SNAPSHOT_PATHS_HASH: ${{ steps.snapshot.outputs.paths_hash }}
           SNAPSHOT_REQUIRE_TESTS: ${{ steps.snapshot.outputs.require_tests }}
+          SNAPSHOT_SELECTED_SPECS: ${{ steps.snapshot.outputs.selected_specs }}
+          SNAPSHOT_SCRIPT_HASH: ${{ steps.snapshot.outputs.script_hash }}
+          SNAPSHOT_GUARD_HASH: ${{ steps.snapshot.outputs.guard_hash }}
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: bash ../scripts/ci-web-tests.sh run
+        run: |
+          set -euo pipefail
+          # Earlier npm/build/spec code must not replace the verifier or preload.
+          [[ "$SNAPSHOT_SCRIPT_HASH" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SNAPSHOT_GUARD_HASH" =~ ^[0-9a-f]{64}$ ]]
+          test "$(shasum -a 256 ../scripts/ci-web-tests.sh | cut -d ' ' -f 1)" = "$SNAPSHOT_SCRIPT_HASH" || { echo 'CI test script changed after snapshot' >&2; exit 1; }
+          test "$(shasum -a 256 ../scripts/ci-web-exit-guard.cjs | cut -d ' ' -f 1)" = "$SNAPSHOT_GUARD_HASH" || { echo 'CI exit guard changed after snapshot' >&2; exit 1; }
+          bash ../scripts/ci-web-tests.sh run
 
   release-check:
     runs-on: ubuntu-latest
