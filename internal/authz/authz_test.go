@@ -55,7 +55,7 @@ func TestRegistryAndBuiltins(t *testing.T) {
 		}
 	}
 	for pattern, declaration := range RoutePermissions {
-		if declaration == PublicRoute {
+		if declaration == PublicRoute || declaration == AuthenticatedRoute {
 			continue
 		}
 		for _, key := range strings.Split(declaration, "|") {
@@ -75,6 +75,43 @@ func TestRouteDeclarationsFailClosed(t *testing.T) {
 	}
 	if err := RequirePattern(context.Background(), "GET /api/ready", Scope{}); err != nil {
 		t.Fatalf("public readiness: %v", err)
+	}
+}
+
+func TestMeRequiresAuthenticationOnly(t *testing.T) {
+	if PatternIsPublic("GET /api/me") {
+		t.Fatal("self identity must not bypass authentication")
+	}
+	if declaration, ok := PermissionForPattern("GET /api/me"); !ok || declaration != AuthenticatedRoute {
+		t.Fatalf("me declaration: %q, declared=%v", declaration, ok)
+	}
+	for _, p := range []tenant.Principal{{}, {ID: "caller"}, {TenantID: "tenant"}} {
+		ctx := tenant.WithPrincipal(context.Background(), p)
+		if err := RequirePattern(ctx, "GET /api/me", Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("incomplete principal allowed: %v", err)
+		}
+	}
+	if err := RequirePattern(context.Background(), "GET /api/me", Scope{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("anonymous identity: %v", err)
+	}
+	for _, kind := range []tenant.PrincipalKind{tenant.Person, tenant.Agent} {
+		ctx := tenant.WithPrincipal(context.Background(), tenant.Principal{ID: "caller", TenantID: "tenant", Kind: kind})
+		if err := RequirePattern(ctx, "GET /api/me", Scope{}); err != nil {
+			t.Fatalf("authenticated %s without scopes or bindings: %v", kind, err)
+		}
+	}
+	// The marker belongs only to self identity. Adjacent and workspace routes
+	// retain their permission declarations, including profile.read's scope.
+	for _, route := range []string{"GET /api/me/profile", "GET /api/me/greeting", "GET /api/me/permissions", "GET /api/members", "GET /api/agent-keys", "GET /api/events"} {
+		declaration, ok := PermissionForPattern(route)
+		if !ok || declaration == PublicRoute || declaration == AuthenticatedRoute {
+			t.Errorf("permission gate missing on %s: %q", route, declaration)
+		}
+	}
+	for route, declaration := range RoutePermissions {
+		if declaration == AuthenticatedRoute && route != "GET /api/me" {
+			t.Errorf("unexpected authenticated-only route %s", route)
+		}
 	}
 }
 

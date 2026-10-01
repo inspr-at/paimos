@@ -436,3 +436,68 @@ func TestNativePlatformsAndIndexPublication(t *testing.T) {
 		t.Fatal("validate index before and after publication")
 	}
 }
+
+func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
+	w := readWorkflow(t, "release.yml")
+	image := w.Jobs["image"]
+	verifyIndex, _ := named(t, image, "Verify pushed image attestation")
+	pinIndex, pin := named(t, image, "Propose verified nixcfg deployment pin")
+	if pinIndex != verifyIndex+1 || pin.If != "" || pin.ID != "pin" {
+		t.Fatal("pin proposal must follow successful index verification immediately")
+	}
+	if image.Environment != "release-pinning" || image.Outputs["pin_evidence"] != "${{ steps.pin.outputs.pin_evidence }}" {
+		t.Fatal("pin credentials and release evidence must use the documented boundary")
+	}
+	for key, expected := range map[string]string{
+		"GH_TOKEN":             "${{ secrets.GITHUB_TOKEN }}",
+		"VERSION":              "${{ steps.version.outputs.version }}",
+		"DIGEST":               "${{ steps.push.outputs.digest }}",
+		"AEON_PIN_BOT_ENABLED": "${{ vars.AEON_PIN_BOT_ENABLED }}",
+		"AEON_PIN_APP_ID":      "${{ secrets.AEON_PIN_APP_ID }}",
+		"AEON_PIN_APP_KEY":     "${{ secrets.AEON_PIN_APP_KEY }}",
+		"INDEX_PUSHED_AT":      "${{ steps.push.outputs.pushed_at }}",
+	} {
+		if pin.Env[key] != expected {
+			t.Fatalf("pin proposal input %s is not bound to the approved release", key)
+		}
+	}
+	for _, fragment := range []string{`if [ "$AEON_PIN_BOT_ENABLED" = true ]`, "node scripts/release-pin-pr.mjs --write", "else", "node scripts/release-pin-pr.mjs\n"} {
+		if !strings.Contains(pin.Run, fragment) {
+			t.Fatalf("pin proposal lacks explicit read-only/write routing: %s", fragment)
+		}
+	}
+	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")
+	if draft.Env["PIN_EVIDENCE"] != "${{ needs.image.outputs.pin_evidence }}" || !strings.Contains(draft.Run, `"$PIN_EVIDENCE"`) {
+		t.Fatal("draft release must carry the image job's verified pin evidence")
+	}
+	for name, j := range w.Jobs {
+		for _, s := range j.Steps {
+			for key, value := range s.Env {
+				if strings.HasPrefix(key, "AEON_PIN_APP_") && (name != "image" || s.ID != "pin" || !strings.Contains(value, "secrets.AEON_PIN_APP_")) {
+					t.Fatal("pin credentials escaped the verified image proposal step")
+				}
+			}
+			if strings.Contains(s.Run, "gh pr merge") || strings.Contains(s.Run, "--auto") || strings.Contains(s.Run, "nixos-rebuild") {
+				t.Fatal("release workflow must never merge or deploy a pin proposal")
+			}
+		}
+	}
+	// CI has scalar and list needs; only parse the steps used by this check.
+	var ci struct {
+		Jobs map[string]struct{ Steps []step }
+	}
+	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &ci); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range ci.Jobs["release-check"].Steps {
+		found = found || strings.Contains(s.Run, "node --test scripts/release-pin-pr.test.mjs")
+	}
+	if !found {
+		t.Fatal("pin regression tests must run in ordinary draft PR CI")
+	}
+}

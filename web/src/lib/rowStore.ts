@@ -28,9 +28,10 @@
 import { reactive, toRaw } from 'vue'
 import type { Kind, ListItem, ListParent, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
+import { positionOf } from './position.ts'
 
 // The change an event names (liveNodes' NodeChange, the part the store reads).
-export interface RowChange { id: string; change: 'created' | 'updated' | 'deleted'; revision: string | null }
+export interface RowChange { id: string; change: 'created' | 'updated' | 'deleted'; revision: string | null; fields?: string[]; eventId?: number }
 // What an event told the store. older: it knew a newer revision (a replay);
 // known: that revision; newer: something it did not know.
 export type News = 'older' | 'known' | 'newer'
@@ -64,6 +65,14 @@ interface Entry {
   touched: number
   // Clock when the newest read that confirmed latest was sent.
   readAt: number
+  // List projections change independently of updated_at. Order their snapshots
+  // by the server event position (AEON-449), then request order for older servers.
+  projectionRead?: { position?: number; sent: number; landed: number }
+  projectionChangedAt?: number
+  projectionFloor?: number
+  // Keep the most recently delivered hint separately from the monotonic floor:
+  // after a confirmed database rewind, old positions no longer set that floor.
+  projectionHintPosition?: number
 }
 
 // List attributes a list page may leave out (an older server): a newer page
@@ -169,8 +178,10 @@ export class RowStore {
   // this copy hides it. show: the display object takes the newest copy now
   // (unless an editor pins it); otherwise views decide when. full: false for
   // a copy with projections the reader could not fill.
-  adopt(copy: ListItem, sent = this.clock, options: { show?: boolean; full?: boolean } = {}): ListItem | null {
-    return this.take(copy.id, sent, options.full ?? true, () => frozen(copy), copy.updated_at, !!copy.deleted_at, options.show ?? false)
+  // projectionFloor: the hint that triggered this batch. A page covering it may
+  // advance the display while a newer hint still waits for the follow-up read.
+  adopt(copy: ListItem, sent = this.clock, options: { show?: boolean; full?: boolean; projectionFloor?: number } = {}): ListItem | null {
+    return this.take(copy.id, sent, options.full ?? true, () => frozen(copy), copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
   }
   // A node read (GET, a save answer): merged over the newest copy.
   adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean } = {}): ListItem | null {
@@ -179,7 +190,7 @@ export class RowStore {
       return frozen(fromNode(entry?.latest ?? entry?.row ?? null, clone(node), id => this.names.get(id), id => this.parents.get(id), id => this.kinds.get(id)))
     }, node.updated_at, !!node.deleted_at, options.show ?? false)
   }
-  private take(id: string, sent: number, full: boolean, make: () => ListItem, revision: string, deleted: boolean, show: boolean): ListItem | null {
+  private take(id: string, sent: number, full: boolean, make: () => ListItem, revision: string, deleted: boolean, show: boolean, position?: number, projectionFloor?: number): ListItem | null {
     const entry = this.entry(id)
     if (deleted) { this.bury(entry, revision, sent); return null }
     // A copy from before a deletion never brings the node back, nor shows
@@ -199,6 +210,18 @@ export class RowStore {
     }
     if (entry.tomb) return null
     const order = entry.latest ? compareRevision(revision, entry.latest.updated_at) : 1
+    const held = entry.projectionRead
+    const backwards = held && sent > held.landed
+    const rewound = backwards && position !== undefined && held.position !== undefined && position < held.position
+    const olderProjection = held && position !== undefined && held.position !== undefined && position !== held.position
+      ? position < held.position && !backwards : held && sent < held.sent
+    if (rewound) entry.projectionFloor = (entry.projectionChangedAt ?? 0) > sent ? entry.projectionHintPosition : position
+    // A session hint can change ETA/lead without changing the node revision.
+    // A read must cover the batch hint (or, without a batch, the newest hint).
+    // A newer hint need not prevent progress on the one this read already covers.
+    const floor = projectionFloor ?? entry.projectionFloor
+    const predatesHint = !rewound && sent < (entry.projectionChangedAt ?? 0) && !(position !== undefined && floor !== undefined && position >= floor)
+    if (full && order === 0 && (olderProjection || predatesHint)) return this.visible(entry) ? entry.row : null
     // Older than a revision the store already knows (an event, a write): dropped.
     // The first copy of a node is kept even so; the view reads it again.
     const behind = !!entry.latest && compareRevision(revision, entry.revision) < 0
@@ -214,6 +237,7 @@ export class RowStore {
         const previous = entry.latest
         if (order > 0 && compareRevision(revision, entry.revision) > 0) { entry.revision = revision; entry.touched = ++this.clock }
         entry.latest = copy
+        if (full) entry.projectionRead = { position, sent, landed: ++this.clock }
         entry.full = full || (order === 0 && entry.full)
         // A list page replaces the count, so earlier local child deltas no
         // longer describe its baseline. Node reads only carry the previous
@@ -270,6 +294,11 @@ export class RowStore {
     const entry = this.entry(change.id)
     const order = change.revision && entry.revision ? compareRevision(change.revision, entry.revision) : 1
     if (order < 0) return 'older'
+    if (change.fields?.some(field => field === 'eta' || field === 'lead_worker')) {
+      entry.projectionChangedAt = ++this.clock
+      entry.projectionHintPosition = change.eventId && change.eventId > 0 ? change.eventId : undefined
+      if (change.eventId && change.eventId > 0) entry.projectionFloor = Math.max(entry.projectionFloor ?? 0, change.eventId)
+    }
     if (change.change === 'deleted') {
       const known = !!entry.tomb && order === 0
       this.bury(entry, change.revision, this.clock + 1)
@@ -418,6 +447,16 @@ export class RowStore {
   current(id: string): boolean {
     const entry = this.entries.get(id)
     return !!entry?.latest && !entry.tomb && entry.readAt > this.gapAt && this.showable(entry)
+  }
+  // By default, confirm the newest hint. A batch may instead confirm its own
+  // floor to apply progress without consuming newer queued hints.
+  projectionFloor(id: string): number | undefined { return this.entries.get(id)?.projectionFloor }
+  projectionsCurrent(id: string, projectionFloor?: number): boolean {
+    const entry = this.entries.get(id)
+    if (!entry?.projectionChangedAt) return true
+    const read = entry.projectionRead
+    const floor = projectionFloor ?? entry.projectionFloor
+    return !!read && (read.sent > entry.projectionChangedAt || (read.position !== undefined && floor !== undefined && read.position >= floor))
   }
 
   // ---------- Editors ----------

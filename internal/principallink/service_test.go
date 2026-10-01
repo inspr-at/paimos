@@ -117,6 +117,42 @@ func TestLinkUnlinkReplayAndSuggestions(t *testing.T) {
 		return err
 	})
 }
+
+func TestSuggestionsRequireASCIIMailboxMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, classicEmail, realEmail, reason string
+	}{
+		{"unrelated", "admİn@example.test", "admin@example.test", ""},
+		{"unrelated", "marK@example.test", "mark@example.test", ""},
+		{"unrelated", "ſam@example.test", "sam@example.test", ""},
+		{"unrelated", "MARK@example.test", "mark@example.test", "same_email"},
+		{"unrelated", "ADMİN@example.test", "admİn@example.test", "same_email"},
+		{"admİn", "", "admin@example.test", ""},
+		{"marK", "", "mark@example.test", ""},
+		{"MARK", "", "mark@example.test", "username_email_local_part"},
+	} {
+		t.Run(tc.name+"/"+tc.classicEmail+"/"+tc.realEmail, func(t *testing.T) {
+			f := setup(t)
+			from := f.person(tc.name, "paimos-classic", tc.classicEmail)
+			to := f.person("Real person", "https://id.example.test", tc.realEmail)
+			before := f.count()
+			suggestions, err := f.s.Suggest(t.Context(), "links")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.reason == "" {
+				if len(suggestions) != 0 {
+					t.Fatalf("different Unicode mailbox suggested: %+v", suggestions)
+				}
+			} else if len(suggestions) != 1 || suggestions[0].From.ID != from || suggestions[0].To.ID != to || suggestions[0].Reason != tc.reason {
+				t.Fatalf("matching suggestion missing: %+v", suggestions)
+			}
+			if f.count() != before {
+				t.Fatal("suggestions changed events")
+			}
+		})
+	}
+}
 func TestInvalidLinksAndDatabaseConstraints(t *testing.T) {
 	f := setup(t)
 	a := f.person("alias", "", "")
@@ -222,6 +258,78 @@ func TestAtomicRollbackAndConcurrentLinks(t *testing.T) {
 	}
 	if success != 1 {
 		t.Fatalf("concurrent chain successes %d", success)
+	}
+}
+
+func TestLinkAuditsEveryBindingRemovalAndRollsBackOnAuditFailure(t *testing.T) {
+	f := setup(t)
+	a := f.person("classic admin", "paimos-classic", "classic@example.test")
+	b := f.person("signed in", "https://id.example.test", "real@example.test")
+	var project string
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET roles=ARRAY['admin'] WHERE tenant_id=$1 AND id=$2`, f.tid, a); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(t.Context(), tx, f.tid, a); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state)
+			SELECT $1::uuid,id,'AUD-1','Audit project','active' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.tid).Scan(&project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+			SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1 AND key='guest'`, f.tid, a, project)
+		return err
+	})
+	// Reject the removal event after DELETE: both bindings and the link must
+	// roll back with it, with no partially written removal audit.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_binding_removal() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN IF NEW.type='binding.removed' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$;
+			CREATE TRIGGER reject_binding_removal BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_binding_removal()`)
+		return err
+	})
+	if _, err := f.s.Link(t.Context(), "links", a, b); err == nil {
+		t.Fatal("link committed despite removal audit failure")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var link *string
+		var bindings, removed int
+		if err := tx.QueryRow(t.Context(), `SELECT linked_to::text FROM principals WHERE tenant_id=$1 AND id=$2`, f.tid, a).Scan(&link); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT
+			(SELECT count(*) FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2),
+			(SELECT count(*) FROM events WHERE tenant_id=$1 AND type='binding.removed')`, f.tid, a).Scan(&bindings, &removed); err != nil {
+			return err
+		}
+		if link != nil || bindings != 2 || removed != 0 {
+			return fmt.Errorf("audit failure escaped rollback: link=%v bindings=%d removals=%d", link, bindings, removed)
+		}
+		_, err := tx.Exec(t.Context(), `DROP TRIGGER reject_binding_removal ON events`)
+		return err
+	})
+	if _, err := f.s.Link(t.Context(), "links", a, b); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var workspace, projectRemoved int
+		if err := tx.QueryRow(t.Context(), `SELECT
+			count(*) FILTER (WHERE node_id IS NULL AND before->>'scope_type'='workspace' AND before->'role'->>'key'='admin'),
+			count(*) FILTER (WHERE node_id IS NULL AND $3::uuid=ANY(node_refs) AND before->>'project_id'=$3::text AND before->>'scope_type'='project' AND before->'role'->>'key'='guest')
+			FROM events WHERE tenant_id=$1 AND type='binding.removed' AND before->>'principal_id'=$2
+			  AND before->>'id' IS NOT NULL AND after IS NULL
+			  AND actor_principal_id=(SELECT id FROM principals WHERE tenant_id=$1 AND name='Principal link operator')`, f.tid, a, project).Scan(&workspace, &projectRemoved); err != nil {
+			return err
+		}
+		if workspace != 1 || projectRemoved != 1 {
+			return fmt.Errorf("missing deleted binding audit: workspace=%d project=%d", workspace, projectRemoved)
+		}
+		return nil
+	})
+	beforeReplay := f.count()
+	if result, err := f.s.Link(t.Context(), "links", a, b); err != nil || result.Changed || f.count() != beforeReplay {
+		t.Fatalf("replay duplicated removal audit: %+v %v", result, err)
 	}
 }
 func TestCLIValidation(t *testing.T) {

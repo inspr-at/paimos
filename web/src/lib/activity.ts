@@ -9,6 +9,7 @@ export const COLLAPSE_MS = 5 * 60_000
 export const EDIT_WINDOW_MS = 15 * 60_000
 
 export type TimelineEntry =
+  | { kind: 'automatic'; id: string; at: string; author: ActivityItem['author']; change: NonNullable<ActivityItem['automatic_change']> }
   | { kind: 'comment'; id: string; at: string; author: ActivityItem['author']; body: string }
   | { kind: 'changes'; id: string; at: string; author: ActivityItem['author']; changes: ActivityChange[] }
   | { kind: 'created'; id: string; at: string; author: ActivityItem['author'] }
@@ -33,11 +34,12 @@ function merge(into: ActivityChange[], next: ActivityChange[]): ActivityChange[]
 export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): TimelineEntry[] {
   const out: TimelineEntry[] = []
   for (const item of [...items].reverse()) {
+    if (item.automatic_change) { out.push({ kind: 'automatic', id: item.id, at: item.at, author: item.author, change: item.automatic_change }); continue }
     if (item.type === 'comment') { out.push({ kind: 'comment', id: item.id, at: item.at, author: item.author, body: item.body_markdown ?? '' }); continue }
     if (item.type === 'created') { out.push({ kind: 'created', id: item.id, at: item.at, author: item.author }); continue }
     const changes = item.changes ?? []
     const last = out[out.length - 1]
-    if (last?.kind === 'changes' && sameAuthor(last.author, item.author) && Date.parse(item.at) - Date.parse(last.at) <= windowMs) {
+    if (last?.kind === 'changes' && sameAuthor(last.author, item.author) && !last.author.automatic && !item.author.automatic && Date.parse(item.at) - Date.parse(last.at) <= windowMs) {
       last.changes = merge(last.changes, changes)
       last.at = item.at
       if (!last.changes.length) out.pop()

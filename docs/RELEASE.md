@@ -20,6 +20,136 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Cross-family verdict and merge queue (AEON-411)
+
+The required **`gate/cross-family`** is a commit status posted **outside
+GitHub Actions** by `inspr-mbp2606-runner` (App ID `5134402`, existing
+installation `166478088`). The companion ruleset in
+`.github/cross-family-ruleset.json` binds that exact context to the App. Neither
+a successful nor a skipped Actions job with the same name can satisfy the
+binding. `.github/workflows/cross-family-preview.yml` is only a diagnostic
+mirror named `gate/policy-preview`; it runs unconditionally on `pull_request`
+and `merge_group: checks_requested`, with a read-only token. Pushes and manual
+dispatches emit neither gate context.
+
+The coordinator records the independent review's explicit `ok` and complete
+reviewed SHA in the ticket, then posts `gate/verdict` using its approved identity:
+
+```sh
+# Set these from the completed review, never from an assumed verdict.
+gh api "repos/inspr-at/paimos/statuses/$REVIEWED_SHA" \
+  -f state=success -f context=gate/verdict \
+  -f description="model=$REVIEW_MODEL; route=$REVIEW_ROUTE; review=$REVIEW_FILE"
+```
+
+Keep the description within GitHub's 140-character limit. The latest trusted
+`gate/verdict` governs, including pending/error/failure revocation. The allowlist
+in `.github/gate-posters.json` requires both login and immutable numeric ID
+(initially `markus-barta`, ID `276789`). Other creators cannot grant or revoke
+approval. The external App verifies those verdicts; it never conducts a review.
+
+**Trusted poster:** install the bootstrap `scripts/trusted-cross-family-poster.mjs`
+and its sibling `post-cross-family-gate.mjs` / `cross-family-gate.mjs` from one
+independently reviewed main revision in the coordinator's protected tooling.
+Its dedicated bare mirror must have origin
+`https://github.com/inspr-at/paimos.git`. In write mode it first posts pending
+using that installed trusted bundle, before a fetch or extraction can fail. On each invocation it refreshes
+`refs/remotes/origin/main`, extracts the checker, poster and allowlist from that
+commit into a private snapshot, and executes only those files. Candidate
+commits are fetched as Git objects for parent/tree comparisons; no candidate
+workflow, module, package install, hook or build runs. A PR checkout cannot
+serve as the mirror. Missing main policy, failed fetches and invalid events fail
+closed. The bootstrap itself is trusted installed code, never a PR-supplied
+entrypoint. CODEOWNERS covers the workflows, checker, poster, bootstrap,
+allowlist, ruleset payload and CODEOWNERS itself; the companion rule enables
+code owner review for those paths.
+
+The coordinator supplies an installation token for App `5134402` as the
+process-only `GATE_APP_TOKEN`, never as a repository/Actions secret. The App
+currently lacks the additional permissions this requires: the lead must grant
+`statuses: write`, `contents: read`, and `pull_requests: read` and accept them for
+this repository. Retain its existing runner permissions; this change does not
+alter the runner controller or provision credentials. Authenticate event input
+through verified GitHub webhook signatures or the coordinator's authenticated
+API reads; arbitrary uploaded event files are not trusted dispatch requests.
+
+```sh
+# BARE_MIRROR and EVENT_FILE are absolute paths in the coordinator's own tooling.
+# Default: read-only evaluation, with no status writes.
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  pull_request "$EVENT_FILE"
+# Explicit opt-in, used only by the coordinator's external watcher:
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  pull_request "$EVENT_FILE" --write
+# Queue checks use the signed checks_requested payload and exact synthetic SHA:
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  merge_group "$EVENT_FILE" --write
+```
+
+The external watcher handles PR opened/synchronize/reopened and merge-group
+checks_requested events; Actions is not the dispatcher. After posting or
+revoking `gate/verdict`, the watcher re-evaluates the affected open PR and **all
+active merge groups containing it** (and serializes evaluations per target SHA).
+A missing watcher leaves the required status pending rather than approving.
+Every write-mode invocation posts pending first, then success only after all
+checks pass; errors post failure or leave pending if the API itself is down.
+The PR status targets the actual PR **head SHA**, including a fork's head in the
+base repository; the queue status targets **merge_group.head_sha**. Never copy a
+PR's success to a group without verifying every constituent PR. The API writer
+rejects a human or Actions creator; the ruleset's integration binding is the
+server-side enforcement, including against a writer forging the context.
+
+An exact reviewed head passes. Follow-ups pass only along the first-parent
+chain when every step has two parents, the second parent is on main's
+first-parent history, and `git merge-tree --write-tree` reproduces the actual
+commit tree. Blobs, paths and modes must match. New edits, conflict resolutions,
+normal commits (even empty or reverted), rebases and squashes require a fresh
+verdict. Missing evidence, API errors, partial pagination and changed heads fail
+closed. Queue checking reproduces every synthetic merge and resolves every
+second-parent SHA against open main PRs. Multiple PRs, including forks, with the
+same immutable SHA share one verdict check, but **every** matching PR is
+revalidated as open with that SHA, base repository and main branch. Missing
+matches and changed synthetic trees fail closed.
+
+**Architecture decision:** choose external App statuses on the current Free
+plan. [Required workflows](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging)
+would provide a trusted source workflow selected by repository/path and
+`refs/heads/main` in an organization/enterprise ruleset, with `merge_group`
+support. The org reports `plan=free`, and reading its rulesets returns HTTP 403
+with an upgrade requirement, so this is not currently available.
+[`pull_request_target`](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target)
+uses base workflow code and could safely perform read-only PR API inspection
+without checking out PR code. It does not establish trusted code for ordinary
+merge-group workflows, and an Actions-name requirement remains spoofable.
+[App-bound statuses](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
+are supported for non-Actions Apps with status-write permission; the
+[REST ruleset schema](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
+provides `integration_id`. The selected existing App avoids an invented ID or a
+paid-plan assumption. Its token must remain confined to the trusted external
+coordinator.
+
+**Lead rollout, after bootstrap:** keep ruleset `24240960` and its required
+`go`, `web`, `release-check`, `e2e`, `migration-compat` checks and merge queue
+unchanged. Install/wire the external poster, grant/accept the App permissions,
+then create the additive repo ruleset using the **exact JSON** in
+`.github/cross-family-ruleset.json`. Do not require the diagnostic Actions check
+or bind the required context to GitHub Actions (`15368`). Preserve a backup and
+rollback by disabling only the new ruleset. The existing admin PR-only bypass
+is retained as a deliberate operator control; the worker never uses it. A code
+owner cannot approve their own PR, so use an independent owner review or the
+operator's explicitly approved admin procedure when the PR author is the owner.
+Coordinate the new ruleset/baseline with the owning nixcfg coordinator before
+runner admission is enabled; workers make no foreign repo changes.
+
+Before activation, the lead records live evidence: unreviewed PR denied; trusted
+exact head and automatic main merge pass; workflow `if: false`/`exit 0` and a
+forged Actions/user status cannot satisfy the App-bound rule; both heads in a
+two-PR queue require review; duplicate-SHA fork PRs do not stall the queue;
+revocation refreshes PR and group statuses. Local fixtures validate repo code,
+not live GitHub enforcement. This worker changes no permissions, settings,
+rulesets, watcher deployment, merges or queues. Acceptance remains with the
+lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
+
 ### Test runner routing (AEON-438, AEON-459)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
@@ -387,7 +517,81 @@ gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
 
 The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the platform and index jobs. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. Both image jobs retain the existing `contents: write` permission so their immutability lookups can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
 
-### Dry runs and timing evidence
+### Deployment pin proposals (AEON-413)
+
+Immediately after the multi-arch index attestation passes, the `image` job
+runs `scripts/release-pin-pr.mjs`. The only foreign-repository write path this
+bot may use is a **draft PR** against `markus-barta/nixcfg` `main`, changing
+exactly the Aeon image line in `hosts/csb1/docker/compose-spec.nix`. It preserves
+the rest of the file, including comments. This implements AEON-413 as a proposal;
+the worker brief supersedes the older ticket's `--auto` request. The bot never
+enables auto-merge, merges, approves, pushes to main, publishes or deploys.
+PMA and other deploy repositories have no bot write path here; their owning
+coordinator receives a proposed diff and follows their own tracker and gates.
+
+Before target authentication or branch creation, the bot requires the exact
+repository/tag-push invocation, an annotated tag resolving directly to the
+workflow's source commit, and that commit's ancestry on current source main.
+It independently runs `gh attestation verify` for the index digest, binding
+`inspr-at/paimos/.github/workflows/release.yml`, the exact source tag and commit,
+the exact tag-scoped certificate identity and signer commit, and
+`--deny-self-hosted-runners`. Missing attestations, lightweight/off-main
+tags and failed or ambiguous API reads fail closed before any target write.
+It rejects older versions and conflicting digests for an existing coordinate.
+
+Default mode is read-only. With App credentials it requests a contents-read
+installation token and prints the one-line diff. Without those credentials it
+records a held proposal explicitly; the lead must provide a read-only snapshot
+of the pin file to obtain the diff. A local snapshot can be used with
+`node scripts/release-pin-pr.mjs --pin-file SNAPSHOT.nix`, retaining the same
+live source/attestation checks; it can never be combined with write mode.
+Set the ordinary release inputs `VERSION`, `DIGEST`, `GITHUB_SHA`,
+`GITHUB_REPOSITORY`, `GITHUB_EVENT_NAME=push`, `GITHUB_REF=refs/tags/v<version>`
+and a process-only `GH_TOKEN`; never pass credentials on the command line.
+
+Coordinator activation requires the release-only `release-pinning` environment,
+its `AEON_PIN_APP_ID` / `AEON_PIN_APP_KEY` secrets, and repository variable
+`AEON_PIN_BOT_ENABLED=true`. Protect this environment and tag creation so only
+the approved release coordinator/App can cut trusted release tags. The pin App
+must be non-admin, installed only on nixcfg, with contents and pull-request
+access; token minting further narrows it to `nixcfg` and exactly contents/write
+plus pull_requests/write. It receives no settings, review bypass or production
+credentials. Tokens are revoked on success and failure. No credentials,
+environment, App permissions or repository settings are provisioned by this
+change. Before cutting the tag, the coordinator records the pin automation's
+canonical worker marker and release scope in the designated owning tracker;
+the App receives no tracker credential (D7). Missing write credentials fail
+rather than silently claiming a PR.
+
+Write mode requires both `--write` and the enable flag. The branch
+`aeon-pin-v<version>` starts at an exact observed nixcfg main SHA. The bot
+checks the committed comparison before proposing: one commit with that sole
+parent, one modified file, one added/deleted line and the exact intended blob.
+Retries reuse only the same verified draft PR; they never overwrite an existing
+branch, reopen a closed PR or change a coordinator's ready-for-review state.
+Main advancing during a retry may require coordinator resolution instead of
+silently rebasing or sweeping in other changes. API failures can leave an
+unmerged proposal branch; only its owner may clean it up after inspection.
+
+The PR records the source commit, digest and verification, exact base SHA/file
+(the immutable pre-change backup reference) and previous image pin for rollback.
+The same evidence goes to the image job summary and, when the independent assets
+job assembles it, the existing draft paimos release's notes. There is no GitHub
+release yet during the image job, so the bot does not race its creation or
+rewrite an existing release. Before any pin merge or rollout, the coordinator
+must complete the owning nixcfg checks/review and record the validated database
+backup required by the release procedure. Rollback remains a separately
+reviewed change to the recorded previous immutable image; the bot never performs
+it. Disable proposal writes by clearing the enable variable.
+
+Fixtures run in `release-check` and the existing hosted image dry run; they make
+no foreign writes. The target of PR-open within 30 seconds after index push
+requires a coordinator-authorized release run with timestamps, a provisioned App
+and the nixcfg gates. The workflow records UTC immediately after successful
+index push and the bot records GitHub's PR creation time and elapsed seconds in
+the evidence. Fixture timings are not live acceptance evidence.
+
+### Image dry runs and timing evidence
 
 `.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
 
@@ -860,3 +1064,26 @@ Write for the reader, not the repository: the theme names what the release is
 about in a few words, the headline says what changes for them in one sentence, the
 intro adds context in two or three. No ticket keys, package names or commit
 jargon; those stay in the rows and the commits.
+
+Status autopilot (AEON-521) is the final post-release check: release publication
+through the journey calls the deterministic hook in the publication transaction.
+Only linked tickets already Done at publication become Delivered; tickets awaiting
+a human check get a skip comment. The hook applies at most 50 tickets, queues the
+rest durably, and the worker drains committed batches every minute. A ticket
+failure is isolated from release settlement; disappeared releases are skipped.
+Verify their Activity reasons and `/api/status-autopilot/changes`; a flagged ticket
+gets a comment and is retried after its check is cleared. Historical releases
+are discovered once; queued work and the daily ticket cursor survive restarts.
+Workspace admins configure the seven limits in Settings → Workspace → Autopilot,
+with Inherit / On / Off per project. The daily UTC job lists triage and cancellation
+suggestions, reminds blocked work, reopens stalled work and accepts deliveries
+after the saved period (30 days by default). Any person comment after delivery
+is conservatively treated as an objection. Automatic changes use the existing
+`POST /api/events/{eventId}/undo`; later edits cause a conflict rather than
+overwriting the ticket. Settings lists all current triage, cancellation, blocked
+and missed-release flags through `/api/status-autopilot/changes?suggestions=true`,
+independent of the latest 50 changes. Project Off runs no rules; workspace Off
+keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
+Progress inactivity uses actual harness/session-branch and review-PR timestamps,
+so a title edit or comment does not keep stalled work in progress. Triage
+autopilot's judgement modes are a separate phase.

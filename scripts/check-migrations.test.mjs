@@ -187,10 +187,13 @@ test('the static guard runs on PR and merge-group checkouts with full release-ta
   assert.match(workflow, /^  merge_group:/m);
   assert.match(workflow, /merge_group:\n    types: \[checks_requested\]/);
   assert.match(workflow, /^  migration-compat:/m);
-  assert.match(workflow, /fetch-depth: 0/);
-  assert.match(workflow, /node scripts\/check-migrations.mjs --base-ref/);
-  assert.match(workflow, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1\s*$/m);
-  assert.doesNotMatch(workflow, /if:.*pull_request/);
+  const migrationJob = workflow.split(/^  migration-compat:\n/m)[1].split(/^  [\w-]+:\n/m)[0];
+  assert.match(migrationJob, /fetch-depth: 0/);
+  assert.match(migrationJob, /node scripts\/check-migrations.mjs --base-ref/);
+  assert.match(migrationJob, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1\s*$/m);
+  // Migration compatibility remains unconditional, including its steps. Other
+  // jobs, such as the PR/queue review gate, deliberately have event guards.
+  assert.doesNotMatch(migrationJob, /^\s+if:/m);
 });
 
 test('the runtime probe pulls by digest and rejects a malformed digest before Docker', () => {

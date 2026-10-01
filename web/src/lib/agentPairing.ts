@@ -162,6 +162,7 @@ export interface PairingView {
   verification_capabilities?: VerificationCapabilities
   verification_helper_version?: string
   agent_compatibility?: AgentCompatibility
+  agent_release?: { version: string }
 }
 
 export interface AgentCompatibility {
@@ -1726,6 +1727,11 @@ function parseView(data: unknown): PairingView {
     if (!['compatible', 'update_required', 'protocol_mismatch', 'unknown'].includes(status)) invalid('agent_compatibility.status')
     if (typeof result.action !== 'string' || result.action.length > 500) invalid('agent_compatibility.action')
     view.agent_compatibility = { status: status as AgentCompatibility['status'], action: result.action }
+  }
+  // Advisory: the helper's own version, shown beside the computer's name (AEON-499).
+  if (record.agent_release && typeof record.agent_release === 'object' && !Array.isArray(record.agent_release)) {
+    const version = (record.agent_release as Record<string, unknown>).version
+    if (typeof version === 'string' && /^[\w.+-]{1,64}$/.test(version)) view.agent_release = { version }
   }
   return view
 }
