@@ -16,7 +16,7 @@ export function accountEmail(identity: Identity) {
 }
 
 import { learnPictures } from './avatar.ts'
-import { noteWrite } from './position.ts'
+import { noteWrite, parsePosition, stampAt, tick } from './position.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
@@ -237,8 +237,13 @@ function listQuery(params: ListQuery): string {
   }
   return query(values)
 }
-export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
-  .then(page => { learnPictures(page.items.map(item => item.assignee)); return page })
+export const listNodes = async (params: ListQuery, options: { signal?: AbortSignal } = {}) => {
+  const start = tick()
+  let position: number | undefined
+  const page = await json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal, response => { position = parsePosition(response) })
+  learnPictures(page.items.map(item => item.assignee))
+  return stampAt(page, { position, start }, 2)
+}
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string

@@ -3,10 +3,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type cliVersion struct {
@@ -32,6 +35,10 @@ func (rt *runtime) nodeSchema() (cliSchema, error) {
 	if err := rt.do(http.MethodGet, "/api/version", nil, &v); err != nil {
 		return cliSchema{}, err
 	}
+	return rt.nodeSchemaForVersion(v)
+}
+
+func (rt *runtime) nodeSchemaForVersion(v cliVersion) (cliSchema, error) {
 	var page struct {
 		Items []map[string]any `json:"items"`
 	}
@@ -98,11 +105,14 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "config", Status: "ok", Detail: "instance=" + inst.Name + " url=" + inst.URL})
+		// Public service probes do not carry the agent credential. Authentication
+		// is checked separately through the same identity call as auth whoami.
+		probe := client.New(inst.URL, "")
 		var health struct {
 			Status string `json:"status"`
 			DB     string `json:"db"`
 		}
-		if err := rt.do(http.MethodGet, "/api/health", nil, &health); err != nil {
+		if err := probe.Do(context.Background(), http.MethodGet, "/api/health", nil, &health); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -111,7 +121,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		var v cliVersion
-		if err := rt.do(http.MethodGet, "/api/version", nil, &v); err != nil {
+		if err := probe.Do(context.Background(), http.MethodGet, "/api/version", nil, &v); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -120,17 +130,14 @@ func (rt *runtime) cmdDoctor() *Command {
 			brand = v.Brand.Product
 		}
 		checks = append(checks, doctorCheck{Name: "health", Status: "ok", Detail: "service=" + brand + " version=" + v.Version})
-		var me struct {
-			Principal struct {
-				Name string `json:"name"`
-			} `json:"principal"`
-		}
-		if err := rt.do(http.MethodGet, "/api/me", nil, &me); err != nil {
+		// Use the same identity request as auth whoami, including its client.
+		me, err := client.New(inst.URL, inst.APIKey).Me(context.Background())
+		if err != nil {
 			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: "API key rejected or auth unavailable"})
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "auth", Status: "ok", Detail: "user=" + me.Principal.Name})
-		s, err := rt.nodeSchema()
+		s, err := rt.nodeSchemaForVersion(v)
 		if err != nil {
 			checks = append(checks, doctorCheck{Name: "schema", Status: "fail", Detail: err.Error()})
 		} else {

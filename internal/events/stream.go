@@ -119,6 +119,12 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	heartbeat := time.Now().Add(15 * time.Second)
+	keepalive := ": keepalive\n\n"
+	if live {
+		// Named events are observable by EventSource; comments are not. No id
+		// means the ping neither advances nor clears the browser's resume point.
+		keepalive += "event: stream.ping\ndata: {}\n\n"
+	}
 	for {
 		for _, e := range batch.Items {
 			if r.Context().Err() != nil {
@@ -139,7 +145,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 				// pgx can return an already queued notification even with an
 				// expired context, so check the deadline before draining more.
 				if !time.Now().Before(heartbeat) {
-					if err = flush(": keepalive\n\n"); err != nil {
+					if err = flush(keepalive); err != nil {
 						return
 					}
 					heartbeat = time.Now().Add(15 * time.Second)
@@ -155,7 +161,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 					if !errors.Is(err, context.DeadlineExceeded) {
 						return
 					}
-					if err = flush(": keepalive\n\n"); err != nil {
+					if err = flush(keepalive); err != nil {
 						return
 					}
 					heartbeat = time.Now().Add(15 * time.Second)

@@ -96,8 +96,9 @@ type Settings struct {
 	Logo      *LogoInfo  `json:"logo"`
 	LogoDark  *LogoInfo  `json:"logo_dark"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	// Cleaned is set when harmless SVG comments were removed.
-	Cleaned bool `json:"cleaned,omitempty"`
+	// Cleaned is set when harmless SVG comments, non-drawing attributes or metadata were removed.
+	Cleaned    bool        `json:"cleaned,omitempty"`
+	SVGCleanup *SVGCleanup `json:"svg_cleanup,omitempty"`
 }
 
 type failure struct {
@@ -243,7 +244,7 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	sum := sha256.Sum256(logo.Content)
 	hash := hex.EncodeToString(sum[:])
 	if current := pick(before, v); current != nil && current.SHA256 == hash {
-		before.Cleaned = logo.Cleaned
+		before.Cleaned, before.SVGCleanup = logo.Cleaned, logo.SVGCleanup
 		return before, nil
 	}
 	if _, err := tx.Exec(r.Context(), `INSERT INTO tenant_brand_logos (tenant_id, variant, content_type, content, sha256, width, height, uploaded_by_principal_id)
@@ -257,7 +258,7 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	out.Cleaned = logo.Cleaned
+	out.Cleaned, out.SVGCleanup = logo.Cleaned, logo.SVGCleanup
 	return out, nil
 }
 

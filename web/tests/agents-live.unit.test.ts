@@ -109,7 +109,7 @@ it('consumes registered/stopped signals and refreshes when the existing stream r
   const changed = vi.fn(), connection = vi.fn()
   const stop = subscribeAgents(changed, connection)
   const stream = Stream.current
-  expect(stream.url).toBe('/api/events/stream')
+  expect(stream.url).toBe('/api/events/stream?after=latest')
   stream.onopen!()
   stream.dispatchEvent(new Event('harness.registered'))
   stream.dispatchEvent(new Event('harness.stopped'))

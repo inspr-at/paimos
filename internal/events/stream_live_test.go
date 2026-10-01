@@ -141,3 +141,27 @@ func TestSSELiveModeSkipsALongBacklog(t *testing.T) {
 		t.Fatalf("short backlog replayed %d first", e.ID)
 	}
 }
+
+func TestSSELivePingPreservesResumeAndTenantCounter(t *testing.T) {
+	d, a, b := fixture(t)
+	appendEvents(t, d, a, 1)
+	srv := testServer(t, d, a, b)
+	resp, sc, ready := liveStream(t, srv, "latest", "", false)
+	defer resp.Body.Close()
+	for _, want := range []string{": keepalive", "", "event: stream.ping", "data: {}", ""} {
+		if !sc.Scan() || sc.Text() != want {
+			t.Fatalf("ping framing: got %q, want %q (%v)", sc.Text(), want, sc.Err())
+		}
+	}
+	// No ping id or log row: reconnect at the original tenant position, then
+	// read the next durable event with its usual sequential id.
+	resumed, _, after := liveStream(t, srv, "latest", strconv.FormatInt(ready, 10), true)
+	resumed.Body.Close()
+	if after != ready {
+		t.Fatalf("ping advanced the tenant counter: %d -> %d", ready, after)
+	}
+	appendEvents(t, d, a, 1)
+	if e := nextEvent(t, sc); e.ID != ready+1 {
+		t.Fatalf("event after ping: %d, want %d", e.ID, ready+1)
+	}
+}

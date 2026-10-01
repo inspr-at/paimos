@@ -39,8 +39,9 @@ type Logo struct {
 	Content     []byte
 	Width       int
 	Height      int
-	// Cleaned reports harmless SVG comments removed. Unsupported features reject.
-	Cleaned bool
+	// Cleaned reports harmless SVG comments, non-drawing attributes or metadata removed.
+	Cleaned    bool
+	SVGCleanup *SVGCleanup
 }
 
 var errLogoType = errors.New("expected a PNG, WebP or SVG image")
@@ -104,7 +105,8 @@ func ValidateLogo(declared string, b []byte) (Logo, error) {
 		}
 		logo.Content, logo.Width, logo.Height = b, w, h
 	case "image/svg+xml":
-		clean, cleaned, err := SanitizeSVG(b)
+		cleanup := &SVGCleanup{RemovedAttributes: []string{}}
+		clean, cleaned, err := sanitizeSVG(b, cleanup)
 		if err != nil {
 			return Logo{}, err
 		}
@@ -124,6 +126,9 @@ func ValidateLogo(declared string, b []byte) (Logo, error) {
 		// stored bounds.
 		scale := math.Min(1, maxLogoSide/math.Max(w, h))
 		logo.Content, logo.Cleaned = clean, cleaned
+		if cleanup.RemovedAttributeCount > 0 || cleanup.RemovedElementCount > 0 {
+			logo.SVGCleanup = cleanup
+		}
 		logo.Width, logo.Height = max(1, int(math.Round(w*scale))), max(1, int(math.Round(h*scale)))
 	}
 	return logo, nil
