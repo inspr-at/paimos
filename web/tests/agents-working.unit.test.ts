@@ -23,9 +23,16 @@ describe('agents working', () => {
     expect(freeLine(8, 8)).toBe('every slot busy')
     expect(freeLine(6, 8)).toBe('2 over your target')
   })
-  it('by area: every area, plus No area set when a ticket has none', () => {
+  it('without a chosen total the number is what runs now, and nothing claims a target', () => {
+    const plan = workingPlan({ pref: null, sessions, harnesses: [], capacityKnown: true, roomNow: null })
+    expect(plan).toMatchObject({ unset: true, cap: 8, runningLine: 'no target set yet' })
+    expect(stepCap(null, 1, plan.cap).cap).toBe(9)
+    expect(stepRow(null, 'area', 'docs', 1, plan.cap)).toEqual({ cap: 8, area: { docs: 1 } })
+  })
+  it('by area: only areas with work or a target, the rest as quiet choices', () => {
     const plan = workingPlan({ pref: { cap: 10, area: { backend: 6, design: 1 } }, sessions, harnesses: [], capacityKnown: true, roomNow: 3 })
-    expect(plan.rows.map(r => r.label)).toEqual(['Backend', 'Frontend', 'Full stack', 'Infrastructure', 'Design', 'Docs', 'No area set'])
+    expect(plan.rows.map(r => r.label)).toEqual(['Backend', 'Frontend', 'Design', 'No area set'])
+    expect(plan.spare.map(a => a.label)).toEqual(['Full stack', 'Infrastructure', 'Docs'])
     const backend = plan.rows[0]
     expect(backend).toMatchObject({ running: 5, target: 6, canDec: true, canInc: true })
     expect(backend.dots).toEqual([true, true, true, true, true, false])

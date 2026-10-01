@@ -29,6 +29,10 @@ export interface WorkingRow {
 }
 export interface WorkingPlan {
   cap: number; running: number; view: WorkingView
+  /** The person has not chosen a total yet: the number shows what runs now. */
+  unset: boolean
+  /** Areas with no work and no target, offered as quiet "+ Area" choices. */
+  spare: { key: string; label: string }[]
   runningLine: string
   capDots: boolean[]
   rows: WorkingRow[]
@@ -54,14 +58,17 @@ export function freeLine(cap: number, running: number): string {
  */
 export function workingPlan(input: { pref: WorkingPreference | null; sessions: RunningSession[]; harnesses: string[]; capacityKnown: boolean; roomNow: number | null }): WorkingPlan {
   const pref = input.pref ?? {}
-  const cap = clampCap(pref.cap ?? DEFAULT_CAP)
-  const view: WorkingView = pref.view === 'model' ? 'model' : 'area'
   const running = input.sessions.length
+  const unset = pref.cap === undefined
+  const cap = clampCap(pref.cap ?? Math.max(running, DEFAULT_CAP))
+  const view: WorkingView = pref.view === 'model' ? 'model' : 'area'
   const targets = (view === 'area' ? pref.area : pref.model) ?? {}
   const count = (key: string) => input.sessions.filter(s => (view === 'area' ? s.area : s.harness) === key).length
   const order = (h: string) => { const i = POOL_ORDER.indexOf(h); return i < 0 ? 99 : i }
+  // Areas show where work runs or a target is set; the rest wait as "+ Area" choices.
+  const used = (key: string) => count(key) > 0 || (targets[key] ?? 0) > 0
   const keys = view === 'area'
-    ? [...AREAS, ...(input.sessions.some(s => !s.area) || (targets[''] ?? 0) > 0 ? [''] : [])]
+    ? [...AREAS.filter(used), ...(used('') ? [''] : [])]
     : [...new Set([...input.harnesses, ...input.sessions.map(s => s.harness), ...Object.keys(targets).filter(k => (targets[k] ?? 0) > 0)])].sort((a, b) => order(a) - order(b) || a.localeCompare(b))
   const assigned = keys.reduce((sum, key) => sum + Math.max(0, targets[key] ?? 0), 0)
   const rows = keys.map(key => {
@@ -81,12 +88,13 @@ export function workingPlan(input: { pref: WorkingPreference | null; sessions: R
     flexible ? `${flexible} flexible: any ${view === 'area' ? 'area' : 'model'} takes them` : '',
     capacity,
   ].filter(Boolean).join(' · ')
-  return { cap, running, view, runningLine: freeLine(cap, running), capDots: dotsOf(running, cap), rows, assigned, flexible, footLine }
+  const spare = view === 'area' ? AREAS.filter(key => !used(key)).map(key => ({ key, label: AREA_LABEL[key] })) : []
+  return { cap, running, view, unset, spare, runningLine: unset ? 'no target set yet' : freeLine(cap, running), capDots: dotsOf(running, cap), rows, assigned, flexible, footLine }
 }
 
 /** The next preference after a step on the total; row targets above the new total shrink from the last row. */
-export function stepCap(pref: WorkingPreference | null, delta: number): WorkingPreference {
-  const next: WorkingPreference = { ...(pref ?? {}), cap: clampCap((pref?.cap ?? DEFAULT_CAP) + delta) }
+export function stepCap(pref: WorkingPreference | null, delta: number, shown = DEFAULT_CAP): WorkingPreference {
+  const next: WorkingPreference = { ...(pref ?? {}), cap: clampCap((pref?.cap ?? shown) + delta) }
   for (const view of ['area', 'model'] as const) {
     const targets = { ...(next[view] ?? {}) }
     let over = Object.values(targets).reduce((a, b) => a + b, 0) - next.cap!
@@ -102,14 +110,15 @@ export function stepCap(pref: WorkingPreference | null, delta: number): WorkingP
 }
 
 /** One step on a row's target, kept within the total. */
-export function stepRow(pref: WorkingPreference | null, view: WorkingView, key: string, delta: number): WorkingPreference {
-  const base = pref ?? {}
-  const cap = clampCap(base.cap ?? DEFAULT_CAP)
+export function stepRow(pref: WorkingPreference | null, view: WorkingView, key: string, delta: number, shown = DEFAULT_CAP): WorkingPreference {
+  // A row target fixes the total that was shown, so the two never disagree.
+  const base: WorkingPreference = { ...(pref ?? {}), cap: clampCap(pref?.cap ?? shown) }
+  const cap = base.cap!
   const targets = { ...(base[view] ?? {}) }
   const assigned = Object.values(targets).reduce((a, b) => a + b, 0)
   const now = targets[key] ?? 0
   const want = Math.max(0, now + delta)
-  if (delta > 0 && assigned >= cap) return base
+  if (delta > 0 && assigned >= cap) return pref ?? base
   targets[key] = want
   return { ...base, [view]: targets }
 }

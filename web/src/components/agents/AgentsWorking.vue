@@ -35,8 +35,8 @@ const plan = computed(() => workingPlan({
 }))
 
 const save = (next: WorkingPreference) => pref.save(next)
-const stepTotal = (delta: number) => save(stepCap(pref.value.value, delta))
-const stepTarget = (key: string, delta: number) => save(stepRow(pref.value.value, plan.value.view, key, delta))
+const stepTotal = (delta: number) => save(stepCap(pref.value.value, delta, plan.value.cap))
+const stepTarget = (key: string, delta: number) => save(stepRow(pref.value.value, plan.value.view, key, delta, plan.value.cap))
 const setView = (view: WorkingView) => { if (plan.value.view !== view) save({ ...(pref.value.value ?? {}), view }) }
 function tabKeys(event: KeyboardEvent) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -87,6 +87,13 @@ function tabKeys(event: KeyboardEvent) {
           </div>
         </li>
       </ul>
+      <p v-if="plan.spare.length" class="spare">
+        <span class="spare-lbl">{{ plan.rows.length ? 'Also' : 'Set a target for' }}</span>
+        <button
+          v-for="area in plan.spare" :key="area.key" type="button" class="spare-btn" :aria-label="`More agents on ${area.label}`"
+          :disabled="plan.assigned >= plan.cap" :data-tip="plan.assigned >= plan.cap ? 'Every agent is assigned; raise the total first' : undefined" @click="stepTarget(area.key, 1)"
+        ><AppIcon name="plus" :size="12" />{{ area.label }}</button>
+      </p>
       <p class="foot">{{ plan.footLine }}</p>
     </div>
   </section>
@@ -132,6 +139,12 @@ function tabKeys(event: KeyboardEvent) {
 .sub { margin: 1px 0 0; overflow: hidden; color: var(--ink-3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .row-step { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .target { min-width: 28px; text-align: center; color: var(--ink); font: 700 17px/1 var(--font); font-variant-numeric: tabular-nums; }
+.spare { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; }
+.spare-lbl { margin-right: 2px; }
+.spare-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); font: 600 12.5px/1 var(--font); cursor: pointer; }
+@media (hover: hover) { .spare-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--teal) 14%, transparent); } }
+.spare-btn:disabled { opacity: .5; cursor: default; }
+.spare-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .foot { margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
 
 @container working (max-width: 760px) {
