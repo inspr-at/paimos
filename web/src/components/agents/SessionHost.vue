@@ -78,7 +78,7 @@ async function save(reset = false) {
 .host-badge svg { flex: none; }
 .host-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-pencil { position: absolute; left: calc(100% + 2px); top: 0; display: grid; place-items: center; width: 20px; height: 24px; border: 0; background: transparent; color: var(--ink-3); opacity: 0; cursor: pointer; }
-:global(.c-host:hover) .host-pencil, .host-control:focus-within .host-pencil { opacity: 1; }
+:global(.c-host:hover .host-pencil), .host-control:focus-within .host-pencil { opacity: 1; }
 .host-pencil:focus-visible, .host-badge:focus-visible { outline: 2px solid var(--ink-3); outline-offset: 2px; }
 .host-form { padding: 8px; }
 .host-form label { display: grid; gap: 8px; font-size: 13px; color: var(--ink); }
