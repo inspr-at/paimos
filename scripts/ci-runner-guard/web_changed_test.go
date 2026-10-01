@@ -136,6 +136,7 @@ if (process.argv[3].endsWith('-cleared-stack')) {
   Error.prepareStackTrace = () => 'no repository frames';
   Error.stackTraceLimit = 0;
 }
+if (process.argv[3].endsWith('-replace-reallyExit')) process.reallyExit = () => {};
 if (process.argv[3].endsWith('-kill')) process.kill(process.pid, 'SIGTERM');
 else if (process.argv[3].endsWith('-reallyExit')) process.reallyExit(0);
 else process.exit(0);
@@ -391,7 +392,7 @@ func TestWebSelectionRejectsSnapshotRewrite(t *testing.T) {
 func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
 	for _, source := range []string{"tests", "src", ".", "../scripts"} {
 		for _, phase := range []string{"list", "run"} {
-			for _, operation := range []string{"exit", "kill", "reallyExit", "cleared-stack"} {
+			for _, operation := range []string{"exit", "kill", "reallyExit", "cleared-stack", "replace-reallyExit"} {
 				t.Run(source+"/"+phase+"/"+operation, func(t *testing.T) {
 					got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts",
 						mutation: phase + "-forged-" + operation, forgedSource: source})
@@ -402,6 +403,9 @@ func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
 					diagnostic := operation
 					if operation == "cleared-stack" {
 						diagnostic = "exit"
+					}
+					if operation == "replace-reallyExit" {
+						diagnostic = "reallyExit"
 					}
 					if got.err == nil || strings.Count(got.calls, "CALL\n") != wantCalls || !strings.Contains(got.output, "UI check rejected process."+diagnostic) {
 						t.Fatalf("forged list/JSON plus process termination must fail: %+v", got)
@@ -421,10 +425,17 @@ func TestWebExitGuardLocksFunctionsAndAllowsRunnerShutdown(t *testing.T) {
 const assert = require('node:assert/strict');
 for (const name of ['exit', 'kill', 'reallyExit']) {
   const descriptor = Object.getOwnPropertyDescriptor(process, name);
-  assert.equal(descriptor.writable, false);
+  if (name === 'reallyExit') {
+    assert.equal(typeof descriptor.get, 'function');
+    assert.equal(typeof descriptor.set, 'function');
+  } else assert.equal(descriptor.writable, false);
   assert.equal(descriptor.configurable, false);
   assert.throws(() => Object.defineProperty(process, name, { value: () => {} }));
 }
+// Dependency lifecycle replacement/restoration must remain guarded and work.
+const original = process.reallyExit;
+process.reallyExit = function(code) { return original(code); };
+process.reallyExit = original;
 assert.equal(process.kill(process.pid, 0), true);
 process.exit(0);
 `)

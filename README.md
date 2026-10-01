@@ -1080,7 +1080,8 @@ against sealed outputs rather than writable scratch files.
 The job summary lists selected tests. UI/spec changes and full-suite events
 require a non-empty selection and an unambiguous list total. Non-empty runs must
 produce a completed JSON test report matching that count. The Node preload locks
-`exit`, `kill`, `reallyExit` and startup stack formatting, rejecting process
+`exit` and `kill`, guards every `reallyExit` replacement, and retains private
+startup stack formatting, rejecting process
 termination from repository code outside `node_modules` (including modules
 outside `web/tests` and `web/src`). Only non-UI PRs may accept no selected specs.
 Other CI events, including `merge_group`, run the complete UI suite without changed

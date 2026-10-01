@@ -28,7 +28,7 @@ function checkCaller(operation) {
   }
 }
 
-for (const [name, original] of [['exit', exit], ['kill', kill], ['reallyExit', reallyExit]]) {
+for (const [name, original] of [['exit', exit], ['kill', kill]]) {
   Object.defineProperty(process, name, {
     configurable: false,
     writable: false,
@@ -38,3 +38,23 @@ for (const [name, original] of [['exit', exit], ['kill', kill], ['reallyExit', r
     },
   });
 }
+
+// signal-exit (used by npm and Playwright) replaces reallyExit during startup
+// and restores it during shutdown. Keep every version guarded and reject
+// replacements from repository code, without breaking dependency lifecycle hooks.
+function guardedReallyExit(original) {
+  return function (...args) {
+    checkCaller('reallyExit');
+    return original.apply(process, args);
+  };
+}
+let currentReallyExit = guardedReallyExit(reallyExit);
+Object.defineProperty(process, 'reallyExit', {
+  configurable: false,
+  get() { return currentReallyExit; },
+  set(value) {
+    checkCaller('reallyExit');
+    if (typeof value !== 'function') throw new TypeError('reallyExit must remain a function');
+    currentReallyExit = guardedReallyExit(value);
+  },
+});
