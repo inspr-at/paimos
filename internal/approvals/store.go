@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
@@ -170,6 +172,22 @@ func (m *Module) propose(ctx context.Context, p tenant.Principal, authorization 
 }
 
 func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, reason string) (Approval, error) {
+	return m.decideVerified(ctx, p, id, decision, reason, nil)
+}
+
+// DecideVerified preserves the person-only permission checks, lock, grant and audit
+// transaction. The verifier must consume a fresh proof in that same transaction.
+func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
+	if verify == nil {
+		return Approval{}, fail(http.StatusForbidden, "fresh verification required")
+	}
+	if _, err := validateDecision(decisionWrite{Decision: decision, Reason: &reason}); err != nil {
+		return Approval{}, err
+	}
+	return (&Module{pool: pool, inTenant: db.InTenant}).decideVerified(ctx, p, id, decision, reason, verify)
+}
+
+func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
 	var out Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		before, expired, err := lockRequest(ctx, tx, id)
@@ -179,20 +197,8 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 		if err != nil {
 			return err
 		}
-		if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
+		if err := CanDecide(ctx, tx, p, before); err != nil {
 			return err
-		}
-		if err := authz.RequireTx(ctx, tx, p, "approvals.decide", authz.Scope{}); err != nil {
-			return fail(http.StatusForbidden, "approval decision requires an authorized person")
-		}
-		if before.Risk == "high" {
-			if err := authz.RequireTx(ctx, tx, p, "approvals.decide_high", authz.Scope{}); err != nil {
-				return fail(http.StatusForbidden, "high-risk approval requires workspace administration")
-			}
-		}
-		permission := approvalPermission(before.Scope)
-		if permission == "" || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
-			return fail(http.StatusForbidden, "approval requires the permission being granted")
 		}
 		var existing string
 		err = tx.QueryRow(ctx, `
@@ -205,6 +211,11 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 		}
 		if expired {
 			return fail(http.StatusConflict, "approval has expired")
+		}
+		if verify != nil {
+			if err := verify(tx, before); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approval_decisions (
@@ -492,4 +503,43 @@ func nodeRef(a Approval) *string {
 	}
 	id := *a.ResourceID
 	return &id
+}
+
+// Review returns one approval under its existing project/workspace read policy.
+func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Approval, error) {
+	a, err := loadApproval(ctx, tx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return a, fail(404, "approval not found")
+	}
+	if err != nil {
+		return a, err
+	}
+	if err = approvalVisible(ctx, tx, p, a); err != nil {
+		return Approval{}, fail(403, "approval unavailable")
+	}
+	if err = exposeAgentName(ctx, tx, p, &a); err != nil {
+		return Approval{}, err
+	}
+	return a, nil
+}
+
+// CanDecide applies the same live person and permission policy used by decision writes.
+func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "approvals.decide", authz.Scope{}); err != nil {
+		return fail(http.StatusForbidden, "approval decision requires an authorized person")
+	}
+	if a.Risk == "high" {
+		if err := authz.RequireTx(ctx, tx, p, "approvals.decide_high", authz.Scope{}); err != nil {
+			return fail(http.StatusForbidden, "high-risk approval requires workspace administration")
+		}
+	}
+	permission := approvalPermission(a.Scope)
+	if permission == "" || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+		return fail(http.StatusForbidden, "approval requires the permission being granted")
+	}
+
+	return nil
 }
