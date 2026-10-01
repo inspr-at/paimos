@@ -115,7 +115,7 @@ async function copyCommand() {
       <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(expiryAfter(days))}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
       <div v-if="rotateKey" class="rotation-scopes">
         <p class="label">Scopes kept</p>
-        <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono">{{ scope }}</li></ul>
+        <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono" :title="scope">{{ scope }}</li></ul>
         <p v-else class="expiry-note">None; this key grants no access.</p>
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
@@ -133,7 +133,7 @@ async function copyCommand() {
           <p class="group-h">{{ group.group }}</p>
           <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
             <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="!held.has(scope.key)" @change="toggle(scope.key)" />
-            <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono key">{{ scope.key }}{{ held.has(scope.key) ? '' : ` · ${why(scope.key)}` }}</span></span>
+            <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono key" :title="scope.key">{{ scope.key }}</span><span v-if="!held.has(scope.key)" class="scope-reason" :title="why(scope.key)">{{ why(scope.key) }}</span></span>
           </label>
         </div>
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
@@ -175,9 +175,10 @@ async function copyCommand() {
 .login-command { height: auto; min-height: 88px; resize: none; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .copy-status { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.rotation-scopes { display: grid; gap: 8px; }
+.rotation-scopes { display: grid; gap: 8px; min-width: 0; }
 .rotation-scopes ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
-.body { display: grid; gap: 14px; }
+.body { display: grid; gap: 14px; min-width: 0; }
+.body > *, .note > span, .once > span { min-width: 0; overflow-wrap: anywhere; }
 .note, .once { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
 .lifetimes { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
@@ -195,10 +196,11 @@ async function copyCommand() {
 .chip-btn:focus-visible { box-shadow: var(--focus-ring); }
 .scope-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 .group-h { grid-column: 1 / -1; margin: 4px 0 2px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
-.scope-text { display: grid; gap: 1px; font-size: 13px; line-height: 1.35; color: var(--ink); }
-.scope-text .key { font-size: 11px; color: var(--ink-3); }
+.scope-text { display: grid; gap: 1px; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--ink); }
+.scope-text > span { min-width: 0; overflow-wrap: anywhere; }
+.scope-text .key, .scope-reason { font-size: 11px; color: var(--ink-3); white-space: normal; }
 .scope-row.off { cursor: default; }
 .scope-row.off .scope-text > span:first-child { color: var(--ink-2); }
 .presets .find { flex: 1 1 180px; }

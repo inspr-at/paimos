@@ -93,7 +93,7 @@ onMounted(load)
             <p class="group-h">{{ group.group }}</p>
             <label v-for="scope in group.items" :key="scope.key" class="scope-row">
               <input type="checkbox" :checked="selected.has(scope.key)" :disabled="!grantable.has(scope.key) && !mayExtend(scope.key) && !selected.has(scope.key)" @change="toggle(scope.key)" />
-              <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono detail">{{ scope.key }}</span><span v-if="!grantable.has(scope.key)" class="detail">{{ unavailableReason(scope.key) }}</span></span>
+              <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono detail" :title="scope.key">{{ scope.key }}</span><span v-if="!grantable.has(scope.key)" class="detail" :title="unavailableReason(scope.key)">{{ unavailableReason(scope.key) }}</span></span>
             </label>
           </div>
           <p v-if="!groups.length" class="note">{{ term ? 'No matching scopes.' : 'No scopes are available for this key.' }}</p>
@@ -133,9 +133,10 @@ onMounted(load)
 .scopes legend { margin-bottom: 8px; }
 .scope-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 .group-h { grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 7px 0; align-items: start; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; gap: 8px; padding: 7px 0; align-items: start; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
-.scope-text { display: grid; gap: 2px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.scope-text { display: grid; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.scope-text > span { min-width: 0; }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
 .actions { display: flex; justify-content: end; gap: 8px; }
