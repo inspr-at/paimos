@@ -346,7 +346,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
           :data-tip="mayManage ? 'Work days, Keep for you and nights' : manageTip" @click="togglePacing"
         ><AppIcon name="sliders" :size="15" /><span class="pacing-line">{{ pacingLine }}</span><AppIcon name="chevron" :size="14" /></button>
         <RouterLink v-if="mayManage" class="ghost-link add-account" to="/settings/accounts#add-account" aria-label="Add an account" data-tip="Add an account on a paired machine"><AppIcon name="plus" :size="15" /><span>Add<span class="long"> an account</span></span></RouterLink>
-        <RouterLink class="ghost-link" to="/settings/accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use">Manage</RouterLink>
+        <RouterLink class="ghost-link manage" to="/settings/accounts" aria-label="Manage accounts" data-tip="Accounts in Settings: sign-ins, names, which accounts agents may use"><AppIcon name="gear" :size="15" class="phone-only" /><span class="wide-only">Manage</span></RouterLink>
       </div>
     </div>
 
@@ -389,26 +389,26 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 
         <div v-if="card.accounts.length" role="table" :aria-label="`Accounts on ${card.name}`" class="accts">
           <div v-for="line in card.accounts" :key="line.id" role="row" class="acct" :data-account="line.id" :data-ready="line.readiness.kind">
-            <div role="cell" class="who">
+            <div role="cell" class="acct-who">
               <span class="vendor"><HarnessMark :harness="line.harness" :size="16" /></span>
               <div class="who-text">
                 <p class="vendor-name">{{ line.vendor }}</p>
                 <p class="identity" :title="line.identity">{{ shown(line) }}</p>
               </div>
             </div>
-            <div role="cell" class="ready">
+            <div role="cell" class="acct-ready">
               <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
               <button v-if="line.readiness.command" type="button" class="fix" :data-tip="`Copies ${line.readiness.command} to run on ${card.name}`" @click="copy(line.readiness.command, card.name)"><AppIcon name="copy" :size="13" />{{ line.readiness.command }}</button>
             </div>
-            <div role="cell" class="cap">
-              <div v-if="line.capacity.kind === 'bar'" class="bar">
-                <p class="bar-head"><b>{{ Math.round(line.capacity.left) }}% left</b><span>{{ [line.capacity.window, `resets ${line.capacity.resets}`].filter(Boolean).join(' · ') }}</span></p>
+            <div role="cell" class="acct-cap">
+              <div v-if="line.capacity.kind === 'bar'" class="meter">
+                <p class="meter-head"><b>{{ Math.round(line.capacity.left) }}% left</b><span>{{ [line.capacity.window, `resets ${line.capacity.resets}`].filter(Boolean).join(' · ') }}</span></p>
                 <CapacityGauge :gauge="line.capacity.gauge" :left="line.capacity.left" :value="line.capacity.left" :label="line.capacity.label" :dim="line.capacity.dim" />
-                <p v-if="line.capacity.five !== null || line.capacity.source" class="bar-foot">{{ [line.capacity.five !== null ? `5-hour window: ${line.capacity.five}% left` : '', line.capacity.source].filter(Boolean).join(' · ') }}</p>
+                <p v-if="line.capacity.five !== null || line.capacity.source" class="meter-foot">{{ [line.capacity.five !== null ? `5-hour window: ${line.capacity.five}% left` : '', line.capacity.source].filter(Boolean).join(' · ') }}</p>
               </div>
               <span v-else-if="line.capacity.kind === 'none'" class="no-reading">
                 <span class="quiet">No reading yet</span>
-                <button type="button" class="check" :disabled="!!checking" @click="checkNow(line, card.name)"><AppIcon name="refresh" :size="14" />{{ checking === line.id ? 'Checking…' : 'Check now' }}</button>
+                <button type="button" class="check-now" :disabled="!!checking" @click="checkNow(line, card.name)"><AppIcon name="refresh" :size="14" />{{ checking === line.id ? 'Checking…' : 'Check now' }}</button>
               </span>
               <span v-else-if="line.capacity.kind === 'offline'" class="quiet">No reading while the computer is offline</span>
               <span v-else class="quiet">{{ line.capacity.text }}</span>
@@ -537,6 +537,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .ghost-link { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 13px; border-radius: 999px; color: var(--ink); font-size: 13.5px; font-weight: 600; white-space: nowrap; text-decoration: none; }
 @media (hover: hover) { .ghost-link:hover { background: var(--row-hover); } }
 .ghost-link:focus-visible { box-shadow: var(--focus-ring); }
+.phone-only { display: none; }
+@media (max-width: 720px) { .phone-only { display: block; } }
 
 /* One pill shape for every state: a subtle full tint, never an edge bar. */
 .pill { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
@@ -580,33 +582,33 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .n-body { margin: 2px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
 .n-fix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; }
 .n-fix code { padding: 7px 10px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: 13px; line-height: 1; }
-.n-copy, .fix, .check { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--gold-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
+.n-copy, .fix, .check-now { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--gold-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
 @media (hover: hover) { .n-copy:hover, .fix:hover { background: var(--row-hover); } }
-.n-copy:focus-visible, .fix:focus-visible, .check:focus-visible { box-shadow: var(--focus-ring); }
+.n-copy:focus-visible, .fix:focus-visible, .check-now:focus-visible { box-shadow: var(--focus-ring); }
 .c-details { margin: 10px 0 0 58px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
 .c-empty { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 6px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
 
 /* ---------- Its accounts ---------- */
 .accts { margin-top: 14px; }
 .acct { display: grid; grid-template-columns: minmax(0, 280px) 210px minmax(0, 1fr) 36px; align-items: center; gap: 20px; padding: 14px 4px; border-top: 1px solid var(--line); min-width: 0; }
-.who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.acct-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .vendor { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 11px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
 .who-text { min-width: 0; }
 .vendor-name { margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); }
 .identity { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ready { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.acct-ready { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .fix { height: 26px; margin-left: -4px; color: var(--ink-2); font: 500 12px/1 var(--mono); }
-.cap { min-width: 0; }
+.acct-cap { min-width: 0; }
 .quiet { color: var(--ink-3); font-size: 13px; }
 .no-reading { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.check { background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); }
-@media (hover: hover) { .check:hover:not(:disabled) { background: color-mix(in srgb, var(--teal) 14%, transparent); } }
-.check:disabled { opacity: .6; cursor: default; }
-.bar { display: grid; gap: 4px; min-width: 0; }
-.bar-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
-.bar-head b { color: var(--ink); font-size: 17px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
-.bar-head span, .bar-foot { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.bar-foot { margin: 0; }
+.check-now { background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); }
+@media (hover: hover) { .check-now:hover:not(:disabled) { background: color-mix(in srgb, var(--teal) 14%, transparent); } }
+.check-now:disabled { opacity: .6; cursor: default; }
+.meter { display: grid; gap: 4px; min-width: 0; }
+.meter-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0; }
+.meter-head b { color: var(--ink); font-size: 17px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.meter-head span, .meter-foot { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.meter-foot { margin: 0; }
 .row-more { display: flex; justify-content: flex-end; }
 .legend-row { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; padding: 12px 4px 4px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
 .legend-row .fine { margin-left: auto; }
@@ -662,22 +664,25 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 /* The panel's own width: the session panel narrows the page without crossing a viewport breakpoint. */
 @container ac (max-width: 900px) {
   .acct { grid-template-columns: minmax(0, 1fr) auto 36px; grid-template-areas: "who ready more" "cap cap cap"; gap: 10px 14px; }
-  .who { grid-area: who; }
-  .ready { grid-area: ready; align-items: flex-end; }
-  .cap { grid-area: cap; padding-left: 48px; }
+  .acct-who { grid-area: who; }
+  .acct-ready { grid-area: ready; align-items: flex-end; }
+  .acct-cap { grid-area: cap; padding-left: 48px; }
   .row-more { grid-area: more; }
 }
 /* Phone: the approved stacked rows: identity and menu, the state, the capacity. */
 @media (max-width: 720px) {
   .ac-actions { width: 100%; margin-left: 0; }
-  .ghost-link .long { display: none; }
+  .ghost-link .long, .wide-only { display: none; }
+  .ghost-link.manage { width: 44px; padding: 0; justify-content: center; }
+  .ghost-link { padding: 0 10px; }
+  .pacing-btn { flex: 0 1 auto; }
   .pacing-btn, .ghost-link { height: 44px; }
   .computer { padding: 16px 16px 6px; }
   .c-side { width: 100%; margin-left: 58px; }
   .notice { margin-top: 12px; }
   .acct { grid-template-columns: minmax(0, 1fr) 40px; grid-template-areas: "who more" "ready ready" "cap cap"; gap: 10px; padding: 14px 0; }
-  .ready { align-items: flex-start; }
-  .cap { padding-left: 0; }
+  .acct-ready { align-items: flex-start; }
+  .acct-cap { padding-left: 0; }
   .more { width: 44px; height: 44px; }
   .legend-row .fine { width: 100%; margin-left: 0; }
   .plan-card p { flex-basis: 100%; }
