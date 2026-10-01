@@ -153,7 +153,7 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
   await expect(cap.getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
   const add = cap.getByRole('link', { name: 'Add an account' })
   await expect(add).toHaveAttribute('href', '/settings/accounts#add-account')
-  await shoot(page, 'agents', cap.locator('.cap-head'))
+  await shoot(page, 'agents', cap.locator('.ac-head'))
   await add.click()
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
