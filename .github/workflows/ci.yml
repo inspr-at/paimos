@@ -166,7 +166,7 @@ jobs:
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
       - name: Scope code wire and ceiling checks
         working-directory: web
-        run: node --experimental-strip-types --test tests/scope-code.test.ts
+        run: node --experimental-strip-types --test tests/scope-code.test.ts tests/access.test.ts
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
