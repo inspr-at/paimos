@@ -374,6 +374,10 @@ func digest(domain, value string) []byte {
 	return sum[:]
 }
 
+// RegistrationLeaseConflict identifies a live reference held by another lease.
+// Native coordinator helpers may retry it until their predecessor expires.
+const RegistrationLeaseConflict = "active generation conflicts with registration: harness_session_ref is already active with a different worker lease"
+
 // vendorRefDigest hashes a harness-native session id with the same domain as
 // harness_session_ref. The same value is not stored twice; lookup hits ref_digest.
 // A nil raw value means the client omitted the field and must not clear a stored one.
@@ -398,7 +402,7 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 		}
 		existing.vendorRefDigest = vendor
 	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
-		return workorders.Fail(409, "active generation conflicts with registration")
+		return workorders.Fail(409, "vendor_session_ref differs from this active generation's existing binding")
 	}
 	existing.HasVendorSessionRef = true
 	return nil
@@ -407,7 +411,14 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 func registrationConflict(err error) error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
-		return workorders.Fail(409, "active generation conflicts with registration")
+		switch pg.ConstraintName {
+		case "harness_one_active_vendor_ref":
+			return workorders.Fail(409, "vendor_session_ref is already bound to an active generation for this agent")
+		case "harness_one_active_ref":
+			return workorders.Fail(409, "harness_session_ref is already bound to an active generation in this project")
+		default:
+			return workorders.Fail(409, "harness registration conflicts with an existing generation")
+		}
 	}
 	return err
 }
@@ -700,8 +711,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 				return nil, workorders.Fail(409, "successor registration conflicts")
 			}
 		}
-		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 || existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
-			return nil, workorders.Fail(409, "active generation conflicts with registration")
+		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 {
+			return nil, workorders.Fail(409, RegistrationLeaseConflict)
+		}
+		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
+			return nil, workorders.Fail(409, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata")
 		}
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err

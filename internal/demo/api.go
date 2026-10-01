@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/business/costunits"
 	"github.com/inspr-at/paimos/internal/business/hours"
+	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/intake"
 	"github.com/inspr-at/paimos/internal/journey"
@@ -60,6 +61,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (*api, error) {
 	nodes.New(pool, nil).Mount(mux)
 	relations.New(pool).Mount(mux)
 	activity.New(pool).Mount(mux)
+	deliveryvote.New(pool).Mount(mux)
 	knowledge.New(pool).Mount(mux)
 	journey.New(pool).Mount(mux)
 	requirements.New(pool).Mount(mux)

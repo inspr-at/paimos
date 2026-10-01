@@ -63,6 +63,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	body["vendor_session_ref"] = other
 	w = f.call(f.person, "POST", base, body, "")
 	expect(t, w, 409)
+	if decode(t, w)["error"] != "vendor_session_ref differs from this active generation's existing binding" {
+		t.Fatal("changed vendor binding diagnostic did not name the conflict")
+	}
 	if strings.Contains(w.Body.String(), other) || strings.Contains(w.Body.String(), vendor) {
 		t.Fatal("conflict response exposed a session reference")
 	}
@@ -85,6 +88,9 @@ func TestVendorSessionBinding(t *testing.T) {
 	second["worker_lease"] = "vendor-lease-000000000000000000000003"
 	w = f.call(f.person, "POST", base, second, "")
 	expect(t, w, 409)
+	if decode(t, w)["error"] != "vendor_session_ref is already bound to an active generation for this agent" {
+		t.Fatal("duplicate vendor diagnostic did not name the conflict")
+	}
 
 	if bindSession(t, f, f.person, vendor) != "" || bindSession(t, f, f.foreign, vendor) != "" {
 		t.Fatal("lookup was not limited to the caller")
