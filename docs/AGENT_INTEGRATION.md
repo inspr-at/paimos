@@ -277,9 +277,13 @@ session line reads “1 session running”; the Model line retains “1 session,
 Before usage is reported, Tokens names the running session count and the display
 model when a single model ran, without a second unreported-usage warning. The
 running count excludes finished sessions, while measured totals include their
-usage. Cost shows a lower-bound warning only when a list value was measured;
-usage-less sessions keep “Billing not reported yet”. Partial-report and
-lower-bound warnings remain on measured values, including zero. The shared
+usage. A session without a usage row counts as unreported tokens, without adding
+an unknown billing mode or setting `list_unpriced`/`paid_unknown`. Its standalone
+Cost hover stays “Billing not reported yet”; beside priced API usage the Cost
+hover stays “API-billed · at list prices”, including a measured zero. Subscription
+usage keeps its plan marker beside an unreported session. Actual usage without
+a list price or known billing still contributes lower-bound and billing warnings
+when a list value was measured. The shared
 `web/tests/fixtures/planning-list.json` is a complete server list response;
 `TestPlanningListHoverFixture` checks its planning fields against the endpoint,
 and unit/browser regressions consume it directly. Calibration appears only on the pre-session
