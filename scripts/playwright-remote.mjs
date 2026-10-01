@@ -27,7 +27,7 @@ load=$(sysctl -n vm.loadavg | awk '{print $2}')
 case "$console_user" in ''|mailina) echo 'remote refused: console presence' >&2; exit 3;; esac
 case "$idle" in ''|*[!0-9]*) echo 'remote refused: idle unknown' >&2; exit 3;; esac
 [ "$console_user" = ci ] || [ "$idle" -ge 600 ] || { echo 'remote refused: keyboard active' >&2; exit 3; }
-awk -v load="$load" 'BEGIN { exit !(load ~ /^[0-9]+([.][0-9]+)?$/ && load <= 18) }' || { echo 'remote refused: load' >&2; exit 3; }
+awk -v load="$load" 'BEGIN { exit !(load ~ /^[0-9]+([.][0-9]+)?$/ && (load + 0) <= 18) }' || { echo 'remote refused: load' >&2; exit 3; }
 for marker in "$HOME"/.aeon-remote-test/*.pid; do
   [ -e "$marker" ] || continue
   echo 'remote refused: another heavy run reserved capacity' >&2; exit 3

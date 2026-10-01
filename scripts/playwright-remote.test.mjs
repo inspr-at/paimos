@@ -26,8 +26,12 @@ function probe(overrides = {}) {
   return spawnSync('bash', ['-s'], { input: prelude + remoteProbe.replaceAll('$HOME', '$lane_probe_home'), encoding: 'utf8' })
 }
 test('remote presence, load, builder and capacity guards fail closed', () => {
-  assert.equal(probe().status, 0)
-  assert.equal(probe({ consoleUser: 'ci', idleSeconds: '0' }).status, 0)
+  for (const load of ['0', '2', '5', '10', '17.99', '18']) {
+    const result = probe({ load })
+    assert.equal(result.status, 0, `load=${load}: ${result.stderr}`)
+  }
+  const unattended = probe({ consoleUser: 'ci', idleSeconds: '0' })
+  assert.equal(unattended.status, 0, unattended.stderr)
   for (const override of [
     { consoleUser: 'mailina' }, { consoleUser: '' }, { idleSeconds: '599' }, { idleSeconds: '' },
     { load: '18.01' }, { load: 'NaN' }, { active: true }, { builderOn: true },
@@ -82,5 +86,5 @@ test('missing approved browser exits 3 and releases only this run reservation', 
   assert.equal(existsSync(join(directory, '.aeon-ui-remote.lock')), false)
   assert.equal(existsSync(join(directory, `.aeon-remote-test/ui-${run}.pid`)), false)
   // Run files remain for inspection; only our reservation is released.
-  assert.equal(existsSync(join(directory, `aeon-ui-runs/${run}/web`)), true)
+  assert.equal(existsSync(join(directory, `aeon-ui-runs/${run}/web`)), true, result.stderr)
 })
