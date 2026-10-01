@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/rulesimport"
 )
 
 // Run reads only stdin and an optional explicit local checkpoint. It performs no
@@ -88,8 +90,8 @@ func parseArgs(args []string) (Options, string, error) {
 		}
 		*dest = args[i]
 	}
-	if opt.Source != "codex" && opt.Source != "cursor" {
-		return opt, "", &UsageError{Msg: "--source must be codex or cursor"}
+	if opt.Source != "codex" && opt.Source != "cursor" && opt.Source != "gemini" && opt.Source != "opencode" {
+		return opt, "", &UsageError{Msg: "--source must be codex, cursor, gemini or opencode"}
 	}
 	return opt, path, nil
 }
@@ -124,6 +126,11 @@ func readCheckpointWithIO(path string, openFile func(string) (*os.File, error), 
 
 // Check the original spelling too: cleaning must not erase a forbidden component.
 func forbiddenCheckpointPath(path string) bool {
+	// Share the importer policy so newly protected vendor stores stay refused
+	// before any checkpoint descriptor is opened, including unclean spellings.
+	if rulesimport.Prohibited(path) != nil {
+		return true
+	}
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
 		name := strings.ToLower(part)
 		if strings.HasPrefix(name, ".env") || strings.HasPrefix(name, "id_") {

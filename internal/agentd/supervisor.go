@@ -157,6 +157,7 @@ type Supervisor struct {
 	pollDiagnosticMu    sync.Mutex
 	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired       map[string]bool
+	signInUnverified    map[string]bool
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
 	harnessHolds        map[string]string
@@ -562,6 +563,10 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
 		// local dependency failure never does (AEON-342).
 		s.loginRequired[account.ID] = status.Failure == ProbeAuthFailed && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.signInUnverified == nil {
+			s.signInUnverified = map[string]bool{}
+		}
+		s.signInUnverified[account.ID] = !status.OK && status.Failure == ProbeUnverified && hold == "" && dependencyErr == nil && probeErr == nil
 		if s.harnessFailed == nil {
 			s.harnessFailed = map[string]bool{}
 		}

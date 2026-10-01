@@ -10,9 +10,9 @@
     },
     {
       "file": "1088_more_harnesses.sql",
-      "sha256": "0cafa9ac90fe08c1542e94bc1aa413e903c4a43f272b4098f0675b23ba255d1c",
+      "sha256": "3f3132a5553d871b9ed8f1c6d95178182d7d7e57d330b4f5601972f0b5b43c5e",
       "ticket": "AEON-452",
-      "reason": "Replace existing harness/family CHECK enumerations with supersets for Gemini CLI and OpenCode. Preserve every existing value, unknown-family pi policy, RLS policy, column and row. DROP CONSTRAINT is outside the static expand-safe allowlist; this exact-byte draft CI exception requires coordinator acceptance before merge/release and previous-binary compatibility measurement. No release authority is granted by this worker."
+      "reason": "Only definition-selected drops of historical enum CHECKs need this one-file exception. Superset replacements are ADD CONSTRAINT CHECK NOT VALID followed by VALIDATE CONSTRAINT, both allowlisted. Every historical harness/family/adapter value, pi unknown-family policy and the review null-pairing predicate remain intact. No rows, columns, RLS policies or other constraints are removed. This exact-byte draft CI exception still requires coordinator acceptance before merge/release and previous-binary compatibility measurement; it grants no release authority."
     }
   ]
 }

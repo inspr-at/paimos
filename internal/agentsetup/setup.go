@@ -166,6 +166,9 @@ func (e *Engine) SavedOptions() (Options, error) {
 		v.Identity = c.Identity
 		v.Version = c.Version
 		v.Login = "signed_in"
+		if v.Harness == "gemini" || v.Harness == "opencode" {
+			v.Login = "unverified"
+		}
 		v.Grok = c.Candidate.Grok
 		o.Candidates = append(o.Candidates, v)
 	}
@@ -850,7 +853,7 @@ func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error
 	return false
 }
 
-// Local-profile harnesses establish authentication at session/new, not discovery.
+// Discovery must establish sign-in before a candidate can be ready.
 func candidateReady(c Candidate) bool {
-	return c.Login == "signed_in" || c.Login == "local_profile" && (c.Harness == "gemini" || c.Harness == "opencode")
+	return c.Login == "signed_in"
 }

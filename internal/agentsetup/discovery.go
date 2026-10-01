@@ -277,7 +277,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	c.Version = string(match[1])
 	if harness == "gemini" || harness == "opencode" {
 		// Neither CLI has a quota-neutral person-identity status command.
-		// Pair the local profile, never claim an email or read credentials.
+		// Identify the local profile, never claim sign-in or read credentials.
 		profile, err := openDirectory(c.Home, false, true)
 		if err != nil {
 			return c, err
@@ -286,7 +286,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		if accountContext != "" && accountContext != "local-profile" {
 			return c, errors.New("select the vendor local profile, not a person identity")
 		}
-		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in unverified)", "local_profile"
+		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in unverified)", "unverified"
 		return c, nil
 	}
 	if harness == "pi" {

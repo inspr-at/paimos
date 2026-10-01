@@ -33,7 +33,9 @@ these candidates as **local profiles**, not authenticated person identities.
 Their explicitly selected HOME must be private and owned. Vendor login remains
 local: run `gemini` or `opencode auth login` normally. Session creation must succeed
 before Aeon sends a prompt; provider authentication can still fail on that prompt.
-Version probes never establish a signed-in identity.
+Version probes leave discovery **unverified** and daemon accounts blocked with
+`sign_in_unverified`; they never establish sign-in or readiness. Setup cannot
+enroll these candidates as ready until a qualified sign-in probe is available.
 
 Both adapters use ACP version 1 over the existing owned stdio transport, with
 fresh sessions and run-scoped Aeon HTTP MCP tools. Idle inbox delivery starts a
@@ -42,7 +44,8 @@ Interrupt waits for a terminal cancellation receipt. An unapproved permission
 request ends the run; Aeon never chooses a vendor permission option for a person.
 These adapters have no qualified no-tools execution boundary, so pairing
 verification and managed reviews remain unavailable before vendor startup.
-Use the explicit **Connect only** approval choice when pairing them.
+Existing enrollments retain their local profile, but a successful version probe
+does not make them launchable or request another login as if sign-out were proven.
 
 Gemini profiles pin the exact model and numeric thinking budget. The qualified
 2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
@@ -85,8 +88,11 @@ stores. Rendering preserves exact bytes; installing a preview remains explicit.
 
 The closed reporter harness enum changes the declared status/heartbeat contract
 from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
-their shape. Strict Pharos/Janus consumers need coordinator adoption before this
-draft can roll out; the worker does not update those repositories or deploy it.
+their shape. `Aeon-Contract` is a response header, not a required request header:
+historical registration and heartbeat bodies still work without it. Pharos and
+Janus do not decode the harness-session enum, so no coordinated rollout is
+required for their existing reporters. The worker does not update those
+repositories or deploy this draft.
 
 ### Default worker launch
 

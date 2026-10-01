@@ -18,8 +18,8 @@ import (
 )
 
 // ACPAdapter adds Gemini and OpenCode to the existing owned wire transport.
-// Local auth is the explicitly paired profile. Version checks establish launch
-// readiness only; session/new establishes an ACP session. Provider authentication
+// Local auth is the explicitly paired profile. Version checks establish launcher
+// availability only; session/new establishes an ACP session. Provider authentication
 // may fail at prompt time and is never inferred from a successful version probe.
 type ACPAdapter struct {
 	Harness     string
@@ -57,8 +57,17 @@ func (a *ACPAdapter) environment(key string) ([]string, error) {
 }
 
 func (a *ACPAdapter) Probe(ctx context.Context, key string) bool {
+	return a.ProbeStatus(ctx, key).OK
+}
+
+func (a *ACPAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
 	env, err := a.environment(key)
-	return err == nil && launcherReady(ctx, a.Path, a.Nodes[key].Path, env) == nil
+	if err != nil || launcherReady(ctx, a.Path, a.Nodes[key].Path, env) != nil {
+		return ProbeStatus{Failure: ProbeUnavailable}
+	}
+	// Neither harness has a qualified quota-neutral sign-in probe. A version
+	// response proves no account identity, authentication or execution health.
+	return ProbeStatus{Failure: ProbeUnverified}
 }
 func (a *ACPAdapter) CapacitySupport(string) string {
 	return "not available: vendor quota-neutral capacity API unqualified"
