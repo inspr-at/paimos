@@ -91,6 +91,25 @@ every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
+Matching login fingerprints are hints. In Settings → Accounts, open an account
+and choose **Pool with…**, then confirm the named accounts use the same vendor
+login. Only those confirmed accounts share readings, holds and parallel slots;
+confirmation replaces the pool with exactly the named accounts, leaving unnamed
+previous members separate. Later enrollments require their own confirmation.
+The dialog names every current member plus the account being added, so adding
+a third account keeps the existing pair. **Remove … from pool** and **Stop sharing
+quota** explicitly name every remaining member; the last pair returns to separate
+readings and limits. A changed fingerprint clears that account's confirmation.
+Existing accounts
+start unconfirmed after migration 1054; prior holds can still settle or release.
+The person-only API is `PUT /api/agent-accounts/quota-pool` (`account.manage`).
+Ticket pins require edit permission in the ticket's visible project. If a queued
+account leaves its routing group, routing releases its old hold and slot before
+choosing a current member or returning a visible wait. Claims also release obsolete
+quota or group holds before returning a conflict; a daemon that has already
+journaled the route observes the unreserved queued run and routes again. Group
+edits replace only visible project memberships and preserve hidden project fences.
+
 Capacity learning uses tenant-local readings and usage only (AEON-388,
 migration 1020). Three matching run samples enable a decaying p75 hold; five
 observed work days enable an Auto reserve normalized to the window's usable
@@ -119,7 +138,8 @@ does not enforce their consumption.
 A terminal vendor-limit failure waits on its account when the reset is within
 20 minutes. Longer stops create one linked retry on the next eligible account
 at the next daemon poll, preserving the work order and any person-selected
-account fence. The original session records the handoff. The local daemon
+account fence and run-level group target through consecutive handoffs. The
+original session records the handoff. The local daemon
 requires proof that the previous process stopped and the same recorded workspace
 and branch before continuing. No eligible account means a visible vendor wait;
 Run now once is never inherited by an automatic retry. Account holds remain
@@ -298,7 +318,7 @@ stop only the matching model; account-wide denials still apply. Known denied
 windows are reported at 100%; missing bounds remain unknown. Accounts publish
 `reading_support` and a tenant-keyed HMAC of a verified vendor account ID, never an
 email, token or local path. Missing verified IDs leave the fingerprint empty.
-Doors with the same fingerprint share allowance windows, outstanding reservations
+Doors explicitly confirmed together share allowance windows, outstanding reservations
 and vendor denials within the tenant; group membership and schedules stay on each
 door. Reservations and launch validation recheck project fences and ticket pins.
 Settings displays `aeon use <harness> <account-id>` so labels containing spaces or

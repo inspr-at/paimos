@@ -73,7 +73,7 @@ func (m *Module) signals(w http.ResponseWriter, r *http.Request) {
 		if a.ReadingSupport == in.ReadingSupport && a.QuotaFingerprint == in.QuotaFingerprint {
 			return nil
 		}
-		_, err = tx.Exec(r.Context(), `UPDATE agent_accounts SET reading_support=$2,quota_fingerprint=$3 WHERE id=$1`, a.ID, in.ReadingSupport, in.QuotaFingerprint)
+		_, err = tx.Exec(r.Context(), `UPDATE agent_accounts SET reading_support=$2,quota_fingerprint=$3,quota_pool_fingerprint=CASE WHEN quota_fingerprint=$3 THEN quota_pool_fingerprint ELSE '' END WHERE id=$1`, a.ID, in.ReadingSupport, in.QuotaFingerprint)
 		if err != nil {
 			return err
 		}
