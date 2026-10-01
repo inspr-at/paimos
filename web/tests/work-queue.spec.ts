@@ -151,6 +151,12 @@ test('advanced assignment uses only granted profile/account, busy targets stay i
   const { state } = await world(page)
   await row(page, 'PHAROS-12').getByRole('button', { name: /Change assignee/ }).click()
   const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-12', exact: true })
+  const search = menu.getByRole('searchbox', { name: 'Find assignee' })
+  await search.pressSequentially('markus')
+  await expect(search).toHaveValue('markus')
+  await search.press('Enter')
+  await expect(row(page, 'PHAROS-12').locator('.c-assignee')).toContainText('Markus Barta')
+  await row(page, 'PHAROS-12').getByRole('button', { name: /Change assignee/ }).click()
   await expect(menu.getByRole('menuitemradio', { name: /Queue: next free agent/ })).toBeVisible()
   await expect(menu.getByRole('menuitemradio', { name: /Codex builder.*Workspace account/ })).toBeVisible()
   for (const theme of ['light', 'dark']) { await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme); await page.screenshot({ path: join(shots, `assignee-${theme}.png`) }) }

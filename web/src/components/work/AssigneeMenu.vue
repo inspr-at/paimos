@@ -34,6 +34,8 @@ async function add(target?: QueueTarget) {
   catch (e) { toast(e instanceof Error ? e.message : 'The work could not be started.', { tone: 'error' }) }
 }
 function keys(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.isContentEditable || target?.closest('input, textarea, select')) return
   if (!['ArrowDown', 'ArrowUp', 'j', 'k'].includes(event.key)) return
   event.preventDefault(); event.stopPropagation()
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
