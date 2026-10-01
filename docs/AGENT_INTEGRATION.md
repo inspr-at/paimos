@@ -217,7 +217,9 @@ omitting billing preserves the person's setting, including when agentd republish
 metadata. Agents cannot change this setting. Account and plan names never imply
 billing. Managed usage carries the actual routed account automatically. Agentd
 uses a successful harness auth-kind probe when exposed (Codex ChatGPT login,
-Claude `claude.ai` or `api_key`), then the routed account declaration, then unknown.
+Claude `claude.ai`), then the routed account declaration, then unknown.
+An email-fenced Claude `api_key` login fails authentication and reports no billing;
+its billing can come only from the person-set account declaration, never that probe.
 No credential file is opened to discover billing. Existing identity fences still
 apply. Unknown or subscription usage has no API charge estimate; subscription
 usage may name the saved plan. This remains list-price accounting, never invoices.
@@ -230,10 +232,12 @@ known billing mode. A missing account binding remains unknown. Retries replay th
 same request even if account settings change later.
 
 Planning stores a stable `estimate_snapshot` at work start: the first harness
-session binding or entry into `in_progress`, whichever happens first. Concurrent
-starts share one row, captured in the same transaction. A change away from
-`in_progress` closes that work episode (completion/cancellation also closes a
-session-first episode); the next start adds history. Edits to hours, routes, prices
+session binding or entry into the in-progress work bucket, whichever happens first.
+Kind state categories win, then the same fixed spellings as project work counts
+(`in_progress`, `inprogress`, `active` and `qa`). Concurrent starts share one row,
+captured in the same transaction. QA, blocked and open transitions keep that episode
+open. Only done, cancelled or archived work buckets close it, including custom
+states and session-first episodes; the next start adds history. Edits to hours, routes, prices
 or calibration after start update live planning but preserve the baseline, including
 nulls when the original estimate or route was unknown. No historical start is
 backfilled from today's values. The snapshot records hours, estimated tokens and

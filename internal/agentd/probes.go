@@ -507,6 +507,8 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	case "claude.ai":
 		return ProbeStatus{OK: true, BillingMode: "subscription"}
 	case "api_key":
+		// Only an unfenced adapter reaches this case. Email-fenced API-key
+		// logins fail authentication above and never establish billing.
 		return ProbeStatus{OK: true, BillingMode: "api"}
 	}
 	return probeOK

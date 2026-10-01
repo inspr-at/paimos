@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"slices"
 	"strconv"
 	"time"
 
@@ -40,7 +39,7 @@ type planningSnapshot struct {
 
 // CapturePlanningStart serializes starts on the node, including competing
 // registrations. A status transition and its first session share one baseline.
-// Re-estimates never mutate it; leaving in_progress closes the work episode.
+// Re-estimates never mutate it; done, cancelled or archived closes the episode.
 func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) error {
 	var project, kind string
 	err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text,''),k.slug FROM nodes n
@@ -120,12 +119,30 @@ func snapshotNodeChange(ctx context.Context, tx pgx.Tx, e Event) error {
 	if err := json.Unmarshal(e.After, &after); err != nil {
 		return err
 	}
-	was, now := normaliseWorkState(before.State) == "in_progress", normaliseWorkState(after.State) == "in_progress"
-	if !was && now {
+	if before.State == after.State {
+		return nil
+	}
+	// Use the same kind categories and fallback spellings as project counts
+	// and Hide closed. QA and blocked are part of the existing work episode.
+	var was, now string
+	err := tx.QueryRow(ctx, `WITH `+workStateCategoryCTE()+`
+        SELECT `+workCountBucketSQL("$2::text", "before_category")+`, `+workCountBucketSQL("$3::text", "after_category")+`
+        FROM nodes n
+        LEFT JOIN configured before_category ON before_category.kind_id=n.kind_id AND before_category.norm=`+workStateNormSQL("$2::text")+`
+        LEFT JOIN configured after_category ON after_category.kind_id=n.kind_id AND after_category.norm=`+workStateNormSQL("$3::text")+`
+        WHERE n.id=$1::uuid AND n.deleted_at IS NULL`, *e.NodeID, before.State, after.State).Scan(&was, &now)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if was != "in_progress" && now == "in_progress" {
 		return CapturePlanningStart(ctx, tx, *e.NodeID, "status")
 	}
 	// A first session can start work while the status is still open.
-	if (was && !now) || (!now && before.State != after.State && slices.Contains([]string{"done", "delivered", "accepted", "cancelled", "canceled", "archived"}, normaliseWorkState(after.State))) {
+	switch now {
+	case "done", "cancelled", "archived":
 		_, err := tx.Exec(ctx, `UPDATE ticket_estimate_snapshots SET closed_at=clock_timestamp() WHERE ticket_node_id=$1::uuid AND closed_at IS NULL`, *e.NodeID)
 		return err
 	}

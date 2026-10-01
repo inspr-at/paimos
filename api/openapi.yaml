@@ -12111,7 +12111,7 @@ components:
             estimated: {type: integer, minimum: 0}
     TicketEstimateSnapshot:
       type: object
-      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into in_progress in a work episode. Later estimates do not overwrite it. Leaving in_progress closes the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
+      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into the in-progress work bucket in a work episode. Kind state categories take precedence over fixed spellings, as in project work counts. Later estimates, QA, blocked and open transitions do not overwrite or close it. Only done, cancelled or archived work buckets close the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
       required: [id, started_at, source, estimate_hours, estimated_tokens, route, rate_basis]
       properties:
         id: {type: string, format: uuid}
