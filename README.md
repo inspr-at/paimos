@@ -1328,6 +1328,13 @@ emits target fields.
 
 ### Attach a running session (AEON-352)
 
+Computer pairing connects agentd to Aeon once. Linking a running session to a
+ticket is a separate approval for that process. The attach CLI and review show
+**Computer paired · This session not yet linked** until activation; pairing does
+not grant permission to share conversation text. `aeon-agentd attach --language de`
+shows the pairing/session distinction and next-step guidance in German;
+the browser uses English or German for that guidance according to its language.
+
 From a separate interactive terminal on a paired computer, run
 `aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
 **Watch the conversation** is the default; the transcript must be a resolvable
@@ -1335,6 +1342,13 @@ physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
 text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
+
+After reviewing the process and sharing mode, press Enter or `y` in the separate
+terminal for the local check. The CLI then opens the prefilled approval page on
+macOS and always prints the link as a fallback. `--no-browser` disables opening;
+other platforms use the printed link. Opening the page only fills in the code;
+the person must still review and approve in Aeon, followed by Touch ID when the
+pairing requires it. Keep the terminal open while linked; Ctrl-C detaches.
 
 On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
 root-owned `login` or `sshd-session` leader; tmux also remains supported.
@@ -1412,8 +1426,8 @@ rejects build failures as evidence and restores each source file. Real codesign
 checks also probe running installed vendor binaries; a harness with no running
 process is reported as skipped, while fixture signature checks still run.
 
-Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
-or `ATTACH` as shown. The helper then says where to approve: the page, the menu
+Review the kernel-observed process, physical folder and chosen mode, then press
+Enter or `y` for the local check. The helper says where to approve: the page, the menu
 entry, the nine-digit code and how long it lives, plus a link
 (`/agents#attach=<code>`) that only fills the code in. **Agents** also lists the
 waiting request (computer, harness, expiry) with a **Review** button, and says so
@@ -1435,7 +1449,7 @@ requests receive HTTP 409 `update_agentd` and cannot create a watch or lease.
 An AEON-460 protocol-2 daemon with an omitted or v1 proof version is refused at
 registration with HTTP 409 `update_agentd` and “upgrade paimos-agentd” guidance,
 before approval or Touch ID; ordinary work continues with attachment disabled.
-The released older terminal helper shows `local lifecycle request rejected`
+An older terminal helper shows `local lifecycle request rejected`
 (the daemon's local refusal is `paired instance refused attach`), rather than
 the server's update message. Upgrade `paimos-agentd`, restart it and give fresh
 approval. Existing pairing capabilities and Enclave keys remain valid; the proof
@@ -1445,9 +1459,19 @@ A newer daemon connecting to an older server receives HTTP 400 on attach
 registration because that server rejects an unknown `attach_protocol` or
 `local_consent_proof_version` field.
 The daemon logs the server's refusal, disables attach and keeps serving work
-and local control. An attach attempt through that daemon shows
-`local lifecycle request rejected`. After updating the server, restart agentd
+and local control. The updated helper shows version-repair guidance on the
+existing authenticated, kernel-checked socket; unauthenticated callers only get
+the generic auth refusal. After updating the server, restart agentd
 to retry attach registration; there is no in-process registration retry.
+
+Owner refusal guidance distinguishes incompatible attach versions, a pairing
+that no longer authenticates, unavailable project/ticket access, an expired code
+and the live approval-request limit. Server errors preserve `code` and `error`
+and add `attach_refusal` only after checking the computer proof and principal
+(or the signed-in person owner). Unknown causes remain generic. Revoked HTTP
+bearers stay unauthenticated; pairing repair is offered only by the locally
+authenticated interactive helper. Poll refusals still detach and clear local
+state, and no uncertain conversation submission is retried.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.

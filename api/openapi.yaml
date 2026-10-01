@@ -2038,7 +2038,8 @@ paths:
         requiring new owner approval.
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
-        appear in URLs. Requests, activation and every poll
+        appear in URL paths or queries; approval links use a fragment removed by the web app.
+        Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. The server pins the owner's consent_mode at person approval.
         local_auth remains approved (no session or lease) until the registered daemon
@@ -2058,6 +2059,13 @@ paths:
         The exited operation is only for a kernel confirmation that the pinned process
         has exited; loss of contact is unreachable.
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
+        Owner diagnostics are additive: errors retain their existing code and error fields
+        and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
+        or code_expired). Registration authenticates the computer lifecycle proof before
+        reporting version mismatch; later operations authenticate the registered poll key
+        and computer principal before reporting a cause. Unauthenticated and foreign callers
+        receive generic refusals without attach_refusal. Revoked bearer credentials remain
+        unauthenticated; only the locally authenticated interactive helper offers pairing-repair guidance.
       requestBody:
         required: true
         content:
@@ -2078,9 +2086,15 @@ paths:
                       state: {type: string, const: registered}
                       local_consent_proof_version: {type: integer, const: 2, description: Required consent signature version; independent of attach_protocol}
         '400': {description: Invalid attach request; conversation text on status-only or pre-activation polls detaches the attach}
-        '403': {description: Registered memory-only poll key required; lifecycle proof only authorizes registration}
-        '409': {description: 'Snapshot or consent mismatch, poll sequence rejected, or update agentd required'}
-        '410': {description: Expired or revoked; new owner approval required}
+        '403':
+          description: Registered memory-only poll key required; lifecycle proof only authorizes registration. Only an authenticated owning daemon receives a diagnostic.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+        '409':
+          description: Snapshot or consent mismatch, poll sequence rejected, or update agentd required. Only an authenticated owning daemon receives a diagnostic.
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+        '410':
+          description: Expired or revoked; new owner approval required
+          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
         '429':
           description: >-
             Attempt or stream quota exceeded, or (error code attach_live_limit) the person
@@ -8140,6 +8154,16 @@ components:
         transcript: {type: string, maxLength: 1024}
         file_id: {type: string, maxLength: 128}
         platform: {type: string, enum: [darwin, linux], description: Observed daemon platform; required for strict local authentication}
+    AttachRefusal:
+      type: object
+      required: [code, error]
+      properties:
+        code: {type: string, description: "Existing error code, retained for older clients"}
+        error: {type: string}
+        attach_refusal:
+          type: string
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired]
+          description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
       additionalProperties: false
