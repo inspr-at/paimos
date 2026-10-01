@@ -575,6 +575,132 @@ This deliberately supersedes AEON-356's “publish after live verification” or
 
 The owning coordinator must move the external `~/Code/aeon-worktrees/deploy.sh` publish/tap block to immediately after native agent qualification, then wait for tap merge and verify exact public distribution before the server-switch block. Keep the existing server backup, approval, switch, health/version/digest verification and rollback gates. This repository does not own that script; AEON-493's draft PR records the required change for its owner.
 
+### Automated live verification and distribution finalization (AEON-414)
+
+`.github/workflows/verify-live.yml` is a coordinator-dispatched, hosted workflow
+that runs only from `inspr-at/paimos` main. It defaults to verification without
+release or tap writes. The coordinator supplies a trusted `aeon.rollout.v1`
+record from the approved pin/host rollout; this extends the timing record rather
+than introducing another rollout controller. The workflow has no SSH, deploy,
+pin-writing or PPM credential. The worker's draft PR never runs this workflow
+against production.
+
+The lead must configure the `live-verification` environment with required
+reviewers and a main-only policy before enabling it. Store approved non-admin
+App identities as `RELEASE_APP_ID` / `RELEASE_APP_KEY` (paimos release contents
+write) and `HOMEBREW_TAP_APP_ID` / `HOMEBREW_TAP_APP_KEY` (tap contents and pull
+requests write). The release App must read attestations; public nixcfg pin
+metadata is read unauthenticated through the API. The tap App also needs checks
+and commit-status read permissions. Tokens are minted for one repository each
+with those specific permissions; an admin-capable token is refused;
+neither the Actions token nor an admin merge bypass is used for publication or
+tap merge. No environment, App installation, permission or foreign rollout
+collector is provisioned by this change.
+
+The dispatch input `rollout` contains JSON with these fields; obtain identifiers,
+hashes and measurements from the trusted collector and qualification evidence,
+never from the live candidate in the same verification step:
+
+```json
+{
+  "schema": "aeon.rollout.v1",
+  "direction": "forward",
+  "outcome": "success",
+  "version": "261001130110.0.0",
+  "version_scheme": "inspr-calver-3",
+  "image_digest": "sha256:<64 lowercase hex>",
+  "running_digest": "sha256:<same OCI index digest observed by the host>",
+  "source_commit": "<40 lowercase hex>",
+  "pin": {
+    "repository": "markus-barta/nixcfg",
+    "number": 890,
+    "merge_commit_sha": "<40 lowercase hex>",
+    "merged_at": "2026-10-01T13:05:00Z"
+  },
+  "live_at": "2026-10-01T13:06:00Z",
+  "observation": {
+    "started_at": "2026-10-01T13:06:00Z",
+    "ended_at": "2026-10-01T13:07:00Z",
+    "restart_count": 0,
+    "requests_5xx": 0,
+    "requests_total": 100
+  },
+  "web": {
+    "entrypoint": "/assets/index-<fingerprint>.js",
+    "sha256": "<64 lowercase hex from the qualified image bundle>"
+  },
+  "qualification": {
+    "version": "261001130110.0.0",
+    "asset": "paimos-agentd-darwin-arm64",
+    "sha256": "<64 lowercase hex>",
+    "sha256sums": "<SHA256SUMS file SHA-256, 64 lowercase hex>",
+    "operator": "markus-barta",
+    "spctl": true,
+    "foreground_socket": true,
+    "acl_fixture": true,
+    "attach_preview": true,
+    "touch_id": true,
+    "evidence": "AEON-487/comment/native-qualification"
+  }
+}
+```
+
+This is a shape example, not valid release evidence. The collector must report
+the deployed **index** digest, not its architecture's child digest, and measure
+container restart count and actual request counters over at least 60 seconds
+after the switch. The observation must be no more than 15 minutes old, remain
+fresh through verification, and contain nonzero traffic with zero 5xx and zero
+restarts. Missing measurements fail closed. The owning nixcfg/operator tooling
+must supply these fields and dispatch after pin merge; its integration and
+first attended live run remain coordinator acceptance, not worker evidence.
+
+`scripts/verify-live.mjs` rechecks the actual merged main pin PR and its single
+image-line diff in `hosts/csb1/docker/compose-spec.nix`, annotated release tag,
+source commit on main, tagged version/scheme and the hosted image attestation.
+It requires the exact nine-asset release, qualified checksum-file hash and
+downloaded SHA-256 of every binary. It polls `/api/version` for at most ten
+minutes, then observes version, health including database, readiness, SPA
+entrypoint and exact bundle hash for at least one minute. The isolated
+Playwright smoke renders sign-in, checks the same bundle and version, and
+blocks writes, login, third-party traffic, WebSockets and service workers. It
+uses no operator profile or credentials. Probe 5xx counts and timestamps are
+separate from the host's traffic counters; a failed probe stops the gate.
+
+With `apply: true`, only after all gates pass, the script appends one bound
+`Live verification:` line and publishes a remaining qualified draft, or
+finalizes the already published release. It rereads release state before writing
+and refuses conflicting evidence. Identical reruns leave the line and assets
+unchanged. **Keep AEON-493's normal order:** qualified agent distribution and tap
+merge still precede the server switch; post-switch verification normally
+finalizes an already published release. Draft publication here is a recovery
+path after explicit coordinator approval, not authorization to defer distribution
+or bypass native qualification.
+
+After publication, public `SHA256SUMS` must equal the qualified file. The script
+reuses `homebrew-tap-pr.mjs`, refuses a downgrade or conflicting existing branch,
+and verifies the sole formula change against the exact darwin checksums. It
+waits up to five minutes for the tap PR and green checks, then merges at the
+verified head through the non-admin API, subject to the tap's review and branch
+policy, and rereads the installed formula. Changed heads, extra files, failed,
+absent or incomplete checks fail closed. Already installed exact formula bytes
+are a no-op. Failures before release finalization leave a draft untouched;
+failures after publication retain the immutable public assets and stop further
+actions. Rerun verification with the same evidence after fixing the cause; never
+unpublish, replace assets or reuse a coordinate.
+
+Every run writes a redacted `live-verification` artifact and job summary; a
+failure emits an Actions error for the lead. Native hardware/Touch ID
+qualification and its evidence remain manual. Under accepted decision **D7 B**,
+the lead still announces through `aeon tell` and closes tickets; this workflow
+does not inject a PPM key or send an inbox message. Deployment/rollback and
+environment bootstrap remain separate human/coordinator controls.
+
+Regression coverage: `node --test scripts/verify-live.test.mjs` exercises refusal,
+idempotence, publication ordering, source binding, tap checksum/head races and
+secret-safe output. `web/e2e/live-verification.spec.ts` exercises the actual
+browser driver against isolated HTTP fixtures in PR CI. Neither is a claim of
+production acceptance or native hardware qualification.
+
 ## Image smoke gate
 
 `scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.

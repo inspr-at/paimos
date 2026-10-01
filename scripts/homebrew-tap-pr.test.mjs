@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, createVerify } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { appJWT, bumpHomebrewTap, fetchPublishedChecksums } from "./homebrew-tap-pr.mjs";
+import { appJWT, bumpHomebrewTap, fetchPublishedChecksums, installationToken } from "./homebrew-tap-pr.mjs";
 
 test("app JWT is RS256 and names the app id without embedding the key", () => {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -33,6 +33,25 @@ test("missing app secrets skip the tap bump", () => {
   assert.equal(run.status, 0);
   assert.equal(run.stdout, "homebrew tap bump skipped: app secrets absent\n");
   assert.equal(run.stderr, "");
+});
+
+test("App tokens stay repository-scoped; existing bump permissions stay compatible", async t => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" });
+  const requests = []; let admin = false;
+  t.mock.method(globalThis, "fetch", async (url, opts) => {
+    if (opts.method === "GET") return Response.json({ id: 123 });
+    const body = JSON.parse(opts.body); requests.push(body);
+    return Response.json({ token: "unused fixture token", permissions: admin ? { administration: "write" } : body.permissions }, { status: 201 });
+  });
+  await installationToken("123", pem);
+  assert.deepEqual(requests[0], { repositories: ["homebrew-tap"], permissions: { contents: "write", pull_requests: "write" } });
+  await installationToken("123", pem, "inspr-at/homebrew-tap", true);
+  assert.deepEqual(requests[1].permissions, { contents: "write", pull_requests: "write", checks: "read", statuses: "read" });
+  await installationToken("123", pem, "inspr-at/paimos");
+  assert.deepEqual(requests[2], { repositories: ["paimos"], permissions: { contents: "write", attestations: "read" } });
+  admin = true; await assert.rejects(installationToken("123", pem), /admin-capable/);
+  await assert.rejects(installationToken("123", pem, "augmentoring-team/agm-nixcfg"), /unsupported/);
 });
 
 const version = "260929203122.0.0";

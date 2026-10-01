@@ -10,6 +10,13 @@ import { validCalendarVersion } from "./verify-release.mjs";
 
 const TAP = "inspr-at/homebrew-tap";
 const FORMULA_PATH = "Formula/aeon-agentd.rb";
+export class TapPendingError extends Error {}
+
+function refuseTapDowngrade(current, version) {
+  if (!current) return;
+  const installed = /^  version "([^"]+)"$/m.exec(current.text)?.[1];
+  if (!validCalendarVersion(installed) || installed > version) throw new Error("tap base version mismatch or downgrade refused");
+}
 
 export function appJWT(appId, privateKeyPem, nowSec = Math.floor(Date.now() / 1000)) {
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
@@ -30,17 +37,17 @@ function normalize(text) {
 }
 
 function githubError(what, status, data) {
-  const message = data && typeof data.message === "string" ? data.message : "";
-  return new Error(`${what} failed (${status})${message ? `: ${message}` : ""}`);
+  // Remote response text may contain credentials or signed URLs.
+  return new Error(`${what} failed (${status})`);
 }
 
-async function gh(token, method, path, body) {
+export async function gh(token, method, path, body) {
   const res = await fetch(`https://api.github.com${path}`, {
     method,
     redirect: "error",
     signal: AbortSignal.timeout(30_000),
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       Accept: "application/vnd.github+json",
       "User-Agent": "aeon-homebrew-tap",
       "X-GitHub-Api-Version": "2022-11-28",
@@ -96,17 +103,77 @@ export async function fetchPublishedChecksums(version) {
   throw new Error(`SHA256SUMS download failed (${last})`);
 }
 
-async function installationToken(appId, privateKey) {
+export async function installationToken(appId, privateKey, repository = TAP, checkAccess = false) {
+  if (![TAP, "inspr-at/paimos"].includes(repository)) throw new Error("unsupported App repository");
   const jwt = appJWT(appId, privateKey);
-  const found = await gh(jwt, "GET", `/repos/${TAP}/installation`);
+  const found = await gh(jwt, "GET", `/repos/${repository}/installation`);
   if (found.status !== 200 || !Number.isInteger(found.data?.id)) throw githubError("tap installation lookup", found.status, found.data);
   const minted = await gh(jwt, "POST", `/app/installations/${found.data.id}/access_tokens`, {
-    repositories: ["homebrew-tap"],
+    repositories: [repository.split("/")[1]],
+    permissions: repository === TAP
+      ? { contents: "write", pull_requests: "write", ...(checkAccess ? { checks: "read", statuses: "read" } : {}) }
+      : { contents: "write", attestations: "read" },
   });
   if ((minted.status !== 201 && minted.status !== 200) || typeof minted.data?.token !== "string" || minted.data.token === "") {
     throw githubError("installation token", minted.status, minted.data);
   }
+  if (minted.data.permissions?.administration) throw new Error("admin-capable App token refused");
   return minted.data.token;
+}
+
+// Coordinator opt-in only. Reuse the published-release/formula path and merge
+// exactly one verified formula change, at the observed head, without admin bypass.
+export async function mergeHomebrewTap(token, version, checksums, apply = false) {
+  const formula = renderFormula(version, checksums);
+  const repo = await gh(token, "GET", `/repos/${TAP}`);
+  if (repo.status !== 200 || typeof repo.data?.default_branch !== "string") throw new Error("tap repository lookup failed");
+  const base = repo.data.default_branch;
+  const current = await readFormula(token, base);
+  if (current && normalize(current.text) === normalize(formula)) return { state: "current" };
+  refuseTapDowngrade(current, version);
+  const branch = `aeon-agentd-v${version}`;
+  const listed = await gh(token, "GET", `/repos/${TAP}/pulls?head=${encodeURIComponent(`inspr-at:${branch}`)}&state=open&per_page=100`);
+  if (listed.status !== 200 || !Array.isArray(listed.data) || listed.data.length > 1) throw new Error("exactly one tap PR is required");
+  if (!listed.data.length) throw new TapPendingError("tap PR is pending");
+  const number = listed.data[0].number;
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error("invalid tap PR number");
+  const path = `/repos/${TAP}/pulls/${number}`;
+  const pull = await gh(token, "GET", path);
+  const pr = pull.data;
+  if (pull.status !== 200 || pr?.state !== "open" || pr.draft !== false ||
+      pr.head?.repo?.full_name !== TAP || pr.head?.ref !== branch ||
+      pr.base?.repo?.full_name !== TAP || pr.base?.ref !== base ||
+      !/^[a-f0-9]{40}$/.test(pr.head?.sha ?? "")) throw new Error("tap PR identity mismatch");
+  const sha = pr.head.sha;
+  const files = await gh(token, "GET", `${path}/files?per_page=100`);
+  if (files.status !== 200 || !Array.isArray(files.data) || files.data.length !== 1 ||
+      files.data[0].filename !== FORMULA_PATH || !["added", "modified"].includes(files.data[0].status)) {
+    throw new Error("tap PR must change only the formula");
+  }
+  const candidate = await readFormula(token, sha);
+  if (!candidate || normalize(candidate.text) !== normalize(formula)) throw new Error("tap formula checksum mismatch");
+  // Never treat an empty or partial check listing as a green gate. GitHub also
+  // enforces the tap's own required checks and review policy at the merge API.
+  const checks = await gh(token, "GET", `/repos/${TAP}/commits/${sha}/check-runs?per_page=100&filter=latest`);
+  const statuses = await gh(token, "GET", `/repos/${TAP}/commits/${sha}/status?per_page=100`);
+  if (checks.status !== 200 || !Number.isSafeInteger(checks.data?.total_count) ||
+      checks.data.total_count < 0 || checks.data.total_count >= 100 ||
+      checks.data.check_runs?.length !== checks.data.total_count ||
+      checks.data.check_runs.some(c => c.head_sha !== sha || (c.status === "completed" && c.conclusion !== "success")) ||
+      statuses.status !== 200 || !Number.isSafeInteger(statuses.data?.total_count) ||
+      statuses.data.total_count < 0 || statuses.data.total_count >= 100 || statuses.data.statuses?.length !== statuses.data.total_count ||
+      statuses.data.statuses.some(s => !["success", "pending"].includes(s.state))) throw new Error("tap checks are incomplete or not green");
+  if (!checks.data.total_count || checks.data.check_runs.some(c => c.status !== "completed") ||
+      statuses.data.statuses.some(s => s.state === "pending")) throw new TapPendingError("tap checks are pending");
+  const fresh = await gh(token, "GET", path);
+  if (fresh.status !== 200 || fresh.data?.head?.sha !== sha || fresh.data?.state !== "open" ||
+      fresh.data?.base?.sha !== pr.base.sha || fresh.data?.draft !== false) throw new Error("tap PR changed during verification");
+  if (!apply) return { state: "verified", number, sha };
+  const merged = await gh(token, "PUT", `${path}/merge`, { sha, merge_method: "merge" });
+  if (merged.status !== 200 || merged.data?.merged !== true) throw new Error("tap merge refused by repository policy");
+  const installed = await readFormula(token, base);
+  if (!installed || normalize(installed.text) !== normalize(formula)) throw new Error("merged tap formula mismatch");
+  return { state: "merged", number, sha };
 }
 
 async function readFormula(token, ref) {
@@ -120,15 +187,18 @@ async function readFormula(token, ref) {
 
 async function ensureBranch(token, base, branch) {
   const existing = await gh(token, "GET", `/repos/${TAP}/git/ref/heads/${encodeURIComponent(branch)}`);
-  if (existing.status === 200) return;
-  if (existing.status !== 404) throw githubError("read branch", existing.status, existing.data);
+  if (existing.status !== 200 && existing.status !== 404) throw githubError("read branch", existing.status, existing.data);
   const baseRef = await gh(token, "GET", `/repos/${TAP}/git/ref/heads/${encodeURIComponent(base)}`);
   if (baseRef.status !== 200 || typeof baseRef.data?.object?.sha !== "string") throw githubError("read default branch", baseRef.status, baseRef.data);
+  // A retry after branch creation but before the formula commit is safe when
+  // the branch is still the exact base, with no unrelated work to overwrite.
+  if (existing.status === 200) return existing.data?.object?.sha === baseRef.data.object.sha;
   const created = await gh(token, "POST", `/repos/${TAP}/git/refs`, {
     ref: `refs/heads/${branch}`,
     sha: baseRef.data.object.sha,
   });
   if (created.status !== 201) throw githubError("create branch", created.status, created.data);
+  return true;
 }
 
 async function writeFormula(token, branch, version, formula, blobSha) {
@@ -187,9 +257,11 @@ export async function bumpHomebrewTap(env = process.env) {
     console.log(`homebrew tap formula is current for ${version}`);
     return;
   }
+  refuseTapDowngrade(current, version);
   const branch = `aeon-agentd-v${version}`;
-  await ensureBranch(token, base, branch);
+  const created = await ensureBranch(token, base, branch);
   const onBranch = await readFormula(token, branch);
+  if (!created && (!onBranch || normalize(onBranch.text) !== normalize(formula))) throw new Error("existing tap branch checksum mismatch");
   if (!onBranch || normalize(onBranch.text) !== normalize(formula)) {
     await writeFormula(token, branch, version, formula, onBranch ? onBranch.sha : undefined);
   }

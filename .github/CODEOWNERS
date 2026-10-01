@@ -8,3 +8,5 @@
 /scripts/post-cross-family-gate* @markus-barta
 /scripts/trusted-cross-family-poster* @markus-barta
 /scripts/ci-runner-guard/ @markus-barta
+/scripts/verify-live* @markus-barta
+/scripts/homebrew-tap-pr* @markus-barta
