@@ -25,7 +25,7 @@ func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T
 	})
 	const name = "1088_more_harnesses.sql"
 	interrupted := errors.New("simulated stop after checks installed")
-	err = db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+	err = db.MigrateWithPhaseHook(t.Context(), d.App, func(phase string) error {
 		if phase == name+"#validate" {
 			return interrupted
 		}
@@ -57,7 +57,7 @@ func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T
 		t.Fatal(err)
 	}
 	var writer pgx.Tx
-	err = db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+	err = db.MigrateWithPhaseHook(t.Context(), d.App, func(phase string) error {
 		switch phase {
 		case name + "#validate":
 			var err error
@@ -95,7 +95,7 @@ func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T
 	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations WHERE version LIKE $1`, name+"#check-phase:%").Scan(&checkpoints); err != nil || checkpoints != 2 {
 		t.Fatalf("interrupted validation lost phase records: %d %v", checkpoints, err)
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+	if err := db.MigrateWithPhaseHook(t.Context(), d.App, func(phase string) error {
 		if phase == name+"#install" || phase == name+"#validate" {
 			return errors.New("completed CHECK phase repeated")
 		}

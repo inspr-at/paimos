@@ -35,10 +35,20 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // MigrateWithHook runs pending migrations and calls before just before each
-// file and each staged CHECK phase (filename#install, #validate, #replace).
-// Migration tests use it to populate an older schema or interrupt a phase;
-// production passes no hook through migrate.
+// file. Migration tests use it to populate an older schema; production passes
+// no hook through migrate. Phase commits do not change its filename-only API.
 func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string) error) error {
+	return migrateWithHooks(ctx, pool, before, nil)
+}
+
+// MigrateWithPhaseHook observes only 1088's staged CHECK transactions, after
+// completed phases have committed. Tests can interrupt or contend at a boundary
+// without changing the existing MigrateWithHook filename callback contract.
+func MigrateWithPhaseHook(ctx context.Context, pool *pgxpool.Pool, beforePhase func(string) error) error {
+	return migrateWithHooks(ctx, pool, nil, beforePhase)
+}
+
+func migrateWithHooks(ctx context.Context, pool *pgxpool.Pool, before, beforePhase func(string) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("migration connection: %w", err)
@@ -92,7 +102,7 @@ func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string
 				return fmt.Errorf("migrate agent role model discovery: %w", err)
 			}
 		}
-		if err := applyFile(ctx, conn, name, before); err != nil {
+		if err := applyFile(ctx, conn, name, beforePhase); err != nil {
 			return err
 		}
 	}
