@@ -119,6 +119,7 @@ func TestAccountLinkExpiryFreshnessAndPersonOnly(t *testing.T) {
 	review := reviewLink(t, f, offer)
 	f.call("POST", accountLinkPath+"/lookup", map[string]string{"user_code": offer.Code}, false, key, 403)
 	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), false, key, 403)
+	f.call("GET", "/api/agent-pairing/account-links", nil, false, key, 403)
 	f.call("POST", "/api/agent-pairing/account-links/"+account+"/unlink", map[string]int64{"expected_revision": 0}, false, key, 403)
 	r := f.request("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "")
 	r.Header.Set("Origin", "https://evil.test")
@@ -148,6 +149,21 @@ func TestAccountLinkExpiryFreshnessAndPersonOnly(t *testing.T) {
 	if !renewed.ShowPrompt || renewed.Code == offer.Code {
 		t.Fatal("explicit renewal failed")
 	}
+}
+
+func TestAccountLinkRejectsAnotherInstallationAndRevokedPairing(t *testing.T) {
+	f, p, v, key := linkFixture(t)
+	other := f.propose("codex")
+	f.approve(other, "connect_only")
+	otherView := f.redeem(other)
+	f.call("POST", accountLinkPath, map[string]string{"operation": "offer", "account_id": otherView.Enrollments[0].AccountID, "device_proof": other.lifecycle}, false, key, 404)
+	f.call("POST", accountLinkPath, map[string]string{"operation": "offer", "account_id": otherView.Enrollments[0].AccountID, "device_proof": p.lifecycle}, false, key, 404)
+	account := v.Enrollments[0].AccountID
+	offer := offerLink(t, f, p, key, account)
+	review := reviewLink(t, f, offer)
+	f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+	f.call("POST", accountLinkPath, map[string]string{"operation": "poll", "account_id": account, "device_proof": p.lifecycle, "request_id": offer.RequestID}, false, key, 410)
+	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 410)
 }
 func TestAccountLinkSecondPersonAndTenantIsolation(t *testing.T) {
 	f, p, v, key := linkFixture(t)

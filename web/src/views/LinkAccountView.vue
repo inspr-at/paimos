@@ -73,7 +73,7 @@ onBeforeUnmount(clear)
 </script>
 
 <template>
-  <main class="link-page">
+  <div class="link-page">
     <div class="link-heading"><AppIcon name="link" :size="23" /><h1>Link an account</h1></div>
     <p v-if="!allowed" class="hint" role="status">Only a signed-in person can link their own account.</p>
     <section v-else-if="linked && review" class="link-card success" role="status">
@@ -103,7 +103,7 @@ onBeforeUnmount(clear)
       </template>
     </section>
     <LinkedAccounts v-if="allowed" :revision="linksRevision" />
-  </main>
+  </div>
 </template>
 
 <style scoped>
