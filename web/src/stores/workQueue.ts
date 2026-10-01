@@ -3,19 +3,21 @@ import { defineStore } from 'pinia'
 import { onScopeDispose, reactive, ref } from 'vue'
 import { onReset } from '../lib/position'
 import { onAccessChange } from '../lib/authz'
-import { getNode } from '../lib/api'
+import { getNode, type ListItem } from '../lib/api'
 import { rowStore } from '../lib/rowStore'
-import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
+import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, readyGaps, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
 
 export const useWorkQueue = defineStore('workQueue', () => {
   // Read projections only; order and queue membership always come from the run service.
   const snapshots = reactive<Record<string, QueueSnapshot>>({})
   const errors = reactive<Record<string, string>>({})
   const pending = new Map<string, Promise<void>>()
+  const advice = reactive<Record<string, { revision: string; value: QueueReadiness }>>({})
+  const checking = new Map<string, Promise<QueueReadiness>>()
   const busy = ref(false)
   let epoch = 0
   const turns = new Map<string, number>()
-  const clear = () => { epoch++; for (const key of Object.keys(snapshots)) delete snapshots[key]; for (const key of Object.keys(errors)) delete errors[key]; pending.clear(); turns.clear(); busy.value = false }
+  const clear = () => { epoch++; for (const key of Object.keys(snapshots)) delete snapshots[key]; for (const key of Object.keys(errors)) delete errors[key]; for (const key of Object.keys(advice)) delete advice[key]; pending.clear(); checking.clear(); turns.clear(); busy.value = false }
   onScopeDispose(onReset(clear))
   onScopeDispose(onAccessChange(change => {
     const projects = Object.keys(snapshots)
@@ -40,6 +42,20 @@ export const useWorkQueue = defineStore('workQueue', () => {
     pending.set(project, request); return request
   }
   function entry(project: string, ticket: string) { return snapshots[project]?.items.find(item => item.ticket_id === ticket) ?? null }
+  function firstShared(project: string) { return snapshots[project]?.items.find(item => !item.target_agent_id) ?? null }
+  function gaps(row: ListItem) {
+    const saved = advice[row.id]
+    return saved?.revision === row.updated_at ? saved.value.missing.filter(gap => gap !== 'status') : readyGaps(row)
+  }
+  function checkReadiness(row: ListItem): Promise<QueueReadiness> {
+    const started = epoch, revision = row.updated_at, key = `${row.id}:${revision}`
+    if (checking.has(key)) return checking.get(key)!
+    const request = queueReadiness(row.id).then(value => {
+      if (started === epoch && row.updated_at === revision) advice[row.id] = { revision, value }
+      return value
+    }).finally(() => { if (checking.get(key) === request) checking.delete(key) })
+    checking.set(key, request); return request
+  }
   async function write(project: string, action: () => Promise<unknown>) {
     if (busy.value) throw new Error('A queue change is already being saved.')
     const started = epoch
@@ -88,10 +104,9 @@ export const useWorkQueue = defineStore('workQueue', () => {
   function move(project: string, ticket: string, direction: -1 | 1 | 'top') {
     const current = entry(project, ticket)
     if (!current || current.target_agent_id) return Promise.resolve()
-    if (direction === 'top' && current.position !== 1) return write(project, () => moveQueue(ticket, 1))
     const ids = snapshots[project]?.items.filter(item => !item.target_agent_id).map(item => item.ticket_id) ?? []
     const next = movedQueue(ids, ticket, direction)
     return next === ids ? Promise.resolve() : order(project, next, ticket)
   }
-  return { snapshots, errors, busy, load, entry, add, remove, reset, move, order }
+  return { snapshots, errors, busy, load, entry, firstShared, gaps, checkReadiness, add, remove, reset, move, order }
 })

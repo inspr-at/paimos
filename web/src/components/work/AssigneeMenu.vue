@@ -3,7 +3,7 @@
 import { computed, onMounted, ref } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { queueable, queueTargets, readyGaps, type QueueTarget } from '../../lib/workQueue'
+import { queueable, queueTargets, type QueueTarget } from '../../lib/workQueue'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -19,18 +19,23 @@ const targets = ref<QueueTarget[]>([]), loading = ref(true), error = ref(''), fi
 const query = ref('')
 const people = computed(() => props.people.filter(person => person.label.toLowerCase().includes(query.value.trim().toLowerCase())))
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('run.create', props.projectId))
-const eligible = computed(() => queueable(props.row)), gaps = computed(() => readyGaps(props.row))
+const eligible = computed(() => queueable(props.row)), gaps = computed(() => queue.gaps(props.row))
 const entry = computed(() => queue.entry(props.projectId, props.row.id))
 onMounted(async () => {
   if (!allowed.value || !eligible.value) { loading.value = false; return }
-  try { targets.value = (await queueTargets(props.row.id)).items.sort((a, b) => Number(b.available) - Number(a.available) || Number(!!b.matches_preference) - Number(!!a.matches_preference)) }
+  try {
+    const [catalog] = await Promise.all([queueTargets(props.row.id), queue.checkReadiness(props.row)])
+    targets.value = catalog.items.sort((a, b) => Number(b.available) - Number(a.available) || Number(!!b.matches_preference) - Number(!!a.matches_preference))
+  }
   catch (e) { error.value = e instanceof Error ? e.message : 'Targets could not be loaded.' }
   finally { loading.value = false }
 })
 async function add(target?: QueueTarget) {
   if (!allowed.value || !eligible.value || queue.busy) return
-  if (gaps.value.length) { fixing.value = true; return }
-  try { await queue.add(props.projectId, props.row.id, target); toast(target ? `${props.row.key}: Start now on ${target.name} requested` : `${props.row.key} queued`); emit('changed'); emit('close', true) }
+  try {
+    if (!(await queue.checkReadiness(props.row)).ready) { fixing.value = true; return }
+    await queue.add(props.projectId, props.row.id, target); toast(target ? `${props.row.key}: Start now on ${target.name} requested` : `${props.row.key} queued`); emit('changed'); emit('close', true)
+  }
   catch (e) { toast(e instanceof Error ? e.message : 'The work could not be started.', { tone: 'error' }) }
 }
 function keys(event: KeyboardEvent) {
@@ -53,7 +58,7 @@ function keys(event: KeyboardEvent) {
       <p v-if="entry" class="am-note">Choosing another route replaces its current queue place.</p>
       <p class="am-sec mono-label" role="presentation">Start now on…</p>
       <p v-if="loading" class="am-note" role="status">Loading agents…</p><p v-else-if="error" class="am-note" role="alert">{{ error }}</p><p v-else-if="!targets.length" class="am-note">No available target is configured.</p>
-      <button v-for="target in targets" :key="`${target.agent_id}:${target.account_id}:${target.profile_id}`" type="button" role="menuitemradio" class="menu-item am-item" :aria-checked="entry?.target_agent_id === target.agent_id && entry?.model_profile_id === target.profile_id && entry?.target_account_id === target.account_id" :disabled="!allowed || !eligible || gaps.length > 0 || queue.busy" @click="add(target)">
+      <button v-for="target in targets" :key="`${target.agent_id}:${target.account_id}:${target.profile_id}`" type="button" role="menuitemradio" class="menu-item am-item" :aria-checked="entry?.target_agent_id === target.agent_id && entry?.model_profile_id === target.profile_id" :disabled="!allowed || !eligible || loading || gaps.length > 0 || queue.busy" @click="add(target)">
         <AppIcon name="agent" :size="15" /><span class="am-body"><span class="am-l1"><b>{{ target.name }}</b><QueueModel :model="target.model" :effort="target.effort" /></span><small>{{ target.account }} · <span :class="{ 'am-free': target.available }">{{ target.available ? 'Free now' : 'Waiting for capacity' }}</span> · {{ target.matches_preference ? 'Matches the preference' : 'Differs from the model preference' }}</small></span><span :class="target.available ? 'am-go' : 'am-wait'">{{ target.available ? 'Start now' : `#1 for ${target.name}` }}</span>
       </button>
       <p class="am-sec mono-label" role="presentation">People</p>

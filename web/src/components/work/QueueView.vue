@@ -81,7 +81,7 @@ async function drop() {
           <span class="qv-sub"><span v-if="item.waiting_reason" class="qv-wait"><AppIcon name="clock" :size="12" />{{ item.waiting_reason }}</span><QueueModel :model="item.expected_model" :effort="item.expected_effort" /><span>{{ item.expected_agent?.name }}</span><span>{{ item.expected_start ? `starts ~${absoluteTime(item.expected_start)}` : item.state === 'blocked' ? 'starts once unblocked' : 'awaiting capacity' }}</span><span v-if="item.by.kind === 'agent'">queued by {{ item.by.name }}</span></span>
         </li>
       </ol>
-      <p v-else class="qv-empty">{{ snapshot ? 'Nothing in line. Queue a ticket from its row or its Assignee menu.' : 'Loading the queue…' }}</p>
+      <p v-else-if="!queue.errors[projectId]" class="qv-empty">{{ snapshot ? 'Nothing in line. Queue a ticket from its row or its Assignee menu.' : 'Loading the queue…' }}</p>
       <template v-if="targeted.length"><p class="qv-sec mono-label">For a specific agent</p><ol class="qv-list" aria-label="Waiting for a specific agent"><li v-for="item in targeted" :key="item.ticket_id" class="qv-item">
         <span /><span class="qv-pos mono">#{{ item.position }}</span><button type="button" class="qv-main" @click="emit('open', item.key)"><span class="key">{{ item.key }}</span><span class="t">{{ item.title }}</span></button>
         <span class="qv-acts"><button type="button" class="icon-btn sm flat" :disabled="!allowed || queue.busy" :aria-label="`Remove ${item.key} from the queue`" @click="change(() => queue.remove(projectId, item.ticket_id))"><AppIcon name="close" :size="13" /></button></span>

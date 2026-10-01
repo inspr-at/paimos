@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { readQueue, addToQueue, moveQueue, removeFromQueue } from '../src/lib/workQueue'
+import { readQueue, addToQueue, moveQueue, removeFromQueue, queueReadiness } from '../src/lib/workQueue'
 import type { QueueSnapshot } from '../src/lib/workQueue'
 import { useWorkQueue } from '../src/stores/workQueue'
 import { resetPositions } from '../src/lib/position'
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), getNode: vi.fn().mockResolvedValue(null) }))
-vi.mock('../src/lib/workQueue', async original => ({ ...await original<typeof import('../src/lib/workQueue')>(), readQueue: vi.fn(), addToQueue: vi.fn(), moveQueue: vi.fn(), removeFromQueue: vi.fn() }))
+vi.mock('../src/lib/workQueue', async original => ({ ...await original<typeof import('../src/lib/workQueue')>(), readQueue: vi.fn(), addToQueue: vi.fn(), moveQueue: vi.fn(), removeFromQueue: vi.fn(), queueReadiness: vi.fn() }))
 const snapshot = (manual_order = false): QueueSnapshot => ({ items: [], manual_order, capacity: { hours: 0, total: 2 } })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
-beforeEach(() => { resetPositions(); setActivePinia(createPinia()); vi.mocked(readQueue).mockReset(); vi.mocked(addToQueue).mockReset(); vi.mocked(moveQueue).mockReset(); vi.mocked(removeFromQueue).mockReset() })
+beforeEach(() => { resetPositions(); setActivePinia(createPinia()); vi.mocked(readQueue).mockReset(); vi.mocked(addToQueue).mockReset(); vi.mocked(moveQueue).mockReset(); vi.mocked(removeFromQueue).mockReset(); vi.mocked(queueReadiness).mockReset() })
 it('joins a read and rejects an older response after a forced refresh', async () => {
   const store = useWorkQueue(), older = deferred<QueueSnapshot>(), newer = deferred<QueueSnapshot>()
   vi.mocked(readQueue).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
@@ -49,13 +49,37 @@ it('reports a saved write whose authoritative projection could not refresh', asy
   await expect(store.add('p', 'a')).rejects.toThrow('Saved, but the queue could not be refreshed')
   expect(store.errors.p).toBe('offline'); expect(store.busy).toBe(false)
 })
-it('uses server workspace positions in project subsets and can move their first ticket to the workspace top', async () => {
+it('uses server workspace positions for all moves, including the project subset top', async () => {
   const store = useWorkQueue(), projection = snapshot()
   projection.items = [{ ticket_id: 'a', position: 5 }, { ticket_id: 'b', position: 8 }] as QueueSnapshot['items']
   vi.mocked(readQueue).mockResolvedValue(projection); vi.mocked(moveQueue).mockResolvedValue(undefined as never)
   await store.load('p'); await store.move('p', 'b', -1)
   expect(moveQueue).toHaveBeenLastCalledWith('b', 5)
-  await store.move('p', 'a', 'top'); expect(moveQueue).toHaveBeenLastCalledWith('a', 1)
+  await store.move('p', 'b', 'top'); expect(moveQueue).toHaveBeenLastCalledWith('b', 5)
+  expect(store.firstShared('p')?.ticket_id).toBe('a')
+  vi.mocked(moveQueue).mockClear()
+  await store.move('p', 'a', 'top'); expect(moveQueue).not.toHaveBeenCalled()
+})
+it('exposes the initial read error before any snapshot exists, and clears it on retry', async () => {
+  const store = useWorkQueue()
+  vi.mocked(readQueue).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(snapshot())
+  await store.load('p'); expect(store.snapshots.p).toBeUndefined(); expect(store.errors.p).toBe('offline')
+  await store.load('p', true); expect(store.snapshots.p).toEqual(snapshot()); expect(store.errors.p).toBeUndefined()
+})
+it('accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets', async () => {
+  const store = useWorkQueue(), result = deferred<Awaited<ReturnType<typeof queueReadiness>>>()
+  const row = { id: 'ticket', state: 'blocked', updated_at: 'v1', fields: { estimate_hours: 3, acceptance_criteria: 'Verified' } } as import('../src/lib/api').ListItem
+  const ready = { queueable: true, ready: true, missing: [], suggested_estimate_hours: 3, security_review_required: false }
+  expect(store.gaps(row)).toEqual(['blocker'])
+  vi.mocked(queueReadiness).mockReturnValueOnce(result.promise)
+  const first = store.checkReadiness(row), joined = store.checkReadiness(row)
+  expect(queueReadiness).toHaveBeenCalledOnce()
+  result.resolve(ready); await Promise.all([first, joined]); expect(store.gaps(row)).toEqual([])
+  row.updated_at = 'v2'; expect(store.gaps(row)).toEqual(['blocker'])
+  const stale = deferred<Awaited<ReturnType<typeof queueReadiness>>>()
+  vi.mocked(queueReadiness).mockReturnValueOnce(stale.promise)
+  const pending = store.checkReadiness(row); resetPositions(); stale.resolve(ready); await pending
+  expect(store.gaps(row)).toEqual(['blocker'])
 })
 it('refreshes a partial route change and reports loss of the former place without choosing an automatic fallback', async () => {
   const store = useWorkQueue(), projection = snapshot()

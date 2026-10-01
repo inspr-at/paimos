@@ -74,9 +74,9 @@ test('several workers disclose each state, and the control does not open the tic
   await expect(dialog.getByText('Session details are withheld')).toBeVisible()
   await expect(dialog.getByText('retired')).toHaveCount(0)
   await expect(dialog.getByText('Some live sessions are not shown.')).toBeVisible()
+  expect(liveCalls(calls)).toHaveLength(1)
   await dialog.getByRole('link', { name: /wren/ }).click()
   await expect(page).toHaveURL(/\/agents\/s-wren$/)
-  expect(liveCalls(calls)).toHaveLength(1)
 })
 
 test('keyboard opens each worker link and Escape returns to the trigger', async ({ page }) => {

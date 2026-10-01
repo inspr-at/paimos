@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Release } from './releases.ts'
 import { normaliseState } from './work.ts'
+import type { QueueSnapshot } from './workQueue.ts'
 
 export interface ReleaseSuggestion { text: string; kind: 'shipped' | 'planned' | 'empty'; tip: string; version?: string }
 export interface SuggestionInput {
@@ -8,10 +9,21 @@ export interface SuggestionInput {
   eta?: { eta_ready_at?: string | null; ready_stale?: boolean; eta_stale?: boolean }
   fields: Record<string, unknown>
 }
-export interface QueueTiming { expected_start?: string | null; estimate_hours?: number | null }
+export interface QueueTiming { expected_start?: string | null; estimate_hours?: number | null; visible_wait_hours?: number | null; parallel_runs?: number }
 const HOUR = 3_600_000
 const instant = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null
 const when = (at: number) => new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/** Project-local workload advice, never an authoritative expected start. */
+export function visibleQueueTiming(snapshot: QueueSnapshot | undefined, ticket: string): QueueTiming | null {
+  const entry = snapshot?.items.find(item => item.ticket_id === ticket)
+  if (!entry || !snapshot) return null
+  const parallel = entry.target_agent_id ? 1 : snapshot.capacity.total
+  const earlier = snapshot.items.filter(item => (item.target_agent_id ?? null) === (entry.target_agent_id ?? null) && item.position < entry.position)
+  const measured = earlier.every(item => typeof item.estimate_hours === 'number' && Number.isFinite(item.estimate_hours) && item.estimate_hours > 0)
+  const wait = measured && Number.isFinite(parallel) && parallel > 0 ? earlier.reduce((hours, item) => hours + item.estimate_hours!, 0) / parallel : null
+  return { expected_start: entry.expected_start, estimate_hours: entry.estimate_hours, visible_wait_hours: wait, parallel_runs: parallel }
+}
 
 /** Measured median, from at most the last ten distinct published release cuts. */
 export function releaseCadence(releases: Release[]): { hours: number; latest: number; samples: number } | null {
@@ -49,6 +61,9 @@ export function suggestedRelease(row: SuggestionInput, releases: Release[], now:
     if (start !== null && typeof hours === 'number' && Number.isFinite(hours) && hours > 0) {
       ready = Math.max(now, start) + hours * HOUR + HOUR
       why = `Starts ~${when(start)} (queue wait ~${Number((Math.max(0, start - now) / HOUR).toFixed(1))} h) + work ~${hours} h + review ~1 h`
+    } else if (row.state !== 'blocked' && typeof queue.visible_wait_hours === 'number' && Number.isFinite(queue.visible_wait_hours) && queue.visible_wait_hours >= 0 && typeof hours === 'number' && Number.isFinite(hours) && hours > 0) {
+      ready = now + (queue.visible_wait_hours + hours + 1) * HOUR
+      why = `Visible queue estimate: wait ~${Number(queue.visible_wait_hours.toFixed(1))} h at ${queue.parallel_runs} parallel runs + work ~${hours} h + review ~1 h\nOther projects not included; current runs and blocker delays not included`
     }
   }
   if (ready === null) return empty(queue ? 'No expected start yet; waits for capacity or its blocker' : row.state === 'in_progress' ? 'No current ETA reported' : 'No suggestion: not in progress and not queued')

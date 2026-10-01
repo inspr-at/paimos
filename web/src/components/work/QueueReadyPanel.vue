@@ -42,6 +42,13 @@ const lines: { id: ReadyGap; label: string; detail: string; action: string }[] =
   { id: 'criteria', label: 'Acceptance criteria', detail: 'What must be true when it is done', action: 'Draft criteria' },
   { id: 'blocker', label: 'No unnamed blocker', detail: 'Blocked, but by what?', action: 'Name it' },
 ]
+const statusLine = computed(() => {
+  if (loading.value) return 'Checking the definition of ready…'
+  if (!readiness.value) return 'Readiness could not be checked.'
+  if (readiness.value.ready) return 'Queued work meets the definition of ready.'
+  const missing = readiness.value.missing.map(gap => gap === 'status' ? 'a queueable ticket status' : gap === 'blocker' ? 'a named blocker' : lines.find(line => line.id === gap)!.label.toLowerCase())
+  return `Still missing: ${missing.join(', ')}.`
+})
 async function fix(kind: ReadyGap) {
   if (busy.value) return
   if (kind === 'blocker' && !naming.value) { void nameBlocker(); return }
@@ -77,8 +84,8 @@ async function add() {
 <template>
   <FloatingPanel :anchor="anchor" :width="380" :label="`${row.key}: what is missing to queue it`" cycle @close="restore => emit('close', restore)">
     <div class="nr">
-      <div class="nr-head"><p class="eyebrow">{{ gaps.length ? 'Not ready to queue' : 'Ready to queue' }}</p><span class="mono">{{ row.key }}</span></div>
-      <p class="nr-lede" role="status">{{ loading ? 'Checking the definition of ready…' : 'Queued work meets the definition of ready.' }}</p>
+      <div class="nr-head"><p class="eyebrow">{{ readiness?.ready ? 'Ready to queue' : 'Not ready to queue' }}</p><span class="mono">{{ row.key }}</span></div>
+      <p class="nr-lede" role="status">{{ statusLine }}</p>
       <ul class="nr-list"><li v-for="line in lines" :key="line.id" class="nr-item" :class="{ ok: !gaps.includes(line.id) }">
         <span class="nr-mark"><AppIcon :name="gaps.includes(line.id) ? 'alert' : 'check'" :size="13" /></span>
         <span class="nr-label">{{ line.label }}<small v-if="gaps.includes(line.id)">{{ line.detail }}</small></span>

@@ -33,7 +33,7 @@ import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
-import { queueable, readyGaps, queueHours } from '../lib/workQueue'
+import { queueable, queueHours } from '../lib/workQueue'
 import { queueFilteredNodes } from '../lib/queueFilter'
 import type { ListQuery } from '../lib/api'
 import AssigneeMenu from '../components/work/AssigneeMenu.vue'
@@ -90,6 +90,7 @@ const queue = useWorkQueue(), releases = useReleases()
 const queueAnchor = ref<HTMLElement | null>(null)
 const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
 const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
+const queueError = computed(() => projectId.value ? queue.errors[projectId.value] : undefined)
 const mayQueue = computed(() => session.identity?.principal.kind === 'person' && can('run.create', projectId.value ?? undefined))
 const queuePoller = usePoller(() => projectId.value ? queue.load(projectId.value) : undefined, 20_000)
 watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if (id) { void queue.load(id); void releases.load() } }, { immediate: true })
@@ -113,8 +114,11 @@ async function bulkQueue() {
   try {
     for (const row of selectedRows.value) {
       if (queue.entry(id, row.id)) continue
-      if (!queueable(row) || readyGaps(row).length) { skipped.push(row.key); continue }
-      try { await queue.add(id, row.id); added++ }
+      if (!queueable(row)) { skipped.push(row.key); continue }
+      try {
+        if (!(await queue.checkReadiness(row)).ready) { skipped.push(row.key); continue }
+        await queue.add(id, row.id); added++
+      }
       catch (e) { toast(`${row.key}: ${e instanceof Error ? e.message : 'queue failed'}`, { tone: 'error' }); break }
     }
     toast(`${added} queued${skipped.length ? `; not ready or not queueable: ${skipped.join(', ')}` : ''}`)
@@ -1592,7 +1596,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('open')!.tip"><StatusIcon state="open" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('doing')!.tip"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
             <span class="stat" :data-tip="PROJECT_COLUMN_BY_ID.get('done')!.tip"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
-            <button v-if="queueSnapshot?.items.length" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="`${queueSnapshot.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="12" /><b>{{ queueSnapshot.items.length }}</b> queued</button>
+            <button v-if="queueSnapshot?.items.length || queueError" type="button" class="stat q-stat" aria-haspopup="dialog" :aria-expanded="!!queueAnchor" :aria-label="queueError ? 'Queue read failed. Open the work queue to retry' : `${queueSnapshot?.items.length} queued. Open the work queue`" @click="queueAnchor = queueAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon :name="queueError ? 'alert' : 'queue'" :size="12" /><template v-if="queueError">Queue unavailable</template><template v-else><b>{{ queueSnapshot?.items.length }}</b> queued</template></button>
           </div>
           <p v-if="queueSnapshot?.items.length" class="q-warn" :class="{ on: queueSnapshot.capacity.warning || (queueSnapshot.capacity.hours ?? 0) >= 4 }"><AppIcon name="clock" :size="12" />{{ queueHours(queueSnapshot) }}</p>
           <div class="progress-line" :data-tip="projectProgressTip(counts.open, counts.progress, counts.done, counts.cancelled)">

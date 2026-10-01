@@ -16,13 +16,18 @@ const button = ref<HTMLElement>()
 const entry = computed(() => queueable(props.row) ? queue.entry(props.projectId, props.row.id) : null)
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('run.create', props.projectId))
 const eligible = computed(() => queueable(props.row))
-const gaps = computed(() => readyGaps(props.row))
+const gaps = computed(() => queue.gaps(props.row))
 const title = computed(() => !allowed.value ? 'Permission to queue work is required' : entry.value ? `Queued #${entry.value.position} · click to remove · q` : !eligible.value ? `${props.row.state}: the queue takes New, Open, Backlog or Blocked` : gaps.value.length ? 'Not ready to queue; click to fix' : 'Queue for the next free agent · q')
 watch(() => props.row.id, () => { readyAnchor.value = null })
+// Only ambiguous blockers need an extra row read: a live blocks relation is
+// named on the server even when the list has no blocker field.
+watch(() => [props.row.id, props.row.updated_at, allowed.value], () => {
+  if (allowed.value && eligible.value && readyGaps(props.row).includes('blocker')) void queue.checkReadiness(props.row).catch(() => {})
+}, { immediate: true })
 async function toggle() {
   if (!allowed.value || queue.busy || (!entry.value && !eligible.value)) return
-  if (!entry.value && gaps.value.length) { readyAnchor.value = button.value ?? null; return }
   try {
+    if (!entry.value && gaps.value.length && !(await queue.checkReadiness(props.row)).ready) { readyAnchor.value = button.value ?? null; return }
     if (entry.value) { await queue.remove(props.projectId, props.row.id); toast(`${props.row.key} left the queue`) }
     else { await queue.add(props.projectId, props.row.id); toast(`${props.row.key} queued`) }
   } catch (e) {

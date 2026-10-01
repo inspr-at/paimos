@@ -123,7 +123,7 @@ test('an empty model grant is not filled from the tenant catalog', async ({ page
 
 test('a catalog miss stays empty until retry', async ({ page }) => {
   await mockStartAgent(page, { catalog: 'retry' })
-  await open(page, true)
+  await open(page)
   const alert = dialog(page).getByRole('alert')
   await expect(alert).toContainText('The account catalog did not load')
   await expect(dialog(page).getByLabel('Host', { exact: true })).toBeDisabled()
@@ -245,7 +245,7 @@ for (const theme of ['light', 'dark']) {
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await page.keyboard.press('Escape')
     await expect(dialog(page)).not.toBeVisible()
-    await expect(page.getByRole('button', { name: 'Start agent', exact: true })).toBeFocused()
+    await expect(page.locator('button.start-agent')).toBeFocused()
   })
 }
 

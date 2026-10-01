@@ -12,7 +12,7 @@ const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key-btn', { hasText: new RegExp(`^${key}$`) }) })
-async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number } = {}) {
+async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean } = {}) {
   mkdirSync(shots, { recursive: true })
   const data = fixtures()
   for (const node of data.nodes) if (node.kind_slug !== 'epic') node.fields = { ...node.fields, estimate_hours: 3, acceptance_criteria: '- [ ] Verified with evidence' }
@@ -20,16 +20,18 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
   n3.state = 'open'; n3.fields.assignee = null
   n4.state = 'blocked'; n4.fields = { ...n4.fields, priority: 'high', blocker: 'PHAROS-11' }
   if (options.missing) { n4.fields.estimate_hours = null; n4.fields.acceptance_criteria = ''; n4.fields.blocker = '' }
+  if (options.relationBlocker) n4.fields.blocker = ''
   const n6 = data.nodes.find(n => n.id === 'n-6')!; n6.state = 'delivered'
   data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'estimate', 'suggested'] }
   const calls = await mockWork(page, data, { readOnly: options.viewer })
-  const state = { ids: options.missing ? ['n-3'] : ['n-4', 'n-3'], targeted: new Map<string, string>(), manual: false, failRead: false, failWrite: false, queueCalls: [] as { method: string; path: string; body: Record<string, unknown> | null }[] }
+  const state = { ids: options.missing || options.relationBlocker ? ['n-3'] : ['n-4', 'n-3'], targeted: new Map<string, string>(), manual: false, failRead: !!options.failRead, failWrite: false, queueCalls: [] as { method: string; path: string; body: Record<string, unknown> | null }[] }
+  const gapsFor = (node: typeof n4) => readyGaps({ fields: node.fields, state: node.state }).filter(gap => !(options.relationBlocker && node.id === 'n-4' && gap === 'blocker'))
   const entries = (): QueueWireEntry[] => state.ids.map((id, i) => {
     const node = data.nodes.find(n => n.id === id)!, targeted = state.targeted.get(id)
     return { node_id: id, key: node.key, title: node.title, state: node.state, priority: String(node.fields.priority ?? 'medium'), estimate_hours: Number(node.fields.estimate_hours), queued: {
       run_id: `run-${id}`, position: targeted ? 1 : i + 1 + (options.offset ?? 0), by: { ...me, kind: 'person' }, at: now,
       target_agent_id: targeted ?? null, expected_agent_id: agent, model_profile_id: profile,
-      expected_start_at: node.state === 'blocked' ? null : '2026-10-01T20:00:00Z', waiting: !!targeted || node.state === 'blocked', wait_reason: targeted ? 'Waiting for agent capacity' : node.state === 'blocked' ? 'Blocked by PHAROS-11; waits until unblocked' : '',
+      expected_start_at: node.state === 'blocked' || options.noStart ? null : '2026-10-01T20:00:00Z', waiting: !!targeted || node.state === 'blocked', wait_reason: targeted ? 'Waiting for agent capacity' : node.state === 'blocked' ? 'Blocked by PHAROS-11; waits until unblocked' : '',
     } }
   })
   const snapshot = () => ({ items: entries(), count: state.ids.length, manual_order: state.manual, capacity: { queued_hours: 6, parallel_runs: 1, work_hours: 6, warning: true } })
@@ -59,7 +61,7 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
     if (path === '/api/queue' && method === 'POST') {
       expect(Object.keys(body!)).toEqual(body!.agent_principal_id ? ['node_id', 'agent_principal_id', 'model_profile_id', 'requested_account_id'] : ['node_id'])
       const node = data.nodes.find(n => n.id === body!.node_id)!
-      const gaps = readyGaps({ fields: node.fields, state: node.state })
+      const gaps = gapsFor(node)
       if (gaps.length) return json({ error: 'Not ready', code: 'queue_not_ready', readiness: { queueable: true, ready: false, missing: gaps, suggested_estimate_hours: 3 } }, 422)
       if (!state.ids.includes(node.id)) state.ids.push(node.id)
       if (body!.agent_principal_id) state.targeted.set(node.id, String(body!.agent_principal_id))
@@ -76,14 +78,14 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
       state.ids.splice(from, 1); state.ids.splice(Math.max(0, to), 0, id); state.manual = true; return json(snapshot())
     }
     if (action === 'estimate') { node.fields.estimate_hours = body!.estimate_hours; node.updated_at = new Date(Date.parse(node.updated_at) + 1000).toISOString() }
-    const missing = readyGaps({ state: node.state, fields: node.fields })
+    const missing = gapsFor(node)
     return json({ queueable: true, ready: !missing.length, missing, suggested_estimate_hours: 3, security_review_required: false })
   })
   await page.clock.setSystemTime(new Date(now))
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/p/PHAROS?sort=key&closed=1')
   await expect(row(page, 'PHAROS-13')).toBeVisible()
-  await expect(page.getByRole('button', { name: /queued\. Open the work queue/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: options.failRead ? /Queue read failed/ : /queued\. Open the work queue/ })).toBeVisible()
   return { data, state, calls }
 }
 test('key copies, row opens, Queue toggles without a fake status, and q/bulk use the same run service', async ({ page }) => {
@@ -112,6 +114,11 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   const { state, calls } = await world(page, { offset: 4 })
   await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
   const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
+  await expect(panel.getByRole('button', { name: 'Move PHAROS-14 to the top' })).toBeDisabled()
+  await panel.getByRole('button', { name: 'Move PHAROS-13 to the top' }).click()
+  expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
+  await expect(panel.getByRole('button', { name: 'Move PHAROS-13 to the top' })).toBeDisabled()
+  await panel.getByRole('button', { name: 'Reset shared queue across projects' }).click()
   await panel.getByRole('button', { name: /^Number 6: PHAROS-13/ }).focus()
   await page.keyboard.press('Alt+ArrowUp')
   await expect(panel.getByRole('note')).toContainText('Manual order')
@@ -125,6 +132,14 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   await expect(page).toHaveURL(/status=queued/)
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(2)
   expect(calls.filter(call => call.path === '/api/nodes').every(call => !call.query.get('state')?.includes('queued'))).toBe(true)
+  await row(page, 'PHAROS-13').locator('.title-text').click()
+  const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
+  await drawer.getByRole('button', { name: 'Close ticket details' }).click()
+  await row(page, 'PHAROS-14').locator('.title-text').click()
+  await drawer.getByRole('button', { name: 'Move to top', exact: true }).click()
+  expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
+  await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
 })
 test('not-ready fixes apply server estimate and explicitly save criteria/blocker without erasing other fields', async ({ page }) => {
   const { data, state } = await world(page, { missing: true })
@@ -133,8 +148,10 @@ test('not-ready fixes apply server estimate and explicitly save criteria/blocker
   const panel = page.getByRole('dialog', { name: /PHAROS-14: what is missing/ })
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeDisabled()
   await expect(panel.getByRole('button', { name: 'Apply ~3 h' })).toBeVisible()
+  await expect(panel.getByRole('status')).toHaveText('Still missing: estimate, acceptance criteria, a named blocker.')
   for (const theme of ['light', 'dark']) { await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme); await page.screenshot({ path: join(shots, `not-ready-${theme}.png`) }) }
   await panel.getByRole('button', { name: 'Apply ~3 h' }).click()
+  await expect(panel.getByRole('status')).toHaveText('Still missing: acceptance criteria, a named blocker.')
   await panel.getByRole('button', { name: 'Draft criteria' }).click()
   await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Verified in both themes')
   await panel.getByRole('button', { name: 'Save criteria' }).click()
@@ -142,6 +159,7 @@ test('not-ready fixes apply server estimate and explicitly save criteria/blocker
   await panel.getByRole('textbox', { name: 'Name the blocker' }).fill('PHAROS-11')
   await panel.getByRole('button', { name: 'Save blocker' }).click()
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
+  await expect(panel.getByRole('status')).toHaveText('Queued work meets the definition of ready.')
   await panel.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
   const node = data.nodes.find(n => n.id === 'n-4')!
@@ -163,6 +181,10 @@ test('advanced assignment uses only granted profile/account, busy targets stay i
   await menu.getByRole('menuitemradio', { name: /Codex builder.*Workspace account/ }).click()
   await expect(row(page, 'PHAROS-12').locator('.q-word')).toContainText('Codex builder')
   expect(state.queueCalls.find(call => call.body?.agent_principal_id)?.body).toEqual({ node_id: 'n-2', agent_principal_id: agent, model_profile_id: profile, requested_account_id: account })
+  await row(page, 'PHAROS-12').getByRole('button', { name: /Change assignee/ }).click()
+  await expect(menu.getByRole('menuitemradio', { name: /Codex builder.*Workspace account/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(menu.getByRole('menuitemradio', { name: /Queue: next free agent/ })).toHaveAttribute('aria-checked', 'false')
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
   const own = page.getByRole('list', { name: 'Waiting for a specific agent' })
   await expect(own).toContainText('PHAROS-12'); await expect(own.locator('li')).not.toHaveAttribute('draggable', 'true')
@@ -173,6 +195,43 @@ test('advanced assignment uses only granted profile/account, busy targets stay i
   await queuedMenu.getByRole('menuitemradio', { name: /Codex builder.*Workspace account/ }).click()
   await expect.poll(() => state.targeted.has('n-3')).toBe(true)
   expect(state.queueCalls.some(call => call.path === '/api/queue/n-3' && call.method === 'DELETE')).toBe(true)
+})
+test('a live blocks relation satisfies readiness for the dot, Queue, bulk and Start now', async ({ page }) => {
+  const { state } = await world(page, { relationBlocker: true })
+  const blocked = row(page, 'PHAROS-14')
+  await expect(blocked.locator('.q-btn')).not.toHaveClass(/unready/)
+  await blocked.hover(); await blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true }).click()
+  await expect.poll(() => state.ids.includes('n-4')).toBe(true)
+  await expect(page.getByRole('dialog', { name: /what is missing/ })).toHaveCount(0)
+  await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
+  await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check(); await page.keyboard.press('q')
+  await expect.poll(() => state.ids.includes('n-4')).toBe(true)
+  await page.keyboard.press('Escape')
+  await blocked.getByRole('button', { name: /Change assignee/ }).click()
+  const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-14', exact: true })
+  await expect(menu.getByRole('button', { name: /Not ready/ })).toHaveCount(0)
+  await menu.getByRole('menuitemradio', { name: /Codex builder.*Workspace account/ }).click()
+  await expect.poll(() => state.targeted.has('n-4')).toBe(true)
+})
+test('a failed first queue read exposes its error and Retry before a snapshot exists', async ({ page }) => {
+  const { state } = await world(page, { failRead: true })
+  await page.getByRole('button', { name: /Queue read failed/ }).click()
+  const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
+  await expect(panel.getByRole('alert')).toContainText('Queue read failed')
+  await expect(panel.getByText('Loading the queue…', { exact: true })).toHaveCount(0)
+  state.failRead = false
+  await panel.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+  await expect(panel.getByRole('list', { name: 'Queue for the next free agent' }).locator('li')).toHaveCount(2)
+  await expect(page.getByRole('button', { name: /2 queued\. Open the work queue/ })).toBeVisible()
+})
+test('shared queued rows without expected start show a labeled local release prediction', async ({ page }) => {
+  await world(page, { noStart: true })
+  const suggested = row(page, 'PHAROS-13').locator('.c-suggested .plan-rel')
+  await expect(suggested).toHaveText('~Next')
+  await expect(suggested).toHaveAccessibleDescription(/Visible queue estimate: wait ~3 h at 1 parallel runs/)
+  await expect(suggested).toHaveAccessibleDescription(/Other projects not included/)
+  await expect(row(page, 'PHAROS-14').locator('.c-suggested .plan-rel')).toHaveText('—')
 })
 test('failed writes preserve membership and viewer shortcuts cannot dispatch', async ({ page }) => {
   const { state } = await world(page)

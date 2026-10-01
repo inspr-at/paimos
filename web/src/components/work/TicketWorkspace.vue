@@ -6,7 +6,7 @@ import { APIError, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
 import { toast } from '../../lib/toast'
-import { queueable, readyGaps } from '../../lib/workQueue'
+import { queueable } from '../../lib/workQueue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
@@ -116,6 +116,7 @@ const queue = useWorkQueue()
 const queueAction = ref<InstanceType<typeof QueueAction>>()
 const queueAnchor = ref<HTMLElement | null>(null)
 const queueEntry = computed(() => item.value && queueable(item.value) ? queue.entry(props.project.id, item.value.id) : null)
+const queueGaps = computed(() => item.value ? queue.gaps(item.value) : [])
 const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
 watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
 onMounted(() => queuePoller.start())
@@ -591,15 +592,15 @@ defineExpose({
           <section v-if="queueEntry" class="q-card" :class="{ wait: queueEntry.waiting_reason }" aria-label="Work queue">
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
-              <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queueEntry.position === 1" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
+              <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
               <button type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
               <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
               <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
             </div>
           </section>
-          <section v-else-if="canQueue && queueable(item) && readyGaps(item).length" class="q-card wait" aria-label="Not ready to queue">
+          <section v-else-if="canQueue && queueable(item) && queueGaps.length" class="q-card wait" aria-label="Not ready to queue">
             <p class="eyebrow"><AppIcon name="alert" :size="14" />Not ready to queue</p>
-            <p>Missing {{ readyGaps(item).map(gap => gap === 'estimate' ? 'estimate' : gap === 'criteria' ? 'acceptance criteria' : 'a named blocker').join(', ') }}.</p>
+            <p>Missing {{ queueGaps.map(gap => gap === 'estimate' ? 'estimate' : gap === 'criteria' ? 'acceptance criteria' : 'a named blocker').join(', ') }}.</p>
             <button type="button" class="btn sm" @click="queueAction?.toggle()"><AppIcon name="sparkle" :size="13" />Fix what is missing</button>
           </section>
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
