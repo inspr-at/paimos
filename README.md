@@ -438,7 +438,55 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.9`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
+Coordinators report **ticket live**, including review, merge and deployment, with
+`aeon harness heartbeat ... --eta-live +20m`. Their ETA does not mean the
+coordinator process has finished. Coordinator beats reject `--progress` and
+`--eta-ready` with an explanation: percent done is derived from their direct
+worker children on the same bound ticket. Active workers and cleanly finished
+workers count equally; unreported progress counts as zero. Failed, removed and
+other-ticket children are excluded; no eligible children leaves progress absent.
+The mean is rounded to the nearest integer and includes children outside the
+current list page. This is a read projection; it never marks a coordinator Done.
+
+Every coordinator can register AI, media and terminal children using the same
+worker lease and parent/ticket/ETA/progress protocol. AI agents keep their
+existing harness (`codex`, `claude`, `pi`, `cursor`, `grok`) and model flags.
+Media uses `--harness media --generator higgsfield/kling3_0`; terminal uses
+`--harness terminal --command ffmpeg`. Public labels are at most 120 ASCII
+characters: letters, digits, `.`, `_`, `:`, `/`, `+`, `-` (terminal also permits
+spaces). Start with a letter or digit; omit surrounding whitespace. These are
+labels, never secrets or executable command arguments. Media/terminal require
+`--role worker`, `--parent-session`, a ticket and a work shape; they neither
+inherit `AEON_MODEL`/`AEON_EFFORT` nor look up the model registry.
+
+For example, while a media job is running, start its reporter:
+
+```sh
+aeon harness run-heartbeat --owner-pid "$job_pid" --state-dir "$job_state_dir" \
+  --project AEON --agent worker --harness media --generator higgsfield/kling3_0 \
+  --parent-session "$coordinator_session" --ticket AEON-501 --work-shape ship \
+  --status-file "$job_status_file" --host "$(hostname -s)"
+```
+
+The terminal equivalent uses `--harness terminal --command ffmpeg`; AI workers
+use their usual harness and model. `harness register` accepts these same family
+and label flags with its usual private registration files. Follow-up one-shot
+heartbeats use the returned session id and lease with `--eta-ready +10m
+--progress 40`, or keep `pct`, `remaining_min` and `note` current in the reporter's
+status file. Each concurrent job needs its own private state directory.
+
+The Sessions table retains its existing design, adds a separate **Host** column,
+and calls the intended result column **Name**. Host identity is the exact
+registered `--host`; `run-heartbeat` defaults to the short OS hostname (the part
+before its first dot), without querying macOS ComputerName. People can click the
+badge or its floating pencil to set **Your name for this computer**. Save applies
+to all rows of that host for that person; **Use '<registered host>'** resets it.
+Labels are stored server-side under tenant/person/host with person-only RLS.
+`GET /api/me/host-labels` reads only your overrides; `PUT` with `{host, label}`
+saves one and a null label resets it. Both require `harness.read`; a project-only
+role with that permission suffices. Agents cannot read or write overrides.
+
+Harness status and heartbeat declare `Aeon-Contract: harness-session/2.0`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. The pin checker classifies expansion of an existing enum as a major change, so strict reporters must explicitly accept this contract before rollout.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -1595,7 +1643,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.9`:
+The reporter contract is `harness-session/2.0`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

@@ -198,6 +198,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/knowledge/{id}":                                                "knowledge.read",
 	"GET /api/me":                                                            AuthenticatedRoute,
 	"GET /api/me/greeting":                                                   "profile.read|profile.portal_read",
+	"GET /api/me/host-labels":                                                "harness.read",
+	"PUT /api/me/host-labels":                                                "harness.read",
 	"GET /api/me/permissions":                                                "authz.read",
 	"GET /api/me/profile":                                                    "profile.read|profile.portal_read",
 	"GET /api/members":                                                       "members.read",
