@@ -558,7 +558,10 @@ access; token minting further narrows it to `nixcfg` and exactly contents/write
 plus pull_requests/write. It receives no settings, review bypass or production
 credentials. Tokens are revoked on success and failure. No credentials,
 environment, App permissions or repository settings are provisioned by this
-change. Missing write credentials fail rather than silently claiming a PR.
+change. Before cutting the tag, the coordinator records the pin automation's
+canonical worker marker and release scope in the designated owning tracker;
+the App receives no tracker credential (D7). Missing write credentials fail
+rather than silently claiming a PR.
 
 Write mode requires both `--write` and the enable flag. The branch
 `aeon-pin-v<version>` starts at an exact observed nixcfg main SHA. The bot

@@ -330,7 +330,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Coordinator-provisioned environment restricted to trusted v* releases.
-    # Its App can propose pins on nixcfg only; it cannot approve or deploy.
+    # Its App proposes pins on nixcfg only; the coordinator reviews and deploys.
     environment: release-pinning
     permissions:
       contents: write
