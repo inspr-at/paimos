@@ -576,7 +576,7 @@ for (const action of ['approve', 'revoke'] as const) {
     await expect(session).toContainText('Accepted attach session')
     await expect(strip(page).locator(`[data-outcome="${action === 'approve' ? 'approved' : 'cancelled'}"]`)).toBeVisible()
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Attach session' }).click()
+    await page.getByRole('button', { name: 'Attach session', exact: true }).click()
     await expect(page.getByLabel('Attach code')).toHaveValue('')
     await expect(page.getByRole('dialog')).not.toContainText('Approved. Keep the attach terminal open')
   })

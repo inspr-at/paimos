@@ -13,7 +13,7 @@ import type { Facets, ListItem, ListQuery } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release'
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check'
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
@@ -31,6 +31,7 @@ export interface ListFilters {
   epic: string[]
   cost: string[]
   release: string[]
+  human_check: string[]
   date: DateFilter | null
   showClosed: boolean
   sort: SortKey[]
@@ -47,6 +48,7 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
   { key: 'type', title: 'Type', facet: 'kind', primary: true, none: '' },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
+  { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native journey membership.
@@ -127,6 +129,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
+    human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
@@ -157,7 +160,7 @@ export function hasFilters(filters: ListFilters): boolean {
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], date: null }
+  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
@@ -289,6 +292,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
+    ...(take('human_check').length ? { human_check: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
@@ -325,6 +329,7 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
+  if (dimension === 'human_check') return [{ value: 'pending', label: 'Needs a human check', count: counts.pending ?? 0 }, { value: 'none', label: 'No human check', count: counts.none ?? 0 }]
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
     const seen = new Set<string>()
@@ -374,6 +379,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
+    case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'type': return kindLabel(value)

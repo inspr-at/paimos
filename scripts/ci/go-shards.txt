@@ -151,8 +151,9 @@
 2 0 github.com/inspr-at/paimos/internal/releasehistory/generate
 2 50566 github.com/inspr-at/paimos/internal/requirements
 2 58892 github.com/inspr-at/paimos/internal/rules/doctrine
-2 0 github.com/inspr-at/paimos/internal/statusautopilot
-2 0 github.com/inspr-at/paimos/internal/version
+2 0 github.com/inspr-at/paimos/internal/scopecode
+2 0 github.com/inspr-at/paimos/internal/systemactor
+2 0 github.com/inspr-at/paimos/internal/workorders
 2 0 github.com/inspr-at/paimos/internal/workqueue
 2 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
 2 0 github.com/inspr-at/paimos/web
@@ -299,8 +300,8 @@
 4 0 github.com/inspr-at/paimos/internal/releasehistory/exporthistoric
 4 0 github.com/inspr-at/paimos/internal/releasehistory/packnotes
 4 42 github.com/inspr-at/paimos/internal/sessionusage
-4 0 github.com/inspr-at/paimos/internal/systemactor
-4 0 github.com/inspr-at/paimos/internal/workorders
+4 0 github.com/inspr-at/paimos/internal/statusautopilot
+4 0 github.com/inspr-at/paimos/internal/version
 4 0 github.com/inspr-at/paimos/scripts
 4 0 github.com/inspr-at/paimos/scripts/onboarding-platform
 4 4 github.com/inspr-at/paimos/scripts/pdf-visual-diff

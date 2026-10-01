@@ -20,38 +20,40 @@ import (
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
-const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state, parent_id::text, position::text, created_at, updated_at, deleted_at`
+const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state, parent_id::text, position::text, created_at, updated_at, deleted_at, human_check`
 
-const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at`
+const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
-	Queued    *workqueue.Queued `json:"queued,omitempty"`
-	Estimate  *estimateView     `json:"estimate,omitempty"`
-	Warnings  []string          `json:"warnings,omitempty"`
-	ID        string            `json:"id"`
-	Key       string            `json:"key"`
-	KindID    string            `json:"kind_id"`
-	Title     string            `json:"title"`
-	Body      string            `json:"body"`
-	Fields    json.RawMessage   `json:"fields"`
-	State     string            `json:"state"`
-	ParentID  *string           `json:"parent_id"`
-	Position  string            `json:"position"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	DeletedAt *time.Time        `json:"deleted_at"`
+	Queued     *workqueue.Queued `json:"queued,omitempty"`
+	HumanCheck *string           `json:"human_check"`
+	Estimate   *estimateView     `json:"estimate,omitempty"`
+	Warnings   []string          `json:"warnings,omitempty"`
+	ID         string            `json:"id"`
+	Key        string            `json:"key"`
+	KindID     string            `json:"kind_id"`
+	Title      string            `json:"title"`
+	Body       string            `json:"body"`
+	Fields     json.RawMessage   `json:"fields"`
+	State      string            `json:"state"`
+	ParentID   *string           `json:"parent_id"`
+	Position   string            `json:"position"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	DeletedAt  *time.Time        `json:"deleted_at"`
 }
 
 type nodeCreate struct {
-	KindID    string          `json:"kind_id"`
-	Key       *string         `json:"key"`
-	KeyPrefix *string         `json:"key_prefix"`
-	Title     string          `json:"title"`
-	Body      *string         `json:"body"`
-	Fields    json.RawMessage `json:"fields"`
-	State     *string         `json:"state"`
-	ParentID  *string         `json:"parent_id"`
-	BeforeID  *string         `json:"before_id"`
+	HumanCheck json.RawMessage `json:"human_check"`
+	KindID     string          `json:"kind_id"`
+	Key        *string         `json:"key"`
+	KeyPrefix  *string         `json:"key_prefix"`
+	Title      string          `json:"title"`
+	Body       *string         `json:"body"`
+	Fields     json.RawMessage `json:"fields"`
+	State      *string         `json:"state"`
+	ParentID   *string         `json:"parent_id"`
+	BeforeID   *string         `json:"before_id"`
 }
 
 func (m *Module) handleCreateNode(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +207,10 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 }
 
 func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	humanCheck, err := parseHumanCheck(in.HumanCheck)
+	if err != nil {
+		return nodeJSON{}, err
+	}
 	kindID, ok := parseUUID(in.KindID)
 	if !ok {
 		return nodeJSON{}, badRequest("invalid kind_id")
@@ -251,6 +257,12 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		fields, err := validateFields(schema, in.Fields)
+		if err == nil && (kind.Slug == "ticket" || kind.Slug == "task") {
+			fields, err = humanCheckFields(p, fields, nil, nil, humanCheck, true)
+		}
+		if humanCheck != nil && kind.Slug != "ticket" && kind.Slug != "task" {
+			return badRequest("human_check is for tickets and tasks")
+		}
 		if err == nil {
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
 		}
@@ -304,13 +316,13 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		row := tx.QueryRow(ctx, `
-			INSERT INTO nodes (tenant_id, key, kind_id, title, body, fields, state, parent_id, position)
+			INSERT INTO nodes (tenant_id, key, kind_id, title, body, fields, state, parent_id, position, human_check)
 			VALUES (
 				NULLIF(current_setting('aeon.tenant_id', true), '')::uuid,
-				$1, $2::uuid, $3, $4, $5::jsonb, $6, $7::uuid, $8::numeric
+    $1, $2::uuid, $3, $4, $5::jsonb, $6, $7::uuid, $8::numeric, $9
 			)
 			RETURNING `+nodeReturning,
-			key, kindID, in.Title, body, string(fields), state, parentID, position)
+			key, kindID, in.Title, body, string(fields), state, parentID, position, humanCheck)
 		loaded, scanErr := scanNode(row)
 		if scanErr != nil {
 			return dbErr("insert node", scanErr)
@@ -345,7 +357,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "estimate_hours", "state", "kind_id", "type", "kind":
+		case "title", "body", "fields", "estimate_hours", "state", "human_check", "kind_id", "type", "kind":
 		case "key":
 			return nodeJSON{}, badRequest("key is immutable")
 		case "parent_id":
@@ -480,7 +492,31 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return err
 			}
 			nextFields = fields
-			sets = append(sets, "fields = "+add(string(fields))+"::jsonb")
+		}
+		kind, _, err := loadKind(ctx, tx, current.KindID)
+		if err != nil {
+			return err
+		}
+		nextCheck := current.HumanCheck
+		rawCheck, checkChanged := raw["human_check"]
+		if checkChanged {
+			if kind.Slug != "ticket" && kind.Slug != "task" {
+				return badRequest("human_check is for tickets and tasks")
+			}
+			nextCheck, err = parseHumanCheck(rawCheck)
+			if err != nil {
+				return err
+			}
+			sets = append(sets, "human_check = "+add(nextCheck))
+		}
+		if kind.Slug == "ticket" || kind.Slug == "task" {
+			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
+			if err != nil {
+				return err
+			}
+		}
+		if _, fieldsChanged := raw["fields"]; fieldsChanged || checkChanged {
+			sets = append(sets, "fields = "+add(string(nextFields))+"::jsonb")
 		}
 		if ticketbenefits.Completed(nextState) && !ticketbenefits.Completed(current.State) {
 			kind, _, err := loadKind(ctx, tx, current.KindID)
@@ -833,7 +869,7 @@ func scanNode(row pgx.Row) (nodeJSON, error) {
 	var position string
 	if err := row.Scan(
 		&n.ID, &n.Key, &n.KindID, &n.Title, &n.Body, &fields, &n.State,
-		&n.ParentID, &position, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt,
+		&n.ParentID, &position, &n.CreatedAt, &n.UpdatedAt, &n.DeletedAt, &n.HumanCheck,
 	); err != nil {
 		return nodeJSON{}, err
 	}

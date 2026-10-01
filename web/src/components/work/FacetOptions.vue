@@ -52,6 +52,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
         <template v-else-if="dimension === 'tag'"><i v-if="option.value !== 'none'" class="tag-dot" :data-color="option.color || undefined" aria-hidden="true" /><AppIcon v-else name="tag" :size="14" class="faint" /></template>
         <AppIcon v-else-if="dimension === 'epic'" name="epic" :size="14" :class="option.value === 'none' ? 'faint' : 'kind epic'" />
         <AppIcon v-else-if="dimension === 'cost'" name="coin" :size="14" class="faint" />
+        <AppIcon v-else-if="dimension === 'human_check'" name="person-check" :size="14" class="faint" />
         <AppIcon v-else name="box" :size="14" class="faint" />
         <span v-if="valueState(selected, option.value) === 'out'" class="not-tag">not</span>
         <span class="option-label">{{ option.label }}</span>

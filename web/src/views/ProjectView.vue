@@ -410,14 +410,14 @@ const facetLoading = ref(false)
 function needOptions(dimension: Dimension) {
   if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
   if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
-  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : null
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : dimension === 'human_check' ? 'human_check' : null
   if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
 }
 function sheetOpened() {
   if (graphActive.value) return
   void list.resolveNames(options('assignee').map(o => o.value))
   void list.loadEpics()
-  for (const facet of ['tag', 'cost_unit', 'release']) void list.requestFacet(facet)
+  for (const facet of ['tag', 'cost_unit', 'release', 'human_check']) void list.requestFacet(facet)
 }
 // Chips name epics by title, so the epics load when an epic filter is on.
 watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
@@ -1709,7 +1709,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
-      <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
         @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
@@ -1722,7 +1722,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       />
       <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" :filtered="filters.status.includes('queued')" @close="closeQueue" @open="key => { closeQueue(false); openKey(key) }" @filter="toggleValue('status', 'queued')" />
       <AssigneeMenu v-if="assigneeMenu" :row="assigneeMenu.row" :project-id="project.id" :anchor="assigneeMenu.anchor" :people="bulkPeople" :can-assign="writable" @choose="assignPerson" @close="closeAssignee" @changed="list.load()" />
-      <StatusMenu v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
+      <StatusMenu :project-id="projectId ?? undefined" v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
       <OptionMenu
         v-else-if="bulkMenu?.kind === 'assignee'" :anchor="bulkMenu.anchor" title="Assignee" :subject="plural(selected.size, 'ticket')" kind="assignee" :options="bulkPeople" current="-" :searchable="bulkPeople.length > 8"
         @choose="bulkAssign" @close="closeBulk"

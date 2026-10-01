@@ -1,0 +1,79 @@
+[
+  {
+    "name": "empty",
+    "input": [],
+    "scopes": [],
+    "code": "aeon-scopes:v1::35433912"
+  },
+  {
+    "name": "history",
+    "input": [
+      "events.read"
+    ],
+    "scopes": [
+      "events.read"
+    ],
+    "code": "aeon-scopes:v1:events.read:78fb3a41"
+  },
+  {
+    "name": "ticket-worker",
+    "input": [
+      "nodes.read",
+      "nodes.write",
+      "comments.read",
+      "comments.write",
+      "search.read",
+      "events.read"
+    ],
+    "scopes": [
+      "comments.read",
+      "comments.write",
+      "events.read",
+      "nodes.read",
+      "nodes.write",
+      "search.read"
+    ],
+    "code": "aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d"
+  },
+  {
+    "name": "proposal-only",
+    "input": [
+      "keys.manage",
+      "unknown.permission",
+      "nodes.read"
+    ],
+    "scopes": [
+      "keys.manage",
+      "nodes.read",
+      "unknown.permission"
+    ],
+    "code": "aeon-scopes:v1:keys.manage,nodes.read,unknown.permission:eb91ac58"
+  },
+  {
+    "name": "legacy-input",
+    "input": [
+      " nodes:write ",
+      "nodes.read",
+      "nodes.write"
+    ],
+    "scopes": [
+      "nodes.read",
+      "nodes.write"
+    ],
+    "code": "aeon-scopes:v1:nodes.read+write:4f5328d2"
+  },
+  {
+    "name": "underscores",
+    "input": [
+      "stage_handoffs.write",
+      "stage_handoffs.read",
+      "harness.force_stop"
+    ],
+    "scopes": [
+      "harness.force_stop",
+      "stage_handoffs.read",
+      "stage_handoffs.write"
+    ],
+    "code": "aeon-scopes:v1:harness.force_stop,stage_handoffs.read+write:3f84b84f"
+  }
+]
