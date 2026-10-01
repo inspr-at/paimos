@@ -56,11 +56,13 @@ type queueTicket struct {
 	NamedBlocker                      bool
 }
 type queueError struct {
-	workorders.Error
+	Status    int
+	Message   string
 	Code      string
 	Readiness *workqueue.Readiness
 }
 
+func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
@@ -266,7 +268,7 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	ready := readiness(t)
 	if !ready.Ready {
-		return nil, &queueError{Error: workorders.Error{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", ")}, Code: "queue_not_ready", Readiness: &ready}
+		return nil, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in.queueTarget); err != nil {
