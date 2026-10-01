@@ -185,7 +185,7 @@ test("verified bytes are reused once, retry writes only the exact base tip and P
     if (path.endsWith("/access_tokens")) return Response.json({ token: "unused fixture", permissions: body.permissions }, { status: 201 });
     if (method === "DELETE") { revocations++; return new Response(null, { status: 204 }); }
     if (method !== "GET") writes.push({ path, method, body });
-    if (path === "/repos/inspr-at/homebrew-tap") return Response.json({ default_branch: "main" });
+    if (path === "/repos/inspr-at/homebrew-tap") return Response.json({ default_branch: mode === "default collision" ? `aeon-agentd-v${version}` : "main" });
     if (path.includes("/git/ref/heads/")) return Response.json({ object: { sha: mode === "foreign branch" && !path.endsWith("/main") ? "b".repeat(40) : base } });
     if (path.includes("/contents/")) return Response.json({ sha: "b".repeat(40), content: Buffer.from('  version "260929200000.0.0"').toString("base64") });
     if (path.endsWith(`/git/commits/${base}`)) return Response.json({ tree: { sha: tree } });
@@ -208,4 +208,7 @@ test("verified bytes are reused once, retry writes only the exact base tip and P
   mode = "concurrent advance"; writes = [];
   await assert.rejects(bumpHomebrewTap(env, verified), /branch changed during formula update/);
   assert.ok(writes.every(c => !c.path.endsWith("/pulls"))); assert.equal(revocations, 3);
+  mode = "default collision"; writes = [];
+  await assert.rejects(bumpHomebrewTap(env, verified), /must differ from the default branch/);
+  assert.deepEqual(writes, []); assert.equal(revocations, 4);
 });

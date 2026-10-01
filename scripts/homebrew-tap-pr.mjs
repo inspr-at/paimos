@@ -325,6 +325,7 @@ export async function bumpHomebrewTap(env = process.env, verifiedChecksums) {
     }
     refuseTapDowngrade(current, version);
     const branch = `aeon-agentd-v${version}`;
+    if (branch === base) throw new Error("tap work branch must differ from the default branch");
     const head = await ensureBranch(token, base, branch);
     const onBranch = await readFormula(token, head.sha);
     if (!head.atBase && (!onBranch || normalize(onBranch.text) !== normalize(formula))) throw new Error("existing tap branch checksum mismatch");
