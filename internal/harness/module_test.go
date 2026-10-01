@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -97,7 +98,7 @@ func fixtureWithOwnershipClock(t *testing.T, now func() time.Time) *harnessFixtu
 	// live-list privacy fixtures still exercise a worker-only caller.
 	f.agent.Scopes = []string{"harness.worker"}
 	if now == nil {
-		harness.New(f.db.App).Mount(f.mux)
+		harness.New(f.db.App, nodes.CapturePlanningStart).Mount(f.mux)
 	} else {
 		harness.NewWithOwnershipClock(f.db.App, now).Mount(f.mux)
 	}
