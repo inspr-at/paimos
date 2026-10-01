@@ -148,7 +148,10 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
 
 test("key dialog CI passes concurrency limits to each runner and covers the shared access markup", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-  const step = workflow.split("      - name: Key dialog layout regression\n")[1].split("\n      - name:")[0];
+  const e2e = workflow.split("  e2e:\n")[1].split("\n  migration-compat:")[0];
+  assert.match(e2e, /sudo apt-get install -y -qq zsh fish/);
+  assert.ok(e2e.indexOf("Install shells for web unit checks") < e2e.indexOf("Key dialog layout regression"));
+  const step = e2e.split("      - name: Key dialog layout regression\n")[1].split("\n      - name:")[0];
   const commands = step.split("        run: |\n")[1].trim().split("\n").map(line => line.trim());
   // npm forwards trailing flags only to the last command in a compound script.
   // Require each unit runner's own invocation, so Node's file fan-out is bounded too.
