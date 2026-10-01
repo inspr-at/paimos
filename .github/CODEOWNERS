@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# LEAD enables require_code_owner_review in the companion ruleset after bootstrap.
+/.github/CODEOWNERS @markus-barta
+/.github/workflows/ @markus-barta
+/.github/gate-posters.json @markus-barta
+/.github/cross-family-ruleset.json @markus-barta
+/scripts/cross-family-gate* @markus-barta
+/scripts/post-cross-family-gate* @markus-barta
+/scripts/trusted-cross-family-poster* @markus-barta
+/scripts/ci-runner-guard/ @markus-barta

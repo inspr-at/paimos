@@ -2712,6 +2712,12 @@ paths:
     get:
       operationId: getMe
       summary: Acting principal, tenant and identity
+      description: >-
+        Requires a valid session or agent key, with no additional permission or
+        key scope. Project-only and empty-scope keys may read their own identity.
+        Returns only the caller's principal and roles, tenant identity and public
+        brand, and linked identity display fields; no other workspace data or
+        credentials. Other profile routes retain their own permission checks.
       security:
         - session: []
         - agentKey: []

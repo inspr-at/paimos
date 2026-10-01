@@ -56,7 +56,11 @@ func TestCLIAdditionalRootTranscripts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []transcriptRequest
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if got := r.Header.Get("Authorization"); got != "Bearer "+testKey {
+				wantAuth := "Bearer " + testKey
+				if tc.name == "doctor" && (r.URL.Path == "/api/health" || r.URL.Path == "/api/version") {
+					wantAuth = ""
+				}
+				if got := r.Header.Get("Authorization"); got != wantAuth {
 					t.Errorf("auth header %q", got)
 				}
 				var body map[string]any
