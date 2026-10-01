@@ -304,8 +304,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
-		Pool:  pool,
-		Brand: &productBrand,
+		Pool:      pool,
+		Brand:     &productBrand,
+		PublicURL: cfg.PublicURL,
 		// AEON-430: the footer names the running release from /api/version.
 		Codename: historyMod.CodenameOf,
 		Web:      webFS,
