@@ -59,8 +59,8 @@ func TestScopeRouteTableMatchesRealIssueCalls(t *testing.T) {
 					}
 					fixture.Config.Handler.ServeHTTP(w, r)
 				}))
-				t.Setenv("PAIMOS_URL", srv.URL)
-				t.Setenv("PAIMOS_API_KEY", testKey)
+				t.Setenv("AEON_URL", srv.URL)
+				t.Setenv("AEON_API_KEY", testKey)
 				args := append([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "--json"}, tc.args...)
 				code, _, errOut := runCLI(args, "")
 				srv.Close()
