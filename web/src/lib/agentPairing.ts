@@ -161,6 +161,18 @@ export interface PairingView {
   /** Present when this Aeon published which harnesses can run harmless verification. */
   verification_capabilities?: VerificationCapabilities
   verification_helper_version?: string
+  agent_compatibility?: AgentCompatibility
+}
+
+export interface AgentCompatibility {
+  status: 'compatible' | 'update_required' | 'protocol_mismatch' | 'unknown'
+  action: string
+}
+
+/** Advice is displayed only for a known incompatibility of this computer. */
+export function agentUpdateAdvice(view: PairingView): string {
+  const result = view.agent_compatibility
+  return result?.status === 'update_required' || result?.status === 'protocol_mismatch' ? result.action : ''
 }
 
 export interface InstallTarget {
@@ -183,8 +195,6 @@ export interface PairingGuide {
   platform_qualification: string
   setup_command: string
   homebrew_command?: string
-  /** True when the tap formula matches this server. False when it was read and differs. Null when the tap could not be read. Absent on older servers. */
-  homebrew_formula_current?: boolean | null
   install_available: boolean
   install_targets: InstallTarget[]
   managed_installation?: string
@@ -318,7 +328,6 @@ export function takePairingCode(): string | null {
 
 export interface GuideSection { heading: string; paragraphs: string[] }
 
-export type HomebrewFormulaState = 'current' | 'pending' | 'unknown' | 'legacy' | 'absent'
 export type InstallMethod = 'homebrew' | 'manual' | 'nix'
 
 export interface PublicGuidePresentation {
@@ -329,9 +338,6 @@ export interface PublicGuidePresentation {
   manualParagraphs: string[]
   setupCommand: string
   homebrewCommand: string
-  homebrewState: HomebrewFormulaState
-  /** Set when the formula was read and does not match. Empty otherwise. */
-  homebrewPending: string
   nixLabel: string
   nixHint: string
   installAvailable: boolean
@@ -341,22 +347,6 @@ export interface PublicGuidePresentation {
 }
 
 export const PAIRING_INSTALL_KEY = 'aeon.pairingInstall'
-
-/** Homebrew is shown only for a matching formula, or for an older guide that published the command and no check. */
-export function homebrewFormulaState(guide: PairingGuide | null): HomebrewFormulaState {
-  if (!guide) return 'absent'
-  if (guide.homebrew_formula_current === true) return 'current'
-  if (guide.homebrew_formula_current === false) return 'pending'
-  if (guide.homebrew_formula_current === null) return 'unknown'
-  return guide.homebrew_command ? 'legacy' : 'absent'
-}
-
-export function homebrewPendingNote(guide: PairingGuide | null): string {
-  if (homebrewFormulaState(guide) !== 'pending' || !guide) return ''
-  const version = guide.version.trim()
-  const named = version ? `Homebrew formula for ${version} is on its way` : 'The Homebrew formula is on its way'
-  return guide.install_available && guide.install_targets.length > 0 ? `${named}; use the direct download.` : `${named}.`
-}
 
 export function nixChoiceLabel(setup: ManagedSetup | null | undefined): string {
   const note = setup?.platform_note ?? ''
@@ -374,8 +364,8 @@ export function nixChoiceHint(setup: ManagedSetup | null | undefined): string {
 
 export function installMethods(presented: PublicGuidePresentation): InstallMethod[] {
   const methods: InstallMethod[] = []
-  if (presented.homebrewCommand) methods.push('homebrew')
   if (presented.targets.length > 0 || presented.homebrewCommand) methods.push('manual')
+  if (presented.homebrewCommand) methods.push('homebrew')
   if (presented.managedSetup) methods.push('nix')
   return methods
 }
@@ -430,9 +420,7 @@ export function presentPublicGuide(guide: PairingGuide | null): PublicGuidePrese
     note: 'Entering the code does not grant access. A signed-in person who can manage accounts has to approve it.',
     manualParagraphs: manual,
     setupCommand: guide?.setup_command ?? '',
-    homebrewCommand: homebrewFormulaState(guide) === 'current' || homebrewFormulaState(guide) === 'legacy' ? guide?.homebrew_command ?? '' : '',
-    homebrewState: homebrewFormulaState(guide),
-    homebrewPending: homebrewPendingNote(guide),
+    homebrewCommand: guide?.homebrew_command ?? '',
     nixLabel: nixChoiceLabel(guide?.managed_setup),
     nixHint: guide?.managed_setup ? nixChoiceHint(guide.managed_setup) : '',
     installAvailable: publishedInstall,
@@ -1588,11 +1576,6 @@ function parseGuide(data: unknown): PairingGuide {
   if (typeof record.managed_installation === 'string' && record.managed_installation) guide.managed_installation = record.managed_installation.slice(0, 500)
   const homebrew = optionalBounded(record.homebrew_command, 'homebrew_command', 4000)
   if (homebrew) guide.homebrew_command = homebrew
-  if ('homebrew_formula_current' in record && record.homebrew_formula_current !== undefined) {
-    const current = record.homebrew_formula_current
-    if (current !== null && typeof current !== 'boolean') invalid('homebrew_formula_current')
-    guide.homebrew_formula_current = current
-  }
   if (record.managed_setup != null) {
     const managed = asRecord(record.managed_setup, 'managed_setup')
     guide.managed_setup = {
@@ -1737,6 +1720,13 @@ function parseView(data: unknown): PairingView {
   if (capabilities) view.verification_capabilities = capabilities
   const helper = optionalBounded(record.verification_helper_version, 'verification_helper_version', 64)
   if (helper) view.verification_helper_version = helper
+  if (record.agent_compatibility != null) {
+    const result = asRecord(record.agent_compatibility, 'agent_compatibility')
+    const status = asString(result.status, 'agent_compatibility.status')
+    if (!['compatible', 'update_required', 'protocol_mismatch', 'unknown'].includes(status)) invalid('agent_compatibility.status')
+    if (typeof result.action !== 'string' || result.action.length > 500) invalid('agent_compatibility.action')
+    view.agent_compatibility = { status: status as AgentCompatibility['status'], action: result.action }
+  }
   return view
 }
 

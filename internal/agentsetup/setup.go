@@ -618,11 +618,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = &SetupProgress{State: state, ErrorCode: code}
+		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = &SetupProgress{State: "provisioning"}
+	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err

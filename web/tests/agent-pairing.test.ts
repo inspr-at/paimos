@@ -7,11 +7,11 @@ import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
   describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
-  formatVerification, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
+  formatVerification, getPairingComputer, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   pairingEventMatches, pairingEventScope, pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
   peekPairingCode, presentPublicGuide, publicGuideSections, rememberPairingCode, takePairingCode,
-  chooseInstallMethod, homebrewPendingNote, installMethods, readPairingInstallMethod, writePairingInstallMethod,
+  chooseInstallMethod, agentUpdateAdvice, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, pairingScopeKey, setHarnessAccount,
   addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
   pairingReadGeneration, unsupportedVerification, verifiableAccountKeys, connectDisabledReason, approvePairedAccounts,
@@ -1075,44 +1075,31 @@ test('Homebrew commands are additive, bounded and published by this instance', a
   const command = "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url 'https://other.example'"
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: command }))
   assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, command)
-  assert.equal(presentPublicGuide(await getPairingGuide()).homebrewState, 'legacy')
   assert.equal(presentPublicGuide(guidePayload()).homebrewCommand, '')
   for (const bad of [[], 'x'.repeat(4001)]) {
     globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_command: bad }))
     await assert.rejects(getPairingGuide)
   }
   globalThis.fetch = async () => jsonResponse(guidePayload({ homebrew_formula_current: 'yes' }))
-  await assert.rejects(getPairingGuide(), PairingError)
+  assert.equal(presentPublicGuide(await getPairingGuide()).homebrewCommand, '')
 })
 
-test('Homebrew is shown only when the formula matches, and the last install choice is reused', () => {
+test('Homebrew is always offered alongside the pinned direct download and the saved install choice', () => {
   const command = `brew install inspr-at/tap/aeon-agentd\nenv "$(brew --prefix)/bin/aeon-agentd" pair --url 'https://aeon.example'`
   const target = {
     platform: 'darwin' as const, arch: 'arm64' as const, service: 'launchd-user' as const, qualification: 'candidate',
     artifact_url: 'https://example.com/darwin', checksums_url: 'https://example.com/SHA256SUMS', command: 'install-darwin-only',
   }
-  const current = presentPublicGuide(guidePayload({ homebrew_command: command, homebrew_formula_current: true }))
-  assert.equal(current.homebrewState, 'current')
-  assert.equal(current.homebrewCommand, command)
-  assert.equal(current.homebrewPending, '')
-  assert.deepEqual(installMethods(current), ['homebrew', 'manual'])
-
-  const pending = presentPublicGuide(guidePayload({
-    homebrew_command: command, homebrew_formula_current: false, version: '260929120000.0.0',
-    install_available: true, install_targets: [target],
-  }))
-  assert.equal(pending.homebrewCommand, '')
-  assert.equal(pending.homebrewPending, 'Homebrew formula for 260929120000.0.0 is on its way; use the direct download.')
-  assert.deepEqual(installMethods(pending), ['manual'])
-  assert.equal(homebrewPendingNote(guidePayload({ homebrew_formula_current: false, version: '260929120000.0.0' })), 'Homebrew formula for 260929120000.0.0 is on its way.')
-
-  const unknown = presentPublicGuide(guidePayload({
-    homebrew_command: command, homebrew_formula_current: null, install_available: true, install_targets: [target],
-  }))
-  assert.equal(unknown.homebrewState, 'unknown')
-  assert.equal(unknown.homebrewCommand, '')
-  assert.equal(unknown.homebrewPending, '')
-  assert.deepEqual(installMethods(unknown), ['manual'])
+  for (const legacyHint of [true, false, null, undefined]) {
+    const presented = presentPublicGuide(guidePayload({
+      homebrew_command: command, homebrew_formula_current: legacyHint,
+      install_available: true, install_targets: [target],
+    }))
+    assert.equal(presented.homebrewCommand, command)
+    assert.deepEqual(installMethods(presented), ['manual', 'homebrew'])
+    assert.equal(chooseInstallMethod(installMethods(presented), ''), 'manual')
+    assert.deepEqual(presented.targets, [target])
+  }
 
   const managed = {
     command: 'env "$HOME/.nix-profile/bin/aeon-agentd" pair --url \'https://aeon.example\'',
@@ -1161,4 +1148,16 @@ test('verification refusal names the harness and cause without claiming pairing 
   assert.match(hint, /installed adapter cannot enforce safe verification/)
   assert.match(hint, /computer is paired/)
   assert.match(describeProgress(computer).detail, /Claude verification couldn't run/)
+})
+
+test('only incompatible computers display update advice', async () => {
+  const advice = 'Update aeon-agentd to at least 261001072608.0.0.'
+  for (const status of ['compatible', 'unknown', 'update_required', 'protocol_mismatch'] as const) {
+    const action = ['update_required', 'protocol_mismatch'].includes(status) ? advice : ''
+    const computer = view({ agent_compatibility: { status, action } })
+    globalThis.fetch = async () => jsonResponse(computer)
+    const parsed = await getPairingComputer(COMPUTER)
+    assert.equal(agentUpdateAdvice(parsed), ['update_required', 'protocol_mismatch'].includes(status) ? advice : '')
+  }
+  assert.equal(agentUpdateAdvice(view()), '')
 })
