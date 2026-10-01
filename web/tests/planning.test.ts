@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareModelSort, formatDollars, formatTokenCount, listCostCell, modelCell, paidCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
+import { compareModelSort, formatDollars, formatTokenCount, listCostCell, modelCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
 import { compareRows } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 
@@ -28,55 +28,21 @@ test('dense figures', () => {
   assert.equal(formatDollars(null), '')
 })
 
-test('model names the registry route, or says why there is none', () => {
-  const resolved = modelCell(row({ route }))
-  assert.equal(resolved.text, 'Codex astra · xhigh')
-  assert.match(resolved.tip, /^Build hard · backend\nModel registry, revision 3f9a1c2b$/)
-  assert.equal(modelCell(row(undefined, {})).text, '')
-  assert.match(modelCell(row(undefined, {})).tip, /Set a role and area/)
+test('planning cells distinguish a planned model and measured figures', () => {
+  assert.equal(modelCell(row({ route })).text, 'Codex astra')
+  assert.equal(modelCell(row({ route })).state, 'planned')
+  assert.match(modelCell(row({ route })).tip, /Model registry, revision 3f9a1c2b/)
+  assert.equal(modelCell(row(undefined, {})).tip, 'No agent session yet\nNo model planned: set a role and area')
   assert.match(modelCell(row({ route_gap: 'area' }, { route_role: 'build' })).tip, /Set an area/)
   assert.match(modelCell(row({ route_gap: 'review_gate' }, { route_role: 'review-gate', area: 'backend' })).tip, /family other than the author's/)
   assert.match(modelCell(row({ route_gap: 'registry' }, { route_role: 'mechanical', area: 'docs' })).tip, /no available route/)
   assert.match(modelCell(row(undefined, {}, 'epic')).tip, /Epics take no model/)
-})
-
-test('tokens read spent / estimated with the calibration basis', () => {
-  const both = tokensCell(row({ route, tokens: tokens(1_540_000, 10_000_000, { calibration: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000 } }) }))
-  assert.deepEqual([both.spent, both.estimated, both.over], ['1.54M', '10M', false])
-  assert.match(both.tip, /Estimated 10,000,000 tokens\n2h at 5M\/h: default 5M\/h until 5 finished tickets on Codex astra · xhigh/)
-  assert.equal(both.label, '1.54M tokens spent, 10M estimated')
-  const median = tokensCell(row({ route, tokens: tokens(null, 12_000_000, { calibration: { basis: 'median', tickets: 12, tokens_per_hour: 6_000_000 } }) }))
-  assert.equal(median.spent, '')
-  assert.match(median.tip, /2h at 6M\/h: median of the last 12 finished tickets on Codex astra · xhigh/)
-  const anyRoute = tokensCell(row({ tokens: tokens(null, 5_000_000, { calibration: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000, any_route: true } }) }))
-  assert.match(anyRoute.tip, /on any route/)
-  // Over the estimate: flagged in text, not only by colour.
-  const over = tokensCell(row({ tokens: tokens(12_000_000, 10_000_000) }))
-  assert.equal(over.over, true)
-  assert.match(over.label, /over the estimate/)
-  assert.match(over.tip, /Over the estimate by 2M/)
-  const epic = tokensCell(row({ tokens: tokens(3_000_000, 15_000_000), children: { total: 3, estimated: 2 } }, {}, 'epic'))
-  assert.match(epic.tip, /Sum of 2 of 3 open and done children with an estimate/)
-  const unreported = tokensCell(row({ tokens: { ...tokens(1000, null), unreported: 1 } }))
-  assert.match(unreported.tip, /1 session has no usage report yet/)
+  const measured = tokensCell(row({ tokens: tokens(12_000_000, 10_000_000) }))
+  assert.equal(measured.state, 'measured')
+  assert.equal(measured.over, false)
+  assert.match(measured.tip, /\(\+20%\)/)
   assert.equal(tokensCell(row({ tokens: tokens(null, null) })).label, '')
-})
-
-test('≈ cost is always approximate; paid names the plan and counts it as $0', () => {
-  const list = listCostCell(row({ route, tokens: tokens(1_540_000, 10_000_000, { calibration: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000 } }), cost: cost({ list_spent: '4.480000', list_estimated: '27.000000', list_unpriced: true }) }))
-  assert.deepEqual([list.spent, list.estimated, list.over], ['$4.48', '$27', false])
-  assert.match(list.label, /^approximately \$4.48 spent \$27 estimated$/)
-  assert.match(list.tip, /At API list prices/)
-  assert.match(list.tip, /Estimated ≈ \$27.00 \(\$13.50\/h\)/)
-  assert.match(list.tip, /lower bound/)
-  const paid = paidCell(row({ tokens: tokens(1_540_000, 10_000_000), cost: cost({ paid_spent: '0.000000', paid_estimated: '0.000000', plans: ['Max 20x'] }) }))
-  assert.deepEqual([paid.spent, paid.estimated], ['$0', '$0'])
-  assert.match(paid.tip, /Max 20x/)
-  const overPaid = paidCell(row({ tokens: tokens(1, 1), cost: cost({ paid_spent: '30', paid_estimated: '27' }) }))
-  assert.equal(overPaid.over, true)
-  // Without cost (no harness.read) nothing shows.
   assert.equal(listCostCell(row({ tokens: tokens(1, 1) })).label, '')
-  assert.equal(paidCell(row({ tokens: tokens(1, 1) })).label, '')
 })
 
 test('presence and sort values follow the list API', () => {

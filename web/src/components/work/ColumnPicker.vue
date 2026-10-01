@@ -10,6 +10,7 @@ import AppIcon from '../AppIcon.vue'
 // Projects list) pass their own labels, pinned columns and wording.
 const props = withDefaults(defineProps<{
   order: T[]; visible: T[]; customised: boolean
+  notes?: Partial<Record<string, string>>
   labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
 }>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
 const emit = defineEmits<{ change: [order: T[], visible: T[]]; reset: [] }>()
@@ -62,12 +63,12 @@ function drop(target: T) {
         <span class="pin-note">Always</span>
       </li>
       <li
-        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id }" draggable="true"
+        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !!notes?.[id] }" draggable="true"
         @dragstart="dragging = id" @dragend="dragging = null; over = null" @dragover.prevent="over = id" @dragleave="over = over === id ? null : over" @drop.prevent="drop(id)"
       >
         <label class="row-label">
           <input
-            type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="hint"
+            type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="notes?.[id] ? `${hint} ${hint}-${id}` : hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
           <span class="name">{{ label(id) }}</span>
@@ -77,6 +78,7 @@ function drop(target: T) {
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} down`" :disabled="index === free.length - 1" tabindex="-1" @click="step(id, 1)"><AppIcon name="chevron" :size="13" /></button>
         </span>
         <span class="grip" aria-hidden="true" />
+        <p v-if="notes?.[id]" :id="`${hint}-${id}`" class="col-note">{{ notes[id] }}</p>
       </li>
     </ul>
     <p :id="hint" class="sr-only">Alt and the arrow keys move the column.</p>
@@ -113,4 +115,7 @@ function drop(target: T) {
 .moves .icon-btn { width: 24px; height: 24px; }
 .grip { flex-shrink: 0; width: 10px; height: 14px; margin: 0 4px 0 2px; cursor: grab; background: radial-gradient(circle, var(--ink-3) 1.2px, transparent 1.5px) 0 0 / 5px 5px; }
 .fine { margin-top: 2px; font-size: 11.5px; color: var(--ink-3); }
+.row.noted { flex-wrap: wrap; height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
+.row.noted .row-label { height: 20px; }
+.col-note { flex-basis: 100%; margin: 1px 0 0 25px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
 </style>

@@ -8,7 +8,7 @@ import AppIcon from '../AppIcon.vue'
 // headers. The first key decides, the next ones break ties.
 const props = defineProps<{ sort: SortKey[] }>()
 const emit = defineEmits<{ change: [keys: SortKey[]] }>()
-const free = computed(() => SORT_FIELDS.filter(field => !props.sort.some(key => key.field === field)))
+const free = computed(() => SORT_FIELDS.filter(field => field !== 'paid' && !props.sort.some(key => key.field === field)))
 const FIRST_DIRECTION: Partial<Record<SortField, boolean>> = { updated_at: true, created_at: true, priority: false }
 function set(index: number, patch: Partial<SortKey>) { emit('change', props.sort.map((key, i) => i === index ? { ...key, ...patch } : key)) }
 function remove(index: number) { emit('change', props.sort.filter((_, i) => i !== index)) }

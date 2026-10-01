@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/operatoractor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -26,11 +27,12 @@ import (
 )
 
 var (
-	errNotMember        = errors.New("not a member")
-	errNotFound         = errors.New("not found")
-	errNotAgent         = errors.New("not an agent")
-	errServicePrincipal = errors.New("agent keys cannot be issued for service principals")
-	errAgentDeactivated = errors.New("agent is deactivated")
+	errNotMember         = errors.New("not a member")
+	errImportedNotMember = fmt.Errorf("%w: imported account", errNotMember)
+	errNotFound          = errors.New("not found")
+	errNotAgent          = errors.New("not an agent")
+	errServicePrincipal  = errors.New("agent keys cannot be issued for service principals")
+	errAgentDeactivated  = errors.New("agent is deactivated")
 )
 
 func scanPrincipal(row pgx.Row) (tenant.Principal, error) {
@@ -119,6 +121,13 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 				}
 				if !errors.Is(accErr, authz.ErrNoInvite) {
 					return accErr
+				}
+				imported, err := authz.ImportedPeopleForEmail(ctx, tx, tenantID, email)
+				if err != nil {
+					return err
+				}
+				if len(imported) > 0 {
+					return errImportedNotMember
 				}
 			}
 			return errNotMember
@@ -226,7 +235,7 @@ func adminEmail(got, want string) bool {
 	if want == "" {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(got), want)
+	return identity.FoldEmailASCII(strings.TrimSpace(got)) == identity.FoldEmailASCII(want)
 }
 
 // personByEmail resolves dev-login email to its canonical person in the tenant.
@@ -245,7 +254,8 @@ func (m *Module) personByEmail(ctx context.Context, tenantID, email string) (ten
 			JOIN principals canonical ON canonical.tenant_id=p.tenant_id
 			    AND canonical.id=COALESCE(p.linked_to,p.id)
 			WHERE p.tenant_id=$2::uuid AND p.kind='person'
-			    AND lower(COALESCE(NULLIF(p.email,''),i.email))=lower($1)
+			    AND translate(COALESCE(NULLIF(p.email,''),i.email),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+			        =translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
 			    AND COALESCE(canonical.identity_id,p.identity_id) IS NOT NULL
 			ORDER BY (EXISTS (SELECT 1 FROM principals source
 			    WHERE source.tenant_id=p.tenant_id AND source.linked_to=canonical.id)) DESC,
@@ -278,7 +288,7 @@ func (m *Module) startSession(ctx context.Context, identityID, tenantID, princip
 			RETURNING id`, sessionID(raw), identityID, tenantID, principalID).Scan(&id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, principalID)
+		_, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tenantID, principalID)
 		return err
 	})
 	if err != nil {

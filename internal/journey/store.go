@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/requirements"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -1057,7 +1058,19 @@ func settleReleased(ctx context.Context, tx pgx.Tx, projectID, releaseID string)
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	var tenantID string
+	if err = tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+		return nil, err
+	}
+	if err = statusautopilot.PublishTx(ctx, tx, tenantID, releaseID); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func createNextRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, revision int64) (string, int64, error) {

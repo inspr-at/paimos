@@ -263,6 +263,7 @@
 2 0 github.com/inspr-at/paimos/internal/releasehistory/packnotes
 2 58892 github.com/inspr-at/paimos/internal/rules/doctrine
 2 42 github.com/inspr-at/paimos/internal/sessionusage
+2 0 github.com/inspr-at/paimos/internal/statusautopilot
 2 0 github.com/inspr-at/paimos/internal/systemactor
 2 3605 github.com/inspr-at/paimos/internal/tenantbootstrap
 2 22093 github.com/inspr-at/paimos/internal/ticketwork
