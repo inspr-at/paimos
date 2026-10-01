@@ -1041,15 +1041,20 @@ and covers sign-in, auth errors, logout, theme switching, version interactions,
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
 
-The PR `web` check uses `--only-changed=origin/main` with a full-history checkout,
-two workers and zero retries. Its job summary lists the selected tests; a change
-with no affected specs passes with zero tests. Selection follows Playwright's
-test import graph, so browser-loaded Vue components are not automatically mapped
-to their specs. This is preliminary feedback, not evidence of a green full tree.
-Other CI events retain the session linking, approval and security regressions.
-The full sharded main/nightly suite and quarantine remain owned by AEON-410
-(draft PR #29); until that dependency lands, this change does not establish
-nightly full-suite coverage or reusable tree-green evidence (AEON-423).
+The PR `web` check uses `--only-changed=<PR base SHA>` with a full-history checkout,
+two workers and zero retries. CI validates that immutable event base and records
+changed paths and Git refs before Node runs. The job summary lists selected tests;
+UI or spec changes must select at least one test, and missing list totals or changes
+to the captured Git inputs fail the check. Only a PR with no UI/spec paths may pass
+with zero selected tests. Non-empty runs must produce a completed JSON test report
+matching the selected count; an early successful process exit fails the check.
+Selection follows Playwright's test import graph, so
+browser-loaded Vue components are not automatically mapped to their specs; an
+unmapped UI change fails for explicit coverage rather than silently passing.
+Other CI events, including `merge_group`, run the complete UI suite without changed
+file or spec filters, with two workers and zero retries. The full sharded main/nightly
+lane and quarantine remain owned by AEON-410 (draft PR #29); this change does not
+establish nightly coverage or reusable tree-green evidence (AEON-423).
 
 Licence: AGPL-3.0-only.
 

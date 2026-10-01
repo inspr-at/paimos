@@ -147,9 +147,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Playwright needs origin/main available locally, including on fork PRs.
+          # Playwright needs the immutable PR base available locally, including on fork PRs.
           fetch-depth: 0
           persist-credentials: false
+      - name: Snapshot UI selection inputs before Node runs
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/ci-web-tests.sh snapshot
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -171,29 +175,12 @@ jobs:
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Changed UI specs on PRs; session regressions on other events
+      - name: Changed UI specs on PRs; full UI suite on other events
         working-directory: web
         env:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: |
-          set -euo pipefail
-          args=(-c playwright.ui.config.ts --workers=2 --retries=0)
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            # Preliminary feedback only: AEON-410 owns the full sharded main/nightly lane.
-            # A non-UI change may select zero tests; Playwright accepts that only-changed result.
-            args+=(--only-changed=origin/main)
-          else
-            args+=(tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts)
-          fi
-          {
-            echo '### UI specs selected for this change'
-            echo
-            echo '```text'
-            npx playwright test "${args[@]}" --list
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          npx playwright test "${args[@]}"
+        run: bash ../scripts/ci-web-tests.sh run
 
   release-check:
     runs-on: ubuntu-latest
