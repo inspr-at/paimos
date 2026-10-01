@@ -335,16 +335,7 @@ func appendCommits(existing, incoming []Commit) []Commit {
 }
 
 func normalizeActivityNote(raw string) (string, bool) {
-	if !utf8.ValidString(raw) {
-		return "", false
-	}
-	clean := strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, raw))
-	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
+	return agentactivity.CleanNote(raw)
 }
 
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
@@ -920,7 +911,10 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			rows.Close()
 			return nil, err
 		}
-		s.ActivityHistory = append(s.ActivityHistory, item)
+		if clean, valid := normalizeActivityNote(item.Note); valid {
+			item.Note = clean
+			s.ActivityHistory = append(s.ActivityHistory, item)
+		}
 	}
 	err = rows.Err()
 	rows.Close()

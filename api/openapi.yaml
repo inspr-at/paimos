@@ -5204,7 +5204,7 @@ paths:
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
-                activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+                activity_note: {type: string, minLength: 1, maxLength: 120, description: "Public plain text; whitespace trimmed and control characters stripped. Uses the activity credential filter before storage and display."}
                 doing: {type: string, minLength: 1, maxLength: 60, description: "Public agent summary without credentials, paths, URLs or command arguments. Collected only in agent_summary mode."}
                 doing_at: {type: string, format: date-time, description: "Optional observation time; defaults to server receipt. Older than ten minutes is ignored; future times beyond thirty seconds are rejected."}
                 tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}

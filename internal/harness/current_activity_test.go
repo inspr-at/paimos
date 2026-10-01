@@ -67,6 +67,9 @@ func TestCurrentActivityPolicyFreshnessHistoryAndIsolation(t *testing.T) {
 		t.Fatal("tool-only policy collected or displayed an agent note")
 	}
 	beat(map[string]any{"tool_activity": auto("arbitrary PRIVATE_ARGUMENT")}, 400)
+	for _, text := range []string{"Editing AKIAIOSFODNN7EXAMPLE.go", "Editing sk-live.go", "Editing ghp_example.ts", "Editing xoxb-example.ts", "Editing id-rsa.go"} {
+		beat(map[string]any{"tool_activity": auto(text)}, 400)
+	}
 	bad := auto("Working")
 	bad["source"] = "agent"
 	beat(map[string]any{"tool_activity": bad}, 400)
@@ -106,6 +109,9 @@ func TestCurrentActivityPolicyFreshnessHistoryAndIsolation(t *testing.T) {
 	expect(t, f.call(f.person, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 100, "doing": "Spoofed"}, lease), 403)
 	expect(t, f.call(f.person, "PUT", settings, map[string]any{"mode": "agent_summary"}, ""), 200)
 	beat(map[string]any{"doing": "Invalid\nsummary"}, 400)
+	for _, text := range []string{"A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE"} {
+		beat(map[string]any{"doing": text}, 400)
+	}
 	for i := 0; i < 23; i++ {
 		beat(map[string]any{"doing": fmt.Sprintf("Phase %d", i)}, 200)
 	}

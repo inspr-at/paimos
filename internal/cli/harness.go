@@ -634,7 +634,11 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 				body["display_label"] = label
 			}
 			if note != "" {
-				body["activity_note"] = note
+				clean, valid := agentactivity.CleanNote(note)
+				if !valid {
+					return usagef("--note must be a public activity note of at most 120 characters")
+				}
+				body["activity_note"] = clean
 			}
 			if doing != "" {
 				text, valid := agentactivity.CleanSummary(doing)

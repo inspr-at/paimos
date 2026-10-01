@@ -15,6 +15,12 @@ func TestToolObservationsNeverForwardArguments(t *testing.T) {
 		{"Edit", "https://user:credential.test/private.go", "", "Editing code"},
 		{"Edit", "id_ed25519.go", "", "Editing code"},
 		{"Edit", "opaque01234567890123456789012345.go", "", "Editing code"},
+		{"Edit", "AKIAIOSFODNN7EXAMPLE.go", "", "Editing code"},
+		{"Edit", "sk-live.go", "", "Editing code"},
+		{"Edit", "ghp_example.ts", "", "Editing code"},
+		{"Edit", "xoxb-example.ts", "", "Editing code"},
+		{"Edit", "id-rsa.go", "", "Editing code"},
+		{"Edit", "planning.ts", "", "Editing planning.ts"},
 		{"Read", "/private/credentials", "", "Reading code"},
 		{"Bash", "", "GOMAXPROCS=2 go test ./... -args PRIVATE_ARGUMENT", "Running Go tests"},
 		{"Bash", "", "npm run test:unit -- PRIVATE_ARGUMENT", "Running web tests"},
@@ -34,7 +40,7 @@ func TestToolObservationsNeverForwardArguments(t *testing.T) {
 			}
 		})
 	}
-	for _, bad := range []string{"Editing ", "Editing ../api.go", "Editing .env", "Editing secret.go", "Running Go tests PRIVATE_ARGUMENT", "PRIVATE_ARGUMENT"} {
+	for _, bad := range []string{"Editing ", "Editing ../api.go", "Editing .env", "Editing secret.go", "Editing AKIAIOSFODNN7EXAMPLE.go", "Editing sk-live.go", "Editing ghp_example.ts", "Editing xoxb-example.ts", "Editing id-rsa.go", "Running Go tests PRIVATE_ARGUMENT", "PRIVATE_ARGUMENT"} {
 		if ValidAuto(bad) {
 			t.Fatalf("accepted arbitrary automatic text %q", bad)
 		}
@@ -63,7 +69,7 @@ func TestSummaryBoundaries(t *testing.T) {
 			t.Fatalf("accepted short key prefix %q", prefix)
 		}
 	}
-	for _, text := range []string{"Key AKIAIOSFODNN7EXAMPLE", "Key s\u200bk-EXAMPLE", "abcdefghijkl\u200bmnopqrstuvwx", "Running\u00ad tests", "Working\u2060", "\ufeffWorking", "Working\u202e"} {
+	for _, text := range []string{"Key AKIAIOSFODNN7EXAMPLE", "Key s\u200bk-EXAMPLE", "abcdefghijkl\u200bmnopqrstuvwx", "Running\u00ad tests", "Working\u2060", "\ufeffWorking", "Working\u202e", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "abcdefghijkl\u20ddmnopqrstuvwx"} {
 		if _, valid := CleanSummary(text); valid {
 			t.Fatalf("accepted unsafe or format-character summary %q", text)
 		}
@@ -83,10 +89,18 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 		{"credential word fallback", "Reading secret", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"short key fallback", "Key AKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"format character fallback", "Key s\u200bk-EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"combining mark fallback", "A\u0301KIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"split opaque token fallback", "abcdefghijkl\u0301mnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"enclosing mark fallback", "A\u20ddKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"enclosing opaque token fallback", "abcdefghijkl\u20ddmnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"unsafe summary hidden", "Reading token", "Editing secret.go", Summary, "", "", fresh},
 		{"invalid tool hidden", "", "Running Go tests with arguments", Tool, "", "", fresh},
 		{"unsafe basename hidden", "", "Editing ../api.go", Tool, "", "", fresh},
+		{"key basename hidden", "", "Editing AKIAIOSFODNN7EXAMPLE.go", Tool, "", "", fresh},
+		{"short prefix basename hidden", "", "Editing sk-live.go", Tool, "", "", fresh},
+		{"credential filename hidden", "", "Editing id-rsa.go", Tool, "", "", fresh},
 		{"valid basename", "", "Editing api.go", Tool, "Editing api.go", "auto", fresh},
+		{"planning basename", "", "Editing planning.ts", Tool, "Editing planning.ts", "auto", fresh},
 		{"stale summary fallback", "Implementing activity", "Running Go tests", Summary, "Running Go tests", "auto", stale},
 		{"tool mode", "Implementing activity", "Running Go tests", Tool, "Running Go tests", "auto", fresh},
 		{"off", "Implementing activity", "Running Go tests", Off, "", "", fresh},
@@ -103,6 +117,22 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 				t.Fatalf("got %+v; want %q from %s at %s", got, tc.want, tc.source, fresh)
 			}
 		})
+	}
+}
+
+func TestLegacyNotePrivacy(t *testing.T) {
+	for _, text := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live", "Editing id-rsa.go", "abcdefghijklmnopqrstuvwx"} {
+		if clean, valid := CleanNote(text); valid || clean != "" {
+			t.Fatalf("accepted unsafe legacy note %q", text)
+		}
+	}
+	for _, text := range []string{"Reviewing the change", "Editing planning.ts", strings.Repeat("Reviewing the change. ", 5)} {
+		if clean, valid := CleanNote(text); !valid || clean != strings.TrimSpace(text) {
+			t.Fatalf("rejected public legacy note %q", text)
+		}
+	}
+	if clean, valid := CleanNote("  Running\nPDF\t tests  "); !valid || clean != "RunningPDF tests" {
+		t.Fatal("legacy control normalization changed")
 	}
 }
 

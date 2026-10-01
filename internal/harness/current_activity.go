@@ -48,6 +48,12 @@ func projectActivity(s *Session, now time.Time) {
 	s.CurrentActivity = agentactivity.Current(s.doing, s.doingAt, s.toolActivity, s.toolActivityAt, s.AgentActivityMode, now)
 	if s.AgentActivityMode != agentactivity.Summary {
 		s.ActivityNote = nil
+	} else if s.ActivityNote != nil {
+		if clean, valid := agentactivity.CleanNote(*s.ActivityNote); valid {
+			s.ActivityNote = &clean
+		} else {
+			s.ActivityNote = nil
+		}
 	}
 }
 
@@ -83,7 +89,14 @@ func currentActivityHistory(ctx context.Context, tx pgx.Tx, s *Session) error {
 		if err := rows.Scan(&a.Text, &a.Source, &a.At); err != nil {
 			return err
 		}
-		s.CurrentActivityHistory = append(s.CurrentActivityHistory, a)
+		if a.Source == "auto" && agentactivity.ValidAuto(a.Text) {
+			s.CurrentActivityHistory = append(s.CurrentActivityHistory, a)
+		} else if a.Source == "agent" {
+			if clean, valid := agentactivity.CleanSummary(a.Text); valid {
+				a.Text = clean
+				s.CurrentActivityHistory = append(s.CurrentActivityHistory, a)
+			}
+		}
 	}
 	return rows.Err()
 }

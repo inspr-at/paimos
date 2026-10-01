@@ -2,6 +2,7 @@
 import type { SessionView } from '../../stores/agents'
 import type { CurrentAgentActivity } from '../../lib/agentRows'
 import { STATE_LABEL } from '../../lib/agentSignals.ts'
+import { cleanActivityNote, safeActivityText } from '../../lib/activityPrivacy.ts'
 
 export interface ActivityEntry { note: string; at: string }
 export interface ActivitySession { activity_note?: string | null; activity_history?: ActivityEntry[] }
@@ -10,7 +11,7 @@ export const activityOf = (view: SessionView) => view.session as typeof view.ses
 export function currentStep(view: SessionView, workers = 0) {
   if (view.status.reasons?.length) return view.status.reasons[0].detail
   const mode = view.session.agent_activity_mode
-  const note = currentActivity(view, Date.now()) || (mode === undefined || mode === 'agent_summary' ? activityOf(view).activity_note?.trim() : '')
+  const note = currentActivity(view, Date.now()) || (mode === undefined || mode === 'agent_summary' ? cleanActivityNote(activityOf(view).activity_note) : '')
   if (note) return note
   if (view.status.state === 'done') return 'All work reported'
   if (view.status.group === 'stopped') return view.status.label === STATE_LABEL.stopped ? 'Session ended' : view.status.label
@@ -32,7 +33,7 @@ export function currentActivity(view: SessionView, now: number): string {
   const a = s.current_activity
   if (!a || !Number.isFinite(Date.parse(a.at))) return ''
   if (a.source === 'agent' && (s.agent_activity_mode === 'tool_activity' || now - Date.parse(a.at) >= 600_000)) return ''
-  return a.text
+  return safeActivityText(a.text) ? a.text : ''
 }
 
 export function workerActivity(workers: SessionView[], now: number): string {
@@ -49,5 +50,5 @@ export function workerActivity(workers: SessionView[], now: number): string {
 
 export function activityDurations(history: readonly CurrentAgentActivity[], now: number, stopped?: string | null) {
   const end = stopped ? Math.min(now, Date.parse(stopped)) : now
-  return history.map((item, index) => ({ ...item, duration: `${Math.max(1, Math.round(((index ? Date.parse(history[index - 1]!.at) : end) - Date.parse(item.at)) / 60_000))} min` }))
+  return history.map((item, index) => ({ ...item, duration: `${Math.max(1, Math.round(((index ? Date.parse(history[index - 1]!.at) : end) - Date.parse(item.at)) / 60_000))} min` })).filter(item => safeActivityText(item.text))
 }

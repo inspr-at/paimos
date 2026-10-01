@@ -42,6 +42,22 @@ test('Off shows no activity line or current activity history', async ({ page }) 
   await expect(page.getByRole('list', { name: 'Current activity history' })).toHaveCount(0)
 })
 
+for (const text of ['AKIAIOSFODNN7EXAMPLE', 'https://user:pass@host/a', 'FOO=secret', 'Editing AKIAIOSFODNN7EXAMPLE.go', 'Editing sk-live.go', 'Editing id-rsa.go', 'A\u0301KIAIOSFODNN7EXAMPLE']) {
+  test(`credential text is hidden in current activity and legacy fallback: ${text}`, async ({ page }) => {
+    const worker = await agents(page)
+    for (const current of [null, { text, source: 'auto', at: ago(1) }]) {
+      Object.assign(worker, { activity_note: text, current_activity: current })
+      await page.goto('/agents')
+      await expect(page.locator(`[data-row="s:${worker.id}"]`)).toBeVisible()
+      await expect(page.locator(`[data-row="s:${worker.id}"] .current-activity`)).toHaveCount(0)
+      await page.goto(`/agents/${worker.id}`)
+      const panel = page.getByRole('complementary', { name: 'Session details' })
+      await expect(panel).toBeVisible()
+      await expect(panel.locator('.now-step')).not.toContainText(text)
+    }
+  })
+}
+
 test('workspace administrators can choose each activity mode and recover a failed save', async ({ page }) => {
   await mockWork(page, fixtures(), { admin: true })
   await mockBusiness(page, businessData({ role: 'admin' }), { role: 'admin' })

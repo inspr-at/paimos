@@ -27,6 +27,7 @@ import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
+import { cleanActivityNote } from '../../lib/activityPrivacy'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
@@ -89,7 +90,10 @@ const reported = computed(() => s.value)
 // A watched session has no Messages tab, so it always shows the overview with the live view.
 const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
-const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activity.value?.activity_history ?? [])
+const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : (activity.value?.activity_history ?? []).flatMap(item => {
+  const note = cleanActivityNote(item.note)
+  return note ? [{ ...item, note }] : []
+}))
 const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
 const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
 const step = computed(() => {

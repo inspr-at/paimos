@@ -1712,7 +1712,7 @@ func heartbeatText(raw string, max int) string {
 
 func heartbeatNote(raw string) string {
 	clean := heartbeatText(raw, 1<<20)
-	if clean == "" {
+	if clean == "" || !agentactivity.SafeText(clean) {
 		return ""
 	}
 	if utf8.RuneCountInString(clean) <= heartbeatNoteMax {

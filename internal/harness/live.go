@@ -147,10 +147,12 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			rows.Close()
 			return nil, err
 		}
+		projection.ActivityNote = v.ActivityNote
 		projectActivity(&projection, out.At)
 		v.CurrentActivity, v.AgentActivityMode = projection.CurrentActivity, mode
-		if mode != agentactivity.Summary {
-			v.ActivityNote, v.ActivityNoteID = nil, nil
+		v.ActivityNote = projection.ActivityNote
+		if v.ActivityNote == nil {
+			v.ActivityNoteID = nil
 		}
 		stampLiveEta(&v, reported, interval, out.At)
 		if heartbeat != nil {
