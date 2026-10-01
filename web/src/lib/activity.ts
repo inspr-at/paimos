@@ -51,7 +51,7 @@ export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): Ti
   return out
 }
 
-const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels', kind: 'the type' }
+const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent', tags: 'labels', kind: 'the type', human_check: 'the human check' }
 export function changeValue(field: ActivityChange['field'], value: string | null): string {
   if (field === 'status') return value ? statusMeta(value).label : '—'
   if (field === 'priority') return priorityLabel(value)
@@ -61,6 +61,8 @@ export function changeValue(field: ActivityChange['field'], value: string | null
   return value ?? '—'
 }
 export function describeChange(change: ActivityChange): { label: string; from?: string; to?: string } {
+  if (change.field === 'human_check' && !change.from) return { label: 'added a human check', to: change.to ?? '—' }
+  if (change.field === 'human_check' && !change.to) return { label: 'completed the human check', to: change.from ?? '—' }
   if (change.field === 'kind') return { label: 'changed the type', from: change.from ? kindLabel(change.from) : '—', to: change.to ? kindLabel(change.to) : '—' }
   if (change.field === 'parent') return { label: 'moved it to another parent' }
   if (change.field === 'assignee' && !change.from) return { label: 'assigned it to', to: changeValue('assignee', change.to) }

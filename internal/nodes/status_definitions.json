@@ -1,0 +1,160 @@
+{
+  "definitions": [
+    {
+      "state": "new",
+      "label": "New",
+      "meaning": "Filed, not yet looked at",
+      "hint": "Filed, not yet looked at",
+      "set_by": "Anyone",
+      "exit": false,
+      "rules": [
+        "new"
+      ]
+    },
+    {
+      "state": "backlog",
+      "label": "Backlog",
+      "meaning": "Wanted, not planned now",
+      "hint": "Wanted, not planned now",
+      "set_by": "Triage",
+      "exit": false,
+      "rules": [
+        "backlog"
+      ]
+    },
+    {
+      "state": "open",
+      "label": "Open",
+      "meaning": "Triaged and ready to pick up",
+      "hint": "Triaged and ready to pick up",
+      "set_by": "Triage",
+      "exit": false,
+      "rules": []
+    },
+    {
+      "state": "blocked",
+      "label": "Blocked",
+      "meaning": "Waiting on a named blocker (ticket, person, external)",
+      "hint": "Waiting on a named blocker: a ticket, a person or something external",
+      "set_by": "Anyone",
+      "exit": false,
+      "rules": [
+        "blocked"
+      ]
+    },
+    {
+      "state": "in_progress",
+      "label": "In progress",
+      "meaning": "Actively worked on: a live session, branch or PR",
+      "hint": "Actively worked on: a live session, branch or PR",
+      "set_by": "Worker or person",
+      "exit": false,
+      "rules": [
+        "progress"
+      ]
+    },
+    {
+      "state": "qa",
+      "label": "QA",
+      "meaning": "Built; in review, a gate or CI, waiting to merge",
+      "hint": "Built; in review, a gate or CI, waiting to merge",
+      "set_by": "Worker",
+      "exit": false,
+      "rules": []
+    },
+    {
+      "state": "done",
+      "label": "Done",
+      "meaning": "Merged. For non-code work (concepts, research): the result exists and passed review",
+      "hint": "Merged, or for non-code work: the result exists and passed review",
+      "set_by": "Merge or gate",
+      "exit": false,
+      "rules": [
+        "done"
+      ]
+    },
+    {
+      "state": "delivered",
+      "label": "Delivered",
+      "meaning": "Live in a published release",
+      "hint": "Live in a published release",
+      "set_by": "Automatic on release publish",
+      "exit": false,
+      "rules": [
+        "publish",
+        "accept"
+      ]
+    },
+    {
+      "state": "accepted",
+      "label": "Accepted",
+      "meaning": "Confirmed by a person or customer, or automatically after the period",
+      "hint": "Confirmed by a person or customer, or automatically 30 days after delivery",
+      "set_by": "Person, or the 30-day rule",
+      "exit": false,
+      "rules": []
+    },
+    {
+      "state": "cancelled",
+      "label": "Cancelled",
+      "meaning": "Won’t be done (duplicate, obsolete, superseded); a reason is required",
+      "hint": "Won’t be done: duplicate, obsolete or superseded. Needs a reason",
+      "set_by": "Triage",
+      "exit": true,
+      "rules": []
+    },
+    {
+      "state": "archived",
+      "label": "Archived",
+      "meaning": "Kept for history, hidden",
+      "hint": "Kept for history, hidden",
+      "set_by": "Person",
+      "exit": true,
+      "rules": []
+    }
+  ],
+  "queued": {
+    "label": "Queued",
+    "meaning": "Open plus a place in the work queue (AEON-522); the next free agent picks it up, then it becomes In progress automatically.",
+    "is_status": false
+  },
+  "autopilot": {
+    "enabled": true,
+    "effective_enabled": true,
+    "project_mode": "inherit",
+    "rules": {
+      "new": {
+        "enabled": true,
+        "days": 7
+      },
+      "backlog": {
+        "enabled": true,
+        "days": 90
+      },
+      "blocked": {
+        "enabled": true,
+        "days": 14
+      },
+      "progress": {
+        "enabled": true,
+        "days": 3
+      },
+      "done": {
+        "enabled": true,
+        "days": 14
+      },
+      "accept": {
+        "enabled": true,
+        "days": 30
+      },
+      "publish": {
+        "enabled": true
+      }
+    }
+  },
+  "triage": {
+    "mode": "apply",
+    "available": false
+  },
+  "limits_source": "defaults"
+}
