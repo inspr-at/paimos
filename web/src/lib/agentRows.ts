@@ -30,7 +30,11 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 
 // A session as the API sends it. Nothing outside the ledger may hold one: see
 // HarnessSession in lib/agents.ts for the type the page works with.
+export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
+  current_activity?: CurrentAgentActivity | null
+  current_activity_history?: CurrentAgentActivity[]
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import('./attachWatch').AttachStatus

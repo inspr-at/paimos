@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/rules"
@@ -522,7 +523,7 @@ func (rt *runtime) harnessBind() *Command {
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
 	var capacityOptions heartbeatCapacity
-	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, doing, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
 	label := omittedLabel
@@ -539,6 +540,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
+			fs.string(&doing, "doing", 0, "public activity summary, at most 60 characters")
 			fs.string(&model, "model", 0, "model name")
 			fs.string(&effort, "effort", 0, "reasoning effort")
 			fs.string(&accountLabel, "account-label", 0, "subscription or account display name (never a credential)")
@@ -614,6 +616,13 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			}
 			if note != "" {
 				body["activity_note"] = note
+			}
+			if doing != "" {
+				text, valid := agentactivity.CleanSummary(doing)
+				if !valid {
+					return usagef("--doing must be a public summary of at most 60 characters")
+				}
+				body["doing"] = text
 			}
 			for key, value := range map[string]string{"model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch} {
 				if value != "" {

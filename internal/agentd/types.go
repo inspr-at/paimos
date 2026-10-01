@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -86,16 +87,19 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
-	Activity         string                 `json:"-"`
-	Ownership        *ownedprocess.Identity `json:"-"`
-	ActivitySequence int64                  `json:"-"`
-	ID               string                 `json:"id"`
-	ProjectID        string                 `json:"project_id"`
-	Lease            string                 `json:"-"`
-	Harness          string                 `json:"-"`
-	Model            string                 `json:"model,omitempty"`
-	ReasoningEffort  string                 `json:"reasoning_effort,omitempty"`
-	AccountLabel     string                 `json:"account_label,omitempty"`
+	Doing            string                  `json:"-"`
+	DoingAt          time.Time               `json:"-"`
+	ToolActivity     *agentactivity.Activity `json:"-"`
+	Activity         string                  `json:"-"`
+	Ownership        *ownedprocess.Identity  `json:"-"`
+	ActivitySequence int64                   `json:"-"`
+	ID               string                  `json:"id"`
+	ProjectID        string                  `json:"project_id"`
+	Lease            string                  `json:"-"`
+	Harness          string                  `json:"-"`
+	Model            string                  `json:"model,omitempty"`
+	ReasoningEffort  string                  `json:"reasoning_effort,omitempty"`
+	AccountLabel     string                  `json:"account_label,omitempty"`
 }
 
 type HarnessControl struct {
@@ -243,7 +247,9 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
-	VendorLimit *capacity.LimitHit
+	Doing        string
+	ToolActivity *agentactivity.Activity
+	VendorLimit  *capacity.LimitHit
 
 	Activity               string // busy or idle, independent of the run process lifetime.
 	Capacity               []capacity.Reading

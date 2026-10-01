@@ -479,3 +479,4 @@
 4 22407 github.com/inspr-at/paimos/internal/usagedashboard
 4 8973 github.com/inspr-at/paimos/internal/views
 4 4 github.com/inspr-at/paimos/scripts/ci-go-shards
+4 0 github.com/inspr-at/paimos/internal/agentactivity

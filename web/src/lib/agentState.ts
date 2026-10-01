@@ -53,7 +53,8 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
   // History is read with a detail only. It stays until the next detail read replaces it,
   // so a panel does not blink between a list row and the detail that follows it.
   carry('metadata_history')
-  carry('activity_history')
+  carry('activity_history', incoming.agent_activity_mode === undefined || incoming.agent_activity_mode === 'agent_summary')
+  carry('current_activity_history', incoming.agent_activity_mode !== 'off')
   if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return { ...incoming, ...carried }
   return {
     ...incoming,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -42,27 +43,29 @@ type LiveAgent struct {
 	// Finished is required in every live row, never omitted: the session reported
 	// 100% and stopped with a recorded clean exit (aeon_session_finished, AEON-437).
 	// It is derived, so a viewer who may not read the stop reason gets it too.
-	Finished        bool        `json:"finished"`
-	ProjectID       string      `json:"project_id"`
-	SessionID       string      `json:"session_id,omitempty"`
-	PrincipalID     string      `json:"principal_id,omitempty"`
-	Name            string      `json:"name,omitempty"`
-	DisplayLabel    *string     `json:"display_label,omitempty"`
-	Harness         string      `json:"harness"`
-	Model           *string     `json:"model,omitempty"`
-	ReasoningEffort *string     `json:"reasoning_effort,omitempty"`
-	AccountLabel    *string     `json:"account_label,omitempty"`
-	HarnessVersion  *string     `json:"harness_version,omitempty"`
-	Management      string      `json:"management_mode"`
-	Role            string      `json:"role"`
-	Phase           string      `json:"phase"`
-	Activity        string      `json:"activity"`
-	ActivityNote    *string     `json:"activity_note,omitempty"`
-	ActivityNoteID  *int64      `json:"activity_note_id,omitempty"`
-	Ticket          *LiveTicket `json:"ticket"`
-	Since           time.Time   `json:"since"`
-	HeartbeatAt     *time.Time  `json:"heartbeat_at"`
-	EtaStale        bool        `json:"eta_stale,omitempty"`
+	Finished          bool                    `json:"finished"`
+	ProjectID         string                  `json:"project_id"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	PrincipalID       string                  `json:"principal_id,omitempty"`
+	Name              string                  `json:"name,omitempty"`
+	DisplayLabel      *string                 `json:"display_label,omitempty"`
+	Harness           string                  `json:"harness"`
+	Model             *string                 `json:"model,omitempty"`
+	ReasoningEffort   *string                 `json:"reasoning_effort,omitempty"`
+	AccountLabel      *string                 `json:"account_label,omitempty"`
+	HarnessVersion    *string                 `json:"harness_version,omitempty"`
+	Management        string                  `json:"management_mode"`
+	Role              string                  `json:"role"`
+	Phase             string                  `json:"phase"`
+	Activity          string                  `json:"activity"`
+	CurrentActivity   *agentactivity.Activity `json:"current_activity,omitempty"`
+	AgentActivityMode string                  `json:"agent_activity_mode,omitempty"`
+	ActivityNote      *string                 `json:"activity_note,omitempty"`
+	ActivityNoteID    *int64                  `json:"activity_note_id,omitempty"`
+	Ticket            *LiveTicket             `json:"ticket"`
+	Since             time.Time               `json:"since"`
+	HeartbeatAt       *time.Time              `json:"heartbeat_at"`
+	EtaStale          bool                    `json:"eta_stale,omitempty"`
 	// ProgressPct is the last reported percent. A worker at 100% that then goes
 	// quiet, or stops cleanly, is finished, not lost (AEON-437).
 	ProgressPct *int `json:"progress_pct,omitempty"`
@@ -90,7 +93,7 @@ type LivePage struct {
 // range itself, and the LIMIT ends the walk. The predicates match the partial
 // index's so the planner can use it.
 const liveSelect = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.display_label,s.harness,s.model,s.reasoning_effort,s.account_label,s.harness_version,s.management,s.role,s.phase,s.activity,s.activity_note,latest.id,
-       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason,s.eta_reported_at,s.progress_pct,aeon_session_finished(s.stopped_at,s.stop_reason,s.progress_pct)
+       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,s.stopped_at,s.stop_reason,s.eta_reported_at,s.progress_pct,aeon_session_finished(s.stopped_at,s.stop_reason,s.progress_pct),s.doing,s.doing_at,s.tool_activity,s.tool_activity_at
   FROM harness_sessions s
   LEFT JOIN LATERAL (SELECT id FROM harness_activity_notes WHERE session_id=s.id ORDER BY id DESC LIMIT 1) latest ON true
   LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
@@ -125,6 +128,10 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
  ORDER BY coalesce(s.stopped_at,s.heartbeat_at,s.created_at) DESC,s.id DESC LIMIT $1`
 		args = []any{maxLive + 1}
 	}
+	mode, err := activityMode(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -132,12 +139,18 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	found := []LiveAgent{}
 	for rows.Next() {
 		var v LiveAgent
+		projection := Session{AgentActivityMode: mode}
 		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat, reported *time.Time
 		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.DisplayLabel, &v.Harness, &v.Model, &v.ReasoningEffort, &v.AccountLabel, &v.HarnessVersion, &v.Management, &v.Role, &v.Phase, &v.Activity, &v.ActivityNote, &v.ActivityNoteID,
-			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason, &reported, &v.ProgressPct, &v.Finished); err != nil {
+			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat, &v.StoppedAt, &v.StopReason, &reported, &v.ProgressPct, &v.Finished, &projection.doing, &projection.doingAt, &projection.toolActivity, &projection.toolActivityAt); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		projectActivity(&projection, out.At)
+		v.CurrentActivity, v.AgentActivityMode = projection.CurrentActivity, mode
+		if mode != agentactivity.Summary {
+			v.ActivityNote, v.ActivityNoteID = nil, nil
 		}
 		stampLiveEta(&v, reported, interval, out.At)
 		if heartbeat != nil {
@@ -196,6 +209,7 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 				agent.LimitWindow = ""
 				agent.LimitResetsAt = nil
 				agent.AttentionReasons = nil
+				agent.CurrentActivity, agent.AgentActivityMode = nil, ""
 				agent.ActivityNote = nil
 				agent.ActivityNoteID = nil
 				agent.Model, agent.ReasoningEffort, agent.AccountLabel, agent.HarnessVersion = nil, nil, nil, nil

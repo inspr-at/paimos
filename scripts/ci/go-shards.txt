@@ -477,3 +477,4 @@
 7 444 github.com/inspr-at/paimos/internal/reportercontract
 7 30987 github.com/inspr-at/paimos/internal/search
 7 22407 github.com/inspr-at/paimos/internal/usagedashboard
+7 0 github.com/inspr-at/paimos/internal/agentactivity

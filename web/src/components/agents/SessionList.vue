@@ -18,6 +18,7 @@ import ListeningLabel from './ListeningLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
+import { currentActivity, workerActivity } from './activity'
 import HarnessBadge from './HarnessBadge.vue'
 import ProviderMark from './ProviderMark.vue'
 import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
@@ -80,6 +81,9 @@ function toggleStopped(branch: Branch) {
   expanded.value[id] = true
 }
 const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount, 0)
+const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(child => [child.view, ...descendants(child)])
+const activityLine = (branch: Branch) => branch.view.session.agent_activity_mode === 'off' ? '' :
+  (branch.view.session.role === 'coordinator' && !branch.view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(branch.view, props.now)
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
 const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
@@ -373,6 +377,7 @@ function rowClick(event: MouseEvent, id: string) {
                   <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
                   <time v-if="view.session.heartbeat_at" class="ctx-beat" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
                 </span>
+                <span v-if="activityLine(branch)" class="current-activity" :title="activityLine(branch)">{{ activityLine(branch) }}</span>
               </span>
             </RouterLink>
             <span v-if="view.session.stopped_at && view.session.handed_over_to_id" class="lineage">
@@ -566,6 +571,7 @@ function rowClick(event: MouseEvent, id: string) {
 .who { display: grid; min-width: 0; line-height: 1.25; }
 .result { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-context { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 450; }
+.current-activity { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The heartbeat has its own column on wide rows; phones say it inline here. */
 .ctx-beat { display: none; flex: none; white-space: nowrap; }

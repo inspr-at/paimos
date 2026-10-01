@@ -5186,6 +5186,9 @@ paths:
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
                 activity_note: {type: string, minLength: 1, maxLength: 120, description: Plain text; whitespace trimmed and control characters stripped.}
+                doing: {type: string, minLength: 1, maxLength: 60, description: "Public agent summary without credentials, paths, URLs or command arguments. Collected only in agent_summary mode."}
+                doing_at: {type: string, format: date-time, description: "Optional observation time; defaults to server receipt. Older than ten minutes is ignored; future times beyond thirty seconds are rejected."}
+                tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
                 display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
@@ -5395,6 +5398,24 @@ paths:
             image/svg+xml: {schema: {type: string, format: binary}}
         '304': {description: Not modified}
         '404': {description: No logo}
+  /settings/agent-activity:
+    get:
+      operationId: getAgentActivityMode
+      description: Workspace Agent activity policy inherited by projects. Requires settings.manage.
+      responses:
+        '200': {description: Current policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
+    put:
+      operationId: putAgentActivityMode
+      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AgentActivitySetting'}
+      responses:
+        '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
+        '400': {description: Unknown mode}
+        '403': {description: Settings permission required}
   /settings/heartbeat-lost:
     get:
       operationId: getHeartbeatLost
@@ -8098,7 +8119,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.9']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.10']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -8412,10 +8433,13 @@ components:
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
+        doing: {type: string, maxLength: 60, description: Public summary on an active poll only; collected only in agent_summary mode.}
+        tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
       properties:
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Workspace policy; spend summary tokens only in agent_summary mode.}
         request_id: {type: string, format: uuid}
         request_digest: {type: string}
         snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
@@ -12251,6 +12275,9 @@ components:
         commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
         activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
         activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Workspace policy; reporters spend summary tokens only in agent_summary mode. Default agent_summary.}
+        current_activity: {oneOf: [{$ref: '#/components/schemas/CurrentAgentActivity'}, {type: 'null'}], description: "Fresh agent summary preferred for ten minutes, then latest tool activity. Null when off. Existing activity busy/idle state is unchanged."}
+        current_activity_history: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/CurrentAgentActivity'}, description: "Bounded changed activities, newest first; detail only, hidden when off."}
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
         metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
@@ -12431,6 +12458,18 @@ components:
       properties:
         code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
         hint: {type: string}
+    AgentActivitySetting:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [off, tool_activity, agent_summary], default: agent_summary}
+    CurrentAgentActivity:
+      type: object
+      required: [text, source, at]
+      properties:
+        text: {type: string, minLength: 1, maxLength: 60, description: "Public summary or closed tool vocabulary; automatic editing includes only a safe source-file basename."}
+        source: {type: string, enum: [agent, auto]}
+        at: {type: string, format: date-time}
     HarnessActivityNote:
       type: object
       required: [note, at]
@@ -12627,6 +12666,8 @@ components:
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
         activity_note: {type: [string, 'null'], maxLength: 120, description: 'Current step, present only with harness.read at the project'}
+        current_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary]}
         activity_note_id: {type: integer, format: int64, description: Latest activity entry ID; present with the current step only where harness.read is granted.}
         ticket:
           description: The bound ticket and the project it lives in now
