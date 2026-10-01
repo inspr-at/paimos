@@ -178,7 +178,8 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 				return err
 			}
 			if q.Has("ack") {
-				out.Body = sequenceAck(record)
+				out.Body, err = sequenceAck(record)
+				return err
 			} else {
 				out.Body = marshal(formatRecord(record, stored))
 			}

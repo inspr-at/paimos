@@ -100,11 +100,18 @@ func deduplicateContent(ctx context.Context, tx pgx.Tx, st *session, raw []byte,
 	return Record{Document: projection, Bytes: string(original)}, true, err
 }
 
-func sequenceAck(record Record) json.RawMessage {
+func sequenceAck(record Record) (json.RawMessage, error) {
 	// Projection was produced or read by the store; do not apply a request-size
 	// limit while making a bounded acknowledgement for a large document.
-	doc, _ := decodeDocument(record.Document)
-	return marshal(map[string]any{"seq": number(doc["seq"])})
+	doc, err := decodeJSON(record.Document)
+	if err != nil {
+		return nil, err
+	}
+	seq, ok := integer(doc["seq"])
+	if !ok || seq < 1 {
+		return nil, fault(503, "unavailable")
+	}
+	return marshal(map[string]any{"seq": seq}), nil
 }
 
 func contentSequences(ctx context.Context, tx pgx.Tx, st *session, q url.Values) (json.RawMessage, error) {

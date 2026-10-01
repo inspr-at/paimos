@@ -527,7 +527,7 @@ func TestPendingContentLargeSnapshotsAndOrdinaryEventBound(t *testing.T) {
 	}
 	// Chunking does not remove the existing ordinary-event size restriction.
 	ordinary := f.record("turn")
-	object(ordinary["data"])["text"] = strings.Repeat("a", 1<<20)
+	object(ordinary["data"])["body"] = strings.Repeat("a", 1<<20)
 	raw = marshal(ordinary)
 	var err error
 	for offset := 0; offset < len(raw); offset += journalChunkBytes {

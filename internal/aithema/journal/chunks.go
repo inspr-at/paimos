@@ -103,7 +103,7 @@ func (s *Store) upload(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	if _, err := tx.Exec(ctx, `DELETE FROM aithema_journal_uploads WHERE `+where, key...); err != nil {
 		return nil, err
 	}
-	return sequenceAck(record), nil
+	return sequenceAck(record)
 }
 
 func readChunk(ctx context.Context, tx pgx.Tx, st *session, q url.Values) (json.RawMessage, error) {
