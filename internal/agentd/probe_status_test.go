@@ -59,6 +59,32 @@ func privateHome(t *testing.T) string {
 	return home
 }
 
+func TestClaudeBillingProbeRespectsEmailFence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		emails map[string]string
+		answer string
+		code   int
+		want   ProbeStatus
+	}{
+		{"fenced API key with matching email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
+		{"fenced API key without email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
+		{"fenced subscription", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0, ProbeStatus{OK: true, BillingMode: "subscription"}},
+		{"fenced unknown auth kind", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"new_kind"}`, 0, ProbeStatus{OK: true}},
+		{"unfenced API key", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{OK: true, BillingMode: "api"}},
+		{"unfenced failed command", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 1, ProbeStatus{Failure: ProbeUnavailable}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := fakeStatus(t, tc.answer, tc.code)
+			node, sdk := claudeAdapterDependencies(t, path)
+			a := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"k": privateHome(t)}, Emails: tc.emails}
+			if got := a.ProbeStatus(t.Context(), "k"); got != tc.want {
+				t.Fatalf("auth/billing result = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // AEON-299 review: only a confirmed sign-out is a sign-in problem; a probe that
 // cannot run or cannot be read is "unavailable".
 func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
@@ -83,11 +109,11 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		got  ProbeStatus
 		want ProbeStatus
 	}{
-		{"codex signed in", codex("Logged in using ChatGPT", 0), ProbeStatus{OK: true}},
+		{"codex signed in", codex("Logged in using ChatGPT", 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"codex signed out", codex("Not logged in", 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"codex unreadable", codex("segmentation fault", 2), ProbeStatus{Failure: ProbeUnavailable}},
 		{"codex signed in but failing", codex("Logged in using ChatGPT", 1), ProbeStatus{Failure: ProbeUnavailable}},
-		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true}},
+		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
 		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
@@ -197,7 +223,7 @@ func TestProbeStatusRejectsDuplicateKeys(t *testing.T) {
 		{"claude case alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","LOGGEDIN":false}`), unavailable},
 		{"claude escaped alias", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","logged\u0049n":false}`), unavailable},
 		{"claude duplicate unknown key", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai","x":1,"x":2}`), unavailable},
-		{"claude clean answer", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), ProbeStatus{OK: true}},
+		{"claude clean answer", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"cursor duplicate identity", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"42","userId":"7"}}`), unavailable},
 		{"cursor duplicate identity other first", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"7","userId":"42"}}`), unavailable},
 		{"cursor duplicate authenticated", cursor(`{"status":"unauthenticated","isAuthenticated":true,"isAuthenticated":false}`), unavailable},

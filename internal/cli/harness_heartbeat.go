@@ -115,6 +115,7 @@ type heartbeatOptions struct {
 	UsageID           string
 	CodexHome         string
 	GrokHome          string
+	AccountID         string
 	BillingMode       string
 	SubscriptionLabel string
 	PrintControls     bool
@@ -171,6 +172,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
 			fs.string(&o.GrokHome, "grok-home", 0, "Grok home (default $GROK_HOME or ~/.grok)")
+			fs.string(&o.AccountID, "account-id", 0, "Aeon account UUID; saved billing used when billing-mode is unknown")
 			fs.string(&o.BillingMode, "billing-mode", 0, "unknown, api, or subscription (default unknown)")
 			fs.string(&o.SubscriptionLabel, "subscription-label", 0, "public subscription label; only with --billing-mode subscription")
 			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
@@ -308,6 +310,12 @@ func (o *heartbeatOptions) prepare() error {
 	}
 	if heartbeatText(o.Host, 200) == "" {
 		return usagef("--host is required")
+	}
+	if o.AccountID != "" && o.Capacity.Account != "" && o.AccountID != o.Capacity.Account {
+		return usagef("usage and capacity accounts must match")
+	}
+	if o.AccountID != "" && !validUUID(o.AccountID) {
+		return usagef("invalid --account-id")
 	}
 	switch o.BillingMode {
 	case "", "unknown", "api", "subscription":

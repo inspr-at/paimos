@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 type Config struct {
@@ -150,6 +151,7 @@ type Supervisor struct {
 	closing             bool
 	blockedAccounts     map[string]bool
 	probedAccounts      map[string]bool
+	accountBilling      map[string]string
 	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
 	pollDiagnostic      func(string)
 	pollDiagnosticMu    sync.Mutex
@@ -525,6 +527,13 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		if !s.probePendingSince[account.ID].Equal(pendingSince) {
 			s.mu.Unlock()
 			continue
+		}
+		if s.accountBilling == nil {
+			s.accountBilling = map[string]string{}
+		}
+		s.accountBilling[account.ID] = "unknown"
+		if status.OK {
+			s.accountBilling[account.ID] = sessionusage.BillingMode(status.BillingMode)
 		}
 		if s.dependencyErrors == nil {
 			s.dependencyErrors = map[string]string{}
@@ -960,6 +969,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	billing := s.accountBilling[route.AccountID]
+	s.mu.Unlock()
+	if sessionusage.BillingMode(billing) == "unknown" {
+		billing = route.BillingMode
+	}
 	if usageAPI, ok := s.api.(sessionUsageAPI); ok {
 		entry.usage = newSessionUsageReporter(usageAPI, entry.harness, func() bool {
 			entry.mu.Lock()
@@ -970,6 +985,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			entry.harnessArchived = true
 			entry.mu.Unlock()
 		})
+		entry.usage.billing = sessionusage.BillingMode(billing)
+		entry.usage.accountID = route.AccountID
+		entry.usage.plan = route.SubscriptionLabel
 	}
 	closeHarness := func(reason string) {
 		s.finishSessionUsage(entry)

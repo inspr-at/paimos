@@ -48,8 +48,9 @@ type Identity struct {
 
 // StatusError is an HTTP response that is not a success.
 type StatusError struct {
-	Status  int
-	Message string
+	Status        int
+	Message       string
+	AttachRefusal string
 }
 
 func (e *StatusError) Error() string {
@@ -145,7 +146,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 		return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload)}
+		var detail struct {
+			AttachRefusal string `json:"attach_refusal"`
+		}
+		_ = json.Unmarshal(payload, &detail)
+		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal}
 	}
 	if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 		return nil

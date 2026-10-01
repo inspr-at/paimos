@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -64,10 +65,10 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
 	}
 	if registered.State != "registered" {
-		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
+		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance refused attach registration; update agentd and Aeon"}
 	}
 	if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
-		return nil, errors.New("paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid")
+		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid"}
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {
@@ -104,17 +105,20 @@ func startupAttachIdentities(c agentsetup.RuntimeConfig) map[string]agentsetup.A
 func attachCommand(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("attach", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
-	var root string
+	var root, language string
+	var noBrowser bool
 	in := agentd.AttachLocalRequest{Operation: "preview"}
 	f.StringVar(&root, "setup-root", "", "paired local setup root")
+	f.StringVar(&language, "language", "en", "attach wording language: en or de")
+	f.BoolVar(&noBrowser, "no-browser", false, "print the approval link without opening a browser")
 	f.IntVar(&in.PID, "pid", 0, "running harness PID")
 	f.StringVar(&in.Harness, "harness", "", "paired harness name")
 	f.StringVar(&in.ProjectID, "project-id", "", "project UUID")
 	f.StringVar(&in.TicketID, "ticket-id", "", "ticket UUID")
 	f.StringVar(&in.Transcript, "transcript", "", "physical transcript file path for the default conversation watch")
 	f.BoolVar(&in.StatusOnly, "status-only", false, "report status without reading or sharing conversation text")
-	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) {
-		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only]")
+	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) || language != "en" && language != "de" {
+		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only] [--language en|de] [--no-browser]")
 	}
 	// Never read confirmation from stdin, an agent pipe, a flag or fetched text.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -143,7 +147,7 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	view, err := client.Attach(ctx, in)
 	if err != nil {
-		return err
+		return attachLocalizedFailure(err, language)
 	}
 	localID := view.ID
 	defer func() {
@@ -152,9 +156,12 @@ func attachCommand(args []string, out io.Writer) error {
 		_, _ = client.Attach(op, agentd.AttachLocalRequest{Operation: "detach", ID: localID})
 	}()
 	p := view.Snapshot.Process
-	verb, confirmation := "Attach", "ATTACH"
+	words := attachWording(language)
+	fmt.Fprintln(tty, words.Unlinked)
+	fmt.Fprintln(tty, words.PairingHelp)
+	verb := "Attach"
 	if !in.StatusOnly {
-		verb, confirmation = "Watch", "WATCH"
+		verb = "Watch"
 	}
 	fmt.Fprintf(tty, "%s this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nProject: %s · Ticket: %s\n", verb, view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.ProjectID, view.Snapshot.TicketID)
 	if in.StatusOnly {
@@ -164,19 +171,10 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
 	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
-	fmt.Fprintf(tty, "Type %s for the local check, then approve in your paired browser: ", confirmation)
-	answer, err := readAttachAnswer(ctx, reader)
+	view, err = confirmAttachApproval(ctx, reader, tty, out, view, language, noBrowser || runtime.GOOS != "darwin", client.Attach, openAttachBrowser)
 	if err != nil {
-		return err
+		return attachLocalizedFailure(err, language)
 	}
-	if answer != confirmation {
-		return errors.New("attach cancelled")
-	}
-	view, err = client.Attach(ctx, agentd.AttachLocalRequest{Operation: "confirm", ID: view.ID, Digest: view.Digest})
-	if err != nil {
-		return err
-	}
-	fmt.Fprint(out, attachApprovalNotice(view.Origin, view.Code, view.ExpiresAt, time.Now()))
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	previous := view.State
@@ -188,6 +186,10 @@ func attachCommand(args []string, out io.Writer) error {
 		case <-ticker.C:
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
 			if err != nil {
+				var detail *agentd.AttachLocalError
+				if errors.As(err, &detail) {
+					return attachLocalizedFailure(err, language)
+				}
 				return attachPollFailure(previous, view.ExpiresAt, time.Now())
 			}
 			if next.State == "confirmed_exited" || next.State == "detached" || next.State == "unreachable" {
@@ -198,6 +200,9 @@ func attachCommand(args []string, out io.Writer) error {
 				return errors.New(next.Reason)
 			}
 			if next.State != previous {
+				if next.State == "active" {
+					fmt.Fprintln(out, words.Linked)
+				}
 				fmt.Fprintln(out, attachStateLine(next.State, next.ConsentMode, in.StatusOnly))
 				previous = next.State
 			}
@@ -217,11 +222,12 @@ func attachApprovalNotice(origin, code string, expires *time.Time, now time.Time
 		fmt.Fprintf(&b, " (expires in %s)", left)
 	}
 	b.WriteString(".\n")
-	if len(code) != 9 || strings.Trim(code, "0123456789") != "" {
-		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter the attach code.\n", origin)
+	link := attachApprovalURL(origin, code)
+	if link == "" {
+		b.WriteString("  Open Aeon → Attach session and enter the attach code.\n")
 	} else {
-		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter code %s-%s-%s\n", origin, code[:3], code[3:6], code[6:])
-		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s/agents#attach=%s\n", origin, code)
+		fmt.Fprintf(&b, "  Open %s \u2192 Attach session and enter code %s-%s-%s\n", strings.Split(link, "#")[0], code[:3], code[3:6], code[6:])
+		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s\n", link)
 	}
 	b.WriteString("Keep this terminal open; Ctrl-C detaches.\n")
 	return b.String()

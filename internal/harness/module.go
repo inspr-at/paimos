@@ -66,6 +66,7 @@ import (
 )
 
 type Module struct {
+	planningStart  func(context.Context, pgx.Tx, string, string) error
 	pool           *pgxpool.Pool
 	controlText    controlRelay
 	ownershipClock func(context.Context, pgx.Tx) (time.Time, error)
@@ -73,7 +74,14 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
+// The server supplies its planning writer without coupling harness to node APIs.
+func New(pool *pgxpool.Pool, planningStart ...func(context.Context, pgx.Tx, string, string) error) httpapi.Module {
+	m := &Module{pool: pool}
+	if len(planningStart) > 0 {
+		m.planningStart = planningStart[0]
+	}
+	return m
+}
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/inbox/session-binding", m.resolveSessionBinding)
@@ -790,6 +798,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
+	if s.TicketNodeID != nil && m.planningStart != nil {
+		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+			return nil, err
+		}
+	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
 		return nil, err
 	}
@@ -1052,6 +1065,11 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
 	if err != nil {
 		return nil, err
+	}
+	if s.TicketNodeID != nil && m.planningStart != nil && !same(before.TicketNodeID, s.TicketNodeID) {
+		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+			return nil, err
+		}
 	}
 	return s, record(ctx, tx, p, s, "bound", before, s)
 }
