@@ -33,9 +33,14 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 	if err := authz.RequirePattern(ctx, "POST /api/phone-approvals/{kind}/{requestId}/decision", authz.Scope{AnyProject: true}); err != nil {
 		t.Fatalf("project member cannot open phone decision route: %v", err)
 	}
-	pending, foreign, expired, decided := f.request(t), f.request(t), f.request(t), f.request(t)
-	f.exec(t, `UPDATE approval_requests SET resource_kind='project',resource_id=$2 WHERE id=$1`, foreign, otherProject)
-	f.exec(t, `UPDATE approval_requests SET expires_at=now()-interval '1 second' WHERE id=$1`, expired)
+	requestFor := func(resourceID any, expired bool) string {
+		var id string
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,'nodes.read',CASE WHEN $3::uuid IS NULL THEN 'tenant' ELSE 'project' END,$3,'Phone fixture',CASE WHEN $4 THEN now()-interval '1 second' ELSE now()+interval '2 hours' END) RETURNING id::text`, f.p.TenantID, f.agent.ID, resourceID, expired).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	pending, foreign, expired, decided := f.request(t), requestFor(otherProject, false), requestFor(nil, true), f.request(t)
 	f.exec(t, `INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision,reason) VALUES($1,$2,$3,'denied','Fixture decision')`, f.p.TenantID, decided, f.p.ID)
 	proof := DecisionProof{Decision: Decision{Decision: "approved", Hash: strings.Repeat("0", 64)}}
 	for _, p := range []tenant.Principal{f.other, f.p} {
@@ -65,7 +70,7 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
 	f := fixtureFor(t)
 	f.m.pairing = agentpairing.New(f.db.App, testOrigin, "phone-test", nil)
-	project := f.project(t, "PHONE-ATTACH")
+	project := f.project(t, "PHONE-3")
 	var key, pairing, computer, id string
 	queries := []struct {
 		sql  string
