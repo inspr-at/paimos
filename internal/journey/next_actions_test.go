@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,7 +43,7 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 			}
 			continue
 		}
-		if err := db.InTenant(t.Context(), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id,brief_confirmed_at,decision,requirements_revision,agreed_requirements_revision,agreed_requirements_digest_sha256) VALUES($1,$2,now(),'go',1,1,$3)`, f.tenant, project, digest)
 			return err
 		}); err != nil {
