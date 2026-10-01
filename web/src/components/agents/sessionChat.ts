@@ -4,6 +4,7 @@
 // watermark is the highest sent_event_id this person has had in view. The server
 // marker follows the person across devices; this browser's copy is the offline
 // fallback.
+import { parseJson } from '../../lib/json.ts'
 import type { HarnessSession, MessageStatus, ProjectMessage } from '../../lib/agents.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
@@ -31,7 +32,7 @@ export function initialTab(query: unknown, store: Store | null = storage()): Ses
 
 function readAll(store: Store | null): Record<string, ReadMark> {
   try {
-    const parsed = JSON.parse(store?.getItem(READ_KEY) ?? '{}')
+    const parsed = parseJson(store?.getItem(READ_KEY) ?? '{}')
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, ReadMark> : {}
   } catch { return {} }
 }

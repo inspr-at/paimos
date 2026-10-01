@@ -1,8 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { api } from '../../lib/api'
-import { sessionResource } from '../../lib/agentRows'
+import { readSessionProvenance } from '../../lib/agentRows'
 import { absoluteTime, relativeTime } from '../../lib/work'
 
 // Instruction versions recorded for one session: logical names, digests and
@@ -54,7 +53,7 @@ watch(() => [props.projectId, props.sessionId], async () => {
   state.value = 'loading'
   page.value = { revisions: [], truncated: false }
   try {
-    const response = await api(sessionResource(projectId, sessionId, 'provenance'))
+    const response = await readSessionProvenance(projectId, sessionId)
     if (!response.ok) throw new Error('unavailable')
     const body = await response.json() as ProvenancePage
     if (props.projectId !== projectId || props.sessionId !== sessionId) return

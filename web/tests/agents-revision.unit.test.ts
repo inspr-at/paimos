@@ -211,6 +211,33 @@ it('the global run list and a per-agent list that arrive out of order never rewi
   expect(agents.recentRuns('agent').map(r => r.status)).toEqual(['completed'])
 })
 
+// Round 1's exact r1 race: a global read starts first but observes the
+// completed row late; a later per-agent read snapshots running at the SAME
+// event position. Row updates need not append an event, so position ties must
+// not let the later request's older row win.
+it('r1 is not rewound by a stale per-agent response at equal position with a later request start', async () => {
+  const agents = useAgents()
+  runs = [run('running', 1)]
+  late = /^\/runs\?limit=200$/
+  const global = agents.loadAll()
+  await vi.waitFor(() => expect(held).toHaveLength(1))
+  late = null
+  hold = /^\/runs\?.*agent=agent/
+  const perAgent = agents.refreshAgentRuns('agent')
+  await vi.waitFor(() => expect(held).toHaveLength(2))
+  hold = null
+  // Only the row's revision advances. Both snapshots name event position 10.
+  runs = [run('completed', 2)]
+  held.shift()!()
+  await global
+  expect(position).toBe(10)
+  expect(agents.runs.r1).toMatchObject({ status: 'completed', row_version: 2 })
+  held.shift()!()
+  await perAgent
+  expect(agents.runs.r1).toMatchObject({ status: 'completed', row_version: 2 })
+  expect(agents.recentRuns('agent').map(row => row.status)).toEqual(['completed'])
+})
+
 it('a write that never calls afterWrite still keeps a held list read from undoing it', async () => {
   const agents = useAgents()
   await agents.refreshSessions()

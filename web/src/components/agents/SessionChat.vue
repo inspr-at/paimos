@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { APIError, api } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
-import { sessionResource } from '../../lib/agentRows'
+import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -58,7 +58,6 @@ function markRead(event: number, id: string) {
   // A repeated look at the same post must not postpone a flush that is already waiting.
   if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
 }
-const readPath = (projectId: string, sessionId: string) => sessionResource(projectId, sessionId, 'read-marker')
 // One trailing timer. Hide and unmount flush immediately. A failed send stays
 // in `pending` and leaves on the next flush, with no toast.
 let pending: ReadMark | null = null
@@ -94,12 +93,7 @@ function syncDivider() {
   newCount.value = unread.value.length
 }
 async function sendMark(projectId: string, sessionId: string, viewer: string, generation: number, next: ReadMark) {
-  const response = await api(readPath(projectId, sessionId), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ last_read_message_id: next.id, last_read_event_id: next.event }),
-    keepalive: true,
-  })
+  const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
   if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
@@ -139,7 +133,7 @@ function releaseMarkerHold(generation: number) {
 }
 async function pullReadMark(projectId: string, sessionId: string, viewer: string, generation: number) {
   try {
-    const response = await api(readPath(projectId, sessionId))
+    const response = await readSessionMarker(projectId, sessionId)
     if (generation !== readGeneration || s.value.id !== sessionId) return
     if (!response.ok) {
       releaseMarkerHold(generation)

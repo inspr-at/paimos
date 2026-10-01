@@ -8,11 +8,11 @@
 // other file from naming these endpoints.
 //
 // What is not a row stays a plain value: the answer to a control, a recovery preview, a
-// thread. Sub-resources of a session take their path from sessionResource.
+// thread. Sub-resources use fixed operations here; no path builder is exported.
 import { api, APIError } from './api.ts'
 import type { CapacityWait } from './capacityWait.ts'
 import type { AttentionReason } from './agentSignals.ts'
-import type { SessionChangeRequest } from './agents.ts'
+import type { SessionChangeRequest, SessionControl } from './agents.ts'
 import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
@@ -89,9 +89,9 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 }
 // The path of a session's own sub-resources (controls, recovery, requests, read marker,
 // watch, provenance). A session row itself is read only through this module.
-export const sessionResource = (projectId: string, sessionId: string, rest: string) => `/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}/${rest}`
+const sessionResource = (projectId: string, sessionId: string, rest: string) => `/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}/${rest}`
 // The same for the sub-resources that hang off a session by its id alone (its delivery rating).
-export const sessionResourceById = (sessionId: string, rest: string) => `/harness-sessions/${enc(sessionId)}/${rest}`
+const sessionResourceById = (sessionId: string, rest: string) => `/harness-sessions/${enc(sessionId)}/${rest}`
 
 // What one answer knows: the tick its request started at and, for a read, the position
 // of the snapshot it returned. A write's position is the write floor (api() raises it)
@@ -173,3 +173,27 @@ export const cancelRun = async (id: string) => {
   const at = await call<AgentRunRow>(`/runs/${enc(id)}/cancel`, 'POST')
   return rowOf(at.body, at)
 }
+
+// Fixed sub-resource operations keep raw session/run paths private. These return
+// controls, settings, previews and viewer metadata, never a session or run row.
+const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+export const readControlResponse = (project: string, session: string, control: string) => api(sessionResource(project, session, `controls/${enc(control)}`))
+export const readManagedSettings = (project: string, session: string) => api(sessionResource(project, session, 'managed-settings'))
+export const sendManagedControl = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'managed-controls'), post(body))
+export const sendSessionControl = async (project: string, session: string, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
+  (await call<SessionControl>(sessionResource(project, session, `controls/${kind}`), 'POST', {})).body
+export const readSessionControl = async (project: string, session: string, control: string): Promise<SessionControl> =>
+  (await call<SessionControl>(sessionResource(project, session, `controls/${enc(control)}`))).body
+export const requestManagedSessionControl = async (session: { project_id: string; id: string; process_ownership?: Readonly<ProcessOwnership> }, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
+  (await call<SessionControl>(sessionResource(session.project_id, session.id, 'managed-controls'), 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })).body
+export const sendSessionRequest = (project: string, session: string, body: unknown, signal?: AbortSignal) => api(sessionResource(project, session, 'requests'), { ...post(body), signal })
+export const readSessionRecovery = (project: string, session: string) => api(sessionResource(project, session, 'recovery'))
+export const archiveSession = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'archive'), post(body))
+export const forceStopSession = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'controls/force-stop'), post(body))
+export const readSessionProvenance = (project: string, session: string) => api(sessionResource(project, session, 'provenance'))
+export const readSessionMarker = (project: string, session: string) => api(sessionResource(project, session, 'read-marker'))
+export const writeSessionMarker = (project: string, session: string, body: { last_read_message_id: string; last_read_event_id: number }) => api(sessionResource(project, session, 'read-marker'), { ...post(body), method: 'PUT', keepalive: true })
+export const openSessionWatch = (project: string, session: string) => new EventSource(`/api${sessionResource(project, session, 'watch')}`)
+export const readSessionRating = (session: string, signal?: AbortSignal) => api(sessionResourceById(session, 'delivery-rating'), { signal })
+export const writeSessionRating = (session: string, body: { score: number | null; tags: string[]; comment: string }) => api(sessionResourceById(session, 'delivery-rating'), { ...post(body), method: 'PUT' })
+export const deleteSessionRating = (session: string) => api(sessionResourceById(session, 'delivery-rating'), { method: 'DELETE' })

@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import { fetchAccountCatalog, effortLabel, type AgentAccountCatalog } from '../../lib/accountCascade'
 import type { HarnessSession, SessionChangeRequest } from '../../lib/agents'
-import { readSessionRequests, sessionResource } from '../../lib/agentRows'
+import { readSessionRequests, sendSessionRequest } from '../../lib/agentRows'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession; now: number }>()
@@ -30,18 +30,11 @@ const recent = computed(() => {
   const sorted = [...controls.value].sort((a, b) => b.sequence - a.sequence)
   return [...sorted.filter(c => c.state !== 'completed'), ...sorted.filter(c => c.state === 'completed').slice(0, 3)]
 })
-const path = sessionResource(props.session.project_id, props.session.id, 'requests')
 let revision = 0
 let disposed = false, timer: ReturnType<typeof setTimeout> | undefined
 let retry: { signature: string; id: string } | undefined
 const abort = new AbortController()
 
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, { signal: abort.signal, ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
-  const data = await response.json()
-  if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
-  return data as T
-}
 async function refresh() {
   const observedRevision = revision
   try {
@@ -80,7 +73,10 @@ async function submit() {
   if (retry?.signature !== signature) retry = { signature, id: crypto.randomUUID() }
   busy.value = true; revision++; error.value = ''
   try {
-    const control = await json<SessionChangeRequest>(path, { ...body, request_id: retry.id })
+    const response = await sendSessionRequest(props.session.project_id, props.session.id, { ...body, request_id: retry.id }, abort.signal)
+    const data = await response.json()
+    if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
+    const control = data as SessionChangeRequest
     void agents.afterWrite()
     if (!disposed) {
       revision++

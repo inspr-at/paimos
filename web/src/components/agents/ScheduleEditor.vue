@@ -92,7 +92,7 @@ function pickModel(id: 'none' | NightModel) {
 function reset() {
   const def = defaultSchedule(draft.value.timezone)
   if (props.kind === 'week') { draft.value.week = def.week; draft.value.off_days = def.off_days; same.value = true }
-  else Object.assign(draft.value, { nights: def.nights, model: def.model, night: def.night, shifts: def.shifts, blocks: def.blocks })
+  else draft.value = { ...draft.value, nights: def.nights, model: def.model, night: def.night, shifts: def.shifts, blocks: def.blocks }
 }
 function fromMyHours() {
   const w = draft.value.week[refDay.value]

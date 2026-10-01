@@ -8,7 +8,7 @@ import {
   type AgentAccount, type AgentRun, type Approval, type HarnessSession, type ModelProfile, type Paged, type ProjectMessage, type SessionControl,
 } from '../lib/agents'
 import { cancelRun, getSession, listAllSessions, listRuns, type AgentRunRow, type HarnessSessionRow } from '../lib/agentRows'
-import type { Wire } from '../lib/wire'
+import { openRow, type Wire } from '../lib/wire'
 import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
@@ -16,8 +16,77 @@ import { managedControlSession } from '../lib/managedControl'
 import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
-import { carry, createReadOrder, lowestPosition, onReset, positionOf, readOrdered, stampAt, type ReadOrder } from '../lib/position'
-import { createLedger, type Admitted, type Ledger } from '../lib/ledger'
+import { carry, createReadOrder, lowestPosition, onReset, positionOf, readOrdered, stampAt, tick as requestTick, type ReadOrder } from '../lib/position'
+import type { Admitted, DeepReadonly, Ledger } from '../lib/ledger'
+
+// No exported factory or ledger instance: every component admits through this store.
+function freezeRow<T>(row: T): DeepReadonly<T> {
+  const seen = new WeakSet<object>()
+  const freeze = (value: unknown) => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return
+    seen.add(value)
+    for (const child of Object.values(value)) freeze(child)
+    Object.freeze(value)
+  }
+  freeze(row)
+  return row as DeepReadonly<T>
+}
+
+interface Entry<T> { row: Admitted<T>; revision?: number; position?: number; start: number; landed: number }
+
+interface LedgerOptions<T> {
+  // Builds the row to keep from the one held and the one admitted, for evidence the
+  // newer answer may omit (a bare mutation result has no list summaries). The default
+  // keeps the admitted row as it is.
+  combine?: (held: Admitted<T> | undefined, incoming: T) => DeepReadonly<T>
+}
+
+function createLedger<T extends { id: string }>(options: LedgerOptions<T> = {}) {
+  const entries = new Map<string, Entry<T>>()
+  const listeners = new Set<(ids: Set<string>) => void>()
+
+  function admits(held: Entry<T>, incoming: Omit<Entry<T>, 'row'>) {
+    if (held.revision !== undefined && incoming.revision === undefined) return false
+    // Asked after the held row landed: it cannot be older, so a lower answer means the log moved back.
+    const backwards = incoming.start > held.landed
+    if (incoming.revision !== undefined && held.revision !== undefined && incoming.revision !== held.revision) {
+      return incoming.revision > held.revision || backwards
+    }
+    if (incoming.position !== undefined && held.position !== undefined && incoming.position !== held.position) {
+      return incoming.position > held.position || backwards
+    }
+    return incoming.start >= held.start
+  }
+
+  return {
+    // Judges each wire row against the copy held and returns, in order, the row that
+    // stands for it: the admitted one, or the row held when the incoming one is older.
+    // Listeners hear which ids changed.
+    merge(wired: Wire<T>[]): Admitted<T>[] {
+      const landed = requestTick()
+      const changed = new Set<string>()
+      const standing = wired.map(wire => {
+        const { row, stamp } = openRow(wire)
+        const held = entries.get(row.id)
+        const incoming = { revision: stamp.rowVersion, position: stamp.position, start: stamp.start, landed }
+        if (held && !admits(held, incoming)) return held.row
+        const admitted = freezeRow(options.combine ? options.combine(held?.row, row) : row) as Admitted<T>
+        entries.set(row.id, { ...incoming, row: admitted })
+        changed.add(row.id)
+        return admitted
+      })
+      if (changed.size) for (const listen of listeners) listen(changed)
+      return standing
+    },
+    get: (id: string): Admitted<T> | undefined => entries.get(id)?.row,
+    // Called after a merge replaced rows, with their ids: a view that copied a row follows it.
+    subscribe(listen: (ids: Set<string>) => void) {
+      listeners.add(listen)
+      return () => { listeners.delete(listen) }
+    },
+    clear() { entries.clear() },
+  }
+}
 
 // forbidden: not for this person; error: the read failed (any other status).
 export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
@@ -64,10 +133,11 @@ export const useAgents = defineStore('agents', () => {
     for (const id of ids) standingSessions.value.set(id, sessionLedger.get(id)!)
     triggerRef(standingSessions)
   })
-  onReset(() => { sessionLedger.clear(); runLedger.clear(); standingSessions.value = new Map() })
+  onReset(() => { sessionLedger.clear(); runLedger.clear(); standingSessions.value = new Map(); runs.value = {} })
   // The session list and the ticket-scoped reads share one order for what the
   // list holds: the server's position decides, and a tie goes to the read that started later.
   const sessionsOrder = createReadOrder()
+  const initialSessions: HarnessSession[] = []
   const sessionsRead = usePolledData(async (): Promise<Wire<HarnessSessionRow>[]> => {
     await preferencesReady
     const out: Wire<HarnessSessionRow>[] = []
@@ -84,7 +154,7 @@ export const useAgents = defineStore('agents', () => {
     } while (cursor)
     // The list as a whole includes what its oldest page did.
     return stampAt(out, { position: lowestPosition(positions) })
-  }, [] as HarnessSession[], items => {
+  }, initialSessions, items => {
     activityEvidence.value = new Map(items.map(item => [item.id, advanceActivity(activityEvidence.value.get(item.id), item)]))
     now.value = Math.max(now.value, Date.now())
   }, { order: sessionsOrder, adopt: rows => once(sessionLedger.merge(rows)) })
@@ -137,7 +207,8 @@ export const useAgents = defineStore('agents', () => {
     for (const id of ids) next[id] = runLedger.get(id)!
     runs.value = next
   })
-  const runsRead = usePolledData(() => listRuns({ limit: 200 }), { items: [] as AgentRun[], next_cursor: null as string | null } as Paged<AgentRun>, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
+  const initialRuns: Paged<AgentRun> = { items: [], next_cursor: null }
+  const runsRead = usePolledData(() => listRuns({ limit: 200 }), initialRuns, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
   const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------

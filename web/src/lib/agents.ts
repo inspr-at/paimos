@@ -6,7 +6,7 @@ import type { DeployTarget } from './deployTarget'
 import { api, APIError } from './api.ts'
 import { stamp, tick } from './position.ts'
 import type { Admitted } from './ledger.ts'
-import { sessionResource, type AgentRunRow, type HarnessSessionRow } from './agentRows.ts'
+import { sendSessionControl, requestManagedSessionControl, readSessionControl, type AgentRunRow, type HarnessSessionRow } from './agentRows.ts'
 
 // Sessions and runs are fetched only by agentRows.ts and shown only after the ledger
 // admitted them (AEON-449): the types a component works with are the admitted ones.
@@ -96,12 +96,9 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
   const text = q.toString()
   return text ? `?${text}` : ''
 }
-export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(sessionResource(projectId, sessionId, `controls/${kind}`), 'POST', {})
-// A managed_control_v1 session takes Interrupt and Stop through the
-// ownership-aware route, bound to the exact process generation (AEON-291).
-export const requestManagedControl = (session: HarnessSession, kind: SessionControl['kind']) =>
-  request<SessionControl>(sessionResource(session.project_id, session.id, 'managed-controls'), 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })
-export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(sessionResource(projectId, sessionId, `controls/${enc(controlId)}`))
+export const requestControl = sendSessionControl
+export const requestManagedControl = requestManagedSessionControl
+export const getControl = readSessionControl
 export const setPiAccountModel = (id: string, model: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/model`, 'PUT', { model })
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
 export interface AccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }

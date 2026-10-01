@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { dispatchHint, launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
 import { APIError } from '../src/lib/api'
 import type { AgentAccount, AgentRun, ModelProfile } from '../src/lib/agents'
 import type { AgentRunRow } from '../src/lib/agentRows'
-import { createLedger } from '../src/lib/ledger'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAgents } from '../src/stores/agents'
+import { resetPositions } from '../src/lib/position'
 import { wired } from './wire-fixtures'
 import type { WorkNode } from '../src/lib/api'
 
@@ -14,9 +16,11 @@ const order = { node_id: 'order', status: 'draft', revision: 3, assignee_princip
 const queued = { id: 'run', work_order_id: 'order', agent_principal_id: 'agent', model_profile_id: 'model', status: 'queued' } as AgentRun
 const selection = { ticket, agentId: 'agent', profileId: 'model' }
 // The page's run ledger: what startAgent reads and launches is judged by it before it is used (AEON-449).
+vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
+beforeEach(() => { setActivePinia(createPinia()); resetPositions() })
 function admission() {
-  const ledger = createLedger<AgentRunRow>()
-  return { run: (wire: Parameters<typeof ledger.merge>[0][number]) => ledger.merge([wire])[0], runs: (wires: Parameters<typeof ledger.merge>[0]) => ledger.merge(wires) }
+  const agents = useAgents()
+  return { run: agents.admitRun, runs: agents.admitRuns }
 }
 const now = Date.parse('2026-09-26T14:00:00Z')
 function account(overrides: Partial<AgentAccount> = {}): AgentAccount {

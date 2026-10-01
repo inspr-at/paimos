@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A session or run row as the server sent it, carried with what it knows about its
 // own answer (AEON-449). The type is opaque on purpose: nothing can read a field of a
-// Wire row, render it or keep it in a list. The only way out is ledger.ts, which judges
+// Wire row, render it or keep it in a list. The only way out is stores/agents.ts, which judges
 // it against the copy it already holds, and the only way in is lib/agentRows.ts, the
 // one module that talks to the session and run endpoints. So a row that never passed
 // the ledger has no way to reach a component: the compiler refuses it.
 //
 // Two imports are fenced by eslint.config.js: wrapRow belongs to agentRows.ts and
-// openRow to ledger.ts.
+// openRow to stores/agents.ts.
 
 // What an answer knows about one row. The server's own revision decides first. The
 // event-log position is snapshot metadata of a list read (a mutation result carries

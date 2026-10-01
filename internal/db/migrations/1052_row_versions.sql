@@ -7,8 +7,15 @@
 -- only ever grow: the new value derives from the old one under the row lock.
 -- This is separate from harness_sessions.revision, which is an optimistic-lock
 -- token that only some writers advance.
-ALTER TABLE harness_sessions ADD COLUMN row_version bigint NOT NULL DEFAULT 1 CHECK (row_version > 0);
-ALTER TABLE agent_runs ADD COLUMN row_version bigint NOT NULL DEFAULT 1 CHECK (row_version > 0);
+SET LOCAL lock_timeout = '5s';
+
+-- A constant default adds the column without rewriting existing rows. NOT VALID
+-- avoids scanning hot tables while ALTER TABLE holds ACCESS EXCLUSIVE.
+ALTER TABLE harness_sessions ADD COLUMN row_version bigint NOT NULL DEFAULT 1;
+ALTER TABLE agent_runs ADD COLUMN row_version bigint NOT NULL DEFAULT 1;
+ALTER TABLE harness_sessions ADD CONSTRAINT harness_sessions_row_version_check CHECK (row_version > 0) NOT VALID;
+ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_row_version_check CHECK (row_version > 0) NOT VALID;
+-- Validation runs in 1054, after this transaction releases its DDL locks.
 
 CREATE FUNCTION aeon_bump_row_version() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

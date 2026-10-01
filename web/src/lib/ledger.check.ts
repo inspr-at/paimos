@@ -9,6 +9,12 @@ import type { AgentRun, HarnessSession } from './agents'
 import type { AgentRunRow, HarnessSessionRow } from './agentRows'
 import type { Wire } from './wire'
 import type { useAgents } from '../stores/agents'
+// @ts-expect-error ledger creation is private to the canonical store
+import { createLedger } from './ledger'
+// @ts-expect-error session paths cannot be obtained outside their fetch module
+import { sessionResource } from './agentRows'
+// @ts-expect-error id-only paths are private as well
+import { sessionResourceById } from './agentRows'
 
 declare const raw: HarnessSessionRow
 declare const rawRun: AgentRunRow
@@ -36,3 +42,14 @@ export const fromStore: HarnessSession | undefined = agents.views[0]?.session
 export const runFromStore: AgentRun | undefined = agents.runs.any
 // @ts-expect-error a raw row cannot be put into what the store holds
 held.value.push(raw)
+
+// @ts-expect-error admitted scalar fields cannot be changed
+admitted.phase = 'stopped'
+// @ts-expect-error changing the version would bypass revision comparison
+admitted.row_version = 999
+// @ts-expect-error nested objects cannot be changed either
+admitted.project!.title = 'rewritten'
+// @ts-expect-error nested arrays cannot be mutated
+admitted.advertised_capabilities.push('managed_control_v1')
+// @ts-expect-error nested array elements are readonly
+admitted.metadata_history![0]!.value = 'rewritten'

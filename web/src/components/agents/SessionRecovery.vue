@@ -2,11 +2,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import type { HarnessSession } from '../../lib/agents'
-import { sessionResource } from '../../lib/agentRows'
+import { readControlResponse, readSessionRecovery, forceStopSession, archiveSession } from '../../lib/agentRows'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 
@@ -47,9 +47,8 @@ const forceResult = computed(() => {
   if (control.outcome === 'applied' && control.reason === 'owned_group_signalled_root_exited') return 'The daemon signalled the owned process group and verified that its root process exited. Processes outside that group were not targeted.'
   return `The daemon did not confirm termination (${(control.reason || 'unknown result').replaceAll('_', ' ')}). Refresh the session before another action.`
 })
-const path = (rest: string) => sessionResource(props.session.project_id, props.session.id, rest)
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function json<T>(answer: Promise<Response>): Promise<T> {
+  const response = await answer
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
   return data as T
@@ -60,7 +59,7 @@ async function refresh() {
   loading.value = true; error.value = ''; confirmation.value = ''; preview.value = null
   requestId = crypto.randomUUID()
   try {
-    const value = await json<Preview>(path('recovery'))
+    const value = await json<Preview>(readSessionRecovery(props.session.project_id, props.session.id))
     if (turn === epoch && visible.value && value.session_id === props.session.id) {
       preview.value = value
       if (!value.can_archive && value.force_stop_available) action.value = 'force'
@@ -93,7 +92,7 @@ async function checkForce(turn = epoch) {
   if (forceControl.value.state === 'completed') { await finishForce(); return }
   if (Date.now() >= forceDeadline) { forceExpired.value = true; return }
   try {
-    const result = await json<ForceControl>(path(`controls/${encodeURIComponent(forceControl.value.id)}`))
+    const result = await json<ForceControl>(readControlResponse(props.session.project_id, props.session.id, forceControl.value.id))
     if (turn !== epoch) return
     forceControl.value = result; error.value = ''
     if (result.state === 'completed') { forceExpired.value = false; await finishForce(); return }
@@ -105,7 +104,7 @@ async function submit() {
   busy.value = true; error.value = ''
   const turn = epoch
   try {
-    const result = await json<ForceControl>(path(action.value === 'force' ? 'controls/force-stop' : 'archive'), { expected_revision: preview.value.observed_revision, confirmation: confirmation.value, request_id: requestId, reason: reason.value.trim() })
+    const result = await json<ForceControl>((action.value === 'force' ? forceStopSession : archiveSession)(props.session.project_id, props.session.id, { expected_revision: preview.value.observed_revision, confirmation: confirmation.value, request_id: requestId, reason: reason.value.trim() }))
     // Accepted: a force stop is now a control for the daemon, an archive is done. Either changes the lists.
     void agents.afterWrite()
     if (turn !== epoch) return

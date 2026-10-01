@@ -4,6 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
+import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
 import { brand } from './brand.ts'
@@ -814,9 +815,9 @@ export function pairingEventScope(view: PairingView | null): PairingEventScope {
 
 /** Does this stream event name the pairing in scope? Events of other pairings, and anything unreadable, do not. */
 export function pairingEventMatches(data: string, scope: PairingEventScope): boolean {
-  let event: { after?: unknown }
-  try { event = JSON.parse(data) } catch { return false }
-  const after = event?.after
+  let event: unknown
+  try { event = parseJson(data) } catch { return false }
+  const after = event && typeof event === 'object' && 'after' in event ? event.after : undefined
   if (!after || typeof after !== 'object') return false
   const named = after as { computer_id?: unknown; request_id?: unknown; account_id?: unknown; account_ids?: unknown }
   if (scope.computerId && named.computer_id === scope.computerId) return true
@@ -855,10 +856,10 @@ export function subscribePairingEvents(
     timer = setTimeout(() => { timer = undefined; if (!closed) wake() }, PAIRING_EVENT_COALESCE_MS)
   }
   stream.addEventListener('stream.ready', event => {
-    let ready: { resumed?: unknown }
-    try { ready = JSON.parse(event.data) } catch { return }
+    let ready: unknown
+    try { ready = parseJson(event.data) } catch { return }
     // The first connection starts at the newest event, with nothing to bridge.
-    if (connected && ready.resumed !== true) soon()
+    if (connected && (!ready || typeof ready !== 'object' || !('resumed' in ready) || ready.resumed !== true)) soon()
     connected = true
   })
   for (const name of PAIRING_LIVE_EVENTS) stream.addEventListener(name, event => { if (pairingEventMatches(event.data, scope())) soon() })

@@ -5,6 +5,7 @@
 import { brand } from './brand.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
 import type { HarnessSessionRow } from './agentRows.ts'
+import type { DeepReadonly } from './ledger.ts'
 
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
@@ -39,9 +40,9 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
 // binding, while allowing a new run or stop reason to establish its own state. The
 // ledger decides which answer is newer (ledger.ts), so this only ever receives the
 // newer one.
-export function mergeSessionEvidence(previous: HarnessSessionRow | undefined, incoming: HarnessSessionRow): HarnessSessionRow {
+export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> | undefined, incoming: HarnessSessionRow): DeepReadonly<HarnessSessionRow> {
   if (!previous) return incoming
-  const carried: Partial<HarnessSessionRow> = {}
+  const carried: Partial<{ -readonly [K in keyof HarnessSessionRow]: DeepReadonly<HarnessSessionRow[K]> }> = {}
   const carry = <K extends keyof HarnessSessionRow>(key: K, when = true) => { if (when && incoming[key] === undefined && previous[key] !== undefined) carried[key] = previous[key] }
   carry('project', incoming.project_id === previous.project_id)
   carry('ticket', incoming.ticket_node_id === previous.ticket_node_id)

@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
 import type { HarnessSession } from '../../lib/agents'
-import { sessionResource } from '../../lib/agentRows'
+import { readControlResponse, readManagedSettings, sendManagedControl } from '../../lib/agentRows'
 import { useVisualViewport } from '../../lib/visualViewport'
 import { managedControlSession, managedControlUnavailable } from '../../lib/managedControl'
 import { useAgents } from '../../stores/agents'
@@ -58,9 +58,8 @@ const feedback = computed(() => {
   const reasons: Record<string, string> = { setting_rejected: `${name} rejected by the harness.`, setting_catalog_changed: 'Rejected · the account catalog changed.', authorization_expired: 'Expired before delivery.', authorization_revoked: 'Rejected · permission was revoked.', transient_input_unavailable: 'Rejected · the server lost the pending text.', budget_exhausted: 'Rejected · the run reached its budget.', outcome_unconfirmed: 'Outcome unconfirmed · the input will not be sent again.', child_unavailable: 'Rejected · the owned process is unavailable.', graceful_stop_timeout: 'Stop unconfirmed · the process may still be running.' }
   return reasons[c.reason || ''] || `${name} rejected · refresh this session before trying again.`
 })
-const path = (rest: string) => sessionResource(props.session.project_id, props.session.id, rest)
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function json<T>(answer: Promise<Response>): Promise<T> {
+  const response = await answer
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new APIError(response.status, data.error || 'The control could not be requested.')
   return data as T
@@ -100,7 +99,7 @@ async function check(turn = epoch) {
   if (!id || turn !== epoch) return
   clearTimeout(timer)
   try {
-    const value = await json<Control>(path(`controls/${encodeURIComponent(id)}`))
+    const value = await json<Control>(readControlResponse(props.session.project_id, props.session.id, id))
     if (turn !== epoch) return
     if (value.session_id !== props.session.id || value.id !== id) throw new Error('The control response did not match this session.')
     result.value = value; uncertain.value = false; error.value = ''; request = null
@@ -122,7 +121,7 @@ async function editSetting(kind: Setting) {
   const turn = epoch
   loadingSettings.value = true
   try {
-    const data = await json<{ models: SettingModel[] }>(path('managed-settings'))
+    const data = await json<{ models: SettingModel[] }>(readManagedSettings(props.session.project_id, props.session.id))
     if (turn === epoch) models.value = data.models
   } catch (e) { if (turn === epoch) error.value = e instanceof Error ? e.message : 'Settings could not be loaded.' }
   finally { if (turn === epoch) loadingSettings.value = false }
@@ -132,7 +131,7 @@ async function sendRequest() {
   const turn = epoch, payload = request
   busy.value = true; error.value = ''; confirmStop.value = false
   try {
-    const value = await json<Control>(path('managed-controls'), payload)
+    const value = await json<Control>(sendManagedControl(props.session.project_id, props.session.id, payload))
     // The server accepted it, whichever session this panel shows by now: the lists re-read.
     void agents.afterWrite()
     if (turn !== epoch) return

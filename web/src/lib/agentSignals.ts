@@ -61,7 +61,7 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
-  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
+  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: readonly AttentionReason[]
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }

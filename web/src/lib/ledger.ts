@@ -22,70 +22,16 @@
 // it would freeze the row. The exception is a row without a revision against one
 // with: that one is never taken.
 import type { Raw } from 'vue'
-import { tick } from './position'
-import { openRow, type Wire } from './wire'
+import type { Wire } from './wire'
 
-// A row the ledger has admitted. The brand is a private member of a class, so a value
-// of this type cannot be made by an object literal, a spread copy or an assignment from
-// the plain row type: only merge() below produces one, and everything that shows or
-// keeps a session or run is typed to require it. Raw keeps the brand through Vue's ref
-// and store unwrapping, which would otherwise drop a private member from the type.
+// Types only: the factory and the ledgers live privately in stores/agents.ts.
+// The brand survives Vue unwrapping; every nested field and array is readonly.
+export type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T
 declare class Admission { private readonly admitted: true }
-export type Admitted<T> = Raw<T> & Admission
-
-interface Entry<T> { row: Admitted<T>; revision?: number; position?: number; start: number; landed: number }
-
-export interface LedgerOptions<T> {
-  // Builds the row to keep from the one held and the one admitted, for evidence the
-  // newer answer may omit (a bare mutation result has no list summaries). The default
-  // keeps the admitted row as it is.
-  combine?: (held: T | undefined, incoming: T) => T
+export type Admitted<T> = Raw<DeepReadonly<T>> & Admission
+export interface Ledger<T extends { id: string }> {
+  merge(rows: Wire<T>[]): Admitted<T>[]
+  get(id: string): Admitted<T> | undefined
+  subscribe(listen: (ids: Set<string>) => void): () => void
+  clear(): void
 }
-
-export function createLedger<T extends { id: string }>(options: LedgerOptions<T> = {}) {
-  const entries = new Map<string, Entry<T>>()
-  const listeners = new Set<(ids: Set<string>) => void>()
-
-  function admits(held: Entry<T>, incoming: Entry<T>) {
-    if (held.revision !== undefined && incoming.revision === undefined) return false
-    // Asked after the held row landed: it cannot be older, so a lower answer means the log moved back.
-    const backwards = incoming.start > held.landed
-    if (incoming.revision !== undefined && held.revision !== undefined && incoming.revision !== held.revision) {
-      return incoming.revision > held.revision || backwards
-    }
-    if (incoming.position !== undefined && held.position !== undefined && incoming.position !== held.position) {
-      return incoming.position > held.position || backwards
-    }
-    return incoming.start >= held.start
-  }
-
-  return {
-    // Judges each wire row against the copy held and returns, in order, the row that
-    // stands for it: the admitted one, or the row held when the incoming one is older.
-    // Listeners hear which ids changed.
-    merge(wired: Wire<T>[]): Admitted<T>[] {
-      const landed = tick()
-      const changed = new Set<string>()
-      const standing = wired.map(wire => {
-        const { row, stamp } = openRow(wire)
-        const held = entries.get(row.id)
-        const incoming: Entry<T> = { row: row as Admitted<T>, revision: stamp.rowVersion, position: stamp.position, start: stamp.start, landed }
-        if (held && !admits(held, incoming)) return held.row
-        incoming.row = (options.combine ? options.combine(held?.row, row) : row) as Admitted<T>
-        entries.set(row.id, incoming)
-        changed.add(row.id)
-        return incoming.row
-      })
-      if (changed.size) for (const listen of listeners) listen(changed)
-      return standing
-    },
-    get: (id: string): Admitted<T> | undefined => entries.get(id)?.row,
-    // Called after a merge replaced rows, with their ids: a view that copied a row follows it.
-    subscribe(listen: (ids: Set<string>) => void) {
-      listeners.add(listen)
-      return () => { listeners.delete(listen) }
-    },
-    clear() { entries.clear() },
-  }
-}
-export type Ledger<T extends { id: string }> = ReturnType<typeof createLedger<T>>

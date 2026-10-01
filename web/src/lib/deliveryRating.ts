@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api } from './api.ts'
-import { sessionResourceById } from './agentRows.ts'
+import { readSessionRating, writeSessionRating, deleteSessionRating } from './agentRows.ts'
 
 export interface DeliverySignals {
   review_rounds: number
@@ -87,21 +87,17 @@ export async function loadNodeRatings(nodeId: string, signal?: AbortSignal): Pro
 }
 
 export async function loadSessionRating(sessionId: string, signal?: AbortSignal): Promise<SessionRating | null> {
-  const response = await api(sessionResourceById(sessionId, 'delivery-rating'), { signal })
+  const response = await readSessionRating(sessionId, signal)
   if (!response.ok) return null
   return parseRating(await response.json().catch(() => null))
 }
 
 export async function saveSessionRating(sessionId: string, body: { score: number | null; tags: string[]; comment: string }): Promise<SessionRating> {
-  return readRating(await api(sessionResourceById(sessionId, 'delivery-rating'), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }))
+  return readRating(await writeSessionRating(sessionId, body))
 }
 
 export async function clearSessionRating(sessionId: string): Promise<SessionRating> {
-  return readRating(await api(sessionResourceById(sessionId, 'delivery-rating'), { method: 'DELETE' }))
+  return readRating(await deleteSessionRating(sessionId))
 }
 
 async function readRating(response: Response): Promise<SessionRating> {
