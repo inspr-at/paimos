@@ -190,7 +190,7 @@ test('the static guard runs on PR and merge-group checkouts with full release-ta
   const migrationJob = workflow.split(/^  migration-compat:\n/m)[1].split(/^  [\w-]+:\n/m)[0];
   assert.match(migrationJob, /fetch-depth: 0/);
   assert.match(migrationJob, /node scripts\/check-migrations.mjs --base-ref/);
-  assert.match(migrationJob, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1/);
+  assert.match(migrationJob, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1\s*$/m);
   // Migration compatibility remains unconditional, including its steps. Other
   // jobs, such as the PR/queue review gate, deliberately have event guards.
   assert.doesNotMatch(migrationJob, /^\s+if:/m);
