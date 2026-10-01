@@ -9,6 +9,7 @@ import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
+import { stamp } from '../src/lib/position'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
 import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type ListRead, type LiveList, type LiveListBlockers, type LiveListOptions, type LiveReadPurpose } from '../src/lib/useLiveList'
 
@@ -134,6 +135,59 @@ describe('useLiveList: field changes', () => {
     await h.settle()
     expect(h.rows.value[0].eta).toEqual({ finished: true, progress_pct: 100 })
     expect(h.rows.value[0].lead_worker).toBeNull()
+  })
+
+  it('applies stop and ETA progress under continuous heartbeats and keeps exactly one follow-up batch', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Ended worker', key: 's:ended' } })])
+    const row = h.rows.value[0], revision = row.updated_at
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let position = 1001, reads = 0
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 90 }
+    h.srv.nodes[0].lead_worker = null
+    h.srv.fetchList.mockImplementation(async (query, purpose) => {
+      const before = position
+      const page = stamp(await plain(query, purpose), new Response(null, { headers: { 'Aeon-Event-Position': String(before) } }))
+      if (++reads <= 10) {
+        h.srv.nodes[0].eta = { finished: true, progress_pct: 90 + reads }
+        h.send({ id: 'n1', eventId: ++position, type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+      }
+      return page
+    })
+    h.send({ id: 'n1', eventId: position, type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    for (let read = 1; read <= 11; read++) {
+      await vi.advanceTimersByTimeAsync(BATCH_MS)
+      expect(h.srv.fetchList).toHaveBeenCalledTimes(read)
+      expect(row.lead_worker).toBeNull()
+      expect(row.eta).toEqual({ finished: true, progress_pct: 89 + read })
+      expect(row.updated_at).toBe(revision)
+      expect(h.nodes.projectionsCurrent('n1')).toBe(read === 11)
+    }
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 10)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(11)
+    expect(h.rows.value[0]).toBe(row)
+  })
+
+  it('continues applying projections when the database counter rewinds during a busy read', async () => {
+    const initial = stamp(item('n1', { lead_worker: { name: 'Ended worker', key: 's:ended' } }), new Response(null, { headers: { 'Aeon-Event-Position': '5000' } }))
+    const h = setup([initial])
+    const row = h.rows.value[0]
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let position = 1, reads = 0
+    h.srv.nodes[0].lead_worker = null
+    h.srv.fetchList.mockImplementation(async (query, purpose) => {
+      const page = stamp(await plain(query, purpose), new Response(null, { headers: { 'Aeon-Event-Position': String(position) } }))
+      if (++reads <= 5) h.send({ id: 'n1', eventId: ++position, type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+      return page
+    })
+    h.send({ id: 'n1', eventId: 5001, type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    for (let read = 1; read <= 6; read++) {
+      await vi.advanceTimersByTimeAsync(BATCH_MS)
+      expect(h.srv.fetchList).toHaveBeenCalledTimes(read)
+      expect(row.lead_worker).toBeNull()
+    }
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 10)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(6)
+    expect(h.nodes.projectionsCurrent('n1')).toBe(true)
   })
   it('patches the row object in place, tints it and says so politely', async () => {
     const h = setup([item('n1'), item('n2')])

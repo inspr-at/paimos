@@ -244,8 +244,8 @@ export function useLiveList(options: LiveListOptions) {
   // ---------- Refetch and classify ----------
   // A read the list no longer needs (a load replaced the rows meanwhile)
   // still tells the row store what it found, unless a gap makes it doubtful.
-  function keep(items: ListItem[], sent: number) {
-    if (!nodes.gapSince(sent)) for (const item of items) nodes.adopt(item, sent)
+  function keep(items: ListItem[], sent: number, floors?: Map<string, number | undefined>) {
+    if (!nodes.gapSince(sent)) for (const item of items) nodes.adopt(item, sent, { projectionFloor: floors?.get(item.id) })
   }
   // True when a read failed: those rows went back to the queue.
   async function flush(): Promise<boolean> {
@@ -262,6 +262,9 @@ export function useLiveList(options: LiveListOptions) {
     for (let i = 0; i < ids.length; i += PAGE) {
       const chunk = ids.slice(i, i + PAGE)
       const sent = nodes.mark()
+      // Snapshot each projection floor before the request, including hints a
+      // resync (eventId 0) may have coalesced with this batch.
+      const floors = new Map(chunk.map(id => [id, nodes.projectionFloor(id)]))
       // What the store knew when the query was sent: a later copy that finds
       // a row the query did not return changed after it (a restore, say).
       const knew = new Map(chunk.map(id => [id, nodes.revision(id)]))
@@ -271,7 +274,7 @@ export function useLiveList(options: LiveListOptions) {
         const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk }, 'matches')
         if (run !== generation) { keep(page.items, sent); return false }
         // The store has what the query found at once, not after the next read.
-        keep(page.items, sent)
+        keep(page.items, sent, floors)
         matched = new Map(page.items.map(item => [item.id, item]))
         // Shown rows that no longer match: closed, or gone from the project?
         const missing = chunk.filter(id => !matched.has(id) && rowById(id) && batch.get(id)!.change.change !== 'deleted')
@@ -299,12 +302,14 @@ export function useLiveList(options: LiveListOptions) {
         // the query did not return is judged by that read, not by the later
         // one that found it: news since the first (a restore) makes it stale.
         const overtaken = !matched.has(id) && (nodes.touchedSince(id, sent) || (!!copy && compareRevision(copy.updated_at, knew.get(id)) > 0))
-        if (copy) nodes.adopt(copy, sent)
+        if (copy) nodes.adopt(copy, sent, { projectionFloor: floors.get(id) })
         // A copy the store holds off (a deletion it learned after the read
         // was sent, without knowing when) cannot tell either: read again.
-        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id) || !nodes.projectionsCurrent(id)))) { requeue(id, queued); continue }
+        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id) || !nodes.projectionsCurrent(id, floors.get(id))))) { requeue(id, queued); continue }
         const newer = queue.get(id)
-        if (newer) {
+        // Apply the page that includes this batch's hint now. Only consume newer
+        // hints if it also includes them; otherwise the next batch reads again.
+        if (newer && nodes.projectionsCurrent(id)) {
           queue.delete(id)
           queued.change = mergeChanges(queued.change, newer.change)
           queued.own = queued.own && newer.own

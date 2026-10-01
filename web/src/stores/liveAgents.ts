@@ -73,7 +73,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
       document.addEventListener('visibilitychange', visibility)
       tick()
       poller.start(true)
-      stopStream = subscribeAgents(changed, connected => { if (!connected) reading.invalidate() }, undefined, true)
+      stopStream = subscribeAgents(changed, connected => { if (!connected) reading.invalidate() })
     }
     let stopped = false
     return () => {

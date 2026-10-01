@@ -21,7 +21,11 @@ import (
 // and a write of its own, keeps the newest position per entity: an older
 // position never overwrites a newer one, whatever order the answers arrive in.
 //
-//   - A read names the exact snapshot it returns: the newest committed event
+//   - A node-list read names the newest event before its handler: a lower bound
+//     on the events its projections include. It runs once, even when newer events
+//     commit while it runs. Clients can apply a page covering the triggering hint
+//     while keeping a follow-up read for the newer hints (AEON-514).
+//   - Other reads name the exact snapshot they return: the newest committed event
 //     was the same before its first statement and after its last, so no event
 //     committed while it ran, and it includes every event up to that position
 //     and none after. A read that an event interrupted is run again (see
@@ -95,9 +99,9 @@ func PositionMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 	}
 }
 
-// serveSettled answers a listed read with the position of the snapshot it
-// returns. The handler answers into a buffer while the newest event is read
-// before and after it: equal means no event committed while it ran.
+// serveSettled buffers listed reads. The node list carries the before counter
+// as a lower bound without repeating the handler; other collections retain their
+// settled snapshot contract (equal counters before and after the handler).
 func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, pool *pgxpool.Pool, tenantID string) {
 	var answer *bufferedResponse
 	for attempt := 0; attempt < readAttempts; attempt++ {
@@ -108,6 +112,10 @@ func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, poo
 		answer = newBufferedResponse(w.Header())
 		next.ServeHTTP(answer, r)
 		if answer.status < 200 || answer.status >= 300 {
+			break
+		}
+		if r.Pattern == "GET /api/nodes" {
+			answer.header.Set(PositionHeader, strconv.FormatInt(before, 10))
 			break
 		}
 		if after, err := newestEvent(r.Context(), pool, tenantID); err != nil {

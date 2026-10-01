@@ -158,6 +158,29 @@ func TestPositionIsAbsentWhenEventsKeepCommittingDuringTheRead(t *testing.T) {
 	}
 }
 
+// A node-list read must make progress without waiting for a quiet tenant. Its
+// position is the counter before the handler, never a later event it may not see.
+func TestListPositionIsALowerBoundWithoutRepeatingUnderContinuousEvents(t *testing.T) {
+	d, a, b := fixture(t)
+	appendEvents(t, d, a, 2)
+	appendEvents(t, d, b, 20)
+	srv := positionServer(t, d, a, func(int) { appendEvents(t, d, a, 1) })
+	for run := 1; run <= 10; run++ {
+		resp := do(t, srv, "GET", "/api/nodes", false)
+		n, ok := position(t, resp)
+		if !ok || n != int64(run+1) {
+			t.Fatalf("read %d: position %d, present %v; want the before counter %d", run, n, ok, run+1)
+		}
+		var body struct{ Run int }
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Run != run {
+			t.Fatalf("read %d: body %+v (%v); the handler must run once per request", run, body, err)
+		}
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Reply") != "kept" {
+			t.Fatalf("status %d, headers %v: buffered answer changed", resp.StatusCode, resp.Header)
+		}
+	}
+}
+
 // A refused read is not repeated, and never carries a position.
 func TestPositionIsNotReadForARefusedRead(t *testing.T) {
 	d, a, _ := fixture(t)

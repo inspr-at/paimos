@@ -73,6 +73,41 @@ describe('RowStore: revisions only move forward', () => {
     expect(rows.newer('n1', at(3))).toBe(true)
   })
 
+  it('applies a page covering the batch hint while a newer projection hint still waits', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { eta: { finished: false }, lead_worker: { name: 'Ended worker', key: 's:ended' } }), rows.mark(), { show: true })!
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['eta', 'lead_worker'], eventId: 52 })
+    const sent = rows.mark()
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['eta', 'lead_worker'], eventId: 53 })
+    rows.adopt(stampAt(item('n1', 1, { eta: { finished: true }, lead_worker: null }), { position: 52 }), sent, { projectionFloor: 52 })
+    expect(row.eta).toEqual({ finished: true })
+    expect(row.lead_worker).toBeNull()
+    expect(rows.projectionsCurrent('n1', 52)).toBe(true)
+    expect(rows.projectionsCurrent('n1')).toBe(false)
+    rows.adopt(stampAt(item('n1', 1, { eta: { finished: true, progress_pct: 100 } }), { position: 53 }), rows.mark())
+    expect(rows.projectionsCurrent('n1')).toBe(true)
+  })
+
+  it('a batch floor cannot admit a pre-hint or unpositioned page or rewind a newer projection', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(stampAt(item('n1', 1, { lead_worker: null }), { position: 51 }), rows.mark(), { show: true })!
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['lead_worker'], eventId: 52 })
+    const first = rows.mark(), second = rows.mark()
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['lead_worker'], eventId: 53 })
+    const stale = item('n1', 1, { lead_worker: { name: 'Ended worker', key: 's:ended' } })
+    rows.adopt(stampAt(stale, { position: 51 }), first, { projectionFloor: 52 })
+    expect(row.lead_worker).toBeNull()
+    rows.adopt(item('n1', 1, stale), first, { projectionFloor: 52 })
+    expect(row.lead_worker).toBeNull()
+    rows.adopt(stampAt(item('n1', 1, { lead_worker: { name: 'New worker', key: 's:new' } }), { position: 53 }), second)
+    rows.adopt(stampAt(stale, { position: 52 }), first, { projectionFloor: 52 })
+    expect(row.lead_worker?.name).toBe('New worker')
+    // After the current answer landed, a lower counter proves a database rewind.
+    rows.adopt(stampAt(item('n1', 1, { lead_worker: null }), { position: 1 }), rows.mark())
+    expect(row.lead_worker).toBeNull()
+    expect(rows.projectionsCurrent('n1')).toBe(true)
+  })
+
   it('one display object per node: every read of it lands on the same object', () => {
     const rows = new RowStore()
     const row = rows.adopt(item('n1', 1), rows.mark(), { show: true })!

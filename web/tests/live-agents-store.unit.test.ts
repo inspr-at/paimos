@@ -112,6 +112,40 @@ it('joins a session registered after the list loaded without waiting for a poll'
   } finally { stop() }
 })
 
+it('tenant-wide heartbeats leave the live feed on its 20s poll and do not invalidate a slow read', async () => {
+  const { store, stop } = await watching([agent({ ticket })])
+  try {
+    for (let i = 0; i < 200; i++) Stream.current?.dispatchEvent(new Event('harness.heartbeat'))
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(getLiveAgents).toHaveBeenCalledTimes(1)
+    let finish!: (page: Awaited<ReturnType<typeof getLiveAgents>>) => void
+    vi.mocked(getLiveAgents).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getLiveAgents).toHaveBeenCalledTimes(2)
+    for (let i = 0; i < 200; i++) Stream.current?.dispatchEvent(new Event('harness.heartbeat'))
+    finish({ items: [agent({ ticket, name: 'Polled worker' })], at: new Date(at + 20_000).toISOString(), fresh_seconds: 120 })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(store.items[0]?.name).toBe('Polled worker')
+    expect(getLiveAgents).toHaveBeenCalledTimes(2)
+  } finally { stop() }
+})
+
+it('coalesces a reconnect storm during a slow poll into one catch-up read', async () => {
+  const { stop, workers } = await watching([agent({ ticket })])
+  try {
+    let finish!: (page: Awaited<ReturnType<typeof getLiveAgents>>) => void
+    vi.mocked(getLiveAgents).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await vi.advanceTimersByTimeAsync(20_000)
+    answer([])
+    for (let i = 0; i < 100; i++) { Stream.current?.onerror?.(); Stream.current?.onopen?.() }
+    expect(getLiveAgents).toHaveBeenCalledTimes(2)
+    finish({ items: [agent({ ticket })], at: new Date(at).toISOString(), fresh_seconds: 120 })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(workers()).toEqual([])
+    expect(getLiveAgents).toHaveBeenCalledTimes(3)
+  } finally { stop() }
+})
+
 it('resyncs on reconnect and shares one stream until the last watcher leaves', async () => {
   const { store, stop, workers } = await watching([agent({ ticket })])
   const stopOther = store.watch()

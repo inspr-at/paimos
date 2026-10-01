@@ -27,9 +27,14 @@ still open the full-page ticket at the same address.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after
-reconnecting; the periodic read remains a fallback. List projections use the
-additive `Aeon-Event-Position` response header to reject older snapshots even
-when the ticket's own `updated_at` has not changed.
+reconnecting and on lifecycle changes; heartbeats leave it on its 20-second poll.
+The ticket list still refetches ETA and lead projections on heartbeat hints.
+List projections use the additive `Aeon-Event-Position` response header to
+reject older snapshots even
+when the ticket's own `updated_at` has not changed. A node-list response names
+the counter before its handler as a lower bound and runs once. A page covering
+the hint that triggered its batch updates the row immediately; newer hints
+remain queued for a follow-up read, so busy tenants do not need a quiet gap.
 
 The flow UI is hidden by default. People working on Paimos itself can enable
 **Show the flow controls (not yet tested end to end)** under **Settings →
