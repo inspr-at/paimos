@@ -269,9 +269,9 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 			}
 		})
 	}
-	for _, input := range []string{"pi", "unknown"} {
+	for _, input := range []string{"pi", "opencode", "unknown"} {
 		status, body := call(t, &admin, http.MethodGet, "/api/models/resolve?role=review-gate&author_family="+input, "")
-		if status != http.StatusBadRequest || !strings.Contains(string(body), "openai, anthropic, xai or cursor") {
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "openai, anthropic, xai, cursor, google or local") {
 			t.Fatalf("invalid family %q: status %d, body %s", input, status, body)
 		}
 	}

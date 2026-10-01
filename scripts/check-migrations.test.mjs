@@ -291,8 +291,8 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('the original integration exception remains the unchanged merged 1054 contract migration', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql']);
-  const [entry] = manifest.exceptions;
+  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
+  assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   assert.equal(entry.ticket, 'AEON-397');
   assert.match(entry.reason, /contract|unconfirmed|person/i);
@@ -311,6 +311,6 @@ test('the current tree passes only with the explicit pinned contract exceptions'
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1088_more_harnesses.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });

@@ -19,7 +19,8 @@ import (
 
 // ACPAdapter adds Gemini and OpenCode to the existing owned wire transport.
 // Local auth is the explicitly paired profile. Version checks establish launch
-// readiness only; session/new establishes vendor authentication before a prompt.
+// readiness only; session/new establishes an ACP session. Provider authentication
+// may fail at prompt time and is never inferred from a successful version probe.
 type ACPAdapter struct {
 	Harness     string
 	Path        string

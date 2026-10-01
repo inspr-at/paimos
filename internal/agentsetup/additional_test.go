@@ -23,6 +23,9 @@ func TestAdditionalHarnessDiscoveryIsExplicitLocalProfile(t *testing.T) {
 	for _, name := range []string{"gemini", "opencode"} {
 		t.Run(name, func(t *testing.T) {
 			home := physicalTemp(t)
+			if err := os.Chmod(home, 0700); err != nil {
+				t.Fatal(err)
+			}
 			workspace := physicalTemp(t)
 			path := filepath.Join(home, name)
 			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {

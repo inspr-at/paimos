@@ -286,7 +286,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		if accountContext != "" && accountContext != "local-profile" {
 			return c, errors.New("select the vendor local profile, not a person identity")
 		}
-		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in checked at launch)", "local_profile"
+		c.Identity, c.Label, c.Login = "local-profile", harness+" (local profile; sign-in unverified)", "local_profile"
 		return c, nil
 	}
 	if harness == "pi" {

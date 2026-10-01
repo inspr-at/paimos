@@ -146,11 +146,23 @@ func acpFixturePath(t *testing.T, name, scenario string) string {
 	return path
 }
 
+func acpFixtureHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
 func TestACPHarnessQualification(t *testing.T) {
 	for _, name := range []string{Gemini, OpenCode} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("AEON_TEST_INJECTION", "must-not-inherit")
-			home, _ := filepath.EvalSymlinks(t.TempDir())
+			home := acpFixtureHome(t)
 			adapter := &ACPAdapter{Harness: name, Path: acpFixturePath(t, name, "tools"), Homes: map[string]string{"local": home}, IdleTimeout: time.Minute}
 			req := StartRequest{AccountKey: "local", Workspace: home, Profile: Profile{Model: "gemini-2.5-pro", Effort: "16384"}, Prompt: "fixture", InboxEnabled: true, Tools: &RunTools{URL: "http://127.0.0.1:1234/mcp", Token: "fixture"}}
 			if name == OpenCode {
@@ -218,7 +230,7 @@ func TestACPFailureAndVerificationFences(t *testing.T) {
 	for _, name := range []string{Gemini, OpenCode} {
 		for _, scenario := range []string{"model-mismatch", "permission", "stream-failed"} {
 			t.Run(name+"/"+scenario, func(t *testing.T) {
-				home, _ := filepath.EvalSymlinks(t.TempDir())
+				home := acpFixtureHome(t)
 				a := &ACPAdapter{Harness: name, Path: acpFixturePath(t, name, scenario), Homes: map[string]string{"local": home}}
 				r := StartRequest{AccountKey: "local", Workspace: home, Profile: Profile{Model: "gemini-2.5-pro", Effort: "16384"}, Prompt: "fixture"}
 				if name == OpenCode {
@@ -259,7 +271,7 @@ func TestACPFailureAndVerificationFences(t *testing.T) {
 func TestACPInterruptAndIncompleteOpenCodeTurn(t *testing.T) {
 	for _, tc := range []struct{ name, scenario string }{{Gemini, "cancel"}, {OpenCode, "cancel"}, {OpenCode, "tool-turn"}} {
 		t.Run(tc.name+"/"+tc.scenario, func(t *testing.T) {
-			home, _ := filepath.EvalSymlinks(t.TempDir())
+			home := acpFixtureHome(t)
 			a := &ACPAdapter{Harness: tc.name, Path: acpFixturePath(t, tc.name, tc.scenario), Homes: map[string]string{"local": home}}
 			r := StartRequest{AccountKey: "local", Workspace: home, Profile: Profile{Model: "gemini-2.5-pro", Effort: "16384"}, Prompt: "fixture"}
 			if tc.name == OpenCode {

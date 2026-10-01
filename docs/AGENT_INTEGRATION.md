@@ -32,7 +32,8 @@ installation and interpreter pins. Discovery checks only `--version` and labels
 these candidates as **local profiles**, not authenticated person identities.
 Their explicitly selected HOME must be private and owned. Vendor login remains
 local: run `gemini` or `opencode auth login` normally. Session creation must succeed
-before Aeon sends a prompt. Missing sign-in or provider settings stops the run.
+before Aeon sends a prompt; provider authentication can still fail on that prompt.
+Version probes never establish a signed-in identity.
 
 Both adapters use ACP version 1 over the existing owned stdio transport, with
 fresh sessions and run-scoped Aeon HTTP MCP tools. Idle inbox delivery starts a
@@ -70,6 +71,9 @@ worker state directory; vendor credentials and databases are never read. No
 quota-neutral capacity API has been qualified; missing capacity stays unknown.
 Qualification tests use local protocol fixtures, not paid vendor calls. Real CLI
 installation, login and no-tools qualification remain separate evidence gates.
+Attach recognizes recorded vendor installation roots and native executable pins.
+A generic Node interpreter does not prove a Gemini process's identity, so such
+attachments are refused. Native Gemini attachment remains unqualified.
 
 ### Default worker launch
 
@@ -133,7 +137,7 @@ Run the guide’s complete instance-bound command from the intended project fold
 
 `pair` runs setup, displays the code and waits for browser approval and daemon connectivity. It offers the current physical folder for explicit confirmation and installed, signed-in harness accounts for selection. Bare `pair` asks for the instance origin on first use; a resumed pairing keeps its saved origin and folder. The guide supplies the default tenant. No credentials are requested or printed. JSON automation must supply `--workspace` and `--harness` explicitly instead of answering prompts.
 
-Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs a read-only sign-in check for every supported vendor tool found on PATH before offering choices; explicit `--harness` flags probe only those selections.
+Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs read-only sign-in checks for vendor tools that expose one; Gemini CLI and OpenCode offer an explicitly selected local profile with unverified sign-in. Explicit `--harness` flags probe only those selections.
 
 `--state-root` is optional for `pair`, `setup`, `status`, `disconnect` and `add-harness`. The defaults are `~/Library/Application Support/aeon/paired` on macOS and `$XDG_STATE_HOME/aeon/paired` on Linux (or `~/.local/state/aeon/paired` when unset). Missing directories, including parents, are created with mode `0700`; existing unsafe permissions, symlinks, repository paths and paths inside the working folder are rejected without repair. No manual `mkdir` is needed. Advanced `--workspace`, repeated `--harness`, `--tenant`/`--tenant-id`, and `--state-root` overrides remain available. To maintain multiple pairings, use a distinct private state root for each.
 

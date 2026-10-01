@@ -2,11 +2,12 @@
 package modelregistry
 
 import (
+	"net/http"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
-	"net/http"
-	"testing"
 )
 
 func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) {
@@ -35,11 +36,27 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 	if len(profiles) != 44 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
-	routes := decode[[]Route](t, &p, http.MethodGet, "/api/models/routes", "", http.StatusOK)
-	for _, r := range routes {
-		if r.Role == "build" && r.Priority == 40 && r.Reason != "saved person policy" {
-			t.Fatal("policy replaced", r)
+	readRoutes := func() []Route {
+		t.Helper()
+		var rows []Route
+		if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+			var err error
+			rows, err = listRoutes(t.Context(), tx)
+			return err
+		}); err != nil {
+			t.Fatal(err)
 		}
+		return rows
+	}
+	routes := readRoutes()
+	foundPolicy := false
+	for _, r := range routes {
+		if r.Role == "build" && r.Priority == 40 {
+			foundPolicy = r.Reason == "saved person policy"
+		}
+	}
+	if !foundPolicy {
+		t.Fatal("saved person policy missing or replaced", routes)
 	}
 	for _, h := range []string{"gemini", "opencode"} {
 		r := decode[Resolution](t, &p, http.MethodGet, "/api/models/resolve?role=build&harness="+h, "", http.StatusOK)
@@ -50,7 +67,7 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 			t.Fatal("budget level missing", r.Profile)
 		}
 	}
-	again := decode[[]Route](t, &p, http.MethodGet, "/api/models/routes", "", http.StatusOK)
+	again := readRoutes()
 	if len(again) != len(routes) || eventCount(t, p, evSeeded) != 1 {
 		t.Fatal("upgrade replay changed policy")
 	}
