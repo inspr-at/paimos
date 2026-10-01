@@ -205,6 +205,9 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	if _, has := doc["seq"]; has {
 		return Record{}, fault(400, "invalid_request")
 	}
+	if contract == "aithema.journal.record" && doc["kind"] == "op.result" && !strings.HasPrefix(text(object(doc["data"])["op_key"]), st.ID+":") {
+		return Record{}, fault(400, "invalid_request")
+	}
 	if contract == "aithema.spec.snapshot" {
 		if doc["host_mode"] != st.HostMode || number(doc["consumed_seq"]) > st.Seq || number(doc["consumed_seq"]) < st.ConsumedSeq {
 			return Record{}, fault(400, "invalid_request")

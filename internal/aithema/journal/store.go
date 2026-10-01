@@ -255,7 +255,8 @@ func state(st *session, now time.Time) AuthorityState {
 }
 
 // Takeover is explicit resume. CAS prevents two resumptions from owning the
-// same generation. A tombstone or withdrawn authorization is terminal.
+// same generation. Suspend refuses takeover without consuming a generation;
+// a tombstone or withdrawn authorization is terminal.
 func (s *Store) Takeover(ctx context.Context, tenant, project, sid string, expected int64) (AuthorityState, error) {
 	var out AuthorityState
 	err := s.transaction(ctx, tenant, sid, false, func(tx pgx.Tx, st *session) error {
@@ -271,6 +272,9 @@ func (s *Store) Takeover(ctx context.Context, tenant, project, sid string, expec
 		}
 		if st.Generation != expected {
 			return fault(409, "fenced_generation")
+		}
+		if st.Suspended {
+			return fault(409, "suspended")
 		}
 		if st.Generation == tokens.MaxSafeInteger {
 			return fault(409, "generation_exhausted")

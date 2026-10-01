@@ -10,7 +10,7 @@ paths:
     post:
       operationId: aithemaJournalRecordsPost
       summary: Aithema journal records
-      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Every op.result data.op_key must begin with this session id followed by a colon; a foreign key returns 400 invalid_request without allocating a sequence or committing the client event id.
       security: [{aithemaDelegated: []}]
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
@@ -195,7 +195,7 @@ paths:
     post:
       operationId: aithemaJournalOp_ResultPost
       summary: Aithema journal op.result
-      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Every op.result data.op_key must begin with this session id followed by a colon; a foreign key returns 400 invalid_request without allocating a sequence or committing the client event id.
       security: [{aithemaDelegated: []}]
       parameters:
         - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}

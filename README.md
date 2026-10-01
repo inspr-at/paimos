@@ -69,7 +69,9 @@ Aithema's host journal and ledger live in `internal/aithema/journal` under
 delegated capability; person cookies and agent API keys do not grant access.
 New writes fence generation and epoch atomically with the effect, and token expiry
 is checked again after lock waits. Journal snapshots use revision CAS and persist
-a nondecreasing `consumed_seq`; pending operation keys must belong to the session.
+a nondecreasing `consumed_seq`; pending operation and `op.result` keys must begin
+with the session id followed by a colon. Foreign keys return `400 invalid_request`
+before allocating a sequence or committing a client event id.
 Records use session-scoped client IDs. Exact retries preserve the original result;
 changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
 cited sources, turns and design inputs; `format=stored` also returns the exact
@@ -89,8 +91,10 @@ Only host-qualified local lanes may reserve zero. `journal/.../authority`
 returns generation, epoch, authorization, suspended state, tombstone and current
 `issued_at` with `Cache-Control: no-store`. Session creation, takeover and
 revocation are trusted in-process methods, with controls journaled before projection. Suspend
-pauses new admissions, claims and worker journal writes while allowing settlement,
-recovery and reads. Resume clears that pause; purge alone creates a tombstone.
+pauses new admissions, claims, worker journal writes and takeover while allowing
+settlement, recovery and reads. Refused takeover returns `409 suspended` without
+consuming a generation, so current claim owners can still settle actual cost.
+Resume clears that pause; purge alone creates a tombstone.
 AEON-361 provides the store and HTTP routes; lifecycle installation and the
 AEON-360 intake adapter are wired by AEON-P04. That adapter must use
 `LockAuthority` inside its intake transaction so takeover cannot race its write.
