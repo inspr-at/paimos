@@ -274,7 +274,7 @@ func TestPauseAllSkipsManagedSessionsWithoutInbox(t *testing.T) {
 					var controls, pauseEvents int
 					if err := tx.QueryRow(t.Context(), `SELECT coalesce(pause_record->>'state',''),phase,stopped_at IS NULL,
  (SELECT count(*) FROM harness_controls WHERE session_id=$1),
- (SELECT count(*) FROM events WHERE type='harness.pause_requested' AND after->>'id'=$1)
+ (SELECT count(*) FROM events WHERE type='harness.pause_requested' AND after->>'id'=$1::text)
  FROM harness_sessions WHERE id=$1`, id).Scan(&state, &phase, &running, &controls, &pauseEvents); err != nil {
 						return err
 					}
@@ -323,7 +323,7 @@ func TestPauseAllSkipReportsAreBoundedWithoutStarvingOtherProjects(t *testing.T)
 		return err
 	})
 	other := uid()
-	f.addNode(t, other, "PAUSE-OTHER", "project", "", "Other project")
+	f.addNode(t, other, "PAUSE-3", "project", "", "Other project")
 	for _, projectID := range []string{f.project, other} {
 		capable := pauseRegistration(f)
 		delete(capable, "ticket_node_id")
