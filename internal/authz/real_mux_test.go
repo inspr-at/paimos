@@ -87,11 +87,10 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),
 		imports.New(nil), inbox.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil),
 		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
-		&phoneapprovals.Module{},
 		journey.New(nil), requirements.New(nil), releases.New(nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),
-		hours.New(nil, nil), directory.New(nil, nil),
+		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(http.ResponseWriter, *http.Request) {})
