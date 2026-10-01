@@ -32,6 +32,7 @@ export const REGISTRY = [
   P('nodes.delete', 'Work', 'Delete tickets and projects', 'high'),
   P('comments.read', 'Work', 'Read ticket comments', 'low'),
   P('comments.write', 'Work', 'Comment on tickets', 'low'),
+  P('events.read', 'History', 'Read ticket activity and history', 'low'),
   P('search.read', 'Search', 'Search projects and tickets you may read', 'low'),
   P('knowledge.read', 'Knowledge', 'Read runbooks, guidelines and memories', 'low'),
   P('knowledge.write', 'Knowledge', 'Write and change knowledge entries', 'medium'),
@@ -53,7 +54,7 @@ export const REGISTRY = [
   P('portal.quotes', 'Customer portal', 'See and accept their own quotes', 'low', false),
 ]
 const ALL = REGISTRY.map(p => p.key)
-const MEMBER = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'search.read', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
+const MEMBER = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
 export interface MockRole { id: string; key: string; name: string; description: string; builtin: boolean; permissions: string[]; based_on: string | null }
 const builtin = (key: string, name: string, description: string, permissions: string[]): MockRole => ({ id: `role-${key}`, key, name, description, builtin: true, permissions, based_on: null })
 export function roles(): MockRole[] {

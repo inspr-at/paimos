@@ -19,7 +19,7 @@ test('permissions read as words and group in registry order', () => {
 
 const ticketRegistry = TICKET_WORKER_SCOPES.map(key => P(key, key === 'search.read' ? 'Search' : 'Work', key.endsWith('.read') ? 'low' : 'medium'))
 test('Ticket worker presets are bounded by creator, role, project scope and agent-grantability', () => {
-  assert.deepEqual(TICKET_WORKER_SCOPES, ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'search.read'])
+  assert.deepEqual(TICKET_WORKER_SCOPES, ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read'])
   const r = role('project-role', 'ticket-worker', TICKET_WORKER_SCOPES, false)
   const projectAgent = agent('worker', { project_roles: [{ project_id: 'p', project_key: 'P', project_title: 'Project', role: r }] })
   const catalog = [...ticketRegistry, P('account.manage', 'Accounts', 'high', false), { ...P('roles.manage', 'Roles', 'high', false), agent_grantable: false }]
@@ -30,6 +30,25 @@ test('Ticket worker presets are bounded by creator, role, project scope and agen
   assert.deepEqual(grantablePresetScopes(['roles.manage', 'account.manage'], creator, catalog), ['account.manage'])
   assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, new Set(), catalog), [])
   assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, new Set(TICKET_WORKER_SCOPES), []), [])
+})
+
+test('Ticket worker includes activity history only within creator, role and registry ceilings', () => {
+  const full = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
+  const withoutHistory = full.filter(key => key !== 'events.read')
+  const catalog = full.map(key => P(key, 'Work', 'low'))
+  for (const { creator, permissions, expected } of [
+    { creator: full, permissions: full, expected: full },
+    { creator: withoutHistory, permissions: full, expected: withoutHistory },
+    { creator: full, permissions: withoutHistory, expected: withoutHistory },
+  ]) {
+    const r = role('member', 'member', permissions)
+    const worker = agent('worker', { workspace_role: r })
+    const ceiling = agentScopeCeiling(worker, [r], catalog)!
+    const held = new Set(creator.filter(key => ceiling.has(key)))
+    assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, held, catalog), expected)
+  }
+  const restricted = catalog.map(p => p.key === 'events.read' ? { ...p, agent_grantable: false } : p)
+  assert.deepEqual(grantablePresetScopes(TICKET_WORKER_SCOPES, new Set(full), restricted), withoutHistory)
 })
 
 test('role suggestions cover the full preset, choose the smallest grant, and never default to Admin', () => {

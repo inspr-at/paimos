@@ -148,9 +148,9 @@ export const MAX_KEY_SCOPES = 256
 export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agent_grantable)
 // What the coordinating agent uses end to end (internal/cli compat test).
 export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
-export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'search.read']
+export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
 export const KEY_SCOPE_PRESETS = [
-  { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
+  { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
   { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
 ]
 // Presets are suggestions only. The registry and live creator/role ceiling are
