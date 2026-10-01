@@ -13180,7 +13180,7 @@ components:
         logo_dark:
           oneOf: [{$ref: "#/components/schemas/BrandLogoInfo"}, {type: "null"}]
         updated_at: {type: string, format: date-time}
-        cleaned: {type: boolean, description: Set when harmless SVG comments, non-drawing attributes or metadata were removed. Unsupported drawing and active SVG features reject the upload.}
+        cleaned: {type: boolean, description: 'Set when harmless SVG comments, non-drawing attributes or metadata were removed. Unsupported drawing and active SVG features reject the upload.'}
         svg_cleanup:
           type: object
           description: Upload-only report of removed non-drawing attributes and metadata; omitted when neither was removed.
