@@ -30,7 +30,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if err := rt.replayPendingUsage(ctx, projectID, session); err != nil {
 		return err
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil {
 		return err
 	}
@@ -87,6 +87,16 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 			if input < prev.Input || output < prev.Output || cached < prev.Cached {
 				continue
 			}
+		}
+		if source == "codex" {
+			// Cache growth can exceed the input delta while fitting this
+			// model's cumulative input. Limit only the prepared report, and
+			// preserve any uncached input the server has already accepted.
+			maxCached := input
+			if prev != nil {
+				maxCached = input - (prev.Input - prev.Cached)
+			}
+			cached = min(cached, maxCached)
 		}
 		reasoning, reasoningKnown = holdReasoning(prev, reasoning, reasoningKnown)
 		var valid bool

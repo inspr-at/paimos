@@ -65,12 +65,17 @@ test('a role change shows its effect first, applies, and can be undone', async (
 })
 
 test('no escalation: an admin cannot give Owner, and is told why', async ({ page }) => {
-  await open(page, '/settings/access/people', { role: 'admin' })
+  const world = await open(page, '/settings/access/people', { role: 'admin' })
   await row(page, 'Mira Holm').getByRole('button', { name: /Workspace role of Mira Holm/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Role of Mira Holm' })
   const owner = page.getByRole('radio', { name: /^Owner/ })
   await expect(owner).toContainText('Includes permissions you do not hold: Manage the workspace, Transfer ownership.')
-  await owner.click()
-  await expect(page.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
+  // Pointer auto-scroll can dismiss this scroll-closing popover on hosted CI.
+  // The picker keeps keyboard selection in its own list without scrolling the page.
+  await picker.getByRole('radio', { name: /^Admin/ }).press('ArrowUp')
+  await expect(owner).toHaveAttribute('aria-checked', 'true')
+  await expect(picker.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
+  expect(calls(world, 'PUT', /workspace-role/)).toHaveLength(0)
 })
 
 test('an invite offers only project roles the inviter holds in the workspace, as the server checks', async ({ page }) => {
@@ -128,6 +133,34 @@ test('deactivating says what happens, then shows the status; reactivating brings
   await expect(sheet.locator('.facts')).toContainText('Active')
   await sheet.getByRole('button', { name: 'Close Mira Holm, access' }).click()
   await expect(page).toHaveURL('/settings/access/people')
+})
+
+test('an action menu survives a delayed opening scroll, but closes when its anchor moves', async ({ page }) => {
+  const world = await open(page)
+  const trigger = row(page, 'Mira Holm').getByRole('button', { name: 'Actions for Mira Holm' })
+  await trigger.click()
+  const menu = page.getByRole('menu', { name: 'Actions for Mira Holm' })
+  await expect(menu).toBeVisible()
+  const placed = await trigger.boundingBox()
+  // Opening the menu can auto-scroll #main. Deliver its queued notification
+  // after placement, as happens intermittently on hosted CI, without moving it.
+  await page.evaluate(async () => {
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    document.getElementById('main')!.dispatchEvent(new Event('scroll'))
+  })
+  expect(await trigger.boundingBox()).toEqual(placed)
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Open', exact: true })).toBeFocused()
+  expect(calls(world, 'POST', /deactivate$/)).toHaveLength(0)
+
+  // Genuine page movement must still dismiss the anchored menu.
+  await page.locator('#main').evaluate(main => { main.scrollTop = main.scrollTop ? 0 : 10 })
+  await expect.poll(async () => (await trigger.boundingBox())?.y).not.toBe(placed?.y)
+  await expect(menu).toBeHidden()
+  await trigger.click()
+  await menu.getByRole('menuitem', { name: 'Deactivate…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Deactivate Mira Holm?' })).toBeVisible()
+  expect(calls(world, 'POST', /deactivate$/)).toHaveLength(0)
 })
 
 test('linking a classic identity to a person, with undo', async ({ page }) => {
@@ -311,13 +344,15 @@ test('agents: role and keys; a new key shows once; service principals are intern
   expect(calls(world, 'POST', /\/agent-keys$/)).toHaveLength(0)
   // The scopes are the registry's agent-grantable permissions; human governance is not offered.
   await expect(sheet.getByRole('checkbox', { name: /members\.manage/ })).toHaveCount(0)
-  await sheet.getByRole('button', { name: 'Coordinator' }).click()
-  await expect(sheet.getByRole('button', { name: 'Coordinator' })).toHaveAttribute('aria-pressed', 'true')
+  await sheet.locator('summary').filter({ hasText: 'Coordinator' }).click()
+  await expect(sheet.locator('details').filter({ hasText: 'Coordinator' })).toContainText('account.manage')
+  await sheet.getByRole('button', { name: 'Apply Coordinator' }).click()
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
   // The deployer is a Viewer: a scope beyond that role is disabled, with the reason.
   await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-  await expect(sheet).toContainText('nodes.write · beyond pharos-deployer’s role (Viewer)')
+  await expect(sheet.locator('.scope-row').filter({ hasText: 'nodes.write' })).toContainText('beyond pharos-deployer’s role (Viewer)')
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).uncheck()
-  await expect(sheet.getByRole('button', { name: 'Coordinator' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).not.toBeChecked()
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
   await sheet.getByRole('button', { name: 'Create key' }).click()
   const ready = page.getByRole('dialog', { name: 'Key ready' })
