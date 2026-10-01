@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	envAdminEmail      = "AEON_BOOTSTRAP_ADMIN_EMAIL"
 	defaultTenantSlug  = "inspr"
 	minSessionKey      = 32
+	maxOIDCDisplayName = 48
 )
 
 // Config is the process configuration for people (OIDC) and agents (API keys).
@@ -57,11 +59,30 @@ func FromEnv() (Config, error) {
 		PublicURL:           strings.TrimRight(strings.TrimSpace(os.Getenv(envPublicURL)), "/"),
 		OIDCIssuer:          strings.TrimRight(strings.TrimSpace(os.Getenv(envOIDCIssuer)), "/"),
 		OIDCClientID:        strings.TrimSpace(os.Getenv(envOIDCClientID)),
-		OIDCDisplayName:     strings.TrimSpace(os.Getenv(envOIDCDisplayName)),
+		OIDCDisplayName:     oidcDisplayName(os.Getenv(envOIDCDisplayName)),
 		SessionKey:          key,
 		BootstrapTenantSlug: slug,
 		BootstrapAdminEmail: strings.TrimSpace(os.Getenv(envAdminEmail)),
 	}, nil
+}
+
+// oidcDisplayName keeps the public label short and free of invisible controls.
+// Whitespace controls become spaces so words remain separated.
+func oidcDisplayName(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(value))
+	runes := []rune(strings.Join(strings.Fields(value), " "))
+	if len(runes) > maxOIDCDisplayName {
+		runes = runes[:maxOIDCDisplayName]
+	}
+	return strings.TrimSpace(string(runes))
 }
 
 func sessionKey(env string) ([]byte, error) {

@@ -100,7 +100,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
         </div>
       </div>
 
-      <a class="btn primary login-button" href="/api/auth/login" @click="startOIDC"><AppIcon name="key" :size="16" />{{ signInLabel }}<AppIcon name="arrow" :size="15" class="go" /></a>
+      <a class="btn primary login-button" href="/api/auth/login" @click="startOIDC"><AppIcon name="key" :size="16" /><span class="login-label">{{ signInLabel }}</span><AppIcon name="arrow" :size="15" class="go" /></a>
       <p class="fine">You are sent to {{ providerName || 'your identity provider' }} and back.</p>
 
       <form v-if="session.devMode" class="dev-form" @submit.prevent="signIn">
@@ -146,14 +146,16 @@ h1 { margin-top: 26px; font-size: 34px; }
 .notice > svg { margin-top: 1px; color: var(--teal-ink); }
 .notice.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .notice.problem > svg { color: var(--danger); }
-.notice p { color: var(--ink-2); }
+.notice p { color: var(--ink-2); overflow-wrap: anywhere; }
 .notice .notice-title { color: var(--ink); font-weight: 650; margin-bottom: 2px; }
 .notice .btn, .notice-actions { margin-top: 10px; }
 .notice-actions { display: flex; gap: 6px; }
 .notice-actions .btn { margin: 0; }
-.login-button { display: flex; width: 100%; height: 48px; margin-top: 24px; font-size: 15px; gap: 10px; }
+.login-button { display: flex; width: 100%; min-width: 0; height: 48px; margin-top: 24px; font-size: 15px; gap: 10px; }
+.login-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.login-button > svg { flex-shrink: 0; }
 .login-button .go { margin-left: auto; }
-.fine { margin-top: 10px; font-size: 12.5px; color: var(--ink-3); text-align: center; }
+.fine { margin-top: 10px; font-size: 12.5px; color: var(--ink-3); text-align: center; overflow-wrap: anywhere; }
 .dev-form { display: grid; gap: 8px; margin-top: 20px; }
 .dev-divider { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .dev-divider::before, .dev-divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }

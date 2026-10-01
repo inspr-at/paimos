@@ -932,8 +932,10 @@ hidden unless the server explicitly returns `dev_mode: true` (including on its
 401 response). It never relies on Vite's development mode. Set
 `AEON_OIDC_DISPLAY_NAME` to the public name of your identity provider (for example,
 `Acme SSO`); the sign-in button, redirect hint and provider-specific errors use
-that name. Unset or whitespace-only names show neutral sign-in copy. The name
-is exposed on both the authenticated and unauthenticated `/api/me` responses.
+that name. Configuration strips control and bidirectional formatting characters,
+collapses whitespace, and caps the name at 48 Unicode characters. Empty names
+after sanitisation show neutral sign-in copy. The name is exposed on both the
+authenticated and unauthenticated `/api/me` responses.
 Login navigates to
 `/api/auth/login`; development login posts `{ email }` to `/api/auth/dev-login`;
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use

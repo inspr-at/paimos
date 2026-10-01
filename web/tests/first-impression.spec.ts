@@ -76,6 +76,45 @@ test.describe('sign-in', () => {
     await expect(page.locator('.login-button b, .notice b, .fine b')).toHaveCount(0)
   })
 
+  for (const [name, providerName] of [
+    ['Microsoft Entra ID', 'Microsoft Entra ID'],
+    ['the maximum configured name', 'W'.repeat(48)],
+    ['an oversized server name', 'W'.repeat(4096)],
+  ]) {
+    for (const error of ['failed', 'denied', 'not_member']) {
+      test(`${name} stays inside a narrow sign-in card with ${error}`, async ({ page }) => {
+        await page.setViewportSize({ width: 320, height: 900 })
+        await mockSignIn(page, { providerName })
+        await page.goto(`/signin?error=${error}`)
+        const button = page.getByRole('link', { name: `Sign in with ${providerName}`, exact: true })
+        await expect(button).toBeVisible()
+        await expect(page.getByRole('alert')).toContainText(providerName)
+        await expect(page.locator('.fine')).toHaveText(`You are sent to ${providerName} and back.`)
+        await page.evaluate(() => document.fonts.ready)
+        const overflow = await page.locator('.signin-card').evaluate(card => {
+          const outside: string[] = []
+          const cardRect = card.getBoundingClientRect()
+          const buttonRect = card.querySelector('.login-button')!.getBoundingClientRect()
+          for (const selector of ['.login-button', '.login-button > svg', '.login-label', '.fine', '.notice p']) {
+            for (const element of card.querySelectorAll(selector)) {
+              const rect = element.getBoundingClientRect()
+              if (rect.left < cardRect.left || rect.right > cardRect.right) outside.push(selector)
+              if (selector === '.login-button > svg' && (rect.left < buttonRect.left || rect.right > buttonRect.right)) outside.push('button icon')
+              if ((selector === '.fine' || selector === '.notice p') && element.scrollWidth > element.clientWidth) outside.push(`${selector} text`)
+            }
+          }
+          if (document.documentElement.scrollWidth > window.innerWidth) outside.push('viewport')
+          return outside
+        })
+        expect(overflow).toEqual([])
+        // The visible text may shorten, but the accessible link name stays complete.
+        const label = page.locator('.login-label')
+        await expect(label).toHaveCSS('text-overflow', 'ellipsis')
+        if (providerName.length >= 48) expect(await label.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+      })
+    }
+  }
+
   test('the email form follows dev_mode and never probes the development route', async ({ page }) => {
     const { calls } = await mockSignIn(page, { devMode: true })
     await page.goto('/signin')
