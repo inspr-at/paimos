@@ -258,6 +258,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				Matrix map[string]string `yaml:"matrix"`
 			} `yaml:"strategy"`
 			Steps []struct {
+				Uses string         `yaml:"uses"`
 				Run  string         `yaml:"run"`
 				With map[string]any `yaml:"with"`
 			} `yaml:"steps"`
@@ -281,13 +282,32 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			t.Fatalf("matrix missing %s", guard)
 		}
 	}
-	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
-		t.Fatal("shard commands must use the selected count and bypass Mac test caching")
+	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "" {
+		t.Fatal("shard commands must use the selected count and allow test caching")
 	}
-	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}" {
-		t.Fatal("routed checkout/cache trust policy changed")
+	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
 	}
+	foundCache := false
 	for _, step := range job.Steps {
+		if strings.HasPrefix(step.Uses, "actions/cache@") {
+			foundCache = true
+			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
+				t.Fatal("cache must persist the actual GOCACHE path")
+			}
+			key, _ := step.With["key"].(string)
+			for _, dimension := range []string{"runner.os", "runner.arch", "steps.setup-go.outputs.go-version", "hashFiles('go.sum')", "strategy.job-total", "matrix.shard", "github.head_ref || github.ref_name", "github.sha"} {
+				if !strings.Contains(key, "${{ "+dimension+" }}") {
+					t.Fatalf("cache key missing %s", dimension)
+				}
+			}
+			restore, _ := step.With["restore-keys"].(string)
+			prefix := strings.TrimSuffix(key, "${{ github.sha }}")
+			mainPrefix := strings.Replace(prefix, "${{ github.head_ref || github.ref_name }}", "main", 1)
+			if restore != prefix+"\n"+mainPrefix+"\n" {
+				t.Fatal("cache must restore this branch before main without crossing platforms, toolchains, dependencies or shards")
+			}
+		}
 		if strings.Contains(step.Run, "ci-go-shards test-timing") {
 			t.Fatal("timing budgets run on routed hardware")
 		}
@@ -296,6 +316,9 @@ func TestWorkflowShardLayouts(t *testing.T) {
 				t.Fatal("command ignores selected count")
 			}
 		}
+	}
+	if !foundCache {
+		t.Fatal("missing explicit rolling Go build and test cache")
 	}
 }
 
