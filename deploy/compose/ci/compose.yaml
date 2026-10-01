@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# CI-only overlay. The mock supplies discovery for the sign-in redirect;
+# it cannot authenticate users and must never be used for a real installation.
+services:
+  oidc:
+    image: python:3.14-alpine
+    command: [python3, /mock/oidc.py]
+    volumes:
+      - ./ci/oidc.py:/mock/oidc.py:ro
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/.well-known/openid-configuration', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  aeon:
+    depends_on:
+      oidc:
+        condition: service_healthy

@@ -2,7 +2,11 @@
 
 The next generation of Paimos: an agents-first, voice-first, multi-tenant work platform in the INSPR family. Hybrid human work stays first-class: a fully dynamic work tree, list, search and a Markdown sidebar viewer.
 
-Status: under construction (release R0). Live at <https://aeon.barta.cm> once R0 ships. Decisions: PPM project AEON, ADR-001 (foundation) and ADR-002 (stack: Go, Postgres 18 + pgvector, Vue 3).
+Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
+and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
+images use explicit release versions; there is no `latest` tag.
+
+Decisions: PPM project AEON, ADR-001 (foundation) and ADR-002 (stack: Go, Postgres 18 + pgvector, Vue 3).
 
 ## Develop
 

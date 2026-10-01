@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Self-hosting compose
+
+on:
+  pull_request:
+    paths:
+      - deploy/compose/**
+      - docs/SELF-HOSTING.md
+      - README.md
+      - Dockerfile
+      - scripts/smoke-compose.sh
+      - .github/workflows/self-hosting-check.yml
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-hosting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Select pinned published image
+        # Check the install recipe against the published version, with no build,
+        # registry login, registry writes or release publication.
+        run: |
+          node --input-type=module - <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('version.json', 'utf8'));
+          if (!/^[0-9]{12}\.0\.0$/.test(version)) throw new Error('Expected a pinned release coordinate');
+          appendFileSync(process.env.GITHUB_ENV, `AEON_IMAGE=ghcr.io/inspr-at/aeon:${version}\n`);
+          JS
+      - name: Boot reference compose and check health and sign-in
+        run: bash scripts/smoke-compose.sh
+      - name: Record evidence
+        run: echo 'Pinned published image installed with reference compose; health, OIDC redirect, RLS role and persistence passed. No deployment.' >> "$GITHUB_STEP_SUMMARY"
