@@ -55,6 +55,7 @@ type planningView struct {
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
 	RouteGap string            `json:"route_gap,omitempty"`
+	Models   []planningModel   `json:"models,omitempty"`
 	Tokens   planningTokens    `json:"tokens"`
 	Cost     *planningCost     `json:"cost,omitempty"`
 	Children *planningChildren `json:"children,omitempty"`
@@ -75,6 +76,7 @@ type planningTokens struct {
 	// Sessions on the node (and its rolled-up children); Unreported of them
 	// have no complete usage report, so Spent is a lower bound.
 	Sessions    int                  `json:"sessions"`
+	Running     int                  `json:"running"`
 	Unreported  int                  `json:"unreported"`
 	Estimated   *int64               `json:"estimated"`
 	Calibration *planningCalibration `json:"calibration,omitempty"`
@@ -100,8 +102,9 @@ type planningCost struct {
 	PaidEstimated *string `json:"paid_estimated"`
 	// PaidUnknown: some usage was reported without its billing mode, or the
 	// route's harness has no billing on record yet.
-	PaidUnknown bool     `json:"paid_unknown"`
-	Plans       []string `json:"plans"`
+	PaidUnknown  bool     `json:"paid_unknown"`
+	Plans        []string `json:"plans"`
+	BillingModes []string `json:"billing_modes"`
 	// ListCostMicros and PaidMicros are the sort keys as integer micro-dollars,
 	// decimal strings: spent when present, otherwise the estimate. A client
 	// compares them as integers. The USD strings above stay the display.
@@ -249,10 +252,11 @@ type planUsage struct {
 	listUnpriced          bool
 	paidUnknown           bool
 	plans                 map[string]bool
+	billingModes          map[string]bool
 }
 
 func newPlanUsage() *planUsage {
-	return &planUsage{sessions: map[string]bool{}, unreported: map[string]bool{}, plans: map[string]bool{}}
+	return &planUsage{sessions: map[string]bool{}, unreported: map[string]bool{}, plans: map[string]bool{}, billingModes: map[string]bool{}}
 }
 
 // usageLine is one harness_session_usage row with its session and list price.
@@ -295,6 +299,11 @@ func (l usageLine) listCost() *big.Rat {
 
 func (u *planUsage) add(l usageLine) {
 	u.sessions[l.session] = true
+	mode := "unknown"
+	if l.billing != nil {
+		mode = *l.billing
+	}
+	u.billingModes[mode] = true
 	if l.model == nil {
 		// A session without any usage report.
 		u.unreported[l.session] = true
@@ -730,9 +739,13 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 // planCost projects price flags. The dollar strings are applied from the
 // SQL micro-dollar integers, which are also the sort keys.
 func planCost(used *planUsage, e planEstimate) *planningCost {
-	c := &planningCost{Plans: []string{}}
+	c := &planningCost{Plans: []string{}, BillingModes: []string{}}
 	plans := map[string]bool{}
 	if used != nil {
+		for mode := range used.billingModes {
+			c.BillingModes = append(c.BillingModes, mode)
+		}
+		sort.Strings(c.BillingModes)
 		c.ListUnpriced, c.PaidUnknown = used.listUnpriced, used.paidUnknown
 		for plan := range used.plans {
 			plans[plan] = true
@@ -773,6 +786,10 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		return nil, err
 	}
 	usage, err := loadPlanUsage(ctx, tx, ids, cost)
+	if err != nil {
+		return nil, err
+	}
+	models, running, err := loadPlanningModels(ctx, tx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -827,6 +844,8 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 			view.Snapshot = snap
 		}
 		if view != nil {
+			view.Models = models[item.ID]
+			view.Tokens.Running = running[item.ID]
 			out[item.ID] = view
 		}
 	}

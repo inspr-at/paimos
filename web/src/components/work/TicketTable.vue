@@ -3,7 +3,7 @@
 import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -56,6 +56,7 @@ const props = defineProps<{
   canDrag?: boolean
   // The person's saved columns, order and widths for this project (null: automatic).
   prefs?: ListPrefs | null
+  costAllowed?: boolean
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
   selected?: Set<string>
@@ -144,7 +145,7 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   const stale = !!eta.stale
   return { pct, stale, label: progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone) }
 }
-const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
+const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
 const ids = computed(() => columns.value.map(column => column.id))
 const has = (id: ColumnId) => ids.value.includes(id)
@@ -155,16 +156,17 @@ const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
+const layoutWidth = computed(() => layout.value.customised ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? COLUMN_BY_ID.get(id)!.min : dragWidths.value[id] ?? widthOf(id, props.prefs)), 0)) : width.value)
+const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
   if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
   return releaseCell(props.nativeReleases?.get(row.id))
 }
-const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
+const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: ColumnId) {
-  if (id === 'title') return titleRoom(ids.value, width.value, props.prefs, dragWidths.value)
+  if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value)
   const def = COLUMN_BY_ID.get(id)!
   return { min: def.min, max: def.max }
 }
@@ -471,7 +473,7 @@ defineExpose({
 
 <template>
   <div ref="card" class="table-card" :class="[density, { selectable, selecting }]">
-    <table ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+    <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
@@ -1168,4 +1170,5 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-head { height: 40px; }
   .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
 }
+@media (min-width: 721px) { .table-card { overflow-x: auto; overscroll-behavior-x: contain; } }
 </style>

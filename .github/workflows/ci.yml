@@ -160,6 +160,21 @@ jobs:
         run: npm run lint
       - working-directory: web
         run: npm run build
+      - working-directory: web
+        run: npm run test:unit
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Planning columns regression and theme screenshots
+        working-directory: web
+        run: npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2
+      - name: Planning screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: planning-columns-${{ github.sha }}
+          path: .agent-shots/planning/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   release-check:
     runs-on: ubuntu-latest

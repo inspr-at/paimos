@@ -1,26 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Planning columns (AEON-329): the model a ticket's role and area resolve to,
-// tokens spent / estimated, the same at API list prices (≈ Cost, always
-// approximate) and what was actually paid. Mirrors api/openapi.yaml
-// TicketPlanning. Free of Vue for unit tests.
+// Planning cells (AEON-511): planned versus used models, measured tokens and
+// their list value. Work-start snapshots are the comparison baseline. Mirrors
+// api/openapi.yaml TicketPlanning. Free of Vue for unit tests.
 
 export interface PlanningRoute { label: string; profile: string; harness: string; model: string; effort: string; revision: string }
 export interface PlanningCalibration { basis: 'median' | 'default'; tickets: number; tokens_per_hour: number; any_route?: boolean }
 export interface PlanningTokens {
   spent: number | null; input: number; output: number; cached: number
-  sessions: number; unreported: number; estimated: number | null
+  sessions: number; running?: number; unreported: number; estimated: number | null
   calibration?: PlanningCalibration
 }
 export interface PlanningCost {
   list_spent: string | null; list_estimated: string | null; list_unpriced: boolean
   paid_spent: string | null; paid_estimated: string | null; paid_unknown: boolean
   plans: string[]
+  billing_modes?: ('api' | 'subscription' | 'unknown')[]
   // Integer micro-dollars of the sort key (spent when present, otherwise the
   // estimate). Display stays on the USD strings above.
   list_cost_micros?: string | null
   paid_micros?: string | null
 }
+export interface PlanningModelSession { id: string; profile_id?: string; model_raw?: string; effort: string; role: string; running: boolean; tokens: number | null }
+export interface PlanningModel { label: string; harness: string; model: string; sessions: PlanningModelSession[] }
+export interface PlanningSnapshot {
+  id: string; started_at: string; source: 'session' | 'status'; estimate_hours: number | null
+  estimated_tokens: number | null; estimated_cost_usd?: string | null; route: PlanningRoute | null
+  rate_basis: PlanningCalibration & { list_per_hour?: string | null }
+}
 export interface TicketPlanning {
+  models?: PlanningModel[]
+  estimate_snapshot?: PlanningSnapshot
   route: PlanningRoute | null
   route_gap?: 'area' | 'review_gate' | 'registry'
   tokens: PlanningTokens
@@ -28,10 +37,10 @@ export interface TicketPlanning {
   children?: { total: number; estimated: number }
 }
 // The part of a list row the planning cells read.
-export interface PlanningRow { kind_slug: string; fields: Record<string, unknown>; planning?: TicketPlanning }
+export interface PlanningRow { kind_slug: string; fields: Record<string, unknown>; state?: string | null; eta?: { has_working_session?: boolean }; planning?: TicketPlanning }
 
 export type PlanningColumn = 'model' | 'tokens' | 'list_cost' | 'paid'
-export const PLANNING_COLUMNS: PlanningColumn[] = ['model', 'tokens', 'list_cost', 'paid']
+export const PLANNING_COLUMNS: PlanningColumn[] = ['model', 'tokens', 'list_cost']
 // Cost columns show only to people who may see usage (harness.read).
 export const COST_COLUMNS: PlanningColumn[] = ['list_cost', 'paid']
 
@@ -82,40 +91,80 @@ function roleArea(row: PlanningRow): string {
 }
 
 // ---------- Model ----------
-export interface ModelCell { text: string; tip: string }
+export interface ModelCell { text: string; tip: string; state: 'none' | 'planned' | 'measured'; harness: string; more: number; label: string }
+function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
+  return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
+}
+function shortModel(route: PlanningRoute): string { return route.label.split(' · ')[0]! }
+function planLine(row: PlanningRow): string {
+  const route = plannedRoute(row)
+  return route ? `Planned: ${route.label} (${route.model})` : 'No model planned: set a role and area'
+}
+function usedLines(models: PlanningModel[]): string[] {
+  return models.flatMap(m => m.sessions.map(s => `${m.harness} ${m.model}${s.effort ? ` · ${s.effort}` : ''} · session ${s.id}${s.role ? ` (${s.role})` : ''}${s.running ? ', running' : ''}${s.tokens !== null ? ` · ${formatTokenCount(s.tokens)} tokens` : ' · usage not reported yet'}${s.model_raw && s.model_raw !== m.model ? ` · reported: ${s.model_raw}` : ''}`))
+}
 export function modelCell(row: PlanningRow): ModelCell {
-  const plan = row.planning
-  if (row.kind_slug === 'epic') return { text: '', tip: 'Epics take no model; their tickets do' }
-  if (plan?.route) {
-    return { text: plan.route.label, tip: `${roleArea(row)}\nModel registry, revision ${plan.route.revision}` }
+  const models = row.kind_slug === 'epic' ? [] : row.planning?.models ?? []
+  if (models.length) {
+    const first = models[0]!, more = models.length - 1
+    return { text: first.label, harness: first.harness, state: 'measured', more,
+      label: `${first.label}, measured${more ? `, and ${more} more model${more === 1 ? '' : 's'}` : ''}`,
+      tip: ['Used, per session:', ...usedLines(models), planLine(row)].join('\n') }
   }
-  const role = roleOf(row)
-  if (!role) return { text: '', tip: 'Set a role and area to suggest a model' }
-  switch (plan?.route_gap) {
-    case 'area': return { text: '', tip: `${roleArea(row)}\nSet an area to resolve the model` }
-    case 'review_gate': return { text: '', tip: `${roleArea(row)}\nChosen at dispatch from a family other than the author's` }
-    default: return { text: '', tip: `${roleArea(row)}\nThe model registry has no available route for this role` }
+  const route = plannedRoute(row)
+  if (row.kind_slug !== 'epic' && route) {
+    return { text: shortModel(route), harness: route.harness, state: 'planned', more: 0,
+      label: `${shortModel(route)}, estimated (planned)`,
+      tip: [planLine(row), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].join('\n') }
   }
+  let reason = 'No model planned: Set a role and area'
+  if (row.kind_slug === 'epic') reason = 'Epics take no model; their tickets do'
+  else if (roleOf(row)) switch (row.planning?.route_gap) {
+    case 'area': reason = `${roleArea(row)}\nSet an area to resolve the model`; break
+    case 'review_gate': reason = `${roleArea(row)}\nChosen at dispatch from a family other than the author's`; break
+    default: reason = `${roleArea(row)}\nThe model registry has no available route for this role`
+  }
+  return { text: '', harness: '', state: 'none', more: 0, label: 'No model', tip: `${row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'}\n${reason}` }
 }
 
-// ---------- Tokens ----------
+// ---------- Figures ----------
 export interface FigureCell {
-  spent: string; estimated: string
-  // Spent above the estimate: the spent figure is tinted and the label says so.
-  over: boolean
+  state: 'none' | 'estimated' | 'running' | 'measured'
+  spent: string; estimated: string; over: boolean; plan: boolean
   label: string; tip: string
 }
-const EMPTY: FigureCell = { spent: '', estimated: '', over: false, label: '', tip: '' }
+function running(row: PlanningRow): boolean {
+  const count = row.planning?.tokens.running
+  return count !== undefined ? count > 0 : !!row.eta?.has_working_session || row.state === 'in_progress'
+}
+function delta(spent: number | null, est: number | null, live: boolean): string {
+  if (spent === null || est === null || est <= 0) return ''
+  const pct = Math.round((live ? spent / est : (spent - est) / est) * 100)
+  return live ? ` (${pct}%)` : ` (${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}%)`
+}
+function snapshotLine(row: PlanningRow): string {
+  const snap = row.planning?.estimate_snapshot
+  return snap ? `Estimate taken when work started, ${new Date(snap.started_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}` : 'No work-start estimate snapshot; comparison uses the current estimate'
+}
+function figure(row: PlanningRow, spent: number | null, est: number | null, format: (n: number) => string, tip: string, unit: string, plan = false): FigureCell {
+  const live = running(row)
+  const state = spent === null ? est === null ? 'none' : 'estimated' : live ? 'running' : 'measured'
+  const over = state === 'running' && est !== null && spent! > est
+  const parts = [spent !== null ? `${format(spent)}${unit} measured${live ? ' so far' : ''}` : '', est !== null && state !== 'measured' ? `${format(est)} estimated` : '', over ? 'over the estimate' : '', plan && state === 'measured' ? 'included in your plan' : '']
+  return { state, spent: spent !== null ? format(spent) : '', estimated: est !== null ? format(est) : '', over, plan: plan && state === 'measured', label: parts.filter(Boolean).join(', '), tip }
+}
 function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
-  const cal = tokens.calibration
+  const snap = row.planning?.estimate_snapshot
+  const cal = snap?.rate_basis ?? tokens.calibration
   if (row.kind_slug === 'epic' && row.planning?.children) {
     const c = row.planning.children
     return `Sum of ${c.estimated} of ${c.total} open and done children with an estimate`
   }
   if (!cal) return ''
-  const hours = tokens.estimated !== null && cal.tokens_per_hour > 0 ? tokens.estimated / cal.tokens_per_hour : null
+  const est = snap ? snap.estimated_tokens : tokens.estimated
+  const hours = snap ? snap.estimate_hours : est !== null && cal.tokens_per_hour > 0 ? est / cal.tokens_per_hour : null
   const rate = `${formatTokenCount(cal.tokens_per_hour)}/h`
-  const route = row.planning?.route?.label
+  const route = plannedRoute(row)?.label
   const on = cal.any_route || !route ? 'on any route' : `on ${route}`
   const times = hours !== null ? `${Number(hours.toFixed(2))}h at ${rate}` : rate
   return cal.basis === 'median'
@@ -124,72 +173,51 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
 }
 export function tokensCell(row: PlanningRow): FigureCell {
   const tokens = row.planning?.tokens
-  if (!tokens || (tokens.spent === null && tokens.estimated === null)) return EMPTY
-  const spent = tokens.spent, est = tokens.estimated
-  const over = spent !== null && est !== null && spent > est
+  const snap = row.planning?.estimate_snapshot
+  const spent = tokens?.spent ?? null, est = snap ? snap.estimated_tokens : tokens?.estimated ?? null
+  const live = running(row)
   const lines: string[] = []
   if (spent !== null) {
-    lines.push(`Spent ${grouped.format(spent)} tokens over ${tokens.sessions === 1 ? '1 session' : `${tokens.sessions} sessions`}`)
-    lines.push(`Input ${grouped.format(tokens.input)} (${grouped.format(tokens.cached)} cached) · output ${grouped.format(tokens.output)}`)
-    if (tokens.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
-  } else if (tokens.sessions) {
-    lines.push(`${tokens.sessions === 1 ? 'The session has' : `${tokens.sessions} sessions have`} no usage report yet`)
-  }
-  if (est !== null) {
-    lines.push(`Estimated ${grouped.format(est)} tokens`)
-    const basis = basisLine(tokens, row)
-    if (basis) lines.push(basis)
-  }
-  if (over) lines.push(`Over the estimate by ${formatTokenCount(spent! - est!)}`)
-  const label = [spent !== null ? `${formatTokenCount(spent)} tokens spent` : '', est !== null ? `${formatTokenCount(est)} estimated` : '', over ? 'over the estimate' : ''].filter(Boolean).join(', ')
-  return { spent: spent !== null ? formatTokenCount(spent) : '', estimated: est !== null ? formatTokenCount(est) : '', over, label, tip: lines.join('\n') }
+    lines.push([est !== null ? `Estimated ~${formatTokenCount(est)}` : '', `${live ? 'Measured so far' : 'measured'} ${formatTokenCount(spent)}${delta(spent, est, live)}`, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.model : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
+    lines.push(`${tokens!.sessions} session${tokens!.sessions === 1 ? '' : 's'}${live ? ', running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
+    if (est !== null) lines.push(snapshotLine(row))
+  } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
+  else lines.push(tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
+  if (tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
+  if (tokens && est !== null) { const basis = basisLine(tokens, row); if (basis) lines.push(basis) }
+  return figure(row, spent, est, formatTokenCount, lines.join('\n'), ' tokens')
 }
 
-// ---------- ≈ Cost and Paid ----------
+// Cost is measured tokens at list prices, with actual billing named in the hover.
 export function listCostCell(row: PlanningRow): FigureCell {
-  const cost = row.planning?.cost
-  if (!cost) return EMPTY
-  const spent = num(cost.list_spent), est = num(cost.list_estimated)
-  if (spent === null && est === null) return EMPTY
-  const over = spent !== null && est !== null && spent > est
-  const lines = ['At API list prices, whatever the billing']
-  if (spent !== null) lines.push(`Spent ≈ ${exactDollars(cost.list_spent!)}`)
-  if (est !== null) {
-    const tokens = row.planning!.tokens
-    const cal = tokens.calibration
-    const hours = cal && tokens.estimated !== null && cal.tokens_per_hour > 0 ? tokens.estimated / cal.tokens_per_hour : null
-    lines.push(`Estimated ≈ ${exactDollars(cost.list_estimated!)}${hours ? ` (${exactDollars(String(est / hours))}/h)` : ''}`)
-  }
-  if (cost.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
-  if (over) lines.push(`Over the estimate by ${formatDollars(spent! - est!)}`)
-  const label = ['approximately', spent !== null ? `${formatDollars(spent)} spent` : '', est !== null ? `${formatDollars(est)} estimated` : '', over ? 'over the estimate' : ''].filter(Boolean).join(' ')
-  return { spent: spent !== null ? formatDollars(spent) : '', estimated: est !== null ? formatDollars(est) : '', over, label, tip: lines.join('\n') }
-}
-export function paidCell(row: PlanningRow): FigureCell {
-  const cost = row.planning?.cost
-  if (!cost) return EMPTY
-  const spent = num(cost.paid_spent), est = num(cost.paid_estimated)
-  if (spent === null && est === null) return EMPTY
-  const over = spent !== null && est !== null && spent > est
-  const plans = cost.plans.length ? cost.plans.join(', ') : ''
-  const lines = ['Pay-per-use charges']
-  if (spent !== null) lines.push(`Paid ${exactDollars(cost.paid_spent!)}`)
-  if (est !== null) lines.push(`Estimated ${exactDollars(cost.paid_estimated!)}`)
-  if (plans) lines.push(`Work on ${plans} counts as $0`)
-  if (cost.paid_unknown) lines.push('Part of this has no billing on record')
-  if (over) lines.push(`Over the estimate by ${formatDollars(spent! - est!)}`)
-  const label = [spent !== null ? `${formatDollars(spent)} paid` : '', est !== null ? `${formatDollars(est)} estimated` : '', over ? 'over the estimate' : ''].filter(Boolean).join(', ')
-  return { spent: spent !== null ? formatDollars(spent) : '', estimated: est !== null ? formatDollars(est) : '', over, label, tip: lines.join('\n') }
+  const cost = row.planning?.cost, snap = row.planning?.estimate_snapshot
+  const spent = num(cost?.list_spent), est = snap ? num(snap.estimated_cost_usd) : num(cost?.list_estimated)
+  const modes = cost?.billing_modes ?? (cost?.plans.length && row.planning?.tokens.sessions ? ['subscription'] : cost && !cost.paid_unknown && row.planning?.tokens.sessions ? ['api'] : [])
+  const subscription = modes.includes('subscription'), api = modes.includes('api'), unknown = modes.includes('unknown')
+  const lines: string[] = []
+  if (spent !== null) {
+    if (subscription && !api && !unknown) lines.push(`Included in your plan · list value ${formatDollars(spent)}`, 'Subscription: not charged per use')
+    else if (api && !subscription && !unknown) lines.push(`API-billed · measured ${formatDollars(spent)} at list prices`)
+    else lines.push(`Measured ${formatDollars(spent)} at list prices`, [api ? 'API-billed' : '', subscription ? 'Subscription portion included in your plan' : '', unknown || !modes.length ? 'Billing not reported yet' : ''].filter(Boolean).join(' · '))
+    if (cost?.plans.length && subscription) lines.push(cost.plans.join(', '))
+    if (est !== null) lines.push(`Estimated ~${formatDollars(est)}${delta(spent, est, running(row))}`, snapshotLine(row))
+  } else if (est !== null) {
+    const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
+    lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
+  } else lines.push(row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
+  if (cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
+  if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
+  return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscription)
 }
 
 // ---------- Columns and sorting ----------
 /** Which planning columns any loaded row can fill; empty ones stay hidden. */
 export function planningPresent(rows: PlanningRow[]): Record<PlanningColumn, boolean> {
   return {
-    model: rows.some(row => row.kind_slug !== 'epic' && (!!roleOf(row) || !!row.planning?.route)),
-    tokens: rows.some(row => !!tokensCell(row).label),
-    list_cost: rows.some(row => !!listCostCell(row).label),
-    paid: rows.some(row => !!paidCell(row).label),
+    model: rows.some(row => !!modelCell(row).text),
+    tokens: rows.some(row => tokensCell(row).state !== 'none'),
+    list_cost: rows.some(row => listCostCell(row).state !== 'none'),
+    paid: false,
   }
 }
 const ROLE_RANK: Record<string, number> = { scout: 0, mechanical: 1, build: 2, 'build-hard': 3, 'review-gate': 4 }
@@ -228,6 +256,6 @@ export function planningTip(row: PlanningRow, column: PlanningColumn): string {
     case 'model': return modelCell(row).tip
     case 'tokens': return tokensCell(row).tip
     case 'list_cost': return listCostCell(row).tip
-    case 'paid': return paidCell(row).tip
+    case 'paid': return listCostCell(row).tip
   }
 }

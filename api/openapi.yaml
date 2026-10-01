@@ -12067,6 +12067,29 @@ components:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
           enum: [area, review_gate, registry]
+        models:
+          description: 'Actually used models from visible sessions on this node and its open/done work descendants. Ordered by measured tokens descending, then harness/model. Session profile identity wins; normalized model and raw metadata are fallbacks. Contains no billing or prices.'
+          type: array
+          items:
+            type: object
+            required: [label, harness, model, sessions]
+            properties:
+              label: {type: string, description: Short model label without effort.}
+              harness: {type: string}
+              model: {type: string}
+              sessions:
+                type: array
+                items:
+                  type: object
+                  required: [id, effort, role, running, tokens]
+                  properties:
+                    id: {type: string, format: uuid}
+                    profile_id: {type: string, format: uuid}
+                    model_raw: {type: string, description: Original harness metadata, retained for audit.}
+                    effort: {type: string}
+                    role: {type: string}
+                    running: {type: boolean}
+                    tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
         tokens:
           type: object
           required: [spent, input, output, cached, sessions, unreported, estimated]
@@ -12076,6 +12099,7 @@ components:
             output: {type: integer, minimum: 0}
             cached: {type: integer, minimum: 0}
             sessions: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0, description: Visible sessions that have not stopped, including those with no model or usage yet.}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
             estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
             calibration:
@@ -12099,6 +12123,7 @@ components:
             paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
             paid_unknown: {type: boolean, description: Some usage or the route's harness has no billing on record.}
             plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
+            billing_modes: {type: array, items: {type: string, enum: [api, subscription, unknown]}, description: Billing modes of actual visible usage only; requires harness.read on source and row projects.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
