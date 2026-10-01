@@ -1,0 +1,5 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" xmlns:x="http://ns.adobe.com/Extensibility/1.0/" viewBox="0 0 160 40" xml:space="preserve" enable-background="new 0 0 160 40" class="logo" i:version="28">
+<i:pgf><x:payload>Editor data</x:payload></i:pgf>
+<path d="M0 0h40v40H0z" fill="#0b6e6e"/><text x="44" y="28" font-size="24">Acme</text>
+</svg>

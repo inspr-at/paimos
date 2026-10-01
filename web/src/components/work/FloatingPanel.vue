@@ -3,7 +3,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
-// bottom edge, closes on Escape, outside clicks and page scroll, and hands
+// bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false })
@@ -14,12 +14,14 @@ const y = ref(-9999)
 // Until placed (off-screen), the content may take its full height so place() measures it.
 const maxHeight = ref(props.tallest)
 const above = ref(false)
+let placedAnchor: DOMRect | null = null
 
 // keepSide: when the content grows or shrinks (results arriving), stay on the
 // side chosen at opening; above the trigger, the bottom edge stays by it.
 function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
+  placedAnchor = rect
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
@@ -37,6 +39,13 @@ function outside(event: PointerEvent) {
 }
 function scrolled(event: Event) {
   if (panel.value?.contains(event.target as Node)) return
+  // Opening can scroll the trigger into view. Its notification may arrive after
+  // placement, even after the next frame; only new anchor movement dismisses it.
+  // Point-anchored context menus still close on every outside scroll.
+  if (props.anchor instanceof HTMLElement && placedAnchor) {
+    const rect = props.anchor.getBoundingClientRect()
+    if (rect.top === placedAnchor.top && rect.left === placedAnchor.left && rect.bottom === placedAnchor.bottom && rect.right === placedAnchor.right) return
+  }
   emit('close', false)
 }
 // Inside a modal dialog (the release history's ticket panel) the popover moves

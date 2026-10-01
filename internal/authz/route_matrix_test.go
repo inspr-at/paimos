@@ -77,6 +77,7 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		check(tc.role, people[tc.role], tc.route, tc.allow)
 	}
 	guest := people["guest"]
+	check("project-only guest", guest, "GET /api/me", true)
 	checkIn("guest", guest, "GET /api/nodes", Scope{AnyProject: true}, true)
 	checkIn("guest", guest, "GET /api/me", Scope{AnyProject: true}, true)
 	// AEON-184: who is working where follows project visibility, so a
@@ -111,6 +112,7 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent.KeyCreatorID = people["admin"].ID
+	check("agent without scopes", agent, "GET /api/me", true)
 	check("agent without scopes", agent, "GET /api/nodes", false)
 	agent.Scopes = []string{"nodes.read"}
 	check("agent read scope", agent, "GET /api/nodes", true)

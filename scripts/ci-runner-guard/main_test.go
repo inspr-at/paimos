@@ -21,6 +21,31 @@ func TestRepositoryWorkflows(t *testing.T) {
 	}
 }
 
+func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/cross-family-preview.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, changed := range []string{
+		strings.Replace(string(body), "  pull_request:", "  push:\n  pull_request:", 1),
+		strings.Replace(string(body), "  pull_request:", "  workflow_dispatch:\n  pull_request:", 1),
+		strings.Replace(string(body), "    runs-on:", "    if: false\n    runs-on:", 1),
+		strings.Replace(string(body), "name: gate/policy-preview", "name: gate/cross-family", 1),
+		strings.Replace(string(body), "statuses: read", "statuses: write", 1),
+	} {
+		problems, err := checkWorkflow("cross-family-preview.yml", []byte(changed))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("unsafe gate preview accepted: %v %v", problems, err)
+		}
+	}
+	for _, file := range []string{"ci.yml", "cross-family-preview.yml", "forged.yml"} {
+		problems, err := checkWorkflow(file, []byte("on: pull_request\njobs:\n  forged:\n    name: gate/cross-family\n    runs-on: ubuntu-latest\n    steps: [{run: 'exit 0'}]\n"))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("Actions counterfeit accepted: %v %v", problems, err)
+		}
+	}
+}
+
 // Runner unit fixtures deliberately omit the CI trigger/job contract. Full
 // workflow tests and directory mutations exercise checkWorkflow instead.
 func checkRunnerWorkflow(name string, body []byte) ([]string, error) {

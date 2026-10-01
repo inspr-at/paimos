@@ -6,12 +6,18 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // PublicRoute marks a matched route that is public. Unknown routes have no
 // declaration and must be denied by the authorization boundary. Session
 // refresh uses the same marker, so it cannot disagree with authorization.
 const PublicRoute = "public"
+
+// AuthenticatedRoute requires a principal resolved by authentication, without
+// a role or key scope. It is reserved for the caller's own identity endpoint.
+const AuthenticatedRoute = "authenticated"
 
 // RoutePermissions declares the permission for each registered API pattern.
 // Customer quote routes accept one of two permissions; the quote handler also
@@ -190,7 +196,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/knowledge/learnings":                                           "knowledge.read",
 	"GET /api/knowledge/resolve":                                             "knowledge.read",
 	"GET /api/knowledge/{id}":                                                "knowledge.read",
-	"GET /api/me":                                                            "profile.read|profile.portal_read",
+	"GET /api/me":                                                            AuthenticatedRoute,
 	"GET /api/me/greeting":                                                   "profile.read|profile.portal_read",
 	"GET /api/me/permissions":                                                "authz.read",
 	"GET /api/me/profile":                                                    "profile.read|profile.portal_read",
@@ -522,7 +528,8 @@ func PatternIsPublic(pattern string) bool {
 }
 
 // RequirePattern denies missing declarations. A public declaration leaves the
-// route's own capability or login checks in place. Quote portal declarations
+// route's own capability or login checks in place. An authenticated declaration
+// requires the trusted principal set by authentication. Quote portal declarations
 // allow either staff or customer authority; the handler checks ownership.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	declaration, ok := PermissionForPattern(pattern)
@@ -531,6 +538,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	}
 	if declaration == PublicRoute {
 		return nil
+	}
+	if declaration == AuthenticatedRoute {
+		if p, ok := tenant.PrincipalFrom(ctx); ok && p.ID != "" && p.TenantID != "" {
+			return nil
+		}
+		return ErrForbidden
 	}
 	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {
