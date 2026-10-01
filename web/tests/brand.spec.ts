@@ -28,14 +28,14 @@ test('a different brand names the title, header, footer, menu, release history a
   await expect(page.getByRole('link', { name: 'NOVA DAWN home' })).toBeVisible()
   await expect(page.locator('.app-header .wordmark')).toHaveText('NOVADAWN')
   await expect(page.locator('.app-header .wordmark sup')).toHaveText('DAWN')
-  await expect(page.locator('footer.app-footer .footer-name')).toHaveText('NOVA DAWN')
+  await expect(page.locator('footer.app-footer .footer-name .footer-wordmark')).toHaveText('NOVA DAWN')
 
   await page.getByRole('button', { name: /^Account for / }).click()
   await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
 
-  await page.locator('.version-pill').click()
+  await page.locator('footer.app-footer .footer-name').click()
   const sheet = page.getByRole('dialog', { name: 'NOVA DAWN releases' })
   await expect(sheet).toBeVisible()
   // The generation is a label, never a version.

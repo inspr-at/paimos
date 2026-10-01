@@ -13,7 +13,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', label: 'Personal', summary: 'Theme, greeting and keys', admin: false },
   { id: 'agent-rules', label: 'Agent rules', summary: 'Rules for every agent', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
   { id: 'accounts', label: 'Accounts', summary: 'Agent accounts and limits', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
-  { id: 'workspace', label: 'Workspace', summary: 'Name and your role', admin: true },
+  { id: 'workspace', label: 'Workspace', summary: 'Name, brand and your role', admin: true },
   { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
   { id: 'projects', label: 'Projects', summary: 'Ticket types', admin: true },

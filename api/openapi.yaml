@@ -4906,6 +4906,82 @@ paths:
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
         '400': {description: Interval outside 1 to 240 minutes}
+  /settings/brand:
+    get:
+      operationId: getBrandSettings
+      description: The workspace's header brand, a short name and a logo with an optional dark-mode logo (AEON-431). Person only; requires settings.manage.
+      responses:
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '403': {description: 'Not a person, or settings.manage missing'}
+    put:
+      operationId: putBrandShortName
+      description: Sets the short name shown next to the logo; an empty string clears it. At most 32 characters, whitespace collapsed. Person only; requires settings.manage. A change appends tenant.brand_updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [short_name]
+              properties:
+                short_name: {type: string, maxLength: 32}
+      responses:
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '400': {description: Invalid short name}
+        '403': {description: 'Not a person, or settings.manage missing'}
+  /settings/brand/logo/{variant}:
+    parameters:
+      - {name: variant, in: path, required: true, schema: {type: string, enum: [light, dark]}, description: light is the logo; dark is the optional logo for dark mode.}
+    put:
+      operationId: putBrandLogo
+      description: >-
+        Uploads a logo as the raw request body. The declared Content-Type must match the bytes: PNG, WebP or SVG, at most 256 KB.
+        Raster logos need at least 32 px and at most 4096 px on each side and at most 4 megapixels; every logo is between 1:2 and 8:1.
+        A raster's size is read from every header before it is decoded: a WebP frame must match its VP8X canvas, and animated
+        PNG or WebP files and bytes after the image's end are refused.
+        SVG accepts a static logo profile of paths, basic shapes, groups, text, titles, descriptions and gradients, with defs as
+        an inert definitions container. Attributes and inline style properties use an allowlist. Unsupported features refuse
+        the whole upload with a 400 and a reason; they are never silently stripped. Masks, clip paths, filters, patterns, markers,
+        use, symbol, images, foreignObject, style elements, scripts, event handlers, animation and all href/xlink:href are refused.
+        Only fill and stroke may contain one url() naming a unique gradient in this file, with an optional static colour fallback;
+        gradient inheritance and inherit/initial/unset/revert/revert-layer on fill or stroke are refused. Size, nesting and element
+        limits remain enforced. Harmless comments may be removed (reported by cleaned), and inline styles become attributes.
+        Person only; requires settings.manage.
+        A change appends tenant.brand_updated.
+      requestBody:
+        required: true
+        content:
+          image/png: {schema: {type: string, format: binary}}
+          image/webp: {schema: {type: string, format: binary}}
+          image/svg+xml: {schema: {type: string, format: binary}}
+      responses:
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '400': {description: 'Wrong type, unreadable or animated image, unsupported static SVG feature, or outside the pixel bounds; includes a reason'}
+        '403': {description: 'Not a person, or settings.manage missing'}
+        '413': {description: 'Larger than 256 KB as uploaded, or an SVG once rewritten; code logo_too_large', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    delete:
+      operationId: deleteBrandLogo
+      description: Removes the logo; the header falls back to the product mark (or, for dark, to the light logo). Person only; requires settings.manage.
+      responses:
+        '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
+        '403': {description: 'Not a person, or settings.manage missing'}
+  /brand/logo/{variant}:
+    get:
+      operationId: getBrandLogo
+      description: The workspace's logo image, for any member, including one who holds only project bindings. Sent with X-Content-Type-Options nosniff and Content-Security-Policy default-src 'none'; sandbox. Immutable when v matches the stored hash.
+      parameters:
+        - {name: variant, in: path, required: true, schema: {type: string, enum: [light, dark]}}
+        - {name: v, in: query, required: false, schema: {type: string}, description: Hash prefix from TenantBrandLogo.url.}
+      responses:
+        '200':
+          description: Logo image
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+            image/svg+xml: {schema: {type: string, format: binary}}
+        '304': {description: Not modified}
+        '404': {description: No logo}
   /settings/heartbeat-lost:
     get:
       operationId: getHeartbeatLost
@@ -7604,7 +7680,7 @@ components:
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.1']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.8']}}
@@ -12717,6 +12793,43 @@ components:
           type: string
         name:
           type: string
+        brand:
+          $ref: "#/components/schemas/TenantBrand"
+    TenantBrand:
+      type: object
+      description: The workspace's own brand for the header (AEON-431). Absent when the workspace has set nothing; each part is absent when unset. Render logos only through an img element.
+      properties:
+        short_name: {type: string, maxLength: 32}
+        logo: {$ref: "#/components/schemas/TenantBrandLogo"}
+        logo_dark: {$ref: "#/components/schemas/TenantBrandLogo"}
+    TenantBrandLogo:
+      type: object
+      required: [url, width, height]
+      properties:
+        url: {type: string, description: Same-origin image URL carrying the content hash; the response is immutable.}
+        width: {type: integer, minimum: 1, maximum: 4096}
+        height: {type: integer, minimum: 1, maximum: 4096}
+    BrandLogoInfo:
+      allOf:
+        - $ref: "#/components/schemas/TenantBrandLogo"
+        - type: object
+          required: [content_type, size, sha256, uploaded_at]
+          properties:
+            content_type: {type: string, enum: [image/png, image/webp, image/svg+xml]}
+            size: {type: integer, minimum: 1, maximum: 262144}
+            sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+            uploaded_at: {type: string, format: date-time}
+    BrandSettings:
+      type: object
+      required: [short_name, logo, logo_dark]
+      properties:
+        short_name: {type: string, maxLength: 32, description: Empty when unset.}
+        logo:
+          oneOf: [{$ref: "#/components/schemas/BrandLogoInfo"}, {type: "null"}]
+        logo_dark:
+          oneOf: [{$ref: "#/components/schemas/BrandLogoInfo"}, {type: "null"}]
+        updated_at: {type: string, format: date-time}
+        cleaned: {type: boolean, description: Set when harmless SVG comments were removed. Unsupported SVG features reject the upload.}
     Identity:
       type: object
       required: [id, issuer, subject]
