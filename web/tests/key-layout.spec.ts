@@ -7,9 +7,11 @@ const LONG_SCOPE = `imports.${'workspace_metadata_'.repeat(6)}read`
 const LONG_ROLE = `Deployment${'Automation'.repeat(10)}`
 const agent = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
 
-async function open(page: Page, firstKey: boolean) {
+async function open(page: Page, firstKey: boolean, theme: 'light' | 'dark') {
   await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
-  await mockWork(page, fixtures())
+  const work = fixtures()
+  work.preferences.theme = { choice: theme }
+  await mockWork(page, work)
   const world = accessWorld()
   world.roles.find(r => r.key === 'viewer')!.name = LONG_ROLE
   if (firstKey) world.keys = world.keys.filter(k => k.principal_id !== DEPLOYER)
@@ -37,13 +39,14 @@ async function fits(dialog: Locator, scopeRows = false) {
     const edge = el.getBoundingClientRect()
     if (edge.left < -1 || edge.right > innerWidth + 1) failures.push('dialog exceeds viewport')
     if (!checkRows) return failures
-    const rows = [...el.querySelectorAll('.scope-row')]
+    const rows = [...el.querySelectorAll('.scope-row, .rotation-scopes > .scope-text')]
     if (!rows.length) failures.push('scope rows missing')
     for (const row of rows) {
       const box = row.getBoundingClientRect()
       const label = row.textContent?.trim()
       if (row.scrollWidth > row.clientWidth + 1) failures.push(`row overflows: ${label}`)
-      for (const span of row.querySelectorAll('.scope-text > span')) {
+      const texts = row.matches('.scope-text') ? row.children : row.querySelectorAll('.scope-text > span')
+      for (const span of texts) {
         const range = document.createRange()
         range.selectNodeContents(span)
         // Text fragment bounds catch overlap even when a clipping container
@@ -63,7 +66,7 @@ async function fits(dialog: Locator, scopeRows = false) {
 }
 
 async function tooltips(dialog: Locator) {
-  const texts = dialog.locator('.scope-text > span:not(:first-child)')
+  const texts = dialog.locator('.scope-text > .scope-id, .scope-text > .unavailable, .scope-text > .detail')
   expect(await texts.count()).toBeGreaterThan(0)
   for (const text of await texts.all()) await expect(text).toHaveAttribute('title', (await text.textContent())!)
 }
@@ -73,11 +76,11 @@ for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as c
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: theme })
     const errors = watchErrors(page)
-    const world = await open(page, false)
+    const world = await open(page, false, theme)
     await agent(page).getByRole('button', { name: 'New key', exact: true }).click()
     const fresh = page.getByRole('dialog', { name: 'New key for pharos-deployer', exact: true })
     await expect(fresh.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-    await expect(fresh.locator('.scope-reason').filter({ hasText: LONG_ROLE }).first()).toBeVisible()
+    await expect(fresh.locator('.scope-text > .unavailable').filter({ hasText: LONG_ROLE }).first()).toBeVisible()
     await fits(fresh, true)
     await tooltips(fresh)
     await fresh.locator('.scope-group').filter({ hasText: 'Imports' }).scrollIntoViewIfNeeded()
@@ -100,8 +103,9 @@ for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as c
     await agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
     const rotate = page.getByRole('dialog', { name: 'Rotate key for pharos-deployer', exact: true })
     await expect(rotate.locator('.rotation-scopes')).toContainText(LONG_SCOPE)
-    await expect(rotate.locator('.rotation-scopes li').filter({ hasText: LONG_SCOPE })).toHaveAttribute('title', LONG_SCOPE)
-    await fits(rotate)
+    await expect(rotate.locator('.rotation-scopes .scope-id').filter({ hasText: LONG_SCOPE })).toHaveAttribute('title', LONG_SCOPE)
+    await fits(rotate, true)
+    await tooltips(rotate)
     // Check the rendered long id, rather than only the dialog's clipped bounds.
     expect(await rotate.locator('.rotation-scopes').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     expect(errors).toEqual([])
@@ -111,7 +115,7 @@ for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as c
   test(`first key and key ready fit at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: theme })
-    await open(page, true)
+    await open(page, true, theme)
     await agent(page).getByRole('button', { name: 'Create first key', exact: true }).click()
     const first = page.getByRole('dialog', { name: 'Create first key for pharos-deployer', exact: true })
     await fits(first, true)

@@ -148,6 +148,19 @@ export const MAX_KEY_SCOPES = 256
 export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agent_grantable)
 // What the coordinating agent uses end to end (internal/cli compat test).
 export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
+export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
+export const KEY_SCOPE_PRESETS = [
+  { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
+  { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
+]
+// Presets are suggestions only. The registry and live creator/role ceiling are
+// authoritative, including when a permission stops being agent-grantable.
+export const grantablePresetScopes = (wanted: string[], held: Set<string>, registry: Permission[]) =>
+  wanted.filter(key => held.has(key) && registry.some(p => p.key === key && p.agent_grantable))
+export function matchesScope(permission: Permission, term: string): boolean {
+  const needle = term.trim().toLowerCase()
+  return !needle || `${permissionLabel(permission.key)} ${permission.key} ${permission.group} ${permission.description}`.toLowerCase().includes(needle)
+}
 export const scopeLabel = (key: string) => permissionLabel(key)
 // How a key is named on screen. Real prefixes start with the workspace id, the
 // same for every key, so a long one shows its distinguishing tail.
@@ -242,6 +255,20 @@ export const OWNER_TRANSFER_REASON = 'Changing an owner’s role needs Transfer 
 // project only those grantable on a project, against what I hold there.
 export const neededToGive = (role: Pick<Role, 'permissions'>, scope: Scope, registry: Permission[]) =>
   scope === 'workspace' ? role.permissions : role.permissions.filter(key => registry.find(p => p.key === key)?.grantable_at.includes('project'))
+// Agent creation requires the creator to hold the full role even on projects
+// (internal/authz/agent_creation.go). Never suggest Admin or Owner automatically.
+export function suggestAgentRole(roles: Role[], wanted: string[], scope: Scope, registry: Permission[], mine: Set<string>): Role | undefined {
+  if (!wanted.length || wanted.some(key => !registry.some(p => p.key === key && p.agent_grantable && p.grantable_at.includes(scope)))) return undefined
+  const candidates = (scope === 'project' ? projectRolesOf(roles, registry) : workspaceRolesOf(roles)).filter(role =>
+    !(role.builtin && ['owner', 'admin', 'customer'].includes(role.key)) && !beyond(role.permissions, mine).length
+    && wanted.every(key => neededToGive(role, scope, registry).includes(key)))
+  const grants = (role: Role) => neededToGive(role, scope, registry)
+  const risk = (role: Role) => grants(role).filter(key => registry.find(p => p.key === key)?.risk === 'high').length
+  return candidates.sort((a, b) => grants(a).length - grants(b).length || risk(a) - risk(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0]
+}
+export function agentDescription(presetLabel: string, scope: 'workspace' | 'projects', projectKeys: string[]): string {
+  return `${presetLabel || 'CLI or script agent'} for ${scope === 'workspace' ? 'the workspace' : projectKeys.length ? projectKeys.join(', ') : 'selected projects'}`.slice(0, 1000)
+}
 export const lostPermission = (permission: string) => `You no longer have ${permissionLabel(permission)}, so this cannot be saved. What you chose stays here.`
 export const LAST_OWNER_REASON = 'The last active owner keeps Owner, so the workspace always has someone who can manage it. Make another person an owner first.'
 export function projectSummary(roles: ProjectRole[]): string {
