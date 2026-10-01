@@ -187,7 +187,11 @@ func TestTicketQueueBlockedTargetCapacityAndPickup(t *testing.T) {
 }
 func TestTicketQueueTargetedStartNowAndAllowance(t *testing.T) {
 	f := setup(t)
-	account := f.queueAccount(t, 0)
+	account := f.queueAccount(t, 1)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance WHERE account_id=$1`, account)
+		return err
+	})
 	shared := f.ticket(t, "open", "urgent", nil)
 	f.addQueue(t, shared, nil)
 	id := f.ticket(t, "open", "low", nil)
@@ -253,10 +257,14 @@ func TestTicketQueuePermissionsIsolationAuditAndConcurrentAdd(t *testing.T) {
 	// Creator's rights intersect a coordinator's live grants.
 	viewer := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$2,'person','Viewer')`, viewer.ID, viewer.TenantID)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$2,'person','Viewer')`, viewer.ID, viewer.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `WITH reader AS(INSERT INTO roles(tenant_id,key,name) VALUES($1,'queue_reader','Queue reader') RETURNING tenant_id,id)
+ INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,'nodes.read' FROM reader`, viewer.TenantID)
 		return err
 	})
-	dbtest.BindRole(t, f.d, viewer.TenantID, viewer.ID, "viewer")
+	dbtest.BindRole(t, f.d, viewer.TenantID, viewer.ID, "queue_reader")
 	var visible map[string]any
 	f.call(t, viewer, "GET", "/api/queue", nil, 200, &visible)
 	rows := visible["items"].([]any)
@@ -330,7 +338,7 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$2,'person','Project member')`, guest.ID, guest.TenantID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'QVIS','Visible project','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, guest.TenantID).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Visible project','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, guest.TenantID).Scan(&project); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, guest.TenantID, guest.ID, project)
