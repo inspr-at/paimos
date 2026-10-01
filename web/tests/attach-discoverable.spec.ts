@@ -27,8 +27,11 @@ function request(id: string, state: State, options: { mins?: number; host?: stri
   }
 }
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: boolean; paused?: boolean } = {}) {
   await page.clock.install({ time: NOW })
+  // Freeze before navigation creates polling timers. A slow CI page load must
+  // not move the intended pause point into the past; requests expire in 9 min.
+  if (options.paused) await page.clock.pauseAt(NOW + 60_000)
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: true })
@@ -543,7 +546,7 @@ const finishDecisionBody = (page: Page) => page.evaluate(() => (window as typeof
 
 for (const action of ['approve', 'revoke'] as const) {
   test(`an accepted ${action} refreshes pending requests and sessions after its review closes during body decoding`, async ({ page }) => {
-    const data = await setup(page)
+    const data = await setup(page, { paused: true })
     let state: State = 'pending', pendingReads = 0, sessionReads = 0
     await page.route(PENDING, route => { pendingReads++; return route.fulfill({ json: { requests: [request('r-wait', state)] } }) })
     await page.route('**/api/harness-sessions?*', route => { sessionReads++; return route.fallback() })
@@ -557,8 +560,7 @@ for (const action of ['approve', 'revoke'] as const) {
     await expect(session).toContainText('imac0')
     await strip(page).getByRole('button', { name: 'Review' }).click()
     await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
-    // Pause below both polling intervals: only the accepted write can refresh.
-    await page.clock.pauseAt(NOW + 1_000)
+    // The clock has not advanced since startup: only the accepted write can refresh.
     await holdDecisionBody(page, action)
     await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
@@ -580,13 +582,12 @@ for (const action of ['approve', 'revoke'] as const) {
   })
 
   test(`an accepted ${action} body is aborted and dropped when the identity changes during decoding`, async ({ page }) => {
-    await setup(page)
+    await setup(page, { paused: true })
     await list(page, [request('r-wait', 'pending')])
     await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => route.fulfill({ json: request('r-wait', action === 'approve' ? 'approved' : 'detached') }))
     await page.goto('/agents')
     await strip(page).getByRole('button', { name: 'Review' }).click()
     await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
-    await page.clock.pauseAt(NOW + 1_000)
     await holdDecisionBody(page, action)
     await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
