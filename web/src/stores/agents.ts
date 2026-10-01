@@ -479,9 +479,12 @@ export const useAgents = defineStore('agents', () => {
   const admitRuns = (rows: Wire<AgentRunRow>[]): AgentRun[] => runLedger.merge(rows)
 
   // ---------- Writes ----------
-  async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
+  // Answers with the server's copy, so the caller confirms only what the server recorded.
+  async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string): Promise<Approval> {
     const updated = await decideApproval(approval.id, decision, reason)
-    void afterWrite(() => { approvals.value = approvals.value.map(a => a.id === approval.id ? { ...a, ...updated, decision } : a) })
+    const recorded: Approval = { ...approval, ...updated, decision: updated.decision ?? decision }
+    void afterWrite(() => { approvals.value = approvals.value.map(a => a.id === approval.id ? { ...a, ...recorded } : a) })
+    return recorded
   }
   async function revoke(approval: Approval) {
     await revokeApproval(approval.id)

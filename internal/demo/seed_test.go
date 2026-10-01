@@ -362,8 +362,14 @@ func assertHarnessMix(t *testing.T, api *api, admin tenant.Principal) {
 		if session.RunID == nil || session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem {
 			t.Fatalf("%s session must have completed evidence and no fabricated heartbeat or problem", item.Harness)
 		}
-		if session.AccountLabel == nil || *session.AccountLabel != expected.label || session.Model == nil || *session.Model != model.Model || session.ReasoningEffort == nil || *session.ReasoningEffort != model.Efforts[0].Effort {
+		if session.AccountLabel == nil || *session.AccountLabel != expected.label {
 			t.Fatalf("%s session account/model must match its enrollment", item.Harness)
+		}
+		// The session separates effort suffixes while retaining the enrollment's
+		// exact model string and unique registry profile for audit.
+		effort := model.Efforts[0]
+		if session.Model == nil || *session.Model != strings.TrimSuffix(model.Model, "-"+effort.Effort) || session.ModelRaw == nil || *session.ModelRaw != model.Model || session.ModelProfileID == nil || *session.ModelProfileID != effort.ProfileID || session.ReasoningEffort == nil || *session.ReasoningEffort != effort.Effort {
+			t.Fatalf("%s session identity must match its enrollment's model, effort and registry profile", item.Harness)
 		}
 	}
 }
