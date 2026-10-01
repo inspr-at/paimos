@@ -52,11 +52,13 @@ export async function loadBriefingOutcomes(range: BriefingRange, signal?: AbortS
   return { items: [...items.values()], truncated: true }
 }
 interface EventPage { items: BriefingEvent[]; next_cursor?: string | null; window?: BriefingRange }
-async function eventPages(range: BriefingRange, signal?: AbortSignal, runs?: true | string, first?: EventPage): Promise<BriefingPage<BriefingEvent>> {
+const ticketEventTypes = 'node.updated'
+const autopilotEventTypes = 'status_autopilot.changed,status_autopilot.skipped'
+async function eventPages(range: BriefingRange, signal?: AbortSignal, autopilot = false, first?: EventPage): Promise<BriefingPage<BriefingEvent>> {
   const items: BriefingEvent[] = [], cursors = new Set<string>()
   let cursor: string | null = null
   for (let page = 0; page < 20; page++) {
-    const query = new URLSearchParams({ from: range.from, to: range.to, limit: '200', order: 'time', type: runs ? 'run.telemetry' : 'node.updated', ...(typeof runs === 'string' ? { project_id: runs } : {}), ...(cursor ? { cursor } : {}) })
+    const query = new URLSearchParams({ from: range.from, to: range.to, limit: '200', order: 'time', type: autopilot ? autopilotEventTypes : ticketEventTypes, ...(cursor ? { cursor } : {}) })
     const read: EventPage = page === 0 && first ? first : await briefingJSON<EventPage>(`/events?${query}`, signal)
     if (!Array.isArray(read.items)) throw new Error('The event log did not return a list.')
     items.push(...read.items)
@@ -68,15 +70,15 @@ async function eventPages(range: BriefingRange, signal?: AbortSignal, runs?: tru
   return { items, truncated: true }
 }
 export async function loadBriefingWindow(pref: BriefingPreference | null, signal?: AbortSignal): Promise<{ range: BriefingRange; events: BriefingPage<BriefingEvent> }> {
-  const query = new URLSearchParams({ briefing: 'true', limit: '200', type: 'node.updated' })
+  const query = new URLSearchParams({ briefing: 'true', limit: '200', type: ticketEventTypes })
   if (Number.isFinite(Date.parse(pref?.last_visit ?? ''))) query.set('since', pref!.last_visit!)
   const first = await briefingJSON<EventPage>(`/events?${query}`, signal)
   const range = first.window
   if (!range || !Number.isFinite(Date.parse(range.from)) || !Number.isFinite(Date.parse(range.to)) || Date.parse(range.from) > Date.parse(range.to)) throw new Error('The event log did not return a server window.')
-  return { range, events: await eventPages(range, signal, undefined, first) }
+  return { range, events: await eventPages(range, signal, false, first) }
 }
-export function loadBriefingEvents(range: BriefingRange, signal?: AbortSignal, runs?: true | string): Promise<BriefingPage<BriefingEvent>> {
-  return eventPages(range, signal, runs)
+export function loadBriefingEvents(range: BriefingRange, signal?: AbortSignal, autopilot = false): Promise<BriefingPage<BriefingEvent>> {
+  return eventPages(range, signal, autopilot)
 }
 export type BriefingUsage = Pick<UsageDashboard, 'totals' | 'allowance' | 'truncated'>
 // Dashboard values remain exact fixed-point strings until presentation.
@@ -110,14 +112,22 @@ export function eventFact(item: BriefingEvent, projectKey: string, ticketKey: st
   if (!projectKey || !ticketKey || !item.node_id || item.id < 1) return null
   const after = object(item.after), before = object(item.before)
   let title = ''
-  if (item.type === 'node.updated' && after.state === 'delivered' && before.state !== 'delivered') title = 'Marked delivered'
-  // Only the immutable finished report with an explicit merged outcome counts.
-  // A later telemetry update must not announce the same merge a second time.
-  const report = object(after.report), run = object(after.run)
-  if (item.type === 'run.telemetry' && report.kind === 'finished' && run.status === 'completed' && run.outcome_detail === 'merged') title = 'Merge reported'
+  if (['node.updated', 'status_autopilot.changed'].includes(item.type) && after.state === 'delivered' && before.state !== 'delivered') title = 'Marked delivered'
+  // Ticket snapshots are project-visible. A PR URL alone proves no merge,
+  // and later edits retaining the same recorded merge must not announce it again.
+  const merge = text(object(after.fields).merge_commit).trim()
+  if (item.type === 'node.updated' && /^[0-9a-f]{7,40}$/i.test(merge) && merge !== text(object(before.fields).merge_commit).trim()) title = 'Merge reported'
   if (!title) return null
   const href = ticketHref(projectKey, ticketKey)
-  return { id: `event:${item.id}`, title: `${ticketKey} · ${title}`, detail: '', at: item.at, href, source: `/api/events?node_id=${encodeURIComponent(item.node_id)}&after=${item.id - 1}&limit=1` }
+  return { id: `event:${item.id}`, title: `${ticketKey} · ${title}`, detail: title === 'Merge reported' ? merge : '', at: item.at, href, source: eventSource(item) }
+}
+function eventSource(item: BriefingEvent): string { return `/api/events?node_id=${encodeURIComponent(item.node_id!)}&after=${item.id - 1}&limit=1` }
+export function eventNeed(item: BriefingEvent, projectKey: string, ticketKey: string): BriefingNeed | null {
+  if (!projectKey || !ticketKey || !item.node_id || item.id < 1 || !['status_autopilot.changed', 'status_autopilot.skipped'].includes(item.type)) return null
+  const after = object(item.after), before = object(item.before)
+  const check = text(after.human_check).trim()
+  if (!check || after.state !== before.state || !['done', 'delivered'].includes(text(after.state))) return null
+  return { id: `human-check:${item.node_id}`, title: `${ticketKey} · Human check`, detail: check, href: ticketHref(projectKey, ticketKey), source: eventSource(item) }
 }
 export function briefingCost(group: UsageGroup): { value: string; detail: string; measured: boolean } {
   if (group.estimated_cost_usd === null || !group.cost_known_rows) return { value: 'Cost not measured yet', detail: `${group.sessions} sessions; no priced usage reported.`, measured: false }

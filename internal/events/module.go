@@ -142,20 +142,7 @@ type briefingWindow struct {
 	Capped bool      `json:"capped"`
 }
 
-func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int, ranges ...eventRange) (page, error) {
-	result := page{Items: make([]Event, 0)}
-	var bounds eventRange
-	if len(ranges) > 0 {
-		bounds = ranges[0]
-	}
-	// Read as the reader: row-level security shows its projects only.
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if bounds.briefing {
-			// The clock and the first log page share one statement snapshot,
-			// including an empty page. A backwards clock never replays a day.
-			window := briefingWindow{}
-			var body []byte
-			err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
+const briefingWindowSQL = `WITH clock AS MATERIALIZED (SELECT statement_timestamp() AS at),
 			 bounds AS MATERIALIZED (
 			 SELECT greatest(coalesce($2::timestamptz,at-interval '24 hours'),at-interval '8784 hours') AS start,
 			        greatest(at,coalesce($2::timestamptz,at)) AS finish,
@@ -167,7 +154,23 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 			          FROM events WHERE tenant_id=$1 AND at>=start AND at<finish AND type NOT LIKE 'quote.%'
 			            AND ($3::text[] IS NULL OR type=ANY($3))
 			          ORDER BY at,id LIMIT $4) e),'[]'::jsonb)
-			 FROM bounds`, p.TenantID, bounds.since, bounds.types, limit+1).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
+			 FROM bounds`
+
+func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int, ranges ...eventRange) (page, error) {
+	result := page{Items: make([]Event, 0)}
+	var bounds eventRange
+	if len(ranges) > 0 {
+		bounds = ranges[0]
+	}
+	// Read as the reader: row-level security shows its projects only.
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if bounds.briefing {
+			// The statement start and first log page share one snapshot; the
+			// cutoff cannot consume commits made after that snapshot.
+			// An empty page still returns bounds. A backwards clock never replays a day.
+			window := briefingWindow{}
+			var body []byte
+			err := tx.QueryRow(ctx, briefingWindowSQL, p.TenantID, bounds.since, bounds.types, limit+1).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
 			if err != nil {
 				return err
 			}

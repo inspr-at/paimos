@@ -3973,7 +3973,7 @@ paths:
     get:
       operationId: listEvents
       description: >-
-        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a database-clock window in the same statement snapshot as the first page: since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
+        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a statement_timestamp() window in the same statement snapshot as the first page (commits after the snapshot are not consumed by its cutoff): since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}

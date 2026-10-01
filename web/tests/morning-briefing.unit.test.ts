@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { briefingCost, briefingDue, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
+import { briefingCost, briefingDue, eventFact, eventNeed, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
 import { usageDashboard } from './usage-data'
 
 const now = new Date('2026-10-01T08:00:00Z')
@@ -18,11 +18,37 @@ it('cites facts and keeps done distinct from released or merged', () => {
   expect(outcomeFact(outcome, 'AEON')).toMatchObject({ title: 'AEON-454 · Marked done', source: '/api/outcomes?ticket_node_id=ticket&outcome_id=out-1&limit=1' })
   expect(outcomeFact({ ...outcome, kind: 'review_verdict', payload: { verdict: 'ok' } }, 'AEON')).toBeNull()
   expect(outcomeFact({ ...outcome, kind: 'review_verdict', payload: { verdict: 'changes', summary: 'Fix isolation' } }, 'AEON')).toMatchObject({ detail: 'Fix isolation' })
-  const base = { id: 42, node_id: 'ticket', type: 'run.telemetry', before: null, after: { report: { kind: 'finished' }, run: { status: 'completed', outcome_detail: 'merged' } }, at: outcome.recorded_at }
+  const base = { id: 42, node_id: 'ticket', type: 'node.updated', before: { fields: {} }, after: { fields: { merge_commit: 'abcdef1234567' } }, at: outcome.recorded_at }
   expect(eventFact(base, 'AEON', 'AEON-454')).toMatchObject({ title: 'AEON-454 · Merge reported', source: '/api/events?node_id=ticket&after=41&limit=1' })
-  expect(eventFact({ ...base, after: { report: { kind: 'finished' }, run: { status: 'completed', outcome_detail: 'committed' } } }, 'AEON', 'AEON-454')).toBeNull()
-  expect(eventFact({ ...base, after: { report: { kind: 'usage' }, run: { status: 'completed', outcome_detail: 'merged' } } }, 'AEON', 'AEON-454')).toBeNull()
+  expect(eventFact({ ...base, after: { fields: { pr_url: 'https://github.com/example/repo/pull/1' } } }, 'AEON', 'AEON-454')).toBeNull()
+  expect(eventFact({ ...base, before: base.after }, 'AEON', 'AEON-454')).toBeNull()
+  expect(eventFact({ ...base, type: 'run.telemetry', after: { report: { kind: 'finished' }, run: { status: 'completed', outcome_detail: 'pr_opened' } } }, 'AEON', 'AEON-454')).toBeNull()
   expect(eventFact({ ...base, type: 'node.updated', before: { state: 'delivered' }, after: { state: 'delivered' } }, 'AEON', 'AEON-454')).toBeNull()
+})
+it('projects autopilot publication and human-check skips from their real snapshots', () => {
+  const base = { id: 43, node_id: 'ticket', type: 'status_autopilot.changed', before: { state: 'done', human_check: null }, after: { state: 'delivered', human_check: null }, at: outcome.recorded_at }
+  expect(eventFact(base, 'AEON', 'AEON-454')?.title).toBe('AEON-454 · Marked delivered')
+  expect(eventNeed(base, 'AEON', 'AEON-454')).toBeNull()
+  for (const type of ['status_autopilot.changed', 'status_autopilot.skipped']) {
+    const skipped = { ...base, type, before: { state: 'done', human_check: 'Touch ID' }, after: { state: 'done', human_check: 'Touch ID' } }
+    expect(eventNeed(skipped, 'AEON', 'AEON-454')).toMatchObject({ title: 'AEON-454 · Human check', detail: 'Touch ID', source: '/api/events?node_id=ticket&after=42&limit=1' })
+    expect(eventFact(skipped, 'AEON', 'AEON-454')).toBeNull()
+  }
+})
+it('pages both autopilot event types only within the server window', async () => {
+  const requests: URL[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input, 'https://aeon.test'); requests.push(url)
+    return new Response(JSON.stringify({ items: [], next_cursor: requests.length === 1 ? 'next' : null }), { status: 200 })
+  }))
+  const range = { from: '2026-09-30T08:00:00.000Z', to: now.toISOString(), first: false, capped: false }
+  expect((await loadBriefingEvents(range, undefined, true)).truncated).toBe(false)
+  expect(requests).toHaveLength(2)
+  for (const url of requests) {
+    expect(url.searchParams.get('type')).toBe('status_autopilot.changed,status_autopilot.skipped')
+    expect(url.searchParams.get('from')).toBe(range.from)
+    expect(url.searchParams.get('to')).toBe(range.to)
+  }
 })
 it('keeps unknown cost unknown and marks partial API value as approximate', () => {
   const group = usageDashboard('unreported').totals

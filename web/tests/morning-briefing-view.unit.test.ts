@@ -26,7 +26,7 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string } = {}) {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean } = {}) {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed')
@@ -53,7 +53,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
   }
   const modules: Record<string, unknown> = {
     vue: { ...Vue, vModelText: {} },
-    '../lib/api': { APIError, listNodes: async () => { if (options.detailsFailure) throw new APIError(500, 'failed'); return { items: [] } } },
+    '../lib/api': { APIError, listNodes: async () => { if (options.detailsFailure) throw new APIError(500, 'failed'); return { items: options.autopilot || options.merge ? [{ id: 'ticket', key: 'AEON-454', kind_slug: 'ticket', project: { id: 'allowed' } }] : [] } } },
     '../lib/authz': { can, ensurePermissions: async () => 'known', refreshPermissions: async () => {}, onAccessChange: () => () => {} },
     '../lib/identityScope': Scope, '../lib/agentState': AgentState,
     '../lib/usageDashboard': { loadUsageDashboard: async (params: { project?: string }) => { paths.push(`/usage/dashboard${params.project ? `?project=${params.project}` : ''}`); return dashboard } },
@@ -64,8 +64,21 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
       ...Briefing, briefingJSON: json,
       loadBriefingPreference: async () => ({ last_visit: START }), saveBriefingPreference: async (value: Briefing.BriefingPreference) => { saves.push(value) },
       loadBriefingOutcomes: async () => { if (options.denied) throw new APIError(403, 'denied'); return { items: [], truncated: false } },
-      loadBriefingEvents: async (_range: unknown, _signal: unknown, runs: unknown) => { paths.push(`events:${JSON.stringify(runs)}`); return { items: [], truncated: false } },
-      loadBriefingWindow: async () => ({ range: { from: START, to: END, first: false, capped: false }, events: { items: [], truncated: false } }),
+      loadBriefingEvents: async (_range: unknown, _signal: unknown, autopilot: unknown) => {
+        paths.push(`events:${JSON.stringify(autopilot)}`)
+        if (autopilot && options.autopilotFailure) throw new APIError(500, 'failed')
+        const base = { node_id: 'ticket', at: START }
+        return { items: autopilot && options.autopilot ? [
+          { ...base, id: 454, type: 'status_autopilot.changed', before: { state: 'done' }, after: { state: 'delivered' } },
+          { ...base, id: 455, type: 'status_autopilot.skipped', before: { state: 'done', human_check: 'Touch ID' }, after: { state: 'done', human_check: 'Touch ID' } },
+        ] : [], truncated: !!options.autopilotTruncated }
+      },
+      loadBriefingWindow: async () => {
+        if (options.ticketLogFailure) throw new APIError(500, 'failed')
+        return { range: { from: START, to: END, first: false, capped: false }, events: { items: options.merge ? [
+          { id: 456, node_id: 'ticket', type: 'node.updated', before: { state: 'done', fields: {} }, after: { state: 'done', fields: { merge_commit: 'abcdef1234567', pr_url: 'https://github.com/example/repo/pull/1' } }, at: START },
+        ] : [], truncated: false } }
+      },
     },
     '../components/AppIcon.vue': { __esModule: true, default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
     '../components/work/PlanningCell.vue': { __esModule: true, default: { render: () => Vue.h('span') } },
@@ -112,9 +125,30 @@ it.each(['open_first_release', 'start_build', 'plan_next_release', 'mark_candida
   expect(textOf(root)).toContain(action)
   expect(paths.filter(path => path.includes('/journey'))).toHaveLength(1)
 })
-it('loads merge telemetry for project-only harness readers', async () => {
-  const { paths } = await mount({ projectCost: true })
-  expect(paths.filter(path => path.startsWith('events:')).join(' ')).toContain('allowed')
+it('renders stored ticket merge evidence for project-only readers before saving the cutoff', async () => {
+  const { paths, root, saves } = await mount({ projectCost: true, merge: true })
+  expect(textOf(root)).toContain('AEON-454 · Merge reported')
+  expect(textOf(root)).toContain('abcdef1234567')
+  expect(flatten(root).find(el => el.tag === 'a' && textOf(el) === 'Source event')?.props.href).toBe('/api/events?node_id=ticket&after=455&limit=1')
+  expect(saves[0]?.last_visit).toBe(END)
+  // The policy hides other workers' run telemetry from project readers. No
+  // empty page from that domain is accepted as complete merge history.
+  expect(paths.filter(path => path.startsWith('events:'))).toEqual(['events:true'])
+})
+it('retains project-only visits when their readable merge log fails', async () => {
+  expect((await mount({ projectCost: true, merge: true, ticketLogFailure: true })).saves).toHaveLength(0)
+})
+it('renders autopilot delivery and human-check skips from the bounded log', async () => {
+  const { root, saves } = await mount({ projectCost: true, autopilot: true })
+  expect(textOf(root)).toContain('AEON-454 · Marked delivered')
+  expect(textOf(root)).toContain('AEON-454 · Human check')
+  expect(textOf(root)).toContain('Touch ID')
+  expect(saves[0]?.last_visit).toBe(END)
+})
+it.each(['autopilotFailure', 'autopilotTruncated'] as const)('keeps the earlier visit on %s', async option => {
+  const { saves, root } = await mount({ [option]: true })
+  expect(saves).toHaveLength(0)
+  expect(textOf(root)).toMatch(/could not be loaded|previous visit has been kept/)
 })
 it('renders measured in visible cost text for screen readers', async () => {
   const { root } = await mount()

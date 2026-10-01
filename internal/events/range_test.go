@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,5 +153,86 @@ func TestBriefingClockWindowCapUsesElapsedDaysRegression(t *testing.T) {
 	}
 	if got.Window == nil || got.Window.First || !got.Window.Capped || got.Window.To.Sub(got.Window.From) != 366*24*time.Hour {
 		t.Fatalf("wrong elapsed-day cap: %+v", got.Window)
+	}
+}
+
+func TestBriefingStatementCutoffDoesNotConsumeLaterSnapshotCommits(t *testing.T) {
+	d, p, _ := fixture(t)
+	visible := appendEvents(t, d, p, 1)[0]
+	ctx := t.Context()
+	blocker, err := d.Admin.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Release()
+	const lock = 45402
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_lock($1)`, lock); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lock) }()
+
+	// Delay only the clock CTE's evaluation, after its statement snapshot has
+	// been acquired. The rest is the exact first-page production statement.
+	query := strings.Replace(briefingWindowSQL, " AS at)", " AS at FROM pg_advisory_xact_lock($5))", 1)
+	if query == briefingWindowSQL {
+		t.Fatal("clock barrier was not installed")
+	}
+	var window briefingWindow
+	var body []byte
+	pid := make(chan int32, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- db.InTenant(tenant.WithPrincipal(ctx, p), d.App, p.TenantID, func(tx pgx.Tx) error {
+			var id int32
+			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&id); err != nil {
+				return err
+			}
+			pid <- id
+			return tx.QueryRow(ctx, query, p.TenantID, nil, []string{"test.changed"}, 51, lock).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
+		})
+	}()
+	var reader int32
+	select {
+	case reader = <-pid:
+	case err := <-done:
+		t.Fatalf("reader failed before barrier: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("reader did not start")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var blocked bool
+		if err := d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)`, reader).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("reader did not acquire its snapshot before the clock barrier")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	late := appendEvents(t, d, p, 1)[0]
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var items []Event
+	if err := json.Unmarshal(body, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != visible.ID || !visible.At.Before(window.To) {
+		t.Fatalf("snapshot-visible row missing from window: %+v %+v", window, items)
+	}
+	if late.At.Before(window.To) {
+		t.Fatal("cutoff consumed the row committed after the statement snapshot")
+	}
+	// Saving this cutoff must leave the concurrent commit for the next visit.
+	next, err := New(d.App).(*module).read(ctx, p, "", 0, 50, eventRange{briefing: true, since: &window.To, types: []string{"test.changed"}})
+	if err != nil || len(next.Items) != 1 || next.Items[0].ID != late.ID {
+		t.Fatalf("next visit skipped concurrent commit: %+v %v", next, err)
 	}
 }

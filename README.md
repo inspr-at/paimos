@@ -54,12 +54,13 @@ older `AEON_EMBEDDING_*` server configuration here.
 People can open **Morning briefing** on Projects or `/briefing`. The daily
 in-app reminder uses a chosen time in the device's local timezone (08:00 by
 default). It reads existing completion and release outcomes, delivered-state
-and reported-merge events, failed reviews/CI, current approvals, held human
+and recorded ticket merge evidence, Status autopilot deliveries and skipped
+human checks, failed reviews/CI, current approvals, held human
 requests and available journey decisions. Each fact links to its item and source.
 The suggested next step is one of those person actions or recorded findings.
 
 The first visit covers 24 hours; later visits start at that person's saved
-briefing visit. The database clock establishes the window alongside the first
+briefing visit. The database statement start establishes the window alongside the first
 event page; only complete successful log reads advance the saved server cutoff.
 Denied logs, failed logs and log pagination limits retain the earlier cutoff.
 Pending approvals, held requests, journey actions and usage are separate current
@@ -73,8 +74,10 @@ or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
 reported usage. Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
-links appear only after successful reads. Merge reports are requested in each
-project with `harness.read`. Journey next actions use one batch snapshot query.
+links appear only after successful reads. Merge facts use changes to a ticket’s
+recorded `fields.merge_commit`, available under project visibility; PR URLs alone
+do not count as merges. The visit-bounded autopilot log must also load completely
+before the cutoff advances. Journey next actions use one batch snapshot query.
 This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
 
 ## Develop
