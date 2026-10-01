@@ -158,6 +158,15 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	if s.ArchivedAt != nil || s.StoppedAt != nil {
 		return s, workorders.Fail(409, "a stopped session cannot be paused")
 	}
+	// agentd forwards cooperative text only on its advertised inbox path.
+	// Unmanaged workers receive the request directly in their CLI heartbeat.
+	if s.Management == "managed" && !has(s, "inbox") {
+		return s, workorders.Fail(409, "pause requires harness inbox delivery")
+	}
+	var err error
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return s, err
+	}
 	if s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned") {
 		return s, nil
 	}
@@ -180,6 +189,76 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	return savePause(ctx, tx, p, s, Pause{ControlID: c.ID, State: "requested", RequestedBy: p.ID, RequestedAt: now, Reason: in.Reason, DeadlineAt: now.Add(time.Duration(in.DeadlineMinutes) * time.Minute)}, "pause_requested")
 }
 
+func pauseDeadlinePassed(ctx context.Context, tx pgx.Tx, pause *Pause) (bool, error) {
+	var expired bool
+	err := tx.QueryRow(ctx, `SELECT clock_timestamp()>=$1::timestamptz`, pause.DeadlineAt).Scan(&expired)
+	return expired, err
+}
+
+// The caller holds the session row lock. Expiry releases only the cooperative
+// control, never the worker lease or process ownership. Paused handovers remain
+// resumable even when their original planning deadline is in the past.
+func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (Session, error) {
+	if s.Pause == nil || (s.Pause.State != "requested" && s.Pause.State != "planned") {
+		return s, nil
+	}
+	expired, err := pauseDeadlinePassed(ctx, tx, s.Pause)
+	if err != nil || !expired {
+		return s, err
+	}
+	before, err := scanControl(tx.QueryRow(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE id=$1 AND session_id=$2 FOR UPDATE`, s.Pause.ControlID, s.ID))
+	if err != nil {
+		return s, err
+	}
+	if before.State != "completed" {
+		after, err := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='pause_deadline_expired',claimed_at=coalesce(claimed_at,clock_timestamp()),completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, before.ID))
+		if err != nil {
+			return s, err
+		}
+		if err = record(ctx, tx, p, s, "control_completed", before, after); err != nil {
+			return s, err
+		}
+	}
+	next := *s.Pause
+	next.State = "cancelled"
+	return savePause(ctx, tx, p, s, next, "pause_cancelled")
+}
+
+// Reuse the tenant's periodic lost-contact runner, including for managed
+// sessions which keep heartbeating and generations waiting to revive.
+func sweepPauseDeadlines(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions
+ WHERE archived_at IS NULL AND pause_record->>'state' IN ('requested','planned')
+ AND (pause_record->>'deadline_at')::timestamptz<=clock_timestamp()
+ ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, lostContactBatch)
+	if err != nil {
+		return err
+	}
+	var expired []Session
+	for rows.Next() {
+		s, err := scanSession(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		expired = append(expired, s)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil || len(expired) == 0 {
+		return err
+	}
+	system := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent, Name: "System", Roles: []string{"system"}}
+	if err = tx.QueryRow(ctx, `SELECT aeon_authz_system_actor($1::uuid)::text`, tenantID).Scan(&system.ID); err != nil {
+		return err
+	}
+	for _, s := range expired {
+		if _, err = expirePause(ctx, tx, system, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *Module) planPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		ControlID string `json:"control_id"`
@@ -197,6 +276,11 @@ func (m *Module) planPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if s.Pause == nil || s.Pause.ControlID != strings.ToLower(in.ControlID) {
 		return nil, workorders.Fail(409, "pause request changed")
+	}
+	if expired, err := pauseDeadlinePassed(r.Context(), tx, s.Pause); err != nil {
+		return nil, err
+	} else if expired {
+		return nil, workorders.Fail(409, "pause deadline expired")
 	}
 	next := *s.Pause
 	if next.State == "planned" && next.HandoverPoint == in.Point {
@@ -254,6 +338,11 @@ func handoverBrief(h Handover) string {
 func finishPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, h *Handover) (Session, error) {
 	if s.Pause == nil || s.Pause.State != "planned" {
 		return s, workorders.Fail(409, "plan a requested pause before stopping")
+	}
+	if expired, err := pauseDeadlinePassed(ctx, tx, s.Pause); err != nil {
+		return s, err
+	} else if expired {
+		return s, workorders.Fail(409, "pause deadline expired")
 	}
 	if err := h.validate(); err != nil {
 		return s, err
@@ -408,7 +497,8 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	if in.Except == nil {
 		in.Except = []string{}
 	}
-	filter := `stopped_at IS NULL AND (pause_record IS NULL OR pause_record->>'state'='cancelled')`
+	filter := `stopped_at IS NULL AND (pause_record IS NULL OR pause_record->>'state'='cancelled'
+ OR (pause_record->>'state' IN ('requested','planned') AND (pause_record->>'deadline_at')::timestamptz<=clock_timestamp()))`
 	if resume {
 		filter = `stopped_at IS NOT NULL AND stop_reason='paused' AND pause_record->>'state'='paused'`
 	}

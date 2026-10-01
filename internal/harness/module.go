@@ -902,6 +902,9 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	if s, err = expirePause(r.Context(), tx, p, s); err != nil {
+		return nil, err
+	}
 	s.Watch, err = readAttachStatus(r.Context(), tx, s.ID)
 	if err != nil {
 		return nil, err
@@ -1205,6 +1208,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
 	if err := recordMetadataChanges(ctx, tx, p.TenantID, before, s); err != nil {
 		return nil, err
 	}
@@ -1297,7 +1303,11 @@ func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Sessi
 		}
 	}
 	before := s
-	rows, err := tx.Query(ctx, `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state<>'completed' ORDER BY sequence FOR UPDATE`, s.ID)
+	var preservedPause *string
+	if reason == StopReasonHeartbeatLost && s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned") {
+		preservedPause = &s.Pause.ControlID
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state<>'completed' AND ($2::uuid IS NULL OR id<>$2::uuid) ORDER BY sequence FOR UPDATE`, s.ID, preservedPause)
 	if err != nil {
 		return Session{}, err
 	}

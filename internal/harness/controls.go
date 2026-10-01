@@ -77,8 +77,11 @@ func (m *Module) requestControl(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	return c, record(ctx, tx, p, s, "control_requested", nil, c)
 }
 func (m *Module) control(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
+	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(r.Context(), tx, p, s); err != nil {
 		return nil, err
 	}
 	if err := expireSessionRequests(r.Context(), tx, p, s); err != nil {

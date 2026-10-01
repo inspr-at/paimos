@@ -4778,7 +4778,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: pauseHarnessSession
-      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Managed sessions must advertise inbox delivery; unsupported harnesses return 409. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseRequest'}}}}
       responses:
         '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
@@ -12355,7 +12355,7 @@ components:
         requested_by_principal_id: {type: string, format: uuid}
         requested_at: {type: string, format: date-time}
         reason: {type: string}
-        deadline_at: {type: string, format: date-time, description: Handover deadline; a hard-stop executor must use the existing exact process ownership protocol. This control never grants permission to signal an arbitrary process.}
+        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. An overdue requested or planned pause becomes cancelled and its control completes with reason pause_deadline_expired, allowing a new pause. Checked on heartbeat, session/control reads, new pause requests and the periodic sweep. Expiry never signals a process; a separate hard-stop executor must use the existing exact process ownership protocol.'}
         handover_point: {type: string}
         planned_at: {type: string, format: date-time}
         paused_at: {type: string, format: date-time}

@@ -111,6 +111,9 @@ func SweepLostContact(ctx context.Context, pool *pgxpool.Pool, tenantID string) 
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,$2))`, "harness-lost-contact:"+tenantID, lostContactAdvisoryNamespace).Scan(&mine); err != nil || !mine {
 			return err
 		}
+		if err := sweepPauseDeadlines(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		mins, err := heartbeatLostMinutes(ctx, tx)
 		if err != nil {
 			return err

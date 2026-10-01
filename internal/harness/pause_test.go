@@ -3,6 +3,7 @@
 package harness_test
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -39,6 +40,191 @@ func finishPaused(t *testing.T, f *harnessFixture, path, lease, control string) 
 	body := map[string]any{"control_id": control, "handover_point": "After the current commit and rollback check"}
 	expect(t, f.call(f.agent, "POST", path+"/pause-plan", body, lease), 200)
 	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "paused", "handover": pauseHandover()}, lease), 200)
+}
+
+func TestPauseControlSurvivesLostContactAndRevive(t *testing.T) {
+	for _, planned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("planned=%t", planned), func(t *testing.T) {
+			f := fixture(t)
+			path, lease, control := pauseSession(t, f, pauseRegistration(f))
+			id := strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")
+			plan := map[string]any{"control_id": control, "handover_point": "After the current commit"}
+			wantState := "pending"
+			if planned {
+				expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 200)
+				wantState = "claimed"
+			}
+			var other string
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `INSERT INTO harness_controls(tenant_id,session_id,kind,sequence,requested_by_principal_id) VALUES($1,$2,'interrupt',2,$3) RETURNING id::text`, f.person.TenantID, id, f.person.ID).Scan(&other)
+			})
+			age(t, f, id, "16 minutes", false)
+			if n := sweep(t, f); n != 1 {
+				t.Fatalf("sweep closed %d sessions", n)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				for _, check := range []struct{ id, state string }{{control, wantState}, {other, "completed"}} {
+					var state string
+					if err := tx.QueryRow(t.Context(), `SELECT state FROM harness_controls WHERE id=$1`, check.id).Scan(&state); err != nil {
+						return err
+					}
+					if state != check.state {
+						t.Errorf("control %s state %s, want %s", check.id, state, check.state)
+					}
+				}
+				return nil
+			})
+			w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
+			expect(t, w, 200)
+			if got := decode(t, w); got["stopped_at"] != nil || got["pause"].(map[string]any)["control_id"] != control {
+				t.Fatalf("pause lost on revive: %v", got)
+			}
+			expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 200)
+			w = f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "paused", "handover": pauseHandover()}, lease)
+			expect(t, w, 200)
+			if got := decode(t, w); got["stop_reason"] != "paused" || got["pause"].(map[string]any)["state"] != "paused" {
+				t.Fatalf("revived pause did not finish: %v", got)
+			}
+		})
+	}
+}
+
+func TestPauseDeadlineCancelsWithoutStoppingAndAllowsNewControl(t *testing.T) {
+	for _, tc := range []struct {
+		trigger          string
+		planned, managed bool
+	}{
+		{"heartbeat", false, false}, {"heartbeat", true, true},
+		{"sweep", false, true}, {"request", true, false},
+		{"batch", true, true},
+		{"control", false, false}, {"status", true, false},
+	} {
+		t.Run(fmt.Sprintf("%s/planned=%t/managed=%t", tc.trigger, tc.planned, tc.managed), func(t *testing.T) {
+			f := fixture(t)
+			body := pauseRegistration(f)
+			if tc.managed {
+				body["management_mode"], body["advertised_capabilities"] = "managed", []string{"stop", "inbox"}
+			}
+			path, lease, control := pauseSession(t, f, body)
+			id := strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")
+			plan := map[string]any{"control_id": control, "handover_point": "After the current step"}
+			if tc.planned {
+				expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 200)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET pause_record=jsonb_set(pause_record,'{deadline_at}',to_jsonb(clock_timestamp()-interval '1 second')) WHERE id=$1`, id)
+				return err
+			})
+			// Planning/replaying or stopping after the DB deadline cannot win
+			// before the next sweep. Error transactions leave no partial writes.
+			expect(t, f.call(f.agent, "POST", path+"/pause-plan", plan, lease), 409)
+			expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "paused", "handover": pauseHandover()}, lease), 409)
+			var got map[string]any
+			switch tc.trigger {
+			case "heartbeat":
+				w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+				expect(t, w, 200)
+				got = decode(t, w)
+			case "sweep":
+				if n := sweep(t, f); n != 0 {
+					t.Fatalf("deadline expiry stopped %d sessions", n)
+				}
+			case "control":
+				expect(t, f.call(f.person, "GET", path+"/controls/"+control, nil, ""), 200)
+			case "status":
+				w := f.call(f.person, "GET", path, nil, "")
+				expect(t, w, 200)
+				got = decode(t, w)
+			case "request":
+				w := f.call(f.person, "POST", path+"/pause", map[string]any{}, "")
+				expect(t, w, 200)
+				got = decode(t, w)
+			case "batch":
+				w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions/pause", map[string]any{}, "")
+				expect(t, w, 200)
+				items := decode(t, w)["items"].([]any)
+				if len(items) != 1 {
+					t.Fatalf("expired pause not included in batch: %v", items)
+				}
+				got = items[0].(map[string]any)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var state, reason, pauseState string
+				var running, leaseIntact bool
+				var cancellations, signals int
+				if err := tx.QueryRow(t.Context(), `SELECT c.state,c.reason,s.pause_record->>'state',s.stopped_at IS NULL AND s.archived_at IS NULL,s.lease_digest IS NOT NULL FROM harness_controls c JOIN harness_sessions s ON s.id=c.session_id WHERE c.id=$1`, control).Scan(&state, &reason, &pauseState, &running, &leaseIntact); err != nil {
+					return err
+				}
+				wantPause := "cancelled"
+				if tc.trigger == "request" || tc.trigger == "batch" {
+					wantPause = "requested"
+				}
+				if state != "completed" || reason != "pause_deadline_expired" || pauseState != wantPause || !running || !leaseIntact {
+					t.Errorf("expiry state=%s reason=%s pause=%s running=%t lease=%t", state, reason, pauseState, running, leaseIntact)
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='harness.pause_cancelled'),count(*) FILTER(WHERE type='harness.stopped') FROM events WHERE after->>'id'=$1`, id).Scan(&cancellations, &signals); err != nil {
+					return err
+				}
+				if cancellations != 1 || signals != 0 {
+					t.Errorf("cancellation events=%d stopped events=%d", cancellations, signals)
+				}
+				return nil
+			})
+			if got != nil && tc.trigger != "request" && tc.trigger != "batch" && got["pause"].(map[string]any)["state"] != "cancelled" {
+				t.Fatalf("response still offers an expired pause: %v", got)
+			}
+			w := f.call(f.person, "POST", path+"/pause", map[string]any{}, "")
+			expect(t, w, 200)
+			fresh := decode(t, w)["pause"].(map[string]any)["control_id"].(string)
+			if fresh == control {
+				t.Fatal("new pause reused the expired control")
+			}
+			finishPaused(t, f, path, lease, fresh)
+		})
+	}
+}
+
+func TestPauseRejectsManagedSessionsWithoutInboxDelivery(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	for _, harnessName := range []string{"claude", "codex", "pi", "cursor", "grok"} {
+		body := pauseRegistration(f)
+		body["harness"], body["management_mode"], body["advertised_capabilities"] = harnessName, "managed", []string{"stop"}
+		w := f.call(f.person, "POST", base, body, "")
+		expect(t, w, 201)
+		id := decode(t, w)["id"].(string)
+		w = f.call(f.person, "POST", base+"/"+id+"/pause", map[string]any{}, "")
+		expect(t, w, 409)
+		if !strings.Contains(w.Body.String(), "inbox delivery") {
+			t.Fatalf("%s: %s", harnessName, w.Body)
+		}
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var controls int
+			var noPause bool
+			if err := tx.QueryRow(t.Context(), `SELECT pause_record IS NULL,(SELECT count(*) FROM harness_controls WHERE session_id=$1) FROM harness_sessions WHERE id=$1`, id).Scan(&noPause, &controls); err != nil {
+				return err
+			}
+			if !noPause || controls != 0 {
+				t.Errorf("rejected %s pause left state/control", harnessName)
+			}
+			return nil
+		})
+	}
+	for _, harnessName := range []string{"claude", "codex", "pi"} {
+		body := pauseRegistration(f)
+		body["harness"], body["management_mode"], body["advertised_capabilities"] = harnessName, "managed", []string{"stop", "inbox"}
+		pauseSession(t, f, body)
+	}
+	for _, harnessName := range []string{"cursor", "grok"} {
+		body := pauseRegistration(f)
+		body["harness"] = harnessName
+		path, lease, control := pauseSession(t, f, body)
+		w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+		expect(t, w, 200)
+		if decode(t, w)["pause"].(map[string]any)["control_id"] != control {
+			t.Fatalf("unmanaged %s did not receive pause", harnessName)
+		}
+	}
 }
 
 func TestPauseStateMachineSurvivesRestartAndResumesWorker(t *testing.T) {
@@ -108,7 +294,7 @@ func TestPauseRequestsConcurrentAndManagedYieldKeepsLegacyStop(t *testing.T) {
 	f := fixture(t)
 	body := pauseRegistration(f)
 	body["management_mode"] = "managed"
-	body["advertised_capabilities"] = []string{"stop"}
+	body["advertised_capabilities"] = []string{"stop", "inbox"}
 	path, lease, control := pauseSession(t, f, body)
 	results := make(chan string, 2)
 	for range 2 {
