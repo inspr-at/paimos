@@ -135,6 +135,34 @@ test('deactivating says what happens, then shows the status; reactivating brings
   await expect(page).toHaveURL('/settings/access/people')
 })
 
+test('an action menu survives a delayed opening scroll, but closes when its anchor moves', async ({ page }) => {
+  const world = await open(page)
+  const trigger = row(page, 'Mira Holm').getByRole('button', { name: 'Actions for Mira Holm' })
+  await trigger.click()
+  const menu = page.getByRole('menu', { name: 'Actions for Mira Holm' })
+  await expect(menu).toBeVisible()
+  const placed = await trigger.boundingBox()
+  // Opening the menu can auto-scroll #main. Deliver its queued notification
+  // after placement, as happens intermittently on hosted CI, without moving it.
+  await page.evaluate(async () => {
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    document.getElementById('main')!.dispatchEvent(new Event('scroll'))
+  })
+  expect(await trigger.boundingBox()).toEqual(placed)
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: 'Open', exact: true })).toBeFocused()
+  expect(calls(world, 'POST', /deactivate$/)).toHaveLength(0)
+
+  // Genuine page movement must still dismiss the anchored menu.
+  await page.locator('#main').evaluate(main => { main.scrollTop = main.scrollTop ? 0 : 10 })
+  await expect.poll(async () => (await trigger.boundingBox())?.y).not.toBe(placed?.y)
+  await expect(menu).toBeHidden()
+  await trigger.click()
+  await menu.getByRole('menuitem', { name: 'Deactivate…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Deactivate Mira Holm?' })).toBeVisible()
+  expect(calls(world, 'POST', /deactivate$/)).toHaveLength(0)
+})
+
 test('linking a classic identity to a person, with undo', async ({ page }) => {
   const world = await open(page)
   await page.getByRole('button', { name: /Imported from classic, no sign-in/ }).click()
