@@ -40,6 +40,17 @@ func canonicalRouteFields(p tenant.Principal, kindSlug string, raw, before json.
 			return nil, err
 		}
 		if same {
+			// A person can confirm a server suggestion by explicitly submitting
+			// the value without its provenance. Copying fields is not confirmation.
+			unconfirmed := old[group.source] == "suggested" || old[group.source] == "agent" && old[group.value+"_confirmed"] == false
+			if unconfirmed && p.Kind == tenant.Person &&
+				next[group.value] != nil && next[group.source] == nil && next[group.by] == nil && next[group.at] == nil {
+				if err := applyRouteGroup(next, group, p, at); err != nil {
+					return nil, err
+				}
+				write = true
+				continue
+			}
 			if keepRouteProvenance(next, old, group) {
 				write = true
 			}
@@ -64,6 +75,7 @@ type routeGroup struct {
 var routeGroups = []routeGroup{
 	{"route_role", "route_role_source", "route_role_by", "route_role_at", modelregistry.KnownRouteRole},
 	{"area", "area_source", "area_by", "area_at", modelregistry.KnownRouteArea},
+	{"complexity", "complexity_source", "complexity_by", "complexity_at", func(s string) bool { return s == "S" || s == "M" || s == "L" }},
 }
 
 func sameRouteValue(next, old map[string]any, key string) (bool, error) {
@@ -101,7 +113,7 @@ func keepRouteProvenance(next, old map[string]any, group routeGroup) bool {
 		next[group.value] = text
 		mutated = true
 	}
-	for _, key := range []string{group.source, group.by, group.at} {
+	for _, key := range []string{group.source, group.by, group.at, group.value + "_confirmed"} {
 		oldVal, oldSet := presentValue(old, key)
 		if !oldSet {
 			if _, ok := next[key]; ok {
@@ -136,6 +148,7 @@ func applyRouteGroup(next map[string]any, group routeGroup, p tenant.Principal, 
 		delete(next, group.source)
 		delete(next, group.by)
 		delete(next, group.at)
+		delete(next, group.value+"_confirmed")
 		return nil
 	}
 	text, ok := value.(string)
@@ -159,12 +172,16 @@ func applyRouteGroup(next map[string]any, group routeGroup, p tenant.Principal, 
 	next[group.source] = string(p.Kind)
 	next[group.by] = p.ID
 	next[group.at] = at
+	next[group.value+"_confirmed"] = p.Kind == tenant.Person
 	return nil
 }
 
 func routeValueError(key string) string {
 	if key == "route_role" {
 		return "route_role must be scout, mechanical, build, build-hard, or review-gate"
+	}
+	if key == "complexity" {
+		return "complexity must be S, M, or L"
 	}
 	return "area must be backend, frontend, full-stack, infra, design, or docs"
 }

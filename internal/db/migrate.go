@@ -248,11 +248,54 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
 	}
+	if name == "1062_work_classification_model_identity.sql" {
+		if err := backfillWorkMetadata(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", name, err)
+	}
+	return nil
+}
+
+// Run under ordinary tenant RLS and explicit service project visibility in the
+// migration transaction. Failure rolls back both expansion and backfill, so a
+// retry cannot silently skip unfinished work. Historical nodes are untouched.
+func backfillWorkMetadata(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(AllProjects(ctx, "AEON-503 model identity migration"), tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties}',
+		 coalesce(field_schema->'properties','{}'::jsonb) || aeon_work_classification_properties())
+		 WHERE slug IN ('ticket','task') AND tenant_id=current_setting('aeon.tenant_id')::uuid`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_session_model_profiles()`); err != nil {
+			return err
+		}
 	}
 	return nil
 }
