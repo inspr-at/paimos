@@ -79,7 +79,7 @@ func TestWorkStartSnapshotBaselineHistoryAndCostScope(t *testing.T) {
 
 func TestWorkStartSnapshotConcurrentUnknownAndTenantIsolation(t *testing.T) {
 	w := planningSetup(t)
-	n := w.node(t, "SNAP-EMPTY", "ticket", w.root.ID, "open", nil)
+	n := w.node(t, "SNAP-2", "ticket", w.root.ID, "open", nil)
 	var workers sync.WaitGroup
 	errs := make(chan error, 4)
 	for range 4 {
@@ -94,7 +94,7 @@ func TestWorkStartSnapshotConcurrentUnknownAndTenantIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	view := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=SNAP-EMPTY")[n.Key]
+	view := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q=SNAP-2")[n.Key]
 	if view == nil || view.Snapshot == nil || view.Snapshot.Hours != nil || view.Snapshot.Tokens != nil || view.Snapshot.Cost != nil || view.Snapshot.Route != nil {
 		t.Fatalf("unknown became guessed: %+v", view)
 	}
