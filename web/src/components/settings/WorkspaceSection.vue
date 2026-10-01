@@ -7,6 +7,7 @@ import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
+import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import ModelRefreshSettings from './ModelRefreshSettings.vue'
 
@@ -66,6 +67,7 @@ async function saveInterval() {
     </SettingsCard>
     <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
+    <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">
       <template #lead>How often a working agent reports when a ticket will be ready, and when it will be live.</template>
       <label class="interval" for="eta-minutes">Minutes between estimates</label>

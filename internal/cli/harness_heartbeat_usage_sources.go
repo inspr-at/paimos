@@ -24,6 +24,15 @@ type usageTarget struct {
 	Snapshot bool
 }
 
+// Capacity reporting already carries the selected account; reuse that identity
+// so launchers need no second account flag solely for billing.
+func usageAccount(o heartbeatOptions) string {
+	if o.AccountID != "" {
+		return o.AccountID
+	}
+	return o.Capacity.Account
+}
+
 func usageBilling(o heartbeatOptions) (mode, label string) {
 	switch o.BillingMode {
 	case "api":
@@ -464,7 +473,7 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 			Model: model, Sequence: seq, Input: sum.input, Output: sum.output, Cached: sum.cached,
 			Reasoning:   reasoningPointer(reasoning, reasoningKnown),
 			ReportID:    usageReportID(session.id, model, seq, sum.input, sum.output, sum.cached, reasoningPointer(reasoning, reasoningKnown)),
-			BillingMode: mode, SubscriptionLabel: label,
+			BillingMode: mode, SubscriptionLabel: label, AccountID: usageAccount(o),
 		})
 	}
 	if len(created) == 0 {

@@ -58,6 +58,7 @@ import (
 	"github.com/inspr-at/paimos/internal/intake"
 	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/knowledge"
+	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
@@ -161,8 +162,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			return fmt.Errorf("aithema signing keys: %w", err)
 		}
 	}
-	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
-	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
+	// In-app models are workspace opt-ins. There is no global vendor fallback.
+	workspaceModels := modelprovider.New(pool, authCfg.SessionKey)
+	workspaceNotes := crm.WorkspaceNotes{Provider: workspaceModels}
+	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, func() (plugins.Plugin, error) { return crm.PluginWithNoteGenerator(workspaceNotes) }, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
 	journalStore, err := journal.NewStore(pool)
 	if err != nil {
 		closeListener()
@@ -240,14 +243,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		closeListener()
 		return fmt.Errorf("public quotes: %w", err)
 	}
-	embedProvider, err := embedding.FromEnv()
-	if err != nil {
-		closeListener()
-		return err
-	}
-	if embedProvider != nil {
-		go embedding.NewWorker(pool, embedProvider, embedding.Options{}).Run(ctx)
-	}
+	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(ctx)
 	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
@@ -320,9 +316,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			nodes.New(pool, nodes.SQLWriter{}),
 			fromclassic.New(pool),
 			tenantbrand.New(pool),
+			workspaceModels,
 			relations.New(pool),
 			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
-			search.New(pool, embedProvider),
+			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
 			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
@@ -334,7 +331,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
-			harness.New(pool),
+			harness.New(pool, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
@@ -359,7 +356,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
-			crm.New(pool, pluginRegistry),
+			crm.NewWithNoteGenerator(pool, pluginRegistry, workspaceNotes),
 			quotesMod,
 			collaborationMod,
 			publicQuotesMod,

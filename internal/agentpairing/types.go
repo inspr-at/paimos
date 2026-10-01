@@ -179,7 +179,12 @@ func WriteError(w http.ResponseWriter, err error) {
 		w.Header().Set("Retry-After", "5")
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, e.Status, map[string]string{"error": e.Message, "code": e.Code})
+	body := map[string]string{"error": e.Message, "code": e.Code}
+	var detail *attachDiagnostic
+	if errors.As(err, &detail) {
+		body["attach_refusal"] = detail.cause
+	}
+	httpapi.WriteJSON(w, e.Status, body)
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)

@@ -227,6 +227,12 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	next := in.snapshot(s.ID)
 	old, err := loadUsage(ctx, tx, s.ID, in.Model)
 	var before any
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if bindingErr := resolveUsageBilling(ctx, tx, s, old, &next); bindingErr != nil {
+		return nil, bindingErr
+	}
 	if err == nil {
 		if err := usageTransition(old, next); err != nil {
 			return nil, err
@@ -314,4 +320,45 @@ func (m *Module) sessionUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		Reported  bool                `json:"reported"`
 		Items     []SessionModelUsage `json:"items"`
 	}{s.ID, len(items) > 0, items}, rows.Err()
+}
+
+// Resolve unknown billing from the actual managed run account, or the explicit
+// unmanaged account UUID. No lookup by label, harness family or plan name.
+func resolveUsageBilling(ctx context.Context, tx pgx.Tx, s Session, old SessionModelUsage, next *SessionModelUsage) error {
+	if s.RunID != nil {
+		var account *string
+		if err := tx.QueryRow(ctx, `SELECT account_id::text FROM agent_runs WHERE id=$1::uuid`, *s.RunID).Scan(&account); err != nil {
+			return err
+		}
+		if account != nil {
+			if next.AccountID != nil && *next.AccountID != *account {
+				return workorders.Fail(400, "usage account differs from managed run account")
+			}
+			next.AccountID = account
+		}
+	}
+	if next.BillingMode != "unknown" {
+		return nil
+	}
+	// Sealed usage retains its billing even if a person later changes settings.
+	if old.Model != "" && !old.Provisional && sameUsageValue(old.AccountID, next.AccountID) {
+		next.BillingMode, next.SubscriptionLabel = old.BillingMode, old.SubscriptionLabel
+		return nil
+	}
+	if next.AccountID == nil {
+		return nil
+	}
+	var mode, plan string
+	err := tx.QueryRow(ctx, `SELECT billing_mode,plan FROM agent_accounts WHERE id=$1::uuid AND harness=$2`, *next.AccountID, s.Harness).Scan(&mode, &plan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return workorders.Fail(400, "account must belong to tenant and session harness")
+	}
+	if err != nil {
+		return err
+	}
+	next.BillingMode = mode
+	if mode == "subscription" && plan != "" && utf8.RuneCountInString(plan) <= 120 {
+		next.SubscriptionLabel = &plan
+	}
+	return nil
 }
