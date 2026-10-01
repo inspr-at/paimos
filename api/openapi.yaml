@@ -6,6 +6,52 @@ info:
 servers:
   - url: /api
 paths:
+  /aithema/jwks:
+    get:
+      operationId: aithemaJWKS
+      summary: Public Aithema token verification keys
+      description: Host-wide Ed25519 signing keys (active, prepublished next, and retired keys during the 960-second overlap). Requires no authentication. Private keys are never returned.
+      security: []
+      responses:
+        "200":
+          description: Public JSON Web Key Set
+          headers:
+            Cache-Control:
+              schema: {type: string, const: "public, max-age=60, must-revalidate"}
+            ETag:
+              schema: {type: string}
+          content:
+            application/jwk-set+json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [kty, crv, alg, use, kid, x]
+                      properties:
+                        kty: {type: string, const: OKP}
+                        crv: {type: string, const: Ed25519}
+                        alg: {type: string, const: EdDSA}
+                        use: {type: string, const: sig}
+                        kid: {type: string}
+                        x: {type: string}
+        "304": {description: Public key set unchanged}
+        "503":
+          description: Signing key store unavailable or HTTPS token issuer not configured
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, code]
+                properties:
+                  error: {type: string}
+                  code: {type: string, const: unavailable}
   /rules/layers:
     get:
       operationId: "listRuleLayers"
@@ -929,7 +975,7 @@ paths:
       security: []
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingReconcileRequest"}}}}
       responses:
-        '200': {"description": "Pairing result; see state and cleanup fields", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
+        '200': {"description": "Pairing result; see state and cleanup fields. A change of setup state or harness report appends agent_pairing.reported (computer_id and setup_state only) to /events and /events/stream. Only the person who approved the pairing reads it; other people, agent keys and other tenants do not. An unchanged heartbeat appends nothing.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PairingView"}}}}
         '400': {description: Invalid or mismatched request}
         '403': {description: Person permission and same-origin approval required}
         '404': {description: Request or proof not found}
@@ -4541,7 +4587,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4762,11 +4808,33 @@ paths:
         '204': {description: Schedule saved}
         '400': {description: Invalid schedule}
         '403': {description: Person account.manage permission required}
+  /agent-accounts/quota-pool:
+    put:
+      operationId: confirmAccountQuotaPool
+      summary: Confirm that selected accounts use the same vendor login
+      description: Person account.manage required. Only the explicitly selected accounts share quota; confirmation removes unnamed members of the same fingerprint and harness from the pool. Matching signals from later enrollments never join automatically. All accounts must report the supplied nonempty fingerprint and use the same harness. A changed signal clears that account's confirmation. Set confirmed to false to remove only the selected accounts from the pool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account_ids, quota_fingerprint, confirmed]
+              properties:
+                account_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+                quota_fingerprint: {type: string, pattern: '^[a-f0-9]{64}$'}
+                confirmed: {type: boolean, description: Confirmation requires at least two accounts; removal may name one account.}
+      responses:
+        '204': {description: Confirmation saved or removed}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: An account no longer reports the selected fingerprint or uses another harness}
   /agent-accounts/groups:
     get:
       operationId: listAccountGroups
       summary: Groups that split a vendor pool
-      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence.
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence. Project IDs include only live projects visible to the caller.
       responses:
         '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
     post:
@@ -4782,7 +4850,7 @@ paths:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     patch:
       operationId: updateAccountGroup
-      description: Person account.manage. account_ids and project_ids, when present, replace the membership. Omit a list to leave it.
+      description: Person account.manage. account_ids, when present, replaces account membership. project_ids, when present, replaces only the caller-visible live project membership; hidden memberships remain intact. Omit a list to leave it.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
       responses:
         '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
@@ -4797,20 +4865,21 @@ paths:
   /agent-accounts/pins:
     get:
       operationId: listAccountPins
-      description: Person account.read. Pins for one ticket.
+      description: Person account.read. Pins for one live ticket visible to the caller; invisible tickets return an empty list.
       parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
     put:
       operationId: putAccountPin
       summary: Remember an account or a group for this ticket
-      description: Person run.create. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      description: Person run.create and nodes.write in the visible ticket's project. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
       responses:
         '204': {description: Pin saved}
         '400': {$ref: '#/components/responses/Error'}
     delete:
       operationId: deleteAccountPin
+      description: Person run.create and nodes.write in the visible ticket's project.
       parameters:
         - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
@@ -5057,7 +5126,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants, returning conflict without changing a held reservation or falling back. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants. If the reserved account leaves its routing fence or loses quota-pool confirmation, release its hold and slot and reroute within the current fence. When no replacement is eligible, return 409 with code account_moved_out_of_group or quota_pool_changed and leave the run unreserved. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -5228,46 +5297,69 @@ paths:
       operationId: addIntakeSource
       summary: Record an intake source
       description: Aithema records a source reference, content digest and provenance; file bytes remain behind Aeon's tenant-scoped file storage boundary. Never accepts credentials in locators.
-      security: *auth
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSourceWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Source, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSource'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake:
     get:
       operationId: getProjectIntake
       summary: Read intake history
-      description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
-      security: *auth
+      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible.
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
-        '404': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/transcript-turns:
     post:
       operationId: appendIntakeTurn
       summary: Append a conversation turn
       description: Appends an immutable conversation turn to a source. Idempotency key binds a retry to the same content.
-      security: *auth
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurnWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Turn, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurn'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/drafts:
     post:
       operationId: proposeIntakeDraft
       summary: Propose a cited draft
       description: Aithema proposes an immutable cited brief or requirement draft against a target node revision. Proposals never patch people-edited nodes.
-      security: [{agentKey: []}]
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      security: [{agentKey: []}, {aithemaDelegated: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '201': {description: Draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
-        '409': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
   /projects/{projectId}/intake/drafts/{draftId}/accept:
     post:
       operationId: acceptIntakeDraft
@@ -5279,9 +5371,33 @@ paths:
         - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeAccept'}}}}
       responses:
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
         '200': {description: Accepted draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
-        '403': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+  /projects/{projectId}/intake/drafts/{draftId}/replace:
+    post:
+      operationId: replaceIntakeDraft
+      summary: Atomically replace a proposed draft
+      description: Agent-only replacement with intake.write and a live grant. Inserts a new immutable draft linked by supersedes_draft_id and an immutable receipt under the same project lock as acceptance. Accepted old drafts return already_accepted; superseded old drafts return draft_superseded. The same key and exact request bytes return the original 201 result, even after later acceptance or replacement; changed bytes or an operation on a different old draft return idempotency_conflict. No bare withdrawal is offered. Delegated requester_principal_id is derived from act.sub; a supplied value must match.
+      security: [{agentKey: []}, {aithemaDelegated: []}]
+      x-aithema-authorization: {capability: intake.write, checks: [tid, pid, sid, gen, auth_epoch, exp, ephemeral_live_grant]}
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
+      responses:
+        '201': {description: Original replacement receipt, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '400': {$ref: '#/components/responses/IntakeError'}
+        '401': {$ref: '#/components/responses/IntakeError'}
+        '403': {$ref: '#/components/responses/IntakeError'}
+        '404': {$ref: '#/components/responses/IntakeError'}
+        '409': {$ref: '#/components/responses/IntakeError'}
+        '422': {$ref: '#/components/responses/IntakeError'}
+        '503': {$ref: '#/components/responses/IntakeError'}
   /stage-handoffs:
     post:
       operationId: requestStageHandoff
@@ -6789,9 +6905,15 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.6']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.7']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
   securitySchemes:
+    aithemaDelegated:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Aithema delegated host token verified by internal/aithema/tokens. Requires a current host session and exact per-route capabilities. Acceptance is session-only.
+
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
@@ -8764,6 +8886,7 @@ components:
         kind: {type: string, enum: [brief, requirement]}
         requirement_kind: {type: string, enum: [functional, nonfunctional]}
         target_node_id: {type: string, format: uuid}
+        requester_principal_id: {type: string, format: uuid, description: Person represented by the delegated token. Omit to derive from act.sub; cannot be set by an ordinary agent key.}
         title: {type: string, minLength: 1}
         body: {type: string}
         extensions: {$ref: '#/components/schemas/IntakeExtensions'}
@@ -8799,7 +8922,13 @@ components:
     IntakeDraft:
       allOf:
         - {$ref: '#/components/schemas/IntakeDraftWrite'}
-        - {type: object, required: [id, status, proposed_at], properties: {id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+        - {type: object, required: [id, status, proposed_at], properties: {supersedes_draft_id: {type: string, format: uuid}, id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected, superseded]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+    IntakeError:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string, description: 'Stable refusal code: idempotency_conflict, citation_invalid (422), draft_superseded, already_accepted, target_changed, already_accepted_on_target, no_recorded_content, person_authored, fenced_generation, revoked (409); forbidden for plain authorization (403). Transport failures use invalid_request, unauthenticated, not_found, unavailable or internal.'}
     IntakeAccept:
       type: object
       additionalProperties: false
@@ -10666,8 +10795,8 @@ components:
         archived_at: {type: [string, 'null'], format: date-time}
     HarnessSession:
       type: object
-      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots.
-      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
+      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
+      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
         warnings:
           type: array
@@ -10680,6 +10809,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
         attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
+        finished: {type: boolean, description: "True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Anything else that stopped, a silence the server closed, a stop with no recorded reason, and a session that is still open are false. Derived, so it is always present, also where stop_reason is withheld. Clients read this flag and never derive Done from progress_pct or stop_reason (AEON-437)."}
         id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
@@ -10799,9 +10929,13 @@ components:
             estimated: {type: integer, minimum: 0}
     TicketEta:
       type: object
-      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent.
+      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
+      required: [finished]
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
+        finished: {type: boolean, description: 'True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Always present, false included (AEON-437).'}
+        finished_at: {type: string, format: date-time, description: 'When that worker stopped. Present with finished.'}
+        finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
@@ -10987,7 +11121,7 @@ components:
                 name: {type: string}
     LiveAgent:
       type: object
-      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
+      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at, finished]
       properties:
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other]}
@@ -10996,6 +11130,7 @@ components:
         needs_attention: {type: boolean, description: "Bound run waiting or exact bound-run approval pending; yielded phase is separate session evidence. Shared inbox attention and nonblocking replies do not set this flag; stopped sessions are false."}
         attention_reasons: {type: array, description: "Authorized content-free reasons; withheld without harness.read at this project.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
         has_problem: {type: boolean, description: 'Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false.'}
+        finished: {type: boolean, description: 'True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Derived, so it is always present, also where stop_reason is withheld; clients never derive Done from progress_pct or stop_reason (AEON-437).'}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: Present only with harness.read at the project.}
         project_id: {type: string, format: uuid}
@@ -11027,6 +11162,7 @@ components:
         since: {type: string, format: date-time, description: When the session started}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         eta_stale: {type: boolean, description: True when the session estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: The last percent the session reported. Omitted until one is reported. Reported progress alone never means finished; read finished (AEON-437).}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
@@ -11490,6 +11626,7 @@ components:
             ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
             reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
             quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+            quota_pool_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Nonempty only after a person confirms this account for the pool.}
             statusline_enabled: {type: boolean}
             statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
             id: {type: string, format: uuid}
@@ -11518,7 +11655,7 @@ components:
       required: [reading_support, quota_fingerprint]
       properties:
         reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
-        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Empty until a stable non-email vendor account ID is verified.}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Self-reported hint only; never authorizes quota pooling. Empty until a stable non-email vendor account ID is verified.}
     StatuslineConsent:
       type: object
       additionalProperties: false
@@ -12924,6 +13061,10 @@ components:
           schema:
             $ref: '#/components/schemas/ViewPatch'
   responses:
+    IntakeError:
+      description: Intake refusal with a stable machine-readable code; Cache-Control no-store.
+      content: {application/json: {schema: {$ref: '#/components/schemas/IntakeError'}}}
+
     KnowledgeEntry:
       description: Knowledge entry
       content:

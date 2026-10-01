@@ -310,13 +310,18 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 			f.Reason = "The doctrine inbox is full or already holds a proposal for this rule; retried on the next day."
 			return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending") })
 		}
-		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin" || failure.Code == "locked_rule") {
+		if errors.As(err, &failure) && (failure.Code == "private_doctrine" || failure.Code == "private_index_unavailable" || failure.Code == "guard_unavailable" || failure.Code == "public_identity" || failure.Code == "credential_text" || failure.Code == "non_latin" || failure.Code == "locked_rule") {
 			reason := "Kept internal to protect private instruction text."
-			if failure.Code == "private_index_unavailable" {
+			if failure.Code == "private_index_unavailable" || failure.Code == "guard_unavailable" {
 				// Startup may still be rebuilding the guard. Preserve the slot
 				// and retry tomorrow without treating unknown safety as a leak.
 				f.Reason = "The private instruction check is unavailable; no draft was published."
-				return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error { return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending") })
+				return m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
+					if _, err := tx.Exec(ctx, `UPDATE doctrine_analysis_runs SET attempts=greatest(0,attempts-1) WHERE day=$1::date`, day); err != nil {
+						return err
+					}
+					return saveFinding(ctx, tx, actor, *f, "doctrine.finding_pending")
+				})
 			}
 			if failure.Code == "credential_text" || failure.Code == "public_identity" {
 				reason = "Kept internal because the proposed text may contain sensitive information."

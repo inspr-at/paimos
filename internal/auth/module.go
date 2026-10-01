@@ -574,7 +574,7 @@ func protectedRequest(r *http.Request) bool {
 // helper. It is not the session gate; that is publicRequest.
 func isPublicAPI(path string) bool {
 	switch path {
-	case "/api/health", "/api/ready", "/api/version":
+	case "/api/health", "/api/ready", "/api/version", "/api/aithema/jwks":
 		return true
 	default:
 		return strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/public/quotes/")

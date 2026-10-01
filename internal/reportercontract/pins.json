@@ -638,7 +638,17 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1approvals 200/items/allOf/0",
+      "/GET ~1approvals 200/items/allOf/0/properties/target",
+      "/POST ~1approvals 201/allOf/0",
+      "/POST ~1approvals 201/allOf/0/properties/target",
+      "/POST ~1approvals~1{approvalId}~1decision 200/allOf/0",
+      "/POST ~1approvals~1{approvalId}~1decision 200/allOf/0/properties/target",
+      "/POST ~1approvals~1{approvalId}~1revoke 200/allOf/0",
+      "/POST ~1approvals~1{approvalId}~1revoke 200/allOf/0/properties/target"
+    ]
   },
   "baseline-batches": {
     "version": "baseline-batches/1.0",
@@ -689,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.6",
-    "sha256": "c39230fe9d2eebb0c77412978a367e6da76a851605291cadc441a40e0f27adab",
+    "version": "harness-session/1.7",
+    "sha256": "e983c8a68cb0e66197761c1bb4ecf70cc0744b61fd283fe930bd67bce643edd4",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -999,6 +1009,9 @@
             "type": "string"
           },
           "eta_stale": {
+            "type": "boolean"
+          },
+          "finished": {
             "type": "boolean"
           },
           "harness": {
@@ -1350,7 +1363,8 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       },
@@ -1663,6 +1677,9 @@
           "eta_stale": {
             "type": "boolean"
           },
+          "finished": {
+            "type": "boolean"
+          },
           "harness": {
             "enum": [
               "codex",
@@ -2012,11 +2029,32 @@
           "activity",
           "activity_sequence",
           "revision",
-          "created_at"
+          "created_at",
+          "finished"
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/account_label",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/branch",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/brief",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/commits/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/branch",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/brief",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/commits/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
+    ]
   },
   "journey": {
     "version": "journey/1.3",
@@ -2349,7 +2387,10 @@
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1projects~1{projectId}~1journey 200/properties/stages/items/properties/target"
+    ]
   },
   "me": {
     "version": "me/1.0",
@@ -2636,7 +2677,11 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/POST ~1stage-handoffs~1{handoffId}~1evidence 201/allOf/0",
+      "/POST ~1stage-handoffs~1{handoffId}~1evidence 201/allOf/0/properties/artifact"
+    ]
   },
   "stage-handoffs": {
     "version": "stage-handoffs/1.0",
@@ -3060,7 +3105,11 @@
         ],
         "type": "object"
       }
-    }
+    },
+    "request_paths": [
+      "/GET ~1stage-handoffs~1{handoffId} 200/properties/result/allOf/0",
+      "/POST ~1stage-handoffs 201/properties/result/allOf/0"
+    ]
   },
   "stage-launch": {
     "version": "stage-launch/1.0",
@@ -3216,6 +3265,9 @@
           }
         ]
       }
-    }
+    },
+    "request_paths": [
+      "/POST ~1stage-handoffs~1{handoffId}~1result 200/allOf/0"
+    ]
   }
 }

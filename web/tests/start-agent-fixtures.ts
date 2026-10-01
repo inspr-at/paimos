@@ -166,7 +166,7 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
   function claim(register = false, reported: Partial<Pick<HarnessSession, 'model' | 'account_label' | 'reasoning_effort'>> = {}) {
     state.runs[0].status = 'starting'
     if (register) state.sessions.push({
-      id: 'managed-1', project_id: 'p-pharos', agent_principal_id: agentId, run_id: 'run-1', ticket_node_id: 'n-1', work_order_id: 'order-1', parent_harness_session_id: null, harness: 'codex', host: 'workstation', management_mode: 'managed', role: 'worker', work_shape: 'ship', advertised_capabilities: ['interrupt', 'stop'], phase: 'starting', activity: 'unknown', activity_sequence: 1, revision: 1, heartbeat_at: new Date().toISOString(), stopped_at: null, stop_reason: null, created_at: new Date().toISOString(),
+      id: 'managed-1', project_id: 'p-pharos', agent_principal_id: agentId, run_id: 'run-1', ticket_node_id: 'n-1', work_order_id: 'order-1', parent_harness_session_id: null, harness: 'codex', host: 'workstation', management_mode: 'managed', role: 'worker', work_shape: 'ship', advertised_capabilities: ['interrupt', 'stop'], phase: 'starting', activity: 'unknown', activity_sequence: 1, revision: 1, heartbeat_at: new Date().toISOString(), stopped_at: null, stop_reason: null, finished: false, created_at: new Date().toISOString(),
       model: 'model' in reported ? reported.model : 'workspace-build',
       account_label: 'account_label' in reported ? reported.account_label : 'Workspace account',
       reasoning_effort: 'reasoning_effort' in reported ? reported.reasoning_effort : 'high',

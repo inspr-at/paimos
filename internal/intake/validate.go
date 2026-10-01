@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/aithema/tokens"
 )
 
 var (
@@ -97,7 +99,7 @@ func validateDraft(in *draftWrite) error {
 	if utf8.RuneCountInString(in.Body) > 65536 || strings.ContainsRune(in.Body, 0) {
 		return fail(http.StatusBadRequest, "invalid body")
 	}
-	if in.BaseEventID == nil || *in.BaseEventID < 0 {
+	if in.BaseEventID == nil || *in.BaseEventID < 0 || *in.BaseEventID > tokens.MaxSafeInteger {
 		return fail(http.StatusBadRequest, "invalid base event")
 	}
 	if (in.TargetNodeID == nil) != (*in.BaseEventID == 0) {

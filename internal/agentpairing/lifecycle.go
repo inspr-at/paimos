@@ -3,11 +3,14 @@ package agentpairing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -252,6 +255,34 @@ func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	}
 	return nil
 }
+
+// reportProgress appends agent_pairing.reported for the person who approved
+// this pairing, never for the workspace: the audience is stored on the event and
+// the events policy (1050) hides the row from every other reader. The agent is
+// the actor. A pairing with no approver publishes nothing.
+func reportProgress(ctx context.Context, tx pgx.Tx, computer, state string) error {
+	var principal, tenantID, audience string
+	err := tx.QueryRow(ctx, `
+SELECT c.principal_id::text, c.tenant_id::text, coalesce(person.linked_to, person.id)::text
+FROM agent_pairing_computers c
+JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+JOIN principals person ON person.tenant_id=q.tenant_id AND person.id=q.approved_by
+WHERE c.id=$1`, computer).Scan(&principal, &tenantID, &audience)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	metadata, err := json.Marshal(map[string]string{"audience_principal_id": audience})
+	if err != nil {
+		return err
+	}
+	_, err = events.Append(ctx, tx, tenant.Principal{ID: principal, TenantID: tenantID, Kind: tenant.Agent}, events.Change{
+		Type: "agent_pairing.reported", After: map[string]any{"computer_id": computer, "setup_state": state}, Metadata: metadata,
+	})
+	return err
+}
 func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
 	changed := false
 	if in.Progress != nil {
@@ -270,8 +301,31 @@ func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in pro
 			return err
 		}
 		// A legacy daemon omits reports. Clear stale state after a downgrade.
-		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET setup_state=$2,setup_error=$3,harness_statuses=$4,harness_details=$5,last_seen_at=clock_timestamp() WHERE id=$1 AND state='connected'`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details); err != nil {
+		// Last-seen moves on every report; the event fires only when setup or a
+		// harness report actually changes, so a heartbeat does not flood the stream.
+		var progressChanged bool
+		err = tx.QueryRow(ctx, `
+WITH prev AS (
+  SELECT id, setup_state, setup_error, harness_statuses, harness_details
+  FROM agent_pairing_computers WHERE id=$1 AND state='connected'
+)
+UPDATE agent_pairing_computers c
+SET setup_state=$2, setup_error=$3, harness_statuses=$4, harness_details=$5, last_seen_at=clock_timestamp()
+FROM prev WHERE c.id=prev.id
+RETURNING prev.setup_state IS DISTINCT FROM c.setup_state
+  OR prev.setup_error IS DISTINCT FROM c.setup_error
+  OR prev.harness_statuses IS DISTINCT FROM c.harness_statuses
+  OR prev.harness_details IS DISTINCT FROM c.harness_details`, computer, in.Progress.State, in.Progress.ErrorCode, statuses, details).Scan(&progressChanged)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		}
+		if err != nil {
 			return err
+		}
+		if progressChanged {
+			if err = reportProgress(ctx, tx, computer, in.Progress.State); err != nil {
+				return err
+			}
 		}
 	}
 
