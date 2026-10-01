@@ -151,6 +151,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Snapshot UI selection inputs before Node runs
+        id: snapshot
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bash scripts/ci-web-tests.sh snapshot
@@ -178,6 +179,11 @@ jobs:
       - name: Changed UI specs on PRs; full UI suite on other events
         working-directory: web
         env:
+          SNAPSHOT_EVENT: ${{ steps.snapshot.outputs.event }}
+          SNAPSHOT_BASE_SHA: ${{ steps.snapshot.outputs.base_sha }}
+          SNAPSHOT_REFS_HASH: ${{ steps.snapshot.outputs.refs_hash }}
+          SNAPSHOT_PATHS_HASH: ${{ steps.snapshot.outputs.paths_hash }}
+          SNAPSHOT_REQUIRE_TESTS: ${{ steps.snapshot.outputs.require_tests }}
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
         run: bash ../scripts/ci-web-tests.sh run

@@ -35,7 +35,7 @@ func webSelection(t *testing.T) (string, string) {
 		step := mapping(value)
 		command, _ := step["run"].(string)
 		if command == "bash scripts/ci-web-tests.sh snapshot" {
-			if index != 1 || step["if"] != nil || mapping(step["env"])["PR_BASE_SHA"] != "${{ github.event.pull_request.base.sha }}" {
+			if index != 1 || step["id"] != "snapshot" || step["if"] != nil || mapping(step["env"])["PR_BASE_SHA"] != "${{ github.event.pull_request.base.sha }}" {
 				t.Fatal("snapshot must bind the event base immediately after checkout, before Node")
 			}
 			snapshot = command
@@ -43,6 +43,11 @@ func webSelection(t *testing.T) (string, string) {
 		if command == "bash ../scripts/ci-web-tests.sh run" {
 			if step["working-directory"] != "web" || step["if"] != nil {
 				t.Fatal("selection must run in web on every CI event")
+			}
+			for _, output := range []string{"event", "base_sha", "refs_hash", "paths_hash", "require_tests"} {
+				if mapping(step["env"])["SNAPSHOT_"+strings.ToUpper(output)] != "${{ steps.snapshot.outputs."+output+" }}" {
+					t.Fatalf("run must consume the sealed snapshot output %s", output)
+				}
 			}
 			run = command
 		}
@@ -55,6 +60,7 @@ func webSelection(t *testing.T) (string, string) {
 
 type webScenario struct {
 	event, path, list, mutation, base string
+	forgedSource                      string
 	failList, failRun                 bool
 }
 
@@ -68,7 +74,7 @@ type webResult struct {
 func runWebSelection(t *testing.T, scenario webScenario) webResult {
 	t.Helper()
 	dir := t.TempDir()
-	for _, path := range []string{"web/src", "scripts", "bin", "temp"} {
+	for _, path := range []string{"web/src", "web/tests", "scripts", "bin", "temp"} {
 		if err := os.MkdirAll(filepath.Join(dir, path), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -111,6 +117,23 @@ func runWebSelection(t *testing.T, scenario webScenario) webResult {
 		t.Fatal(err)
 	}
 	write("scripts/ci-web-tests.sh", string(body))
+	body, err = os.ReadFile("../ci-web-exit-guard.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("scripts/ci-web-exit-guard.cjs", string(body))
+	forgedSource := scenario.forgedSource
+	if forgedSource == "" {
+		forgedSource = "tests"
+	}
+	forgedScript := "web/" + forgedSource + "/forged.cjs"
+	write(forgedScript, `
+'use strict';
+if (process.argv[2] === 'list') console.log('Total: 1 test in 1 file');
+else console.log('{"stats":{"expected":1,"skipped":0,"unexpected":0,"flaky":0},"errors":[]}');
+if (process.argv[3].endsWith('-kill')) process.kill(process.pid, 'SIGTERM');
+else process.exit(0);
+`)
 	stub := `#!/bin/bash
 printf 'CALL\n' >> "$INVOCATION_LOG"
 printf '%s\n' "$@" >> "$INVOCATION_LOG"
@@ -120,6 +143,13 @@ case "$MUTATION" in
   "$phase-ref") git update-ref refs/remotes/origin/main "$PR_BASE_SHA" ;;
   "$phase-path") printf 'changed\n' > src/other.vue; git add src/other.vue ;;
   "$phase-exit") exit 0 ;;
+  "$phase-forged-"*) exec node "$FORGED_SCRIPT" "$phase" "$MUTATION" ;;
+  "$phase-snapshot")
+    git read-tree "$PR_BASE_SHA"
+    git show "$PR_BASE_SHA:web/src/fixture.vue" > src/fixture.vue
+    git diff --no-renames --name-only -z "$PR_BASE_SHA" -- > "$RUNNER_TEMP/aeon-web-selection/paths"
+    ;;
+  "$phase-rewrite-only") printf '' > "$RUNNER_TEMP/aeon-web-selection/paths" ;;
 esac
 if [ "$phase" = list ]; then
   if [ "$FAIL_LIST" = 1 ]; then exit 17; fi
@@ -148,8 +178,10 @@ fi
 	}
 	log := filepath.Join(dir, "calls")
 	summary := filepath.Join(dir, "summary")
+	outputs := filepath.Join(dir, "outputs")
 	vars := append(os.Environ(), "PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"),
 		"GITHUB_EVENT_NAME="+scenario.event, "GITHUB_STEP_SUMMARY="+summary,
+		"GITHUB_OUTPUT="+outputs, "FORGED_SCRIPT="+filepath.Join(dir, forgedScript),
 		"RUNNER_TEMP="+filepath.Join(dir, "temp"), "PR_BASE_SHA="+baseInput,
 		"INVOCATION_LOG="+log, "FAIL_LIST="+flag(scenario.failList),
 		"FAIL_RUN="+flag(scenario.failRun), "LIST_OUTPUT="+list, "MUTATION="+scenario.mutation)
@@ -158,6 +190,31 @@ fi
 	cmd.Dir, cmd.Env = dir, vars
 	out, err := cmd.CombinedOutput()
 	if err == nil {
+		// Simulate the runner sealing the completed step outputs. Subsequent
+		// writes to GITHUB_OUTPUT or scratch files cannot change these inputs.
+		body, readErr := os.ReadFile(outputs)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+			key, value, found := strings.Cut(line, "=")
+			if !found {
+				t.Fatalf("invalid step output %q", line)
+			}
+			vars = append(vars, "SNAPSHOT_"+strings.ToUpper(key)+"="+value)
+		}
+		if strings.HasPrefix(scenario.mutation, "before-") {
+			write("temp/aeon-web-selection/paths", "")
+			write("temp/aeon-web-selection/base", base)
+			write("temp/aeon-web-selection/refs", git("show-ref", "--head"))
+			write("temp/aeon-web-selection/event", scenario.event+"\n")
+			write("temp/aeon-web-selection/require_tests", "0\n")
+			write("outputs", "require_tests=0\npaths_hash=forged\n")
+			if scenario.mutation == "before-snapshot" {
+				git("read-tree", base)
+				write("web/src/fixture.vue", "base\n")
+			}
+		}
 		cmd = exec.Command("bash", "-c", run)
 		cmd.Dir, cmd.Env = filepath.Join(dir, "web"), vars
 		var next []byte
@@ -263,6 +320,75 @@ func TestWebSelectionStopsOnLoadExitAndGitTampering(t *testing.T) {
 				t.Fatalf("early exit or mutation must not silently pass: %+v", got)
 			}
 		})
+	}
+}
+
+func TestWebSelectionRejectsSnapshotRewrite(t *testing.T) {
+	for _, mutation := range []string{"before-records", "before-snapshot", "list-snapshot", "run-snapshot"} {
+		t.Run(mutation, func(t *testing.T) {
+			scenario := webScenario{event: "pull_request", path: "web/src/fixture.vue", mutation: mutation}
+			wantCalls, want := 1, "Changed paths changed"
+			switch mutation {
+			case "before-records":
+				scenario.list = "Total: 0 tests in 0 files"
+				want = "require a non-empty test selection"
+			case "before-snapshot":
+				wantCalls = 0
+			case "run-snapshot":
+				wantCalls = 2
+			}
+			got := runWebSelection(t, scenario)
+			if got.err == nil || strings.Count(got.calls, "CALL\n") != wantCalls || !strings.Contains(got.output, want) {
+				t.Fatalf("rewriting scratch data must not forge trusted coverage or paths: %+v", got)
+			}
+		})
+	}
+	for _, mutation := range []string{"list-rewrite-only", "run-rewrite-only"} {
+		got := runWebSelection(t, webScenario{event: "pull_request", path: "web/src/fixture.vue", mutation: mutation})
+		if got.err != nil {
+			t.Fatalf("scratch path files must not be used as trusted run inputs: %+v", got)
+		}
+	}
+}
+
+func TestWebSelectionRejectsForgedCompletion(t *testing.T) {
+	for _, source := range []string{"tests", "src"} {
+		for _, phase := range []string{"list", "run"} {
+			for _, operation := range []string{"exit", "kill"} {
+				t.Run(source+"/"+phase+"/"+operation, func(t *testing.T) {
+					got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts",
+						mutation: phase + "-forged-" + operation, forgedSource: source})
+					wantCalls := 1
+					if phase == "run" {
+						wantCalls = 2
+					}
+					if got.err == nil || strings.Count(got.calls, "CALL\n") != wantCalls || !strings.Contains(got.output, "UI check rejected process."+operation) {
+						t.Fatalf("forged list/JSON plus process termination must fail: %+v", got)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestWebExitGuardLocksFunctionsAndAllowsRunnerShutdown(t *testing.T) {
+	hook, err := filepath.Abs("../ci-web-exit-guard.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", "--require", hook, "-e", `
+const assert = require('node:assert/strict');
+for (const name of ['exit', 'kill']) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, name);
+  assert.equal(descriptor.writable, false);
+  assert.equal(descriptor.configurable, false);
+  assert.throws(() => Object.defineProperty(process, name, { value: () => {} }));
+}
+assert.equal(process.kill(process.pid, 0), true);
+process.exit(0);
+`)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("guard must lock replacements while allowing runner shutdown: %v, %s", err, out)
 	}
 }
 

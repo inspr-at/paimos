@@ -1043,11 +1043,15 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 
 The PR `web` check uses `--only-changed=<PR base SHA>` with a full-history checkout,
 two workers and zero retries. CI validates that immutable event base and records
-changed paths and Git refs before Node runs. The job summary lists selected tests;
+hashes of changed paths and Git refs plus the coverage requirement in sealed
+GitHub step outputs before Node runs. Later checks compare live Git to those
+outputs, never to writable scratch files. The job summary lists selected tests;
 UI or spec changes must select at least one test, and missing list totals or changes
 to the captured Git inputs fail the check. Only a PR with no UI/spec paths may pass
 with zero selected tests. Non-empty runs must produce a completed JSON test report
-matching the selected count; an early successful process exit fails the check.
+matching the selected count. A Node preload locks the process exit/kill functions
+and rejects calls from `web/tests` or `web/src`, including forged reporter output
+followed by an early successful process exit.
 Selection follows Playwright's test import graph, so
 browser-loaded Vue components are not automatically mapped to their specs; an
 unmapped UI change fails for explicit coverage rather than silently passing.

@@ -7,51 +7,71 @@ readonly repo="$(git rev-parse --show-toplevel)"
 readonly snapshot="$RUNNER_TEMP/aeon-web-selection"
 cd "$repo"
 
+hash() { shasum -a 256 | cut -d ' ' -f 1; }
+
 if [ "${1:-}" = snapshot ]; then
   mkdir -p "$snapshot"
-  printf '%s\n' "$GITHUB_EVENT_NAME" > "$snapshot/event"
-  git show-ref --head > "$snapshot/refs"
+  base_sha=
+  paths_hash=
+  require_tests=1
   if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
     # Only the immutable event base is accepted, including PRs into other branches.
     [[ "${PR_BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid PR base SHA' >&2; exit 1; }
     test "$(git rev-parse --verify "$PR_BASE_SHA^{commit}")" = "$PR_BASE_SHA"
-    printf '%s\n' "$PR_BASE_SHA" > "$snapshot/base"
+    base_sha="$PR_BASE_SHA"
     git diff --no-renames --name-only -z "$PR_BASE_SHA" -- > "$snapshot/paths"
+    paths_hash="$(hash < "$snapshot/paths")"
+    require_tests=0
+    while IFS= read -r -d '' path; do
+      case "$path" in
+        web/*|*.spec.ts|*.spec.js|*.spec.mts|*.spec.mjs) require_tests=1 ;;
+      esac
+    done < "$snapshot/paths"
   fi
+  # The runner seals these step outputs before any repository Node code runs.
+  # The scratch directory is never a source of trusted selection inputs in run.
+  {
+    printf 'event=%s\n' "$GITHUB_EVENT_NAME"
+    printf 'base_sha=%s\n' "$base_sha"
+    printf 'refs_hash=%s\n' "$(git show-ref --head | hash)"
+    printf 'paths_hash=%s\n' "$paths_hash"
+    printf 'require_tests=%s\n' "$require_tests"
+  } >> "$GITHUB_OUTPUT"
   exit 0
 fi
 test "${1:-}" = run
-test "$(cat "$snapshot/event")" = "$GITHUB_EVENT_NAME"
-readonly original_refs="$(cat "$snapshot/refs")"
+test "${SNAPSHOT_EVENT:-}" = "$GITHUB_EVENT_NAME"
+[[ "${SNAPSHOT_REFS_HASH:-}" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid saved Git refs hash' >&2; exit 1; }
+[[ "${SNAPSHOT_REQUIRE_TESTS:-}" =~ ^[01]$ ]] || { echo 'Invalid saved coverage requirement' >&2; exit 1; }
+readonly original_refs_hash="$SNAPSHOT_REFS_HASH"
+readonly require_tests="$SNAPSHOT_REQUIRE_TESTS"
 args=(-c playwright.ui.config.ts --workers=2 --retries=0)
-require_tests=1
 if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-  readonly base_sha="$(cat "$snapshot/base")"
+  readonly base_sha="${SNAPSHOT_BASE_SHA:-}"
   [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid saved PR base SHA' >&2; exit 1; }
+  [[ "${SNAPSHOT_PATHS_HASH:-}" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid saved changed paths hash' >&2; exit 1; }
+  readonly original_paths_hash="$SNAPSHOT_PATHS_HASH"
   args+=("--only-changed=$base_sha")
-  require_tests=0
-  while IFS= read -r -d '' path; do
-    case "$path" in
-      web/*|*.spec.ts|*.spec.js|*.spec.mts|*.spec.mjs) require_tests=1 ;;
-    esac
-  done < "$snapshot/paths"
+else
+  test "$require_tests" = 1
 fi
-readonly require_tests
 
 check_inputs() {
-  test "$(git show-ref --head)" = "$original_refs" || { echo 'Git refs changed during UI checks' >&2; return 1; }
+  test "$(git show-ref --head | hash)" = "$original_refs_hash" || { echo 'Git refs changed during UI checks' >&2; return 1; }
   if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
     test "$(git rev-parse --verify "$base_sha^{commit}")" = "$base_sha"
-    cmp "$snapshot/paths" <(git diff --no-renames --name-only -z "$base_sha" --) || {
+    test "$(git diff --no-renames --name-only -z "$base_sha" -- | hash)" = "$original_paths_hash" || {
       echo 'Changed paths changed during UI checks' >&2; return 1;
     }
   fi
 }
 check_inputs
+mkdir -p "$snapshot"
 cd "$repo/web"
+readonly node_options="--require=\"$repo/scripts/ci-web-exit-guard.cjs\""
 # Non-PR events, especially merge_group, run every UI spec without a path filter.
 list="$snapshot/list"
-if npx playwright test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
+if NODE_OPTIONS="$node_options" npx playwright test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
   check_inputs
 else
   cat "$list" >&2
@@ -76,7 +96,7 @@ if [ "$total" -eq 0 ]; then
   exit 0
 fi
 report="$snapshot/result.json"
-if npx playwright test "${args[@]}" --reporter=json > "$report"; then
+if NODE_OPTIONS="$node_options" npx playwright test "${args[@]}" --reporter=json > "$report"; then
   check_inputs
 else
   cat "$report" >&2
