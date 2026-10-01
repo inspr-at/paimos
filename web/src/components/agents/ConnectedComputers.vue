@@ -16,7 +16,9 @@ import { usePoller } from '../../lib/usePolledData'
 import { useAgents } from '../../stores/agents'
 import HarnessMark from './HarnessMark.vue'
 
-const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean; refreshToken?: number }>()
+// revokedOnly (AEON-499): the computer cards on /agents draw the live computers;
+// this keeps the revoked disclosure, the disconnect dialog and removal for them.
+const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean; refreshToken?: number; revokedOnly?: boolean }>()
 const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
 const agents = useAgents()
 
@@ -36,7 +38,8 @@ const active = computed(() => computers.value.filter(item => item.computer_state
 const revoked = computed(() => computers.value.filter(item => item.computer_state === 'revoked'))
 const revokedOpen = ref(false)
 const root = ref<HTMLElement>()
-const visible = computed(() => state.value === 'loading' || state.value === 'error' || computers.value.length > 0 || (state.value === 'ready' && !props.compactEmpty))
+// In revokedOnly mode the section always renders: the dialog lives in it.
+const visible = computed(() => props.revokedOnly || state.value === 'loading' || state.value === 'error' || computers.value.length > 0 || (state.value === 'ready' && !props.compactEmpty))
 const confirm = computed(() => {
   const request = pending.value
   if (!request) return null
@@ -253,6 +256,8 @@ function replace(next: PairingView) {
   }
 }
 
+defineExpose({ openDialog, remove, canChange, removal })
+
 function assign(error: unknown, fallback: string) {
   if (error instanceof PairingError) { message.value = error.message; nextStep.value = error.next; return }
   message.value = fallback
@@ -261,8 +266,8 @@ function assign(error: unknown, fallback: string) {
 </script>
 
 <template>
-  <section v-if="visible" ref="root" class="computers" :class="{ embedded }" aria-labelledby="computers-title">
-    <header class="head">
+  <section v-if="visible" ref="root" class="computers" :class="{ embedded, 'revoked-only': revokedOnly }" :aria-labelledby="revokedOnly ? undefined : 'computers-title'" :aria-label="revokedOnly ? 'Revoked computers' : undefined">
+    <header v-if="!revokedOnly" class="head">
       <h2 id="computers-title" tabindex="-1">Connected computers</h2>
       <span v-if="active.length" class="count mono">{{ active.length }}</span>
       <span class="spacer" />
@@ -270,6 +275,7 @@ function assign(error: unknown, fallback: string) {
       <RouterLink v-if="permissions.canApprove && !embedded" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="14" />Add computer</RouterLink>
     </header>
 
+    <template v-if="!revokedOnly">
     <p v-if="state === 'loading'" class="muted">Loading paired computers…</p>
     <p v-else-if="state === 'error'" class="problem" role="alert">{{ message }} <button type="button" class="btn sm" @click="load">Try again</button></p>
     <p v-else-if="!computers.length" class="muted">No computers are connected in this workspace yet.</p>
@@ -333,9 +339,10 @@ function assign(error: unknown, fallback: string) {
         </div>
       </article>
     </div>
+    </template>
     <div v-if="state === 'ready' && revoked.length" class="revoked">
       <button type="button" class="revoked-toggle" :aria-expanded="revokedOpen" aria-controls="revoked-list" @click="revokedOpen = !revokedOpen">
-        <AppIcon name="chevron-right" :size="14" class="chev" />Revoked ({{ revoked.length }})
+        <AppIcon name="chevron-right" :size="14" class="chev" /><template v-if="revokedOnly">Revoked computers · {{ revoked.length }}</template><template v-else>Revoked ({{ revoked.length }})</template>
       </button>
       <ul v-if="revokedOpen" id="revoked-list" class="revoked-list">
         <li v-for="computer in revoked" :key="keyOf(computer)" :title="`${statusOf(computer).detail} ${statusOf(computer).next}`">
@@ -376,6 +383,10 @@ function assign(error: unknown, fallback: string) {
 <style scoped>
 .computers { container: computers / inline-size; margin-top: 28px; padding: 6px 8px 8px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
 .computers.embedded { margin-top: 0; }
+.computers.revoked-only { padding: 0; border: 0; border-radius: 0; background: none; }
+.computers.revoked-only:empty { display: none; }
+.revoked-only .revoked { padding: 0; border-top: 0; }
+.revoked-only .revoked-toggle { min-height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px 4px 10px; }
 .head h2 { font: 650 15px/1.3 var(--font); letter-spacing: 0; }
 .count { font-size: 12px; color: var(--ink-3); }
