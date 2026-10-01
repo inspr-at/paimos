@@ -124,6 +124,14 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 			return err
 		}
 		settling := area == "ledger" && action == "settle" && method == "POST"
+		// Authority must report tombstones to the polling service; settlement
+		// remains available to owners of already committed claims. Neither
+		// exception permits new effects after offboarding or plugin removal.
+		if s.HostAuthorization != nil && cap != "aithema.authority.read" && !settling {
+			if err := s.HostAuthorization(ctx, tx, c, cap, state(st, s.now())); err != nil {
+				return err
+			}
+		}
 		if cap != "aithema.authority.read" && !settling {
 			if err := fence(st, c, method == "POST"); err != nil {
 				return err
@@ -133,6 +141,17 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 			return fault(409, "suspended")
 		}
 		if method == "GET" || method == "HEAD" {
+			if area == "journal" && action == "authority" && s.AuthorityProjection != nil {
+				if !queryValid(q) {
+					return fault(400, "invalid_request")
+				}
+				projection, err := s.AuthorityProjection(ctx, tx, state(st, s.now()))
+				if err != nil {
+					return err
+				}
+				out.Body = marshal(projection)
+				return nil
+			}
 			body, err := s.read(ctx, tx, st, area, action, q)
 			out.Body = body
 			return err

@@ -68,6 +68,12 @@ type Store struct {
 	Pool      *pgxpool.Pool
 	validator *Validator
 	clock     func() time.Time
+	// HostAuthorization is P04's optional live installation/binding gate,
+	// evaluated under the same session lock as the journal/ledger effect.
+	HostAuthorization func(context.Context, pgx.Tx, tokens.Claims, string, AuthorityState) error
+	// AuthorityProjection includes live host offboarding in polling replies,
+	// before the durable revoke accelerator worker has run.
+	AuthorityProjection func(context.Context, pgx.Tx, AuthorityState) (AuthorityState, error)
 }
 
 func NewStore(pool *pgxpool.Pool) (*Store, error) {

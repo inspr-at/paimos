@@ -19,13 +19,16 @@ import (
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
-	Addr                string
-	DatabaseURL         string
-	Env                 string // "dev" or "prod"
-	PublicURL           string
-	WebDir              string
-	BootstrapTenantSlug string
-	BootstrapTenantName string
+	Addr        string
+	DatabaseURL string
+	Env         string // "dev" or "prod"
+	PublicURL   string
+	// Deployment-owned exact host:port exceptions for an operator-local
+	// Aithema service. Empty by default; never writable by tenants.
+	AithemaOperatorLocalServices []string
+	WebDir                       string
+	BootstrapTenantSlug          string
+	BootstrapTenantName          string
 	// MessagingKey encrypts inbox receiver targets. It is SHA-256 of the
 	// AEON_MESSAGING_KEY_FILE contents; in dev without a file it is random and
 	// lives only in memory; in prod without a file it is nil and messaging is off.
@@ -99,6 +102,9 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	if raw := os.Getenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES"); raw != "" {
+		cfg.AithemaOperatorLocalServices = strings.Split(raw, ",")
 	}
 	var policyErr error
 	cfg.DoctrineBinaryAllowlist, policyErr = doctrineBinaryAllowlist(os.Getenv("AEON_DOCTRINE_BINARY_ALLOWLIST"))

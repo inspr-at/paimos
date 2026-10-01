@@ -27,6 +27,8 @@ const (
 	PermStageVerify        = "stage.verify"
 	PermStageAccessPrepare = "stage.access_prepare"
 	PermStageAccessApply   = "stage.access_apply"
+	PermIntakeRead         = "intake.read"
+	PermIntakeWrite        = "intake.write"
 )
 
 // Gates a workflow step may declare.
@@ -64,6 +66,7 @@ var permissions = map[string]struct{}{
 	PermStepsRequest: {}, PermStepsApply: {}, PermToolsInvoke: {},
 	PermIntegrationsCall: {}, PermJobsRun: {}, PermStageDeploy: {},
 	PermStageVerify: {}, PermStageAccessPrepare: {}, PermStageAccessApply: {},
+	PermIntakeRead: {}, PermIntakeWrite: {},
 }
 
 var gates = map[string]struct{}{

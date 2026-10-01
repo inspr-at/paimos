@@ -30,6 +30,11 @@ type Module struct {
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	// Delegated is an optional exact-route authentication handoff. It must
+	// verify and authorize its credential before serving next, returning true
+	// only when it has handled the request. Ordinary sessions/keys keep their
+	// existing path; no protected route becomes public.
+	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
 
 	mu       sync.Mutex
 	provider *oidc.Provider
@@ -91,6 +96,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // matched pattern is a public declaration (authz.PatternIsPublic).
 func (m *Module) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.Delegated != nil && m.Delegated(w, r, next) {
+			return
+		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
 			writeInternal(w)

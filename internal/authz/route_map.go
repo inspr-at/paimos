@@ -18,6 +18,17 @@ const PublicRoute = "public"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
+	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
+	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/tokens":            "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/control":           "intake.write",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/host-event":        "intake.write",
+	"POST /api/aithema/deprovision":                                           "plugins.manage",
+	"GET /api/aithema/callbacks/{callbackId}":                                 "plugins.manage",
+	"POST /api/projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}": "intake.write",
+	"GET /api/projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}":  "intake.write",
+
 	// Aithema delegates authentication to the journal module: a public outer
 	// declaration never bypasses its JWT, exact capability or transaction fence.
 	"POST /api/aithema/journal/sessions/{sid}/records":   "public",

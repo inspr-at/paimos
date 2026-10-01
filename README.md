@@ -96,8 +96,95 @@ settlement, recovery and reads. Refused takeover returns `409 suspended` without
 consuming a generation, so current claim owners can still settle actual cost.
 Resume clears that pause; purge alone creates a tombstone.
 AEON-361 provides the store and HTTP routes; lifecycle installation and the
-AEON-360 intake adapter are wired by AEON-P04. That adapter must use
+AEON-360 intake adapter are wired by AEON-P04. The adapter uses
 `LockAuthority` inside its intake transaction so takeover cannot race its write.
+
+The compiled `aithema` plugin and `internal/aithema/host` provide that wiring.
+An administrator enables the plugin with `intake.read` and `intake.write`, binds
+its agent principal to the project, and writes typed settings through
+`/api/plugins/aithema/settings`. The service credential is write-only:
+`service_jwt` is masked on reads, omission preserves it, and an empty value
+clears it. Its ciphertext uses a separate derivation of the stable host session
+key and tenant-bound AES-GCM. Audit events record field names and rotation,
+never values. Paid processing remains refused until the administrator has
+approved host-qualified processor evidence (`evidence_verified`, default false).
+Processing settings cannot change while sessions or callbacks are active;
+preview public keys, picker hash, and service credentials may rotate.
+
+A person with project `intake.write` creates a host session through
+`POST /api/projects/{projectId}/aithema/sessions`; the host assigns the session,
+tenant, project, epoch and settings digest. It queues service creation before
+issuing browser tokens. `…/sessions/{sid}/tokens` refreshes for the current
+generation only after creation succeeds. Browser responses contain only the
+session token with audience `aithema`; host-audience delegated tokens remain
+server-side and are supplied to the service at creation/resume delivery.
+Intake delegation uses the same locked journal authority as its effect, checks both project bindings and the
+installed plugin, and creates no persistent agent grant. Acceptance stays
+person-only. Journal and ledger effects recheck host bindings as well; authority
+polling and settlement of already committed claims retain their existing rules.
+
+`…/sessions/{sid}/control` accepts `suspend`, `resume`, or `purge` with a UUID
+idempotency key. Resume takes over the generation; purge writes the tombstone
+before service delivery. State and callback enqueue commit together. Native
+project events automatically enqueue value-free `host-event` notifications;
+`…/host-event` also permits explicit notification of an existing project event.
+Offboarding or plugin removal refuses new effects immediately; authority
+polling exposes the live tombstone even before the worker persists it and queues
+the revoke accelerator. `POST /api/aithema/deprovision` tombstones the exact
+`(issuer, tenant, sub)` scope and prevents it creating new sessions. Exact
+retries retain their original result. The durable outbox uses replica leases,
+ten-second HTTP deadlines, no redirects, a stable `Idempotency-Key`, and at most
+six attempts with delays capped at thirty seconds. Delivery state is visible at
+`GET /api/aithema/callbacks/{callbackId}` to people with `plugins.manage`.
+
+The service protocol uses `POST /v1/sessions`, `/v1/deprovision`, and
+`/v1/sessions/{sid}/{host-event,suspend,resume,purge,revoke}`. Every callback
+carries the configured service JWT in `Authorization`; creation and resume
+carry freshly minted `X-Aithema-Session-Token` and
+`X-Aithema-Delegated-Token` headers. These credentials never enter the outbox.
+The service must deduplicate the immutable callback payload by
+`Idempotency-Key`, independently of refreshed credential headers. Purge must
+acknowledge `{sid, purged: true, host_artifacts: [...]}`; artifact refs must begin
+with `sid:`. Only that bounded acknowledgement is retained; it is a list for
+host-owned cleanup, never authority to delete arbitrary paths.
+
+`/aithema/preview/{design_rev}?cap=…` proxies documents; `resource=base.css`
+or `resource=tokens.css` proxies their stylesheets with the same capability.
+The service-signed EdDSA JWT has exactly `iss`, `aud`, `tid`, `sid`,
+`design_rev`, `iat`, and `exp`, uses a pinned `kid` and `typ: JWT`, and expires
+within 300 seconds without expiry skew. The unsigned tenant claim selects
+only public verification settings; signature and claims verification precede
+any read or decryption of the service credential. Missing, foreign, invalid,
+expired or revoked caps receive the same 404 before upstream access. Final host headers
+permit only the configured picker script hash, same-origin CSS, data images
+and fonts, and `frame-ancestors 'self'`; they set `SAMEORIGIN`, `nosniff`,
+`no-referrer` and `private, no-store`. Native app documents allow
+`microphone=(self)`, `frame-src 'self'`, and only the host's WebSocket origin;
+this also covers later Vue navigation into Journey. Public portal documents
+keep microphone denial. AEON-P05 owns the iframe's `sandbox="allow-scripts"`,
+`referrerpolicy="no-referrer"` and empty `allow` attribute.
+
+The origin-checked proxy is
+`/api/projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}`:
+POST accepts only `input` and `ws-ticket`; GET accepts only an `inline`
+WebSocket upgrade with a service-issued single-use `ticket`. The service owns
+ticket consumption; the host checks live person authority before the handshake.
+The host supplies service/session credentials and strips browser cookies and
+forwarding headers. It never retries input or sockets, follows no redirects,
+and suppresses upstream credential echoes, including WebSocket data and control
+frames. Complete WebSocket messages (at most 1 MiB / 1024 fragments) are checked
+before forwarding; compressed, extended or masked server frames are refused.
+Service URL writes and every dial use one outbound policy: HTTPS with public
+DNS answers by default, no redirects or ambient proxy, and only checked IP
+literals are dialed. The deployment may explicitly configure an operator-local
+service with `AEON_AITHEMA_OPERATOR_LOCAL_SERVICES`, a comma-separated list of
+exact `host:port` entries (IPv6 uses `[address]:port`; no wildcards). Only
+`location=operator` at one of those exact endpoints permits HTTP and
+loopback/private IPs; link-local and other special networks stay denied.
+Tenant settings never enable this exception, and a changed DNS answer is
+checked again before any connection. No frontend assets changed in this host
+package;
+real renderer and native-view qualification remain AIT-P23 / AEON-P05.
 
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
