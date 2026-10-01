@@ -19,7 +19,9 @@ import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import AgentGlyph from './AgentGlyph.vue'
 import HarnessBadge from './HarnessBadge.vue'
-import ProviderMark from './ProviderMark.vue'
+import ExecutionMark from './ExecutionMark.vue'
+import SessionHost from './SessionHost.vue'
+import { listHostLabels } from '../../lib/agents'
 import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
 import EtaCell from '../work/EtaCell.vue'
 import { etaFromSession } from '../../lib/eta'
@@ -131,9 +133,23 @@ const grant = computed<ControlGrant>(() => ({ person: identity.identity?.princip
 // The chosen order is remembered per viewer in this browser; the page works without storage.
 const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
 watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
+const hostLabels = ref<Record<string, string>>({})
+let hostRead = 0
+watch(viewer, async () => {
+  const read = ++hostRead
+  hostLabels.value = {}
+  if (!grant.value.person) return
+  try {
+    const labels = await listHostLabels()
+    if (read === hostRead) hostLabels.value = { ...Object.fromEntries(labels.map(item => [item.host, item.label])), ...hostLabels.value }
+  } catch { /* The registered host remains the default; the editor retries its read. */ }
+}, { immediate: true })
+function renamedHost(host: string, label: string) {
+  hostLabels.value = { ...hostLabels.value, [host]: label }
+}
 const COLUMNS: { key: SortKey; label: string; cls?: string }[] = [
-  { key: 'state', label: 'State' }, { key: 'result', label: 'Intended result' }, { key: 'ticket', label: 'Ticket' },
-  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' }, { key: 'running', label: 'Running', cls: 'right c-elapsed' },
+  { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'ticket', label: 'Ticket' },
+  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'host', label: 'Host', cls: 'c-host' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' }, { key: 'running', label: 'Running', cls: 'right c-elapsed' },
 ]
 const effectiveSort = computed(() => sort.value ?? DEFAULT_SORT)
 const ariaSort = (key: SortKey) => effectiveSort.value.key === key ? (effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending') : undefined
@@ -395,11 +411,14 @@ function rowClick(event: MouseEvent, id: string) {
             <EtaCell v-if="etaOf(view) || working(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" :missing="working(view)" />
           </span>
           <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
-            <span class="exec-icon"><ProviderMark :provider="exec.provider" /></span>
+            <span class="exec-icon"><ExecutionMark :kind="exec.kind" :provider="exec.provider" /></span>
             <span class="exec-copy">
               <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
-              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ view.harness }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
+              <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
             </span>
+          </span>
+          <span role="cell" class="c-host">
+            <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels[view.session.host]" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
           </span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
@@ -486,7 +505,7 @@ function rowClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 80px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -573,7 +592,7 @@ function rowClick(event: MouseEvent, id: string) {
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
-.exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 16px; }
+.exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; }
 .exec-icon :deep(svg) { max-width: 28px; height: auto; max-height: 14px; }
 .exec-copy { display: grid; min-width: 0; line-height: 1.25; }
 .exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -625,16 +644,16 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 80px 80px 76px; }
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(112px, .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; }
 @container sessions (max-width: 980px) {
   .sort-bar { display: flex; }
-  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 72px 76px; }
+  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 132px 72px 76px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(104px, .42fr) minmax(116px, .75fr) 132px 72px 76px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 68px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 68px; }
+  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 132px 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 132px 68px; }
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }
@@ -669,8 +688,10 @@ function rowClick(event: MouseEvent, id: string) {
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
-  .exec-icon { width: 18px; justify-items: start; }
+  .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
+  .row > .c-host { grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
+  .c-exec { padding-right: 132px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
   .exec-copy { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }

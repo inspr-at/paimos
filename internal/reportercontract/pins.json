@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.8",
-    "sha256": "c5038c0bbefff9094c9f6c00f3fb093525ed79e21c1ed15026265f2d57bb8233",
+    "version": "harness-session/2.0",
+    "sha256": "bdab69f83901a0c07bceeb6f799f2679cb88cfdf9b17e8156891d27739c7efee",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -839,6 +839,11 @@
               "string",
               "null"
             ]
+          },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
           },
           "commits": {
             "items": {
@@ -1014,13 +1019,20 @@
           "finished": {
             "type": "boolean"
           },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },
@@ -1511,6 +1523,11 @@
               "null"
             ]
           },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
+          },
           "commits": {
             "items": {
               "properties": {
@@ -1685,13 +1702,20 @@
           "finished": {
             "type": "boolean"
           },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },

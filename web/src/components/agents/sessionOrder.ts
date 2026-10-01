@@ -8,10 +8,10 @@ import { GROUPS, HEARTBEAT_STALE_MS, byStart as sessionsByStart, type SessionBra
 import type { SessionView } from '../../stores/agents'
 import { intendedResult, sessionExecution } from './sessionRow'
 
-export type SortKey = 'state' | 'result' | 'ticket' | 'execution' | 'heartbeat' | 'running'
+export type SortKey = 'state' | 'result' | 'ticket' | 'execution' | 'host' | 'heartbeat' | 'running'
 export type SortDir = 'asc' | 'desc'
 export interface SessionSort { key: SortKey; dir: SortDir }
-export const SORT_KEYS: readonly SortKey[] = ['state', 'result', 'ticket', 'execution', 'heartbeat', 'running']
+export const SORT_KEYS: readonly SortKey[] = ['state', 'result', 'ticket', 'execution', 'host', 'heartbeat', 'running']
 // The default order is State ascending. It is never stored: no choice means default.
 export const DEFAULT_SORT: SessionSort = { key: 'state', dir: 'asc' }
 
@@ -40,6 +40,7 @@ function valueOf(key: Exclude<SortKey, 'state'>, b: Branch, now: number): Value 
       const exec = sessionExecution(b.view)
       return exec.modelLine ? [exec.modelLine, b.view.harness, exec.account] : null
     }
+    case 'host': return s.host || null
     case 'heartbeat': {
       if (!s.heartbeat_at) return Number.POSITIVE_INFINITY
       const age = Math.max(0, now - Date.parse(s.heartbeat_at))

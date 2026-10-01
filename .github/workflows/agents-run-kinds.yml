@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Agents execution column
+on:
+  pull_request:
+    paths:
+      - 'web/src/components/agents/SessionList.vue'
+      - 'web/src/components/agents/SessionHost.vue'
+      - 'web/src/components/agents/ExecutionMark.vue'
+      - 'web/src/components/agents/sessionRow.ts'
+      - 'web/tests/run-kinds*'
+      - '.github/workflows/agents-run-kinds.yml'
+permissions:
+  contents: read
+concurrency:
+  group: agents-execution-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  execution-column:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run test:unit
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Capture the base table and test the candidate table
+        working-directory: web
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          AEON_501_SHOTS: ${{ runner.temp }}/aeon-501-shots
+        run: |
+          set -euo pipefail
+          cp src/components/agents/SessionList.vue "$RUNNER_TEMP/candidate-session-list.vue"
+          git show "$BASE_SHA:web/src/components/agents/SessionList.vue" > src/components/agents/SessionList.vue
+          AEON_501_CAPTURE=before npx playwright test -c playwright.ui.config.ts tests/run-kinds.spec.ts --workers=1
+          cp "$RUNNER_TEMP/candidate-session-list.vue" src/components/agents/SessionList.vue
+          npx playwright test -c playwright.ui.config.ts tests/run-kinds.spec.ts --workers=1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: agents-execution-before-after
+          path: |
+            ${{ runner.temp }}/aeon-501-shots
+            web/test-results

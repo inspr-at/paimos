@@ -5393,7 +5393,7 @@ paths:
       description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped]}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, format: uuid}}
@@ -5419,6 +5419,31 @@ paths:
         '400': {description: Invalid filter or cursor}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /me/host-labels:
+    get:
+      operationId: listOwnHostLabels
+      description: Person only. Overrides for the authenticated person; host identity is the registered host, scoped to this tenant.
+      responses:
+        '200': {description: Own overrides, content: {application/json: {schema: {type: array, items: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}}
+        '403': {description: Person required}
+    put:
+      operationId: setOwnHostLabel
+      description: Save an override for yourself. A null label resets it to the registered host. Owner is always taken from authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, label]
+              properties:
+                host: {type: string, minLength: 1, maxLength: 128}
+                label: {type: [string, 'null'], minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Effective label, content: {application/json: {schema: {type: object, required: [host, label], properties: {host: {type: string}, label: {type: string}}}}}}
+        '400': {description: Invalid host or label}
+        '403': {description: Person required}
+        '404': {description: Host is not visible}
   /harness-sessions/live:
     get:
       operationId: listLiveAgents
@@ -5719,7 +5744,7 @@ paths:
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai or cursor and aliases codex → openai, claude → anthropic, grok → xai. pi is ambiguous; pass the model family instead.", schema: {type: string}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -7946,7 +7971,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.8']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/2.0']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -11719,7 +11744,9 @@ components:
         brief: {$ref: '#/components/schemas/HarnessBrief'}
         worktree: {$ref: '#/components/schemas/HarnessWorktree'}
         branch: {$ref: '#/components/schemas/HarnessBranch'}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         host: {type: string, minLength: 1, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
@@ -12008,7 +12035,9 @@ components:
         activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
         metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         watch:
           type: object
           description: Content-free attach status, present on attached session detail only
