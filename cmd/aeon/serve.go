@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/attachments"
@@ -161,6 +162,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin}
+	journalStore, err := journal.NewStore(pool)
+	if err != nil {
+		closeListener()
+		return fmt.Errorf("aithema journal contracts: %w", err)
+	}
+	journalMod := &journal.Module{Store: journalStore, Keys: tokenMod.Keys}
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
 		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
@@ -292,6 +299,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		Modules: []httpapi.Module{
 			authMod,
 			tokenMod,
+			journalMod,
 			// ADR-003: permissions, roles, members, project members, invites and
 			// access audit. P1 shipped with it unmounted, so /api/me/permissions answered 403.
 			authz.NewWithProvisioner(pool, provisioner),
