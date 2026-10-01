@@ -23,7 +23,7 @@ async function setup(page: Page, options: { failure?: boolean; noCost?: boolean;
     if (options.slow) await new Promise(resolve => setTimeout(resolve, 400))
     if (options.failure) return route.fulfill({ status: 500, json: { error: 'unavailable' } })
     const cursor = new URL(route.request().url()).searchParams.get('cursor')
-    await route.fulfill({ json: { outcomes: options.empty ? [] : cursor ? [outcome('out-review', 'review_verdict', { verdict: 'changes', summary: 'Tenant isolation needs a fix' })] : [outcome('out-done', 'ticket_done', { to_state: 'delivered' }), outcome('out-release', 'released', { version: '260929110000.0.0' })], next_cursor: options.empty || cursor ? null : 'page-2' } })
+    await route.fulfill({ json: { outcomes: options.empty || options.autopilot ? [] : cursor ? [outcome('out-review', 'review_verdict', { verdict: 'changes', summary: 'Tenant isolation needs a fix' })] : [outcome('out-done', 'ticket_done', { to_state: 'delivered' }), outcome('out-release', 'released', { version: '260929110000.0.0' })], next_cursor: options.empty || options.autopilot || cursor ? null : 'page-2' } })
   })
   await page.route('**/api/nodes?**', route => {
     const ids = new URL(route.request().url()).searchParams.get('ids')?.split(',') ?? []
