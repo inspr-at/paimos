@@ -7,6 +7,7 @@ on:
       - ".github/workflows/pairing-platform.yml"
       - "cmd/aeon-agentd/**"
       - "internal/agentsetup/**"
+      - "internal/agentsecurity/**"
       - "scripts/onboarding-platform/**"
       - "go.mod"
       - "go.sum"
@@ -58,3 +59,9 @@ jobs:
           AEON_DISPOSABLE_SERVICE_FIXTURE: "1"
           GOMAXPROCS: "2"
         run: go run -p 2 ./scripts/onboarding-platform
+      - name: Keychain-free native daemon security tests
+        if: matrix.os == 'darwin'
+        env:
+          CGO_ENABLED: "1"
+          GOMAXPROCS: "2"
+        run: go test -p 2 -tags aeon_enclave ./internal/agentsecurity/... ./cmd/aeon-agentd/...
