@@ -539,6 +539,47 @@ describe('LiveNodeStore', () => {
     expect(offline.state).toBe('off')
   })
 
+  it('clock-gap wake reconnects, invalidates pre-sleep pages and fully resyncs every view', () => {
+    const list = view([]), outline = view([])
+    store.subscribe(list.v); store.subscribe(outline.v)
+    const sleeping = latest()
+    sleeping.ready(40, false)
+    const sent = rows.mark()
+    vi.setSystemTime(Date.now() + 12 * 60_000)
+    vi.advanceTimersByTime(5_000)
+    expect(sleeping.closed).toBe(true)
+    expect(latest().url).toBe('/api/events/stream?after=latest')
+    expect(rows.gapSince(sent)).toBe(true)
+    expect(list.resyncs).toEqual(['initial', 'gap'])
+    expect(outline.resyncs).toEqual(['initial', 'gap'])
+    // Late events from the retired source cannot revive it or apply old state.
+    sleeping.node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    expect(list.calls).toEqual([])
+    expect(store.state).toBe('reconnecting')
+    latest().ready(50, false)
+    expect(store.state).toBe('live')
+  })
+
+  it('pings keep a quiet stream alive without row reads; missing pings reconnect and resync at 45s', () => {
+    const list = view([])
+    store.subscribe(list.v)
+    const source = latest()
+    source.ready(40, false)
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(15_000)
+      source.emit('stream.ping', {})
+    }
+    expect(source.closed).toBe(false)
+    expect(list.resyncs).toEqual(['initial'])
+    expect(fetchNode).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(44_999)
+    expect(source.closed).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(source.closed).toBe(true)
+    expect(list.resyncs).toEqual(['initial', 'gap'])
+    expect(latest().url).toBe('/api/events/stream?after=latest')
+  })
+
   it('fetch() reads any node for a view and keeps it', async () => {
     fetchNode.mockResolvedValueOnce(node('n5', '2026-09-29T10:00:01Z'))
     expect((await store.fetch('n5'))?.id).toBe('n5')

@@ -638,6 +638,49 @@ describe('useLiveList: loads and gaps', () => {
     expect(h.live.message.value).toBe('K-1 was updated elsewhere.')
   })
 
+  it('keeps freshness stale until every resync batch has finished and preserves the successful update time on failure', async () => {
+    const h = setup([item('n1'), item('n2')])
+    const oldAt = h.live.updatedAt.value
+    const plain = h.srv.fetchList.getMockImplementation()!
+    // Only the first row is in the first resync page, so the second needs a batch.
+    h.srv.fetchList.mockImplementationOnce(async query => {
+      const page = await plain(query, 'matches')
+      return { ...page, items: page.items.slice(0, 1) }
+    }).mockRejectedValueOnce(new Error('offline'))
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.live.dataStale.value).toBe(true)
+    await h.settle()
+    expect(h.live.updatedAt.value).toBe(oldAt)
+    expect(h.live.dataStale.value).toBe(true)
+    await h.settle()
+    expect(h.live.updatedAt.value).toBeGreaterThanOrEqual(oldAt!)
+    // A connected stream can declare freshness only after those batches land.
+    for (const listen of (h.store as unknown as { stateListeners: Set<(state: string) => void> }).stateListeners) listen('live')
+    expect(h.live.dataStale.value).toBe(false)
+  })
+
+  it('wake starts a full resync without waiting for a pre-sleep resync request', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Old worker', key: 's:old' } })])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => { release = resolve })
+    h.srv.fetchList.mockImplementationOnce(async query => { const page = await plain(query, 'matches'); await waiting; return page })
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 100 }
+    h.srv.nodes[0].lead_worker = null
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    expect(h.rows.value[0].eta?.finished).toBe(true)
+    expect(h.rows.value[0].lead_worker).toBeNull()
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.rows.value[0].eta?.finished).toBe(true)
+    expect(h.rows.value[0].lead_worker).toBeNull()
+  })
+
   it('a resync that keeps failing is tried again after growing waits, then waits for a resumed stream', async () => {
     const h = setup([item('n1')])
     const plain = h.srv.fetchList.getMockImplementation()!

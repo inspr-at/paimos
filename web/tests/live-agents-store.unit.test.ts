@@ -178,3 +178,75 @@ it('a stop during a slow poll discards the old response and coalesces a catch-up
     expect(getLiveAgents).toHaveBeenCalledTimes(3)
   } finally { stop() }
 })
+
+it('sleep recovery discards a pre-sleep read, refetches workers and reconnects the stream', async () => {
+  const { store, stop, workers } = await watching([agent({ ticket })])
+  try {
+    Stream.current?.onopen?.()
+    await vi.advanceTimersByTimeAsync(0)
+    let finish!: (page: Awaited<ReturnType<typeof getLiveAgents>>) => void
+    vi.mocked(getLiveAgents).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await vi.advanceTimersByTimeAsync(20_000)
+    const sleepingStream = Stream.current!
+    Object.assign(document, { visibilityState: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.setSystemTime(at + 12 * 60_000)
+    answer([])
+    Object.assign(document, { visibilityState: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(store.dataStale).toBe(true)
+    expect(sleepingStream.close).toHaveBeenCalledOnce()
+    Stream.current?.onopen?.()
+    await vi.advanceTimersByTimeAsync(0)
+    // Catch-up completes even before the old HTTP request returns.
+    expect(workers()).toEqual([])
+    expect(store.dataStale).toBe(false)
+    finish({ items: [agent({ ticket })], at: new Date(at).toISOString(), fresh_seconds: 120 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(workers()).toEqual([])
+    expect(store.dataStale).toBe(false)
+    expect(store.updatedAt).toBe(at + 12 * 60_000)
+  } finally { stop() }
+})
+
+it('pageshow, online and a clock gap each reconnect and refresh the live feed', async () => {
+  const { stop } = await watching([])
+  try {
+    for (const name of ['pageshow', 'online']) {
+      const previous = Stream.current!
+      const count = vi.mocked(getLiveAgents).mock.calls.length
+      window.dispatchEvent(new Event(name))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(previous.close).toHaveBeenCalledOnce()
+      expect(Stream.current).not.toBe(previous)
+      expect(getLiveAgents).toHaveBeenCalledTimes(count + 1)
+    }
+    const previous = Stream.current!
+    vi.setSystemTime(at + 12 * 60_000)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(previous.close).toHaveBeenCalledOnce()
+    expect(Stream.current).not.toBe(previous)
+  } finally { stop() }
+})
+
+it('silent stream reconnects at 45s despite successful polling; pings never refetch the feed', async () => {
+  const { store, stop } = await watching([])
+  try {
+    const source = Stream.current!
+    source.onopen?.()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(40_000)
+    const count = vi.mocked(getLiveAgents).mock.calls.length
+    source.dispatchEvent(new Event('stream.ping'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getLiveAgents).toHaveBeenCalledTimes(count)
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(source.close).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(source.close).toHaveBeenCalledOnce()
+    expect(store.dataStale).toBe(true)
+    Stream.current?.onopen?.()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.dataStale).toBe(false)
+  } finally { stop() }
+})

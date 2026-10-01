@@ -155,6 +155,18 @@ export function useLiveList(options: LiveListOptions) {
   const classified = new Map<string, { at: number; revision: string | null }>()
   const flash = ref(new Set<string>())
   const message = ref('')
+  const streamState = ref(store.state)
+  const updatedAt = ref<number | null>(options.loadedOnce.value ? Date.now() : null)
+  const catchingUp = ref(false)
+  const readFailed = ref(false)
+  let resyncPending = false
+  const dataStale = computed(() => streamState.value !== 'live' || catchingUp.value || readFailed.value || updatedAt.value === null)
+  function refreshed() {
+    if (resyncPending || queue.size) return
+    catchingUp.value = false
+    readFailed.value = false
+    updatedAt.value = Date.now()
+  }
   let queue = new Map<string, Queued>()
   let batchTimer: ReturnType<typeof setTimeout> | undefined
   let checkTimer: ReturnType<typeof setInterval> | undefined
@@ -185,9 +197,12 @@ export function useLiveList(options: LiveListOptions) {
     // The list refetches through its own query, never one node at a time.
     shows: () => false,
     changed(change) { receive(change) },
-    resync() { resync() },
+    resync() { resyncRetry.clear(); resync() },
     // Reads that failed while the stream was away are tried again.
     resumed() {
+      // Reconnect always checks the authorized projections, even if durable
+      // replay is complete: live ETA and workers can change without a revision.
+      resync()
       flushRetry.resume()
       // A pending addition read before the loss cannot join until a read
       // confirms it again, even when the stream resumes its full history.
@@ -322,6 +337,8 @@ export function useLiveList(options: LiveListOptions) {
     // Counts follow the rows: waiting updates change them when they apply.
     if (outcome.some(entry => entry.kind === 'patch' && entry.newer)) options.applied?.()
     watchPending()
+    if (failed) readFailed.value = true
+    else refreshed()
     return failed
   }
 
@@ -510,6 +527,8 @@ export function useLiveList(options: LiveListOptions) {
   const resyncRetry = new RefreshRetry(() => refreshLoaded())
   function resync() {
     if (!options.active.value || !options.loadedOnce.value) return
+    catchingUp.value = true
+    resyncPending = true
     if (options.loading.value) { resyncWanted = true; return }
     resyncRetry.request()
   }
@@ -533,7 +552,7 @@ export function useLiveList(options: LiveListOptions) {
         page = { items: pages.flatMap(page => page.items), next_cursor: null }
       } else page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) }), 'matches')
     }
-    catch { return run === generation }
+    catch { if (run === generation) readFailed.value = true; return run === generation }
     if (run !== generation) { keep(page.items, sent); return false }
     // Another gap after this read was sent: the resync it asked for reads again.
     if (nodes.gapSince(sent)) return false
@@ -548,13 +567,15 @@ export function useLiveList(options: LiveListOptions) {
     for (const row of rows.value) {
       seen.add(row.id)
       const item = fresh.get(row.id)
-      if (!item || nodes.waiting(row.id) || nodes.newer(row.id, item.updated_at)) receive(reread(row.id, item))
+      if (!item || !nodes.current(row.id) || !nodes.projectionsCurrent(row.id) || nodes.waiting(row.id) || nodes.newer(row.id, item.updated_at)) receive(reread(row.id, item))
     }
     for (const id of [...pending.ids(), ...queue.keys(), ...afterEditor]) {
       if (seen.has(id)) continue
       seen.add(id)
       if (!queue.has(id)) receive(reread(id))
     }
+    resyncPending = false
+    refreshed()
     return false
   }
 
@@ -565,6 +586,7 @@ export function useLiveList(options: LiveListOptions) {
     clearTimeout(batchTimer); batchTimer = undefined
     // A load reads the list anew: a refresh that failed is not needed any more.
     flushRetry.clear(); resyncRetry.clear()
+    resyncPending = false
     pending.clear(); held.clear(); afterEditor.clear(); classified.clear()
     watchPending()
   }
@@ -588,6 +610,7 @@ export function useLiveList(options: LiveListOptions) {
     if (read.kind === 'load' && read.sent !== undefined) for (const id of nodes.changedSince(read.sent)) if (!rowById(id) && !queue.has(id)) receive(reread(id))
     if (read.kind === 'load' && resyncWanted) { resyncWanted = false; resyncRetry.request() }
     else if (queue.size) schedule()
+    if (!nodes.gapSince(read.sent ?? nodes.mark())) refreshed()
   })
   watch(options.loading, loading => { if (!loading && queue.size) schedule() })
   watch(options.active, (on, was) => {
@@ -602,6 +625,11 @@ export function useLiveList(options: LiveListOptions) {
     watchPending()
   })
   onScopeDispose(store.subscribe(view))
+  onScopeDispose(store.onState(state => {
+    streamState.value = state
+    if (state === 'reconnecting' || state === 'connecting') catchingUp.value = true
+  }))
+  streamState.value = store.state
   onScopeDispose(nodes.hold(() => [...rows.value.map(row => row.id), ...pending.ids(), ...queue.keys()]))
   onScopeDispose(env.listen(() => { lastInput = env.now() }))
   onScopeDispose(() => {
@@ -616,7 +644,7 @@ export function useLiveList(options: LiveListOptions) {
     return out
   })
   return {
-    pending, pill, labels, flash, message, layout, apply,
+    pending, pill, labels, flash, message, layout, apply, updatedAt, dataStale,
     // Selected ids deleted meanwhile, for the bulk bar.
     deletedAmong: (ids: Iterable<string>) => pending.deletedAmong(ids),
     // For tests: run the batch and the safe-apply check now.

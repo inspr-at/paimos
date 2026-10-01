@@ -25,6 +25,8 @@ export const useLiveAgents = defineStore('liveAgents', () => {
   const now = ref(Date.now())
   const unavailable = ref(false)
   const truncated = ref(false)
+  const catchingUp = ref(false)
+  const connected = ref<boolean | null>(null)
   const evidence = ref(new Map<string, ActivityEvidence>())
   const evidenceKey = (agent: LiveAgent) => `${agent.project_id}:${agentKey(agent)}`
   const eventPulseFor = (agent: LiveAgent) => evidence.value.get(evidenceKey(agent))?.pulse ?? 0
@@ -44,6 +46,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     evidence.value = new Map(items.value.map(agent => [evidenceKey(agent), advanceActivity(evidence.value.get(evidenceKey(agent)), agent)]))
     skew.value = skewOf(page, at)
     now.value = at
+    catchingUp.value = false
   }, { order: createReadOrder() })
   const state = computed<'idle' | 'ready' | 'unavailable'>(() => unavailable.value ? 'unavailable' : reading.status.value.updatedAt === null ? 'idle' : 'ready')
 
@@ -61,19 +64,22 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     clearInterval(ticker)
     ticker = undefined
     if (!watchers || document.visibilityState === 'hidden') return
-    ticker = setInterval(() => { if (items.value.length) now.value = Date.now() }, TICK_MS)
+    ticker = setInterval(() => { now.value = Date.now() }, TICK_MS)
   }
   function visibility() { now.value = Date.now(); tick() }
   // Hints invalidate an older read and ask for one catch-up, even when a poll
   // is already running. The shared poller coalesces bursts and respects hidden tabs.
-  function changed() { reading.invalidate(); poller.tick(true) }
+  function changed() { catchingUp.value = true; reading.invalidate(); poller.tick(true) }
   function watch() {
     watchers++
     if (watchers === 1) {
       document.addEventListener('visibilitychange', visibility)
       tick()
       poller.start(true)
-      stopStream = subscribeAgents(changed, connected => { if (!connected) reading.invalidate() })
+      stopStream = subscribeAgents(changed, value => {
+        connected.value = value
+        if (!value) { catchingUp.value = true; reading.invalidate() }
+      }, undefined, false, () => { catchingUp.value = true; poller.restart() })
     }
     let stopped = false
     return () => {
@@ -87,5 +93,7 @@ export const useLiveAgents = defineStore('liveAgents', () => {
     }
   }
 
-  return { items, state, now, serverNow, byProject, forProject, eventPulseFor, refresh, watch, truncated, pollStale: reading.stale }
+  const updatedAt = computed(() => reading.status.value.updatedAt)
+  const dataStale = computed(() => reading.stale.value || catchingUp.value || connected.value === false || updatedAt.value === null)
+  return { items, state, now, serverNow, byProject, forProject, eventPulseFor, refresh, watch, truncated, pollStale: reading.stale, updatedAt, dataStale }
 })
