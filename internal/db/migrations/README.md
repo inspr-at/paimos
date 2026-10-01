@@ -36,6 +36,13 @@ Use a unique four-digit number for each SQL file, even across parallel branches.
 Published files are immutable: add a new file instead of editing, renaming or
 deleting an applied migration. Historical destructive SQL stays unchanged.
 
+AEON-475 adds `aeon_node_eta_progress` for completion-aware epic roll-up and
+`aeon_node_completion` for the latest worker's completion evidence. New node
+reads and progress sorting use these functions together; a cleanly finished
+child contributes 100 without retaining its stopped session's ETA. Nested epics
+still count as one direct child, and unknown or failed work stays unknown.
+The published `aeon_node_eta` function remains available to previous binaries.
+
 Every new migration containing any statement outside the expand-safe allowlist
 must have this standalone line comment in its header, before SQL (after `aeon:no-transaction`
 when applicable):

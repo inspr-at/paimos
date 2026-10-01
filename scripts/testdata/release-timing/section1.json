@@ -1,0 +1,256 @@
+{
+  "schema": "aeon.release-timing.fixture.v1",
+  "fixture_identity_note": "fixture-* IDs identify recorded samples within this offline bundle; they are not GitHub database IDs. Explicit forward directions identify the recorded release cuts.",
+  "pull_requests": [
+    {
+      "number": 24,
+      "title": "Release 12 (stable107, v260929193046.0.0)",
+      "createdAt": "2026-09-29T19:31:06Z",
+      "mergedAt": "2026-09-29T19:42:05Z",
+      "headRefName": "rel/r12",
+      "mergeCommit": { "oid": "d6375207f66578bfd0842c3653ea629b98059981" }
+    },
+    {
+      "number": 25,
+      "title": "AEON-367: release 12b hotfix (stable108), no 32-scope cap on agent keys",
+      "createdAt": "2026-09-29T20:31:39Z",
+      "mergedAt": "2026-09-29T20:43:05Z",
+      "headRefName": "rel/r12b",
+      "mergeCommit": { "oid": "e893f1a63ab4863fe0d80829b2c80cd2e0087f21" }
+    },
+    {
+      "number": 26,
+      "title": "Release 12c (260929215406.0.0)",
+      "createdAt": "2026-09-29T22:00:54Z",
+      "mergedAt": "2026-09-29T22:49:31Z",
+      "headRefName": "rel/r12c",
+      "mergeCommit": { "oid": "0cb6a7c1c578e35a61382dfc332ab87b2962ef4e" }
+    },
+    {
+      "number": 27,
+      "title": "Release 12d: pairing guide, add account, release history, small UI (stable110)",
+      "createdAt": "2026-09-29T23:28:28Z",
+      "mergedAt": "2026-09-29T23:51:20Z",
+      "headRefName": "rel/r12d",
+      "mergeCommit": { "oid": "cbcab384a05fc3dff9c5112be57ee17c20db473b" }
+    }
+  ],
+  "pin_pull_requests": [
+    {
+      "number": 874,
+      "title": "AEON: pin PAIMOS AEON v260929193046.0.0 (release 12 stable107)",
+      "createdAt": "2026-09-29T19:54:17Z",
+      "mergedAt": "2026-09-29T20:05:08Z",
+      "checks": []
+    },
+    {
+      "number": 876,
+      "title": "AEON: pin PAIMOS AEON v260929203122.0.0 (stable108 hotfix)",
+      "createdAt": "2026-09-29T20:54:49Z",
+      "mergedAt": "2026-09-29T21:05:45Z",
+      "checks": []
+    },
+    {
+      "number": 880,
+      "title": "AEON: pin PAIMOS AEON v260929215406.0.0 (stable109, release 12c)",
+      "createdAt": "2026-09-29T23:00:28Z",
+      "mergedAt": "2026-09-29T23:11:16Z",
+      "checks": []
+    },
+    {
+      "number": 881,
+      "title": "AEON: pin PAIMOS AEON v260929232203.0.0 (release 12d)",
+      "createdAt": "2026-09-30T00:05:22Z",
+      "mergedAt": "2026-09-30T00:16:08Z",
+      "checks": [
+        {
+          "name": "Eval flake (csb1)",
+          "startedAt": "2026-09-30T00:05:28Z",
+          "completedAt": "2026-09-30T00:06:20Z"
+        },
+        {
+          "name": "Pharos fleet release compatibility",
+          "startedAt": "2026-09-30T00:05:28Z",
+          "completedAt": "2026-09-30T00:14:47Z"
+        }
+      ]
+    }
+  ],
+  "workflow_runs": [
+    {
+      "databaseId": 36621130682,
+      "workflowName": "Release",
+      "event": "push",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T19:42:21Z",
+      "updatedAt": "2026-09-29T19:54:04Z",
+      "headBranch": "v260929193046.0.0",
+      "headSha": "d6375207f66578bfd0842c3653ea629b98059981"
+    },
+    {
+      "databaseId": 36628332737,
+      "workflowName": "Release",
+      "event": "push",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T20:43:13Z",
+      "updatedAt": "2026-09-29T20:54:28Z",
+      "headBranch": "v260929203122.0.0",
+      "headSha": "e893f1a63ab4863fe0d80829b2c80cd2e0087f21"
+    },
+    {
+      "databaseId": 36641828773,
+      "workflowName": "Release",
+      "event": "push",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T22:49:38Z",
+      "updatedAt": "2026-09-29T23:00:00Z",
+      "headBranch": "v260929215406.0.0",
+      "headSha": "0cb6a7c1c578e35a61382dfc332ab87b2962ef4e"
+    },
+    {
+      "databaseId": 36647379702,
+      "workflowName": "Release",
+      "event": "push",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T23:51:27Z",
+      "updatedAt": "2026-09-30T00:03:06Z",
+      "headBranch": "v260929232203.0.0",
+      "headSha": "cbcab384a05fc3dff9c5112be57ee17c20db473b",
+      "jobs": [
+        {
+          "name": "release",
+          "steps": [
+            {
+              "name": "Record pushed digest",
+              "startedAt": "2026-09-30T00:02:08Z",
+              "completedAt": "2026-09-30T00:02:08Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixture-ci-1",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T19:31:11Z",
+      "updatedAt": "2026-09-29T19:41:55Z",
+      "headBranch": "rel/r12",
+      "headSha": "965d3e00ce7829cf68f53252cefc1f8308504d97"
+    },
+    {
+      "id": "fixture-ci-2",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T20:31:42Z",
+      "updatedAt": "2026-09-29T20:40:59Z",
+      "headBranch": "rel/r12b",
+      "headSha": "f66132195efbc92f3ac4870c18a44e314ad42e4d"
+    },
+    {
+      "id": "fixture-ci-3",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "failure",
+      "createdAt": "2026-09-29T22:00:57Z",
+      "updatedAt": "2026-09-29T22:11:36Z",
+      "headBranch": "rel/r12c",
+      "headSha": "7c975b9da65a66678cfe871aa7171f0c58f36404"
+    },
+    {
+      "id": "fixture-ci-4",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T22:38:18Z",
+      "updatedAt": "2026-09-29T22:48:47Z",
+      "headBranch": "rel/r12c",
+      "headSha": "b711cfcec3b2b94a59968d83f210494b74318d28"
+    },
+    {
+      "id": "fixture-ci-5",
+      "workflowName": "CI",
+      "event": "push",
+      "conclusion": "failure",
+      "createdAt": "2026-09-29T23:28:29Z",
+      "updatedAt": "2026-09-29T23:39:15Z",
+      "headBranch": "rel/r12d",
+      "headSha": "fe54493ddca47d7483b985a919067bb4fa19eeb1"
+    },
+    {
+      "id": "fixture-ci-6",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "failure",
+      "createdAt": "2026-09-29T23:28:32Z",
+      "updatedAt": "2026-09-29T23:39:14Z",
+      "headBranch": "rel/r12d",
+      "headSha": "fe54493ddca47d7483b985a919067bb4fa19eeb1"
+    },
+    {
+      "id": "fixture-ci-7",
+      "workflowName": "CI",
+      "event": "push",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T23:39:48Z",
+      "updatedAt": "2026-09-29T23:50:59Z",
+      "headBranch": "rel/r12d",
+      "headSha": "b689a8659f6e43b2c43c88e5a0fd53e26650ff22"
+    },
+    {
+      "id": "fixture-ci-8",
+      "workflowName": "CI",
+      "event": "pull_request",
+      "conclusion": "success",
+      "createdAt": "2026-09-29T23:39:51Z",
+      "updatedAt": "2026-09-29T23:50:57Z",
+      "headBranch": "rel/r12d",
+      "headSha": "b689a8659f6e43b2c43c88e5a0fd53e26650ff22"
+    }
+  ],
+  "statuses": [],
+  "rollouts": [
+    {
+      "schema": "aeon.rollout.v1",
+      "direction": "forward",
+      "release": "12",
+      "version": "260929193046.0.0",
+      "sequence": 107,
+      "cut_at": "2026-09-29T17:59:39Z",
+      "live_at": "2026-09-29T20:07:07Z",
+      "outcome": "live"
+    },
+    {
+      "schema": "aeon.rollout.v1",
+      "direction": "forward",
+      "release": "12b",
+      "version": "260929203122.0.0",
+      "sequence": 108,
+      "cut_at": "2026-09-29T20:31:14Z",
+      "live_at": "2026-09-29T21:09:01Z",
+      "outcome": "live"
+    },
+    {
+      "schema": "aeon.rollout.v1",
+      "direction": "forward",
+      "release": "12c",
+      "version": "260929215406.0.0",
+      "sequence": 109,
+      "cut_at": "2026-09-29T21:50:50Z",
+      "live_at": "2026-09-29T23:14:19Z",
+      "outcome": "live"
+    },
+    {
+      "schema": "aeon.rollout.v1",
+      "direction": "forward",
+      "release": "12d",
+      "version": "260929232203.0.0",
+      "sequence": 110,
+      "cut_at": "2026-09-29T23:20:59Z",
+      "live_at": "2026-09-30T00:18:56Z",
+      "outcome": "live"
+    }
+  ]
+}
