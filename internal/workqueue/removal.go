@@ -44,7 +44,7 @@ func RemoveQueued(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID str
 	if err != nil || !removed {
 		return removed, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE agent_runs SET account_id=NULL,started_at=clock_timestamp() WHERE id=$1`, id); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE agent_runs SET account_id=NULL,started_at=coalesce(started_at,ended_at) WHERE id=$1`, id); err != nil {
 		return false, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE work_orders SET status='cancelled',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1`, order); err != nil {
