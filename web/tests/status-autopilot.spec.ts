@@ -10,6 +10,9 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
   await mockWork(page, fixtures(), { admin: role === 'admin' })
   await mockBusiness(page, businessData({ role }), { role })
   await mockSettings(page, settingsData())
+  // The business fixture freezes Date.now(). TicketWorkspace's capture
+  // listener and Vue's target listener need an advancing event clock.
+  await page.clock.setSystemTime(new Date('2026-10-01T18:00:00Z'))
   await page.route('**/api/settings/model-provider', route => route.fulfill({ json: { enabled: false, base_url: '', chat_model: '', embedding_model: '', features: { crm_note_rewrite: false, embeddings: false }, provider_id: '', revision: 0, has_api_key: false } }))
   const settings: AutopilotSettings = { enabled: true, revision: 0, rules: { new: { enabled: true, days: 7 }, backlog: { enabled: true, days: 90 }, blocked: { enabled: true, days: 14 }, progress: { enabled: true, days: 3 }, done: { enabled: true, days: 14 }, publish: { enabled: true }, accept: { enabled: true, days: 30 } } }
   const changes: AutomaticChange[] = [{ event_id: 41, node_id: 'ticket-1', key: 'ORB-142', title: 'Touch ID sign-in for the desktop app', actor: 'Status autopilot', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', undone: false, undoable: true }]
@@ -100,14 +103,17 @@ test('light, dark and narrow settings evidence beside the approved fragment', as
 test('ticket Activity shows the autopilot reason, automatic filter and guarded Undo', async ({ page }) => {
   await setup(page)
   const change: AutomaticChange = { event_id: 41, node_id: 'n-1', key: 'PHR-12', title: 'Ticket', actor: 'Status autopilot', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', undone: false, undoable: true }
-  await page.route('**/api/events/41/undo', route => { change.undone = true; change.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
+  let undoCalls = 0
+  await page.route('**/api/events/41/undo', route => { undoCalls++; change.undone = true; change.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
   await page.route('**/api/nodes/n-1/activity*', route => route.fulfill({ json: { items: [{ id: '41', type: 'change', at: change.at, author: { id: 'system', name: 'System', automatic: true, job: 'status-autopilot', reason: change.reason }, changes: [{ field: 'status', from: 'in_progress', to: 'open' }], automatic_change: change }], next_cursor: null } }))
   await page.goto('/p/PHAROS/PHAROS-11')
   const activity = page.getByRole('region', { name: 'Activity', exact: true })
   await expect(activity.getByText('Status autopilot', { exact: true })).toBeVisible()
   await expect(activity.getByText(change.reason)).toBeVisible()
   await activity.getByRole('radio', { name: 'Automatic', exact: true }).click()
+  await expect(activity.getByRole('radio', { name: 'Automatic', exact: true })).toBeChecked()
   await expect(activity.getByText(change.reason)).toBeVisible()
   await activity.getByRole('button', { name: /Undo: put PHR-12 back/ }).click()
+  await expect.poll(() => undoCalls).toBe(1)
   await expect(activity.getByText('Undone · back to In progress')).toBeVisible()
 })
