@@ -202,6 +202,25 @@ func TestAttachConfirmFailureNeverOpensBrowser(t *testing.T) {
 	}
 }
 
+func TestAttachOwnerFailuresKeepTheirCauseInGerman(t *testing.T) {
+	for code, word := range map[string]string{
+		"attach_version_mismatch":   "Aktualisiere Aeon",
+		"attach_pairing_revoked":    "gekoppelten Computer",
+		"attach_ticket_not_visible": "Projektzugriff",
+		"attach_code_expired":       "abgelaufen",
+		"attach_live_limit":         "Freigabe",
+	} {
+		original := &agentd.AttachLocalError{Code: code, Hint: "English repair"}
+		if attachLocalizedFailure(original, "en") != original {
+			t.Fatal("English failure changed")
+		}
+		var detail *agentd.AttachLocalError
+		if !errors.As(attachLocalizedFailure(original, "de"), &detail) || detail.Code != code || !strings.Contains(detail.Hint, word) {
+			t.Fatalf("German repair missing for %s", code)
+		}
+	}
+}
+
 func fmtInput(input string) string {
 	if input == "" {
 		return "EOF"

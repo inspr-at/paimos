@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentpairing_test
+
+import (
+	"net/http/httptest"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/attachwatch"
+)
+
+func refusalCause(t *testing.T, w *httptest.ResponseRecorder, cause string) {
+	t.Helper()
+	var body struct {
+		Code, Error string
+		Cause       string `json:"attach_refusal"`
+	}
+	decodeResult(t, w, &body)
+	if body.Cause != cause || body.Code == "" || body.Error == "" {
+		t.Fatalf("wrong refusal: code=%q cause=%q", body.Code, body.Cause)
+	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("refusal was cacheable")
+	}
+}
+
+func TestAttachRefusalAuthenticatesProofAndPrincipalBeforeVersion(t *testing.T) {
+	f, key, in := watchFixture(t)
+	otherKey, _ := extraWatchComputer(t, f, in)
+	registration := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: 1, ComputerID: in.ComputerID, DeviceProof: nonce(), PollKey: nonce()}
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", registration, false, key, 403), "")
+	registration.DeviceProof = in.DeviceProof
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", registration, false, otherKey, 403), "")
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", registration, false, key, 409), attachwatch.RefusalVersion)
+	// A failed upgrade did not replace the old memory-only poll authority.
+	requestWatch(t, f, key, in)
+	registration.AttachProtocol = 1
+	registration.LocalConsentProofVersion = 0
+	f.call("POST", "/api/agent-pairing/attach", registration, false, key, 200)
+	in.PollKey = registration.PollKey
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), attachwatch.RefusalVersion)
+}
+
+func TestAttachTicketRefusalIsOpaqueWithoutOwningDaemon(t *testing.T) {
+	f, key, in := watchFixture(t)
+	otherKey, _ := extraWatchComputer(t, f, in)
+	actualTicket := in.Snapshot.TicketID
+	in.Snapshot.TicketID = uuid(t, f.db)
+	in.Digest = in.Snapshot.Digest()
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), attachwatch.RefusalTicket)
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+	bad := in
+	bad.PollKey = nonce()
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", bad, false, key, 403), "")
+	// A missing and an existing ticket yield identical unauthenticated refusals.
+	var prior *httptest.ResponseRecorder
+	for _, ticket := range []string{in.Snapshot.TicketID, actualTicket} {
+		in.Snapshot.TicketID = ticket
+		in.Digest = in.Snapshot.Digest()
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, f.request("POST", "/api/agent-pairing/attach", in, false, ""))
+		if w.Code != 401 && w.Code != 403 {
+			t.Fatal("unauthenticated attach accepted")
+		}
+		var body map[string]any
+		decodeResult(t, w, &body)
+		if _, exists := body["attach_refusal"]; exists {
+			t.Fatal("unauthenticated caller received an owner cause")
+		}
+		if prior != nil && (w.Code != prior.Code || w.Body.String() != prior.Body.String()) {
+			t.Fatal("unauthenticated ticket probe changed the refusal")
+		}
+		prior = w
+	}
+	// An enrollment failure does not falsely blame ticket visibility.
+	in.Snapshot.TicketID = actualTicket
+	in.Snapshot.Harness = "claude"
+	in.Digest = in.Snapshot.Digest()
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), "")
+}
+
+func TestAttachCodeExpiryCausePreservesTheEndedRequest(t *testing.T) {
+	f, key, in := watchFixture(t)
+	requestWatch(t, f, key, in)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, in.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	in.Operation = "poll"
+	in.Sequence = 1
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 410), attachwatch.RefusalExpired)
+	var state string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state FROM harness_attach_requests WHERE id=$1 AND session_id IS NULL`, in.RequestID).Scan(&state); err != nil || state != "unreachable" {
+		t.Fatal("expiry was not durable or created a session")
+	}
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 410), "")
+}
+
+func TestAttachRevokedPairingCauseRequiresRetainedAuthentication(t *testing.T) {
+	f, key, in := watchFixture(t)
+	otherKey, _ := extraWatchComputer(t, f, in)
+	// Model the race after the computer state commits but before auth middleware
+	// rejects its credential. No revoked credential is made usable by attach.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 403), attachwatch.RefusalPairing)
+	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, in.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 401)
+	var body map[string]any
+	decodeResult(t, w, &body)
+	if _, exists := body["attach_refusal"]; exists {
+		t.Fatal("unauthenticated revoked credential got an owner cause")
+	}
+}

@@ -65,10 +65,10 @@ func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote
 		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
 	}
 	if registered.State != "registered" {
-		return nil, errors.New("paired instance refused attach registration; update agentd and Aeon")
+		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance refused attach registration; update agentd and Aeon"}
 	}
 	if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
-		return nil, errors.New("paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid")
+		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid"}
 	}
 	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {
@@ -147,7 +147,7 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	view, err := client.Attach(ctx, in)
 	if err != nil {
-		return err
+		return attachLocalizedFailure(err, language)
 	}
 	localID := view.ID
 	defer func() {
@@ -173,7 +173,7 @@ func attachCommand(args []string, out io.Writer) error {
 	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
 	view, err = confirmAttachApproval(ctx, reader, tty, out, view, language, noBrowser || runtime.GOOS != "darwin", client.Attach, openAttachBrowser)
 	if err != nil {
-		return err
+		return attachLocalizedFailure(err, language)
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -186,6 +186,10 @@ func attachCommand(args []string, out io.Writer) error {
 		case <-ticker.C:
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
 			if err != nil {
+				var detail *agentd.AttachLocalError
+				if errors.As(err, &detail) {
+					return attachLocalizedFailure(err, language)
+				}
 				return attachPollFailure(previous, view.ExpiresAt, time.Now())
 			}
 			if next.State == "confirmed_exited" || next.State == "detached" || next.State == "unreachable" {
