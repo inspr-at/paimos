@@ -5774,7 +5774,7 @@ paths:
         '200': {description: Settings, last refresh result, pending models and observations; no credentials, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
     post:
       operationId: refreshModelCatalog
-      description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every run writes one audit event; outages keep the last good catalog and mark that source stale.
+      description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. All callers and the scheduler share interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.
       security: *auth
       responses:
         '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
@@ -5783,17 +5783,19 @@ paths:
   /models/reports:
     post:
       operationId: reportModelObservations
-      description: Requires models.report. Reports observed CLI availability or explicit invalid-model failures. Replayed report ids are idempotent. Repeated failures suppress routing for 24 hours independently of person overrides. New profiles are auto-added by default, with conservative mapping; no reports reorder ladders. Unknown families are proposed for person acceptance.
+      description: Requires models.report. Agent advertisements require an enrolled harness. Health evidence requires an active caller-owned session and a matching attempted model and effort. Two invalid-model failures at least five minutes apart suppress routing for 24 hours independently of person overrides. Replayed report ids remain idempotent for seven days; at most 1000 receipts per principal and 200 new receipts per hour are accepted. New profiles are auto-added disabled by default and require person acceptance before dispatch; no reports reorder ladders. Unknown families are proposed for person acceptance.
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
       responses:
         '200': {description: Report result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /models/proposals/accept:
     post:
       operationId: acceptModelProposal
-      description: Person with models.manage accepts a previously observed model using its declared conservative mapping. Unmapped families require explicit person-managed profile creation. No ladder changes.
+      description: Person with models.manage accepts and enables a previously observed model using its declared conservative mapping. Unmapped families require explicit person-managed profile creation. No ladder changes.
       security: [{session: []}]
       requestBody:
         required: true

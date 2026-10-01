@@ -88,7 +88,7 @@ func (m *Module) reports(w http.ResponseWriter, r *http.Request) {
 			return fail(403, "permission denied")
 		}
 		var err error
-		out, err = recordReports(r.Context(), tx, p, in, "agent")
+		out, err = recordReports(r.Context(), tx, p, in, "agent", "")
 		return err
 	})
 	if err != nil {
@@ -120,15 +120,7 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var out RefreshResult
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(r.Context(), tx, p, "models.refresh", authz.Scope{}); err != nil {
-			return fail(403, "permission denied")
-		}
-		var err error
-		out, err = m.refreshTx(r.Context(), tx, p, false)
-		return err
-	})
+	out, err := m.runRefresh(r.Context(), p, false)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -136,115 +128,172 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
-func (m *Module) refreshTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, scheduled bool) (RefreshResult, error) {
+const maxRefreshObservations = 200
+
+type discoveryInput struct {
+	DiscoverySource
+	cipher []byte
+}
+
+type discoveredSource struct {
+	input discoveryInput
+	ids   []string
+	fresh bool
+}
+
+// Reserve before making network calls. Only short catalog transactions hold
+// the tenant lock; both workers and the scheduler obey the same interval.
+func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled bool) (RefreshResult, error) {
 	out := RefreshResult{Sources: []SourceResult{}}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
-		return out, err
-	}
-	if err := catalogLock(ctx, tx); err != nil {
-		return out, err
-	}
-	cfg, err := settings(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	now, err := dbNow(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	out.At = now
-	var last *time.Time
-	if err := tx.QueryRow(ctx, `SELECT last_run_at FROM model_refresh_settings FOR UPDATE`).Scan(&last); err != nil {
-		return out, err
-	}
-	interval := time.Minute
-	if scheduled {
-		interval = time.Duration(cfg.IntervalMinutes) * time.Minute
-	}
-	if last != nil && now.Sub(*last) < interval {
-		if scheduled {
-			return out, nil
-		}
-		return out, fail(429, "model refresh recently ran")
-	}
-	if cfg.APIEnabled {
-		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
-		if err != nil {
-			return out, err
-		}
-		type credential struct {
-			DiscoverySource
-			cipher []byte
-		}
-		inputs := []credential{}
-		for rows.Next() {
-			var c credential
-			if err := rows.Scan(&c.AccountID, &c.Vendor, &c.cipher); err != nil {
-				rows.Close()
-				return out, err
+	inputs := []discoveryInput{}
+	reserved := false
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if !scheduled {
+			if err := authz.RequireTx(ctx, tx, p, "models.refresh", authz.Scope{}); err != nil {
+				return fail(403, "permission denied")
 			}
-			inputs = append(inputs, c)
 		}
-		err = rows.Err()
-		rows.Close()
+		if err := ensureCatalog(ctx, tx, p); err != nil {
+			return err
+		}
+		if err := catalogLock(ctx, tx); err != nil {
+			return err
+		}
+		cfg, err := settings(ctx, tx)
 		if err != nil {
-			return out, err
+			return err
 		}
-		for _, c := range inputs {
-			result := SourceResult{DiscoverySource: c.DiscoverySource, State: "stale"}
-			key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+c.AccountID+"/"+c.Vendor, c.cipher)
-			if err == nil {
-				client := m.discovery
-				if client == nil {
-					client = discoveryClient()
+		if out.At, err = dbNow(ctx, tx); err != nil {
+			return err
+		}
+		var last *time.Time
+		if err := tx.QueryRow(ctx, `SELECT last_run_at FROM model_refresh_settings FOR UPDATE`).Scan(&last); err != nil {
+			return err
+		}
+		if last != nil && out.At.Sub(*last) < time.Duration(cfg.IntervalMinutes)*time.Minute {
+			if scheduled {
+				return nil
+			}
+			return fail(429, "model refresh interval has not elapsed")
+		}
+		if cfg.APIEnabled {
+			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var c discoveryInput
+				if err := rows.Scan(&c.AccountID, &c.Vendor, &c.cipher); err != nil {
+					return err
 				}
-				ids, listErr := listVendorModels(ctx, client, c.Vendor, key)
-				if listErr == nil {
-					// Record API sightings directly: no agent-supplied profile metadata.
-					observations := discoveryObservations(c.Vendor, now.UTC().Format(time.RFC3339Nano)+"/"+c.AccountID, ids)
-					for _, o := range observations {
-						if err := observe(ctx, tx, p.TenantID, o, "api:"+c.Vendor); err != nil {
-							return out, err
-						}
-						if KnownInvalid(o.Model) {
-							continue
-						}
-						var exists bool
-						if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE harness=$1 AND model=$2 AND effort=$3)`, o.Harness, o.Model, o.Effort).Scan(&exists); err != nil {
-							return out, err
-						}
-						if exists {
-							continue
-						}
-						pin, mapped := observedPin(o)
-						if cfg.AutoAddProfiles && mapped {
-							if _, err := insertProfile(ctx, tx, p.TenantID, pin); err != nil {
-								return out, err
-							}
-							out.Added++
-						} else {
-							out.Proposed++
-						}
+				inputs = append(inputs, c)
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1`, out.At)
+		reserved = err == nil
+		return err
+	})
+	if err != nil || !reserved {
+		return out, err
+	}
+
+	// One deadline covers all vendors and pages, never one timeout per page.
+	fetchCtx, cancel := context.WithTimeout(ctx, discoveryDeadline)
+	defer cancel()
+	fetched := make([]discoveredSource, 0, len(inputs))
+	client := m.discovery
+	if client == nil {
+		client = discoveryClient()
+	}
+	for _, input := range inputs {
+		result := discoveredSource{input: input}
+		key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
+		if err == nil && fetchCtx.Err() == nil {
+			result.ids, err = listVendorModels(fetchCtx, client, input.Vendor, key)
+			result.fresh = err == nil
+		}
+		fetched = append(fetched, result)
+	}
+
+	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if err := catalogLock(ctx, tx); err != nil {
+			return err
+		}
+		if !scheduled {
+			if err := authz.RequireTx(ctx, tx, p, "models.refresh", authz.Scope{}); err != nil {
+				return fail(403, "permission denied")
+			}
+		}
+		cfg, err := settings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		var current time.Time
+		if err := tx.QueryRow(ctx, `SELECT last_run_at FROM model_refresh_settings FOR UPDATE`).Scan(&current); err != nil {
+			return err
+		}
+		if !current.Equal(out.At) {
+			return fail(409, "model refresh superseded")
+		}
+		remaining := maxRefreshObservations
+		for _, fetched := range fetched {
+			input := fetched.input
+			result := SourceResult{DiscoverySource: input.DiscoverySource, State: "stale"}
+			// Do not publish results from a revoked key/account or disabled job.
+			var valid bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available')`, input.AccountID, input.Vendor, input.cipher).Scan(&valid); err != nil {
+				return err
+			}
+			if cfg.APIEnabled && valid && fetched.fresh {
+				observations := discoveryObservations(input.Vendor, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.AccountID, fetched.ids)
+				result.State, result.Seen = "fresh", len(fetched.ids)
+				if len(observations) > remaining {
+					result.State = "limited"
+					observations = observations[:remaining]
+				}
+				remaining -= len(observations)
+				for _, o := range observations {
+					if err := observe(ctx, tx, p.TenantID, o, "api:"+input.Vendor); err != nil {
+						return err
 					}
-					result.State = "fresh"
-					result.Seen = len(ids)
+					if KnownInvalid(o.Model) {
+						continue
+					}
+					var exists bool
+					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE harness=$1 AND model=$2 AND effort=$3)`, o.Harness, o.Model, o.Effort).Scan(&exists); err != nil {
+						return err
+					}
+					if exists {
+						continue
+					}
+					pin, mapped := observedPin(o)
+					if cfg.AutoAddProfiles && mapped {
+						if _, err := insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
+							return err
+						}
+						out.Added++
+					} else {
+						out.Proposed++
+					}
 				}
 			}
 			// Never persist vendor error bodies, raw headers, URLs or key material.
 			out.Sources = append(out.Sources, result)
 		}
-	}
-	raw, err := json.Marshal(out)
-	if err != nil {
-		return out, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_result=$2::jsonb`, now, string(raw)); err != nil {
-		return out, err
-	}
-	if err := writeEvent(ctx, tx, p, "model.catalog_refreshed", nil, out); err != nil {
-		return out, err
-	}
-	return out, nil
+		raw, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET last_result=$1::jsonb`, string(raw)); err != nil {
+			return err
+		}
+		return writeEvent(ctx, tx, p, "model.catalog_refreshed", nil, out)
+	})
+	return out, err
 }
 
 func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +458,7 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out["sources"] = sources
-		rows, err = tx.Query(r.Context(), `SELECT jsonb_build_object('harness',o.harness,'model',o.model,'effort',o.effort,'last_seen_at',o.last_seen_at,'last_working_at',o.last_working_at,'last_failing_at',o.last_failing_at,'failures',o.failures,'suppressed_until',o.suppressed_until,'source',o.source,'pending',NOT EXISTS(SELECT 1 FROM model_profiles p WHERE p.harness=o.harness AND p.model=o.model AND p.effort=o.effort)) FROM model_observations o ORDER BY o.last_seen_at DESC,o.harness,o.model,o.effort LIMIT 500`)
+		rows, err = tx.Query(r.Context(), `SELECT jsonb_build_object('harness',o.harness,'model',o.model,'effort',o.effort,'last_seen_at',o.last_seen_at,'last_working_at',o.last_working_at,'last_failing_at',o.last_failing_at,'failures',o.failures,'suppressed_until',o.suppressed_until,'source',o.source,'pending',NOT EXISTS(SELECT 1 FROM model_profiles p WHERE p.harness=o.harness AND p.model=o.model AND p.effort=o.effort AND p.enabled)) FROM model_observations o ORDER BY o.last_seen_at DESC,o.harness,o.model,o.effort LIMIT 500`)
 		if err != nil {
 			return err
 		}
@@ -463,15 +512,14 @@ func (m *Module) sweep(ctx context.Context) {
 	rows.Close()
 	for _, id := range ids {
 		work, cancel := context.WithTimeout(ctx, 90*time.Second)
+		var actor string
 		err := db.InTenant(db.NoProjects(work, "model catalog scheduler"), m.pool, id, func(tx pgx.Tx) error {
-			var actor string
-			if err := tx.QueryRow(work, `SELECT aeon_authz_system_actor($1::uuid)::text`, id).Scan(&actor); err != nil {
-				return err
-			}
-			p := tenant.Principal{TenantID: id, ID: actor, Kind: tenant.Agent}
-			_, err := m.refreshTx(work, tx, p, true)
-			return err
+			return tx.QueryRow(work, `SELECT aeon_authz_system_actor($1::uuid)::text`, id).Scan(&actor)
 		})
+		if err == nil {
+			p := tenant.Principal{TenantID: id, ID: actor, Kind: tenant.Agent}
+			_, err = m.runRefresh(db.NoProjects(work, "model catalog scheduler"), p, true)
+		}
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("model catalog refresh failed", "tenant_id", id)

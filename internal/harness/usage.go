@@ -287,7 +287,7 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	if s.ReasoningEffort != nil && modelreport.ValidTuple(out.Model, *s.ReasoningEffort) && out.OutputTokens != nil && *out.OutputTokens > 0 {
 		evidence := modelregistry.Observation{ReportID: modelregistry.EvidenceID(s.ID + "/usage/" + in.ReportID), Harness: s.Harness, Model: out.Model, Effort: *s.ReasoningEffort, Status: "working"}
-		if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, []modelregistry.Observation{evidence}); err != nil {
+		if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, []modelregistry.Observation{evidence}); err != nil {
 			return nil, err
 		}
 	}

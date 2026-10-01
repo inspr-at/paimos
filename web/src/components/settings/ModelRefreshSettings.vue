@@ -22,7 +22,7 @@ const vendor = computed(() => vendorFor[accounts.value.find(a => a.id === accoun
 const configured = computed(() => status.value?.sources.some(s => s.account_id === accountId.value))
 async function request(path: string, method = 'GET', body?: unknown) {
   const response = await api(path, { method, ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })
-  if (!response.ok) throw new Error(response.status === 429 ? 'A refresh just ran. Try again in a minute.' : 'The model settings could not be updated. Please try again.')
+  if (!response.ok) throw new Error(response.status === 429 ? 'The configured refresh interval has not elapsed. Try again after it expires.' : 'The model settings could not be updated. Please try again.')
   return response.json()
 }
 async function load() { status.value = await request('/models/refresh') as Status }
@@ -37,7 +37,7 @@ async function save() {
 }
 async function refresh() { await action(async () => { await request('/models/refresh', 'POST'); message.value = 'Model refresh completed.' }) }
 async function accept(o: Observation) {
-  await action(async () => { await request('/models/proposals/accept', 'POST', { harness: o.harness, model: o.model, effort: o.effort }); message.value = 'Profile added. Your role order is preserved.' })
+  await action(async () => { await request('/models/proposals/accept', 'POST', { harness: o.harness, model: o.model, effort: o.effort }); message.value = 'Profile enabled. Your role order is preserved.' })
 }
 async function credential(revoke = false) {
   const key = revoke ? '' : apiKey.value
@@ -60,11 +60,12 @@ onMounted(async () => {
     <p v-if="message" role="status" class="hint">{{ message }}</p>
     <template v-if="status">
       <p class="hint">Last refresh: {{ status.last_run_at ? new Date(status.last_run_at).toLocaleString() : 'Waiting for the first refresh' }}.</p>
-      <p v-for="source in status.last_result.sources ?? []" :key="source.vendor" class="hint">{{ source.vendor }}: {{ source.state === 'stale' ? 'Unavailable; previous catalog kept' : 'Up to date' }}</p>
+      <p v-for="source in status.last_result.sources ?? []" :key="source.vendor" class="hint">{{ source.vendor }}: {{ source.state === 'stale' ? 'Unavailable; previous catalog kept' : source.state === 'limited' ? 'Discovery limit reached' : 'Up to date' }}</p>
       <form v-if="manageable" class="controls" @submit.prevent="save">
         <label><input v-model="status.settings.agent_reports_enabled" type="checkbox" :disabled="busy"> Accept agent model reports</label>
-        <label><input v-model="status.settings.auto_add_profiles" type="checkbox" :disabled="busy"> Automatically add discovered profiles</label>
+        <label><input v-model="status.settings.auto_add_profiles" type="checkbox" :disabled="busy"> Automatically record discovered profiles</label>
         <label><input v-model="status.settings.api_enabled" type="checkbox" :disabled="busy"> Enable vendor API discovery</label>
+        <p class="hint">Discovered profiles need your acceptance before they can run.</p>
         <p class="hint">Optional discovery sends a model-list request to the configured vendor using its saved key. Off by default.</p>
         <label for="model-refresh-interval">Refresh every (minutes)</label>
         <input id="model-refresh-interval" v-model.number="status.settings.interval_minutes" type="number" min="60" max="43200" required :disabled="busy">
@@ -80,7 +81,7 @@ onMounted(async () => {
       </form>
       <div v-if="pending.length" class="proposals">
         <h3>Discovered models awaiting acceptance</h3>
-        <div v-for="o in pending" :key="`${o.harness}/${o.model}/${o.effort}`" class="proposal"><span>{{ o.harness }} · {{ o.model }} · {{ o.effort }}</span><button v-if="manageable" class="btn" :disabled="busy" @click="accept(o)">Add profile</button></div>
+        <div v-for="o in pending" :key="`${o.harness}/${o.model}/${o.effort}`" class="proposal"><span>{{ o.harness }} · {{ o.model }} · {{ o.effort }}</span><button v-if="manageable" class="btn" :disabled="busy" @click="accept(o)">Accept profile</button></div>
       </div>
       <p v-if="status.observations.some(o => o.failures >= 2)" class="hint">Repeated invalid-model reports pause the affected profiles for 24 hours. A successful run clears that pause.</p>
     </template>

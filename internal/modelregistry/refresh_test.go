@@ -155,6 +155,8 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	if status != 403 {
 		t.Fatalf("ungranted agent: %d", status)
 	}
+	grantModelReporter(t, p, agent)
+	seedEvidenceSession(t, p, agent, "codex", "gpt-6.1-sol", "high")
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	sol := profileBySlug(profiles, "codex-6-1-sol-high")
 	until := time.Now().Add(time.Hour)
@@ -162,14 +164,18 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
 		return err
 	})
-	if got := send(p, o, 200); got.Recorded != 1 {
+	if got := send(agent, o, 200); got.Recorded != 1 {
 		t.Fatal(got)
 	}
-	if got := send(p, o, 200); got.Recorded != 0 {
+	if got := send(agent, o, 200); got.Recorded != 0 {
 		t.Fatal("replayed failure counted")
 	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_observations SET last_failing_at=now()-interval '6 minutes'`)
+		return err
+	})
 	o.ReportID = EvidenceID("failure-two")
-	send(p, o, 200)
+	send(agent, o, 200)
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		now, err := dbNow(t.Context(), tx)
 		if err != nil {
@@ -193,7 +199,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	})
 	o.ReportID = EvidenceID("working")
 	o.Status = "working"
-	send(p, o, 200)
+	send(agent, o, 200)
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		var count int
 		var suppressed *time.Time
@@ -208,7 +214,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	changed := o
 	changed.Status = "invalid"
 	raw, _ = json.Marshal([]Observation{changed})
-	status, _ = call(t, &p, "POST", "/api/models/reports", string(raw))
+	status, _ = call(t, &agent, "POST", "/api/models/reports", string(raw))
 	if status != 409 {
 		t.Fatalf("conflicting replay %d", status)
 	}
@@ -222,11 +228,12 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		}
 		return nil
 	})
+	enrollEvidenceHarness(t, p, agent, "grok")
 	o = Observation{ReportID: EvidenceID("new-model"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
-	if got := send(p, o, 200); got.Added != 1 {
+	if got := send(agent, o, 200); got.Added != 1 {
 		t.Fatal(got)
 	}
-	if got := send(p, o, 200); got.Added != 0 {
+	if got := send(agent, o, 200); got.Added != 0 {
 		t.Fatal("added duplicate profile")
 	}
 }
@@ -241,14 +248,18 @@ func TestDefaultRefreshNoNetworkAndOneAuditPerRun(t *testing.T) {
 		t.Error("unexpected outbound call")
 		return nil, io.EOF
 	})}
-	inRegistry(t, p, func(tx pgx.Tx) error { _, err := m.refreshTx(t.Context(), tx, p, false); return err })
+	if _, err := m.runRefresh(tenant.WithPrincipal(t.Context(), p), p, false); err != nil {
+		t.Fatal(err)
+	}
 	if called {
 		t.Fatal("default called vendor")
 	}
 	if eventCount(t, p, "model.catalog_refreshed") != 1 {
 		t.Fatal("refresh audit missing")
 	}
-	inRegistry(t, p, func(tx pgx.Tx) error { _, err := m.refreshTx(t.Context(), tx, p, true); return err })
+	if _, err := m.runRefresh(tenant.WithPrincipal(t.Context(), p), p, true); err != nil {
+		t.Fatal(err)
+	}
 	if eventCount(t, p, "model.catalog_refreshed") != 1 {
 		t.Fatal("scheduled interval ignored")
 	}
@@ -429,6 +440,7 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
 	decode[RefreshResult](t, &worker, "POST", "/api/models/refresh", "{}", 200)
+	enrollEvidenceHarness(t, p, worker, "grok")
 	o := Observation{ReportID: EvidenceID("pending-grok"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	raw, _ := json.Marshal([]Observation{o})
 	result := decode[ReportResult](t, &worker, "POST", "/api/models/reports", string(raw), 200)

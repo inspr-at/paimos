@@ -22,11 +22,19 @@ var vendorURLs = map[string]string{
 	"openrouter": "https://openrouter.ai/api/v1/models",
 }
 
+const (
+	discoveryDeadline  = 30 * time.Second
+	maxDiscoveryPages  = 5
+	maxDiscoveryModels = 500
+)
+
 func discoveryClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 func listVendorModels(ctx context.Context, client *http.Client, vendor, key string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, discoveryDeadline)
+	defer cancel()
 	endpoint, ok := vendorURLs[vendor]
 	if !ok {
 		return nil, errors.New("unsupported vendor")
@@ -34,7 +42,10 @@ func listVendorModels(ctx context.Context, client *http.Client, vendor, key stri
 	found := map[string]bool{}
 	after := ""
 	// Anthropic is paginated. Truncation is an error, never a disappearance signal.
-	for page := 0; page < 100; page++ {
+	for page := 0; page < maxDiscoveryPages; page++ {
+		if ctx.Err() != nil {
+			return nil, errors.New("model list unavailable")
+		}
 		address := endpoint
 		if vendor == "anthropic" {
 			q := url.Values{"limit": {"1000"}}
@@ -81,6 +92,9 @@ func listVendorModels(ctx context.Context, client *http.Client, vendor, key stri
 				return nil, errors.New("invalid model identifier")
 			}
 			found[row.ID] = true
+			if len(found) > maxDiscoveryModels {
+				return nil, errors.New("model list identifier limit")
+			}
 		}
 		if !body.HasMore {
 			out := make([]string, 0, len(found))

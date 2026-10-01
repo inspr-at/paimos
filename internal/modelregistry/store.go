@@ -113,13 +113,22 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, true)
+}
+
+// Discovery records a pin without granting it to wildcard accounts.
+func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertProfileWithState(ctx, tx, tenantID, in, false)
+}
+
+func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
 	var out Profile
 	err := tx.QueryRow(ctx, `
 		INSERT INTO model_profiles
 			(tenant_id, slug, version, harness, family, model, effort, tier, enabled)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier).
+		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
 	return out, err
 }

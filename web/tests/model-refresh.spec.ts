@@ -25,7 +25,7 @@ test('model refresh starts private, saves its interval and accepts profiles with
   await card.getByRole('button', { name: 'Save settings' }).click()
   await expect(card.getByRole('status')).toContainText('saved')
   expect(status.settings.interval_minutes).toBe(2880)
-  await card.getByRole('button', { name: 'Add profile' }).click()
+  await card.getByRole('button', { name: 'Accept profile' }).click()
   await expect(card.getByText('Discovered models awaiting acceptance')).toHaveCount(0)
   expect(writes).toEqual(['/api/models/refresh/settings', '/api/models/proposals/accept'])
 })

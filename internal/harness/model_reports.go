@@ -18,7 +18,7 @@ func (m *Module) modelReports(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if err := modelregistry.ReportInSession(r.Context(), tx, p, s.Harness, in); err != nil {
+	if err := modelregistry.ReportInSession(r.Context(), tx, p, s.Harness, s.ID, in); err != nil {
 		return nil, workorders.Fail(400, "invalid model evidence")
 	}
 	return map[string]bool{"accepted": true}, nil
