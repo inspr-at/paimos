@@ -75,6 +75,14 @@ Attach recognizes recorded vendor installation roots and native executable pins.
 A generic Node interpreter does not prove a Gemini process's identity, so such
 attachments are refused. Native Gemini attachment remains unqualified.
 
+Skill rendering uses the vendor directories
+[`.gemini/skills`](https://geminicli.com/docs/cli/skills/) and
+[`.opencode/skills`](https://opencode.ai/v2/docs/skills).
+Always-on Gemini previews suggest
+[`GEMINI.md`](https://geminicli.com/docs/cli/gemini-md/); OpenCode uses `AGENTS.md`.
+Rules import accepts both harness selectors while refusing their private vendor
+stores. Rendering preserves exact bytes; installing a preview remains explicit.
+
 ### Default worker launch
 
 Use the paired **aeon-agentd managed run** path for workers: connect the approved

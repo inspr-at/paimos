@@ -5,7 +5,7 @@
     "grok": {"path": "AGENTS.md", "file": "grok.golden"},
     "pi": {"path": "AGENTS.md", "file": "pi.golden"},
     "cursor": {"path": "AGENTS.md", "file": "cursor.golden"},
-    "gemini": {"path": "AGENTS.md", "file": "codex.golden"},
+    "gemini": {"path": "GEMINI.md", "file": "codex.golden"},
     "opencode": {"path": "AGENTS.md", "file": "codex.golden"}
   }
 }
