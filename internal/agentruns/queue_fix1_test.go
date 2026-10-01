@@ -210,12 +210,13 @@ func TestTicketQueueTwoAgentsClaimOneRunExactlyOnce(t *testing.T) {
 	id := f.ticket(t, "open", "high", nil)
 	e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
 	body, _ := json.Marshal(claimBody(f.reserve(t, e.Run)))
+	otherKey := f.key(t, f.other, []string{"run.claim"})
 	start := make(chan struct{})
 	codes := make(chan int, 2)
 	for _, p := range []tenant.Principal{f.agent, f.other} {
 		go func() {
 			<-start
-			token := ""
+			token := otherKey
 			if p.ID == f.agent.ID {
 				token = f.token
 			}
