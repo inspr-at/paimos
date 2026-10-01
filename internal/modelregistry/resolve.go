@@ -96,7 +96,7 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 	rows, err := tx.Query(ctx, `
 		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
 		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, o.suppressed_until
-		FROM model_role_routes r
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
 		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE r.role = $1

@@ -119,7 +119,7 @@ func upgradeCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		if !safe {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role=$1`, role.name); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+roleRoutesTable(role.name)+` WHERE role=$1`, role.name); err != nil {
 			return err
 		}
 		for _, r := range replacements {

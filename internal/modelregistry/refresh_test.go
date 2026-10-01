@@ -51,6 +51,83 @@ func registryRoutes(t *testing.T, p tenant.Principal) []Route {
 	return out
 }
 
+func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "security-routes", "person", "Owner", []string{"admin"})
+	other := makePrincipal(t, "other-security-routes", "person", "Other", []string{"admin"})
+	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	decode[[]Profile](t, &other, "GET", "/api/models", "", 200)
+	otherBefore := registryRoutes(t, other)
+	routes := registryRoutes(t, p)
+	var firstSecurity string
+	until := time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour)
+	var beforeRevision string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var err error
+		beforeRevision, err = Revision(t.Context(), tx)
+		return err
+	})
+	for i := range routes {
+		if routes[i].Role == "review-gate-security" && routes[i].Priority == 1 {
+			firstSecurity = routes[i].ProfileID
+			routes[i].State, routes[i].Reason, routes[i].ValidUntil = "conserved", "Owner security override", &until
+		}
+	}
+	if firstSecurity == "" {
+		t.Fatal("security ladder missing from current route reads")
+	}
+	raw, err := json.Marshal(routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decode[[]Route](t, &p, "PUT", "/api/models/routes", string(raw), 200)
+	if !reflect.DeepEqual(registryRoutes(t, p), routes) {
+		t.Fatal("route replacement lost the security override")
+	}
+	gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if gate.Profile == nil || gate.Profile.ID == firstSecurity || gate.Profile.Harness != "cursor" {
+		t.Fatalf("security override did not select the fallback: %+v", gate)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		revision, err := Revision(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if revision == beforeRevision || revision == "" {
+			t.Fatal("revision ignored security route changes")
+		}
+		expired, err := resolveRole(t.Context(), tx, resolveQuery{Role: "review-gate-security", AuthorFamily: "openai"}, until.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		if expired.Profile == nil || expired.Profile.ID != firstSecurity {
+			t.Fatal("security override did not expire")
+		}
+		return nil
+	})
+	withoutSecurity := []Route{}
+	for _, route := range routes {
+		if route.Role != "review-gate-security" {
+			withoutSecurity = append(withoutSecurity, route)
+		}
+	}
+	raw, err = json.Marshal(withoutSecurity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decode[[]Route](t, &p, "PUT", "/api/models/routes", string(raw), 200)
+	if !reflect.DeepEqual(registryRoutes(t, p), withoutSecurity) {
+		t.Fatal("replacement retained removed security routes or altered other roles")
+	}
+	gate = decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if gate.Profile != nil || !gate.OwnerRequired || len(gate.Ladder) != 0 {
+		t.Fatalf("removed security ladder still resolves: %+v", gate)
+	}
+	if !reflect.DeepEqual(registryRoutes(t, other), otherBefore) {
+		t.Fatal("route replacement changed another tenant")
+	}
+}
+
 func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Owner", []string{"admin"})

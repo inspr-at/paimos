@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -133,9 +134,17 @@ func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in 
 	return out, err
 }
 
+// Only these constant identifiers enter SQL; the caller's role is never SQL.
+func roleRoutesTable(role string) string {
+	if role == "review-gate-security" {
+		return "model_security_role_routes"
+	}
+	return "model_role_routes"
+}
+
 func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO model_role_routes (tenant_id, role, priority, profile_id, state, reason, valid_until)
+		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
 		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
 	return err
@@ -164,7 +173,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM model_role_routes
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
 		ORDER BY role, priority, profile_id`)
 	if err != nil {
 		return nil, err
@@ -247,6 +256,9 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 		return before, nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
 		return nil, err
 	}
 	for _, route := range normalized {

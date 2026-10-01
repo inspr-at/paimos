@@ -1,9 +1,27 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE model_role_routes DROP CONSTRAINT model_role_routes_role_check;
-ALTER TABLE model_role_routes ADD CONSTRAINT model_role_routes_role_check
-    CHECK (role IN ('scout','mechanical','build','build-hard','review-gate','review-gate-security'));
+-- Keep the published role table and its CHECK unchanged for previous binaries.
+-- The new role lives in an additive table with the same pin/override invariants.
+CREATE TABLE model_security_role_routes (
+    tenant_id uuid NOT NULL REFERENCES tenants(id),
+    role text NOT NULL CHECK (role = 'review-gate-security'),
+    priority integer NOT NULL CHECK (priority > 0),
+    profile_id uuid NOT NULL,
+    valid_until timestamptz,
+    state text NOT NULL DEFAULT 'available'
+        CHECK (state IN ('available', 'unavailable', 'conserved', 'budget_limited')),
+    reason text NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant_id, role, priority),
+    UNIQUE (tenant_id, role, profile_id),
+    FOREIGN KEY (tenant_id, profile_id) REFERENCES model_profiles(tenant_id, id),
+    CHECK (state = 'available' OR (valid_until IS NOT NULL AND length(btrim(reason)) > 0))
+);
+ALTER TABLE model_security_role_routes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_security_role_routes FORCE ROW LEVEL SECURITY;
+CREATE POLICY model_security_role_routes_tenant ON model_security_role_routes
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
 
 CREATE TABLE model_refresh_settings (
     tenant_id uuid PRIMARY KEY REFERENCES tenants(id),
@@ -51,14 +69,29 @@ CREATE TABLE model_discovery_credentials (
     FOREIGN KEY (tenant_id,account_id) REFERENCES agent_accounts(tenant_id,id)
 );
 
-DO $$
-DECLARE tbl text;
-BEGIN
-    FOREACH tbl IN ARRAY ARRAY['model_refresh_settings','model_observations','model_report_receipts','model_discovery_credentials'] LOOP
-        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',tbl);
-        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY',tbl);
-        EXECUTE format('CREATE POLICY %I ON %I USING (tenant_id=NULLIF(current_setting(''aeon.tenant_id'',true),'''')::uuid) WITH CHECK (tenant_id=NULLIF(current_setting(''aeon.tenant_id'',true),'''')::uuid)',tbl||'_tenant',tbl);
-    END LOOP;
-END $$;
+-- Explicit RLS declarations keep this expansion inspectable by the guard.
+ALTER TABLE model_refresh_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_refresh_settings FORCE ROW LEVEL SECURITY;
+CREATE POLICY model_refresh_settings_tenant ON model_refresh_settings
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE model_observations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_observations FORCE ROW LEVEL SECURITY;
+CREATE POLICY model_observations_tenant ON model_observations
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE model_report_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_report_receipts FORCE ROW LEVEL SECURITY;
+CREATE POLICY model_report_receipts_tenant ON model_report_receipts
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+
+ALTER TABLE model_discovery_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_discovery_credentials FORCE ROW LEVEL SECURITY;
+CREATE POLICY model_discovery_credentials_tenant ON model_discovery_credentials
+    USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
 
 -- New permissions are grantable; existing keys and roles are not expanded.

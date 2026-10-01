@@ -185,7 +185,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	// suppressions. Read-only: catalog initialization remains modelregistry's job.
 	rows, err := tx.Query(ctx, `
 		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,r.priority
-		FROM model_profiles p LEFT JOIN model_role_routes r
+		FROM model_profiles p LEFT JOIN (`+ModelRoleRoutesSQL+`) r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE p.enabled

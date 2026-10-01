@@ -189,7 +189,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	// probes, allowance windows, approvals, journeys or historical evidence.
 	for _, table := range []string{
 		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
-		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"model_profiles", "model_role_routes", "model_security_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
 		"work_orders", "work_criteria", "work_evidence", "agent_delivery_votes",
 		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
 		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
