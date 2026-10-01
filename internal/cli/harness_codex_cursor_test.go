@@ -148,7 +148,8 @@ func codexTotalsLine(input, output int64, reasoning string) string {
 
 // Round 3 review case: A reports 100 output without reasoning, then B's
 // cumulative 110 output carries 80 reasoning. The reasoning baseline was
-// unknown, so B must not receive 80 reasoning against 10 output.
+// unknown, so B must not receive 80 reasoning against 10 output. Its later
+// 80 -> 90 increase must still be attributed within the same scan.
 func TestCodexUnknownReasoningBaselineIsNotAttributed(t *testing.T) {
 	path := filepath.Join(fenceHome(t), "sessions", "2026", "09", "29", "rollout-probe.jsonl")
 	fenceWrite(t, path, codexContext("model-a")+codexTotalsLine(100, 100, "")+codexContext("model-b")+codexTotalsLine(150, 110, "80")+codexTotalsLine(200, 150, "90"))
@@ -161,8 +162,11 @@ func TestCodexUnknownReasoningBaselineIsNotAttributed(t *testing.T) {
 			t.Errorf("%s: reasoning %d above output %d", model, sum.reasoning, sum.output)
 		}
 	}
-	if b := sums["model-b"]; b.input != 100 || b.output != 50 || b.reasoningKnown {
-		t.Fatalf("model-b %+v: the increase after an unknown baseline was attributed", b)
+	if a := sums["model-a"]; a.reasoningKnown {
+		t.Fatalf("model-a %+v: missing reasoning was inferred", a)
+	}
+	if b := sums["model-b"]; b.input != 100 || b.output != 50 || !b.reasoningKnown || b.reasoning != 10 {
+		t.Fatalf("model-b %+v: expected only the known 80 -> 90 reasoning increase", b)
 	}
 	if cursor == nil || !cursor.ReasoningKnown || cursor.Reasoning != 90 {
 		t.Fatalf("baseline not re-established: %+v", cursor)
@@ -180,45 +184,90 @@ func TestCodexUnknownReasoningBaselineIsNotAttributed(t *testing.T) {
 	}
 }
 
+// Missing totals cannot erase already attributed reasoning, and the first
+// total after a gap establishes a baseline without adding unknown growth.
+func TestCodexReasoningSurvivesUnknownStretchInOneScan(t *testing.T) {
+	path := filepath.Join(fenceHome(t), "sessions", "rollout-reasoning-gap.jsonl")
+	body := codexContext("model-b") + codexTotalsLine(100, 100, "20") + codexTotalsLine(150, 110, "") + codexTotalsLine(200, 120, "80")
+	fenceWrite(t, path, body)
+	sums, _, _, _, cursor, err := scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := sums["model-b"]; b.input != 200 || b.output != 120 || !b.reasoningKnown || b.reasoning != 20 {
+		t.Fatalf("reasoning before the gap was lost or the baseline was counted: %+v", b)
+	}
+	if cursor == nil || !cursor.ReasoningKnown || cursor.Reasoning != 80 {
+		t.Fatalf("baseline not re-established: %+v", cursor)
+	}
+	fenceWrite(t, path, body+codexTotalsLine(250, 140, "90"))
+	sums, _, _, _, cursor, err = scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := sums["model-b"]; b.input != 250 || b.output != 140 || !b.reasoningKnown || b.reasoning != 30 {
+		t.Fatalf("known reasoning around the gap did not accumulate: %+v", b)
+	}
+	if cursor == nil || cursor.Reasoning != 90 {
+		t.Fatalf("final cursor: %+v", cursor)
+	}
+}
+
 // Round 3 review case end to end: a server that rejects reasoning above
-// output never sees such a report, and later usage keeps flowing.
+// output never sees such a report. Reading the same records in one beat or
+// across beats must retain the same known reasoning increase.
 func TestCodexReasoningReportsStayAcceptable(t *testing.T) {
-	var calls []hbCall
-	srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(b, "reasoning_tokens") > numField(b, "output_tokens") {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":"reasoning tokens exceed output"}`))
-			return true
-		}
-		return false
-	})
-	defer srv.Close()
-	rt, _, stderr := heartbeatRuntime(t, srv)
-	dir := fenceHome(t)
-	path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-reasoning.jsonl")
-	fenceWrite(t, path, codexContext("model-a")+codexTotalsLine(100, 100, ""))
-	opts := heartbeatTestOptions(dir)
-	opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
-	session := openUsageSession(t, rt, opts)
-	for i, next := range []string{"", codexContext("model-b") + codexTotalsLine(150, 110, "80"), codexTotalsLine(200, 150, "90")} {
-		if next != "" {
-			appendFile(t, path, next)
-		}
-		if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
-			t.Fatalf("report %d: %v stderr %s", i, err, stderr.String())
-		}
-	}
-	if len(session.disk.PendingUsage) != 0 || strings.Contains(stderr.String(), "rejected") {
-		t.Fatalf("queue blocked: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
-	}
-	var bOutput float64
-	for _, post := range usagePosts(calls) {
-		if post["model"] == "model-b" {
-			bOutput = numField(post, "output_tokens")
-		}
-	}
-	if bOutput != 50 {
-		t.Fatalf("model-b usage did not keep flowing: %v", usagePosts(calls))
+	for _, oneScan := range []bool{true, false} {
+		t.Run(fmt.Sprintf("oneScan=%t", oneScan), func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(b, "reasoning_tokens") > numField(b, "output_tokens") {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":"reasoning tokens exceed output"}`))
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir := fenceHome(t)
+			path := filepath.Join(dir, "sessions", "2026", "09", "29", "rollout-reasoning.jsonl")
+			lines := []string{codexContext("model-a") + codexTotalsLine(100, 100, ""), codexContext("model-b") + codexTotalsLine(150, 110, "80"), codexTotalsLine(200, 150, "90")}
+			fenceWrite(t, path, "")
+			opts := heartbeatTestOptions(dir)
+			opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+			session := openUsageSession(t, rt, opts)
+			for i, next := range lines {
+				appendFile(t, path, next)
+				if oneScan && i < len(lines)-1 {
+					continue
+				}
+				if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+					t.Fatalf("report %d: %v stderr %s", i, err, stderr.String())
+				}
+			}
+			if len(session.disk.PendingUsage) != 0 || strings.Contains(stderr.String(), "rejected") {
+				t.Fatalf("queue blocked: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
+			}
+			var bOutput float64
+			var bReasoning any
+			for _, post := range usagePosts(calls) {
+				if post["model"] == "model-b" {
+					bOutput = numField(post, "output_tokens")
+					bReasoning = post["reasoning_tokens"]
+				}
+			}
+			if bOutput != 50 || bReasoning != float64(10) {
+				t.Fatalf("model-b usage lost known reasoning or counted the unsafe baseline: %v", usagePosts(calls))
+			}
+			before := len(usagePosts(calls))
+			if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+				t.Fatal(err)
+			}
+			if len(usagePosts(calls)) != before {
+				t.Fatalf("unchanged log was reported twice: %v", usagePosts(calls))
+			}
+		})
 	}
 }
 
