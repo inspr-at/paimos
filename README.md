@@ -64,6 +64,29 @@ integers before conversion; `nbf` is refused because the binding schema does
 not permit it. Verification grants no route access: project, generation and
 epoch freshness checks remain AEON-360's responsibility. No journal is required.
 
+Aithema's host journal and ledger live in `internal/aithema/journal` under
+`/api/aithema/{journal,ledger}/sessions/{sid}`. Every route requires its exact
+delegated capability; person cookies and agent API keys do not grant access.
+Writes fence generation and epoch atomically with the effect, and token expiry
+is checked again after lock waits. Journal snapshots use revision CAS; records
+use session-scoped client IDs. Exact retries preserve the original result;
+changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
+cited sources, turns and design inputs; `format=stored` also returns the exact
+submitted bytes. `cursor` returns the latest snapshot and replay position.
+
+The ledger admits against session, principal/day and tenant/day caps, commits
+one digest-bound claim per hold, and settles actual cost or an unknown maximum.
+`holds?state=open` provides uncached keyset pagination. Current-generation
+`recover` closes unclaimed holds as `void` and claimed holds as `unknown`;
+settled holds retain their result across repeated recovery and lost replies.
+Only host-qualified local lanes may reserve zero. `journal/.../authority`
+returns generation, epoch, authorization, tombstone and current `issued_at`
+with `Cache-Control: no-store`. Session creation, takeover and revocation are
+trusted in-process methods, with controls journaled before tombstone projection.
+AEON-361 provides the store and HTTP routes; lifecycle installation and the
+AEON-360 intake adapter are wired by AEON-P04. That adapter must use
+`LockAuthority` inside its intake transaction so takeover cannot race its write.
+
 Wide project headers can show an ambient ticket graph (Display → Graph in
 project header). It uses a tilted 3D cloud with an optional elliptic force bias,
 fits the densest 85% of nodes by height, and fades out inside the empty space
