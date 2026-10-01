@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -477,7 +477,11 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			return fail(400, "invalid_request", "poll sequence required")
 		}
 		if in.Doing != nil || in.ToolActivity != nil {
-			if err = harness.ReportAttachedActivity(ctx, tx, p, *out.SessionID, in.Doing, in.ToolActivity); err != nil {
+			if err = agentactivity.ReportAttached(ctx, tx, p.TenantID, p.ID, *out.SessionID, in.Doing, in.ToolActivity); err != nil {
+				var invalid *agentactivity.InvalidReport
+				if errors.As(err, &invalid) {
+					return fail(400, "invalid_request", invalid.Message)
+				}
 				return err
 			}
 		}

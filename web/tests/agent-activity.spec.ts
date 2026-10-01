@@ -63,7 +63,7 @@ test('workspace administrators can choose each activity mode and recover a faile
   await expect(options.getByRole('radio', { name: /^Off/ })).toBeChecked()
   fail = true
   await options.getByRole('radio', { name: /^Agent summary/ }).click()
-  await expect(page.getByRole('alert')).toContainText('Could not save Agent activity')
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not save Agent activity' })).toBeVisible()
   await expect(options.getByRole('radio', { name: /^Off/ })).toBeChecked()
   expect(writes).toEqual(['tool_activity', 'off'])
 })
@@ -76,6 +76,7 @@ test('activity fits phone and desktop in both themes', async ({ browser }) => {
     const page = await context.newPage(); const worker = await agents(page, false, theme)
     await page.goto('/agents')
     await expect(page.locator(`[data-row="s:${worker.id}"] .current-activity`)).toBeVisible()
+    await page.locator(`[data-row="s:${worker.id}"] .current-activity`).scrollIntoViewIfNeeded()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({ path: resolve(shots, `${theme}-${width}-list.png`), fullPage: true })
     await page.goto(`/agents/${worker.id}`)

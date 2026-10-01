@@ -26,6 +26,19 @@ type Activity struct {
 	At     time.Time `json:"at"`
 }
 
+func Current(doing *string, doingAt *time.Time, tool *string, toolAt *time.Time, mode string, now time.Time) *Activity {
+	if mode == Off {
+		return nil
+	}
+	if mode == Summary && doing != nil && doingAt != nil && now.Sub(*doingAt) < Fresh {
+		return &Activity{Text: *doing, Source: "agent", At: *doingAt}
+	}
+	if tool != nil && toolAt != nil {
+		return &Activity{Text: *tool, Source: "auto", At: *toolAt}
+	}
+	return nil
+}
+
 func Mode(mode string) bool { return mode == Off || mode == Tool || mode == Summary }
 
 var opaque = regexp.MustCompile(`[A-Za-z0-9+/_=-]{24,}`)
