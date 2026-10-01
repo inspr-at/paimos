@@ -15,4 +15,5 @@ export const saveStatusAutopilot = (s: AutopilotSettings) => request<AutopilotSe
 export const getProjectAutopilot = (id: string) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`)
 export const saveProjectAutopilot = (id: string, mode: ProjectOverride['mode'], revision: number) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`, { mode, expected_revision: revision })
 export const getAutomaticChanges = (nodeId?: string) => request<{ items: AutomaticChange[] }>(`/status-autopilot/changes${nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''}`)
+export const getAutopilotSuggestions = () => request<{ items: AutomaticChange[] }>('/status-autopilot/changes?suggestions=true')
 export const automaticTarget = (value: string) => ({ triage_list: 'Triage list', cancel_suggested: 'Cancel suggested', blocked_reminder: 'Reminder', missed_release: 'Missed release' } as Record<string, string>)[value] ?? ''

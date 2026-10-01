@@ -32,15 +32,29 @@ type Change struct {
 // ChangesTx reads only events and tickets already visible under the caller's
 // RLS context. NodeID narrows a ticket's Activity; zero limit returns its full
 // reversible event map (Activity's own cursor decides which rows to show).
+// Suggestions reads all current marks, independently of that history limit.
 func ChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, suggestions bool, limit int) ([]Change, error) {
+	from := `FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
+ WHERE e.type=$1 AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
+ ORDER BY e.at DESC,e.id DESC LIMIT nullif($3,0)`
+	if suggestions {
+		limit = 0
+		// Start from live ticket marks, not the latest 50 audit rows. A mark remains
+		// listed after unrelated edits, until status changes or a guarded Undo clears it.
+		from = `FROM nodes n CROSS JOIN LATERAL jsonb_each(n.status_autopilot) mark
+ JOIN LATERAL (SELECT e.* FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id
+ AND e.type=$1 AND e.metadata->>'flag'=mark.key AND e.after->>'state'=n.state
+ AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)
+ ORDER BY e.at DESC,e.id DESC LIMIT 1) e ON true
+ WHERE n.deleted_at IS NULL AND n.status_autopilot<>'{}'::jsonb AND ($2='' OR n.id=nullif($2,'')::uuid)
+ AND mark.value='true'::jsonb AND mark.key IN ('triage_list','cancel_suggested','blocked_reminder','missed_release')
+ ORDER BY mark.key,n.key,n.id LIMIT nullif($3,0)`
+	}
 	rows, err := tx.Query(ctx, `SELECT e.id,n.id::text,n.key,n.title,e.metadata->>'rule',e.metadata->>'reason',e.before->>'state',
  coalesce(nullif(e.metadata->>'flag',''),e.after->>'state'),e.at,
  EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id),
  n.updated_at=(e.after->>'updated_at')::timestamptz AND n.state=e.after->>'state',n.project_id::text
- FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
- WHERE e.type=$1 AND n.deleted_at IS NULL AND ($2='' OR n.id=nullif($2,'')::uuid)
- AND (NOT $3 OR (e.metadata->>'rule' IN ('new','backlog') AND n.state=e.after->>'state' AND coalesce(n.status_autopilot->>nullif(e.metadata->>'flag',''),'false')='true' AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)))
- ORDER BY e.at DESC,e.id DESC LIMIT nullif($4,0)`, Changed, nodeID, suggestions, limit)
+ `+from, Changed, nodeID, limit)
 	if err != nil {
 		return nil, err
 	}

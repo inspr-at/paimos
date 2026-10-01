@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type node struct {
 type candidate struct {
 	Node            node
 	Since, Activity time.Time
+	WorkActivity    time.Time
 	Work, Objection bool
 }
 type decision struct {
@@ -56,7 +58,7 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 	n := c.Node
 	var key, to, flag, reason string
 	since := c.Since
-	switch n.State {
+	switch normaliseState(n.State) {
 	case "new":
 		key = "new"
 		flag = "triage_list"
@@ -70,22 +72,15 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 		key = "blocked"
 		flag = "blocked_reminder"
 		reason = "Blocked for %d days; reminder to check the named blocker."
-	case "in_progress", "in progress", "in-progress", "progress", "active":
+	case "in_progress", "inprogress", "progress", "active":
 		key = "progress"
 		to = "open"
-		since = c.Activity
+		since = c.WorkActivity
+		if since.Before(c.Since) {
+			since = c.Since
+		}
 		reason = "No session, branch or PR activity for %d days."
 		if c.Work {
-			return nil
-		}
-		for _, f := range []string{"branch_activity_at", "pr_activity_at"} {
-			if t := fieldTime(n, f); t.After(since) {
-				since = t
-			}
-		}
-		// A branch or PR without a timestamp is incomplete evidence, not proof
-		// of inactivity. Fail closed rather than reopen active work.
-		if fieldString(n, "branch") != "" && fieldTime(n, "branch_activity_at").IsZero() || fieldString(n, "pr_url") != "" && fieldTime(n, "pr_activity_at").IsZero() {
 			return nil
 		}
 	case "done":
@@ -117,10 +112,7 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 		return nil
 	}
 	d := &decision{Rule: key, To: to, Flag: flag, Reason: fmt.Sprintf(reason, r.Days), Anchor: since.UTC().Format(time.RFC3339Nano)}
-	if pending(n) {
-		if key != "accept" {
-			return nil
-		}
+	if pending(n) && key == "accept" {
 		d.Skip = true
 		d.To = ""
 		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Automatic acceptance was skipped."
@@ -129,110 +121,62 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 	return d
 }
 
-// RunTenant executes one UTC calendar day atomically. Receipts and the day
-// cursor commit with the events, so concurrent servers and retries are safe.
-func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) error {
-	day := now.UTC().Truncate(24 * time.Hour)
-	return db.InTenant(db.AllProjects(ctx, "daily status autopilot"), m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := lock(ctx, tx); err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `INSERT INTO status_autopilot_days(tenant_id,day) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET day=excluded.day WHERE status_autopilot_days.day<excluded.day`, tenantID, day)
-		if err != nil || tag.RowsAffected() == 0 {
-			return err
-		}
-		released, err := tx.Query(ctx, `SELECT release_node_id::text FROM journey_releases WHERE state IN ('released','superseded') ORDER BY released_at,release_node_id`)
-		if err != nil {
-			return err
-		}
-		var releaseIDs []string
-		for released.Next() {
-			var id string
-			if err = released.Scan(&id); err != nil {
-				released.Close()
-				return err
-			}
-			releaseIDs = append(releaseIDs, id)
-		}
-		err = released.Err()
-		released.Close()
-		if err != nil {
-			return err
-		}
-		for _, id := range releaseIDs {
-			if err = PublishTx(ctx, tx, tenantID, id); err != nil {
-				return err
-			}
-		}
-		s, err := Load(ctx, tx)
-		if err != nil {
-			return err
-		}
-		p, err := systemactor.Ensure(ctx, tx, tenantID)
-		if err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL AND n.state IN ('new','backlog','blocked','in_progress','in progress','in-progress','progress','active','done','delivered') ORDER BY n.id`)
-		if err != nil {
-			return err
-		}
-		var ids []string
-		for rows.Next() {
-			var id string
-			if err = rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			c, _, err := loadCandidate(ctx, tx, id, day)
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			effective := s
-			if c.Node.ProjectID != nil {
-				o, err := Project(ctx, tx, *c.Node.ProjectID, s.Enabled)
-				if err != nil {
-					return err
-				}
-				effective.Enabled = o.Effective
-			}
-			if d := evaluate(c, effective, day); d != nil {
-				if err = apply(ctx, tx, p, c.Node, *d); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
+// Keep the SQL candidate index and this normalisation aligned with nodes.normaliseWorkState.
+var stateSeparator = regexp.MustCompile(`[[:space:]-]+`)
+
+func normaliseState(state string) string {
+	return stateSeparator.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
 }
-func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (candidate, json.RawMessage, error) {
-	var c candidate
-	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE n.id=$1 AND n.deleted_at IS NULL FOR UPDATE`, id).Scan(&raw)
+
+const candidateStateSQL = `regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g')`
+
+func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time) ([]candidate, error) {
+	rows, err := tx.Query(ctx, `SELECT to_jsonb(n),
+ coalesce(episode.at,n.created_at),
+ greatest(n.created_at,coalesce(activity.at,n.created_at)),
+ greatest(coalesce(episode.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
+ coalesce(work.live,false),
+ EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at))
+ FROM nodes n
+ LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state') episode ON true
+ LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2) activity ON true
+ LEFT JOIN LATERAL (SELECT max(greatest(h.created_at,h.heartbeat_at,h.stopped_at)) at,
+ bool_or(h.phase IN ('starting','working','stopping') AND h.stopped_at IS NULL AND h.archived_at IS NULL AND coalesce(h.heartbeat_at,h.created_at)>=$3) live
+ FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id) work ON true
+ LEFT JOIN LATERAL (SELECT max(r.created_at) at FROM work_order_reviews r WHERE r.ticket_node_id=n.id AND r.tenant_id=n.tenant_id AND r.pull_request IS NOT NULL) review ON true
+ WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
 	if err != nil {
-		return c, nil, err
+		return nil, err
 	}
-	if err = json.Unmarshal(raw, &c.Node); err != nil {
-		return c, nil, err
+	defer rows.Close()
+	var out []candidate
+	for rows.Next() {
+		var c candidate
+		var raw []byte
+		if err = rows.Scan(&raw, &c.Since, &c.Activity, &c.WorkActivity, &c.Work, &c.Objection); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(raw, &c.Node); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
-	err = tx.QueryRow(ctx, `SELECT
- coalesce((SELECT max(e.at) FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND (e.before->>'state' IS DISTINCT FROM e.after->>'state')),n.created_at),
- greatest(n.created_at,coalesce((SELECT max(e.at) FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2),n.created_at),coalesce((SELECT max(coalesce(h.heartbeat_at,h.created_at)) FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id),n.created_at)),
- EXISTS(SELECT 1 FROM harness_sessions h WHERE h.tenant_id=n.tenant_id AND h.ticket_node_id=n.id AND h.phase IN ('starting','working','stopping') AND coalesce(h.heartbeat_at,h.created_at)>=$3),
- EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce((SELECT max(d.at) FROM events d WHERE d.tenant_id=n.tenant_id AND d.node_id=n.id AND d.after->>'state'='delivered' AND d.before->>'state' IS DISTINCT FROM d.after->>'state'),n.created_at))
- FROM nodes n WHERE n.id=$1`, id, Job, now.Add(-15*time.Minute)).Scan(&c.Since, &c.Activity, &c.Work, &c.Objection)
-	return c, raw, err
+	return out, rows.Err()
 }
+
+func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (candidate, json.RawMessage, error) {
+	candidates, err := loadCandidates(ctx, tx, []string{id}, now)
+	if err != nil {
+		return candidate{}, nil, err
+	}
+	if len(candidates) == 0 {
+		return candidate{}, nil, pgx.ErrNoRows
+	}
+	var raw []byte
+	err = tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, id).Scan(&raw)
+	return candidates[0], raw, err
+}
+
 func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision) error {
 	var seen bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
@@ -283,105 +227,19 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 	return err
 }
 
-// PublishTx is called only after the release is durably published inside its
-// caller's tenant transaction. It never approves or publishes a release itself.
-func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error {
-	if err := lock(ctx, tx); err != nil {
-		return err
-	}
-	var project, title, version string
-	var published time.Time
-	err := tx.QueryRow(ctx, `SELECT r.project_node_id::text,n.title,coalesce(r.version,''),r.released_at FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id WHERE r.release_node_id=$1 AND r.state IN ('released','superseded') AND n.deleted_at IS NULL`, releaseID).Scan(&project, &title, &version, &published)
-	if err != nil {
-		return err
-	}
-	s, err := Load(ctx, tx)
-	if err != nil {
-		return err
-	}
-	o, err := Project(ctx, tx, project, s.Enabled)
-	if err != nil || !o.Effective || !s.Rules["publish"].Enabled {
-		return err
-	}
-	p, err := systemactor.Ensure(ctx, tx, tenantID)
-	if err != nil {
-		return err
-	}
-	rows, err := tx.Query(ctx, `SELECT ticket_node_id::text AS id FROM journey_tickets WHERE release_node_id=$1
- UNION
- SELECT n.id::text FROM journey_release_note_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.snapshot->'tickets') ticket
- JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id::text=ticket->>'id' AND n.project_id=s.project_node_id
- WHERE s.release_node_id=$1 AND s.project_node_id=$2
- UNION
- SELECT n.id::text FROM release_manifest_note_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.snapshot->'tickets') ticket
- JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id::text=ticket->>'id' AND n.project_id=s.project_node_id
- WHERE s.project_node_id=$2 AND s.version=$3
- ORDER BY id`, releaseID, project, version)
-	if err != nil {
-		return err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		c, _, err := loadCandidate(ctx, tx, id, published)
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		n := c.Node
-		// The approved transition is Done → Delivered. A historical release
-		// must not ship a reopened ticket or a newer Done episode on replay.
-		if n.ProjectID == nil || *n.ProjectID != project || n.State != "done" || c.Since.After(published) {
-			continue
-		}
-		d := decision{Rule: "publish", To: "delivered", Anchor: releaseID, Reason: fmt.Sprintf("Shipped in release %s (%s).", title, version)}
-		if pr := fieldString(n, "pr_url"); pr != "" {
-			d.Reason += " PR: " + pr + "."
-		}
-		if merge := fieldString(n, "merge_commit"); merge != "" {
-			d.Reason += " Merge: " + merge + "."
-		}
-		if pending(n) {
-			d.Skip = true
-			d.To = ""
-			d.Anchor += "/human-check/" + *n.HumanCheck
-			d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + title + " (" + version + ") was skipped."
-		}
-		if err = apply(ctx, tx, p, n, d); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Run checks at startup, then at each UTC midnight; the durable cursor ensures
-// one deterministic evaluation per tenant/day across restarts and replicas.
+// Run drains release work every minute; the durable day cursor evaluates daily
+// rules only once per UTC day, and preserves progress through process restarts.
 func (m *Module) Run(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
 		if err := m.runAll(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			slog.Error("status autopilot", "err", err)
 		}
-		now := time.Now().UTC()
-		timer := time.NewTimer(time.Until(now.Truncate(24 * time.Hour).Add(24 * time.Hour)))
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
+		case <-ticker.C:
 		}
 	}
 }

@@ -16,6 +16,7 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
   await page.route('**/api/settings/model-provider', route => route.fulfill({ json: { enabled: false, base_url: '', chat_model: '', embedding_model: '', features: { crm_note_rewrite: false, embeddings: false }, provider_id: '', revision: 0, has_api_key: false } }))
   const settings: AutopilotSettings = { enabled: true, revision: 0, rules: { new: { enabled: true, days: 7 }, backlog: { enabled: true, days: 90 }, blocked: { enabled: true, days: 14 }, progress: { enabled: true, days: 3 }, done: { enabled: true, days: 14 }, publish: { enabled: true }, accept: { enabled: true, days: 30 } } }
   const changes: AutomaticChange[] = [{ event_id: 41, node_id: 'ticket-1', key: 'ORB-142', title: 'Touch ID sign-in for the desktop app', actor: 'Status autopilot', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', undone: false, undoable: true }]
+  const suggestions: AutomaticChange[] = ['triage_list', 'cancel_suggested', 'blocked_reminder', 'missed_release'].map((flag, i) => ({ ...changes[0]!, event_id: 100 + i, key: `ORB-${i + 1}`, rule: (['new', 'backlog', 'blocked', 'done'] as const)[i]!, from: ['new', 'backlog', 'blocked', 'done'][i]!, to: flag, reason: `Current ${flag}`, at: '2026-01-01T00:00:00Z', undoable: false, changed_since: true }))
   const overrides: Record<string, ProjectOverride> = {}
   const writes: unknown[] = []; let conflict = false; let undo = 0
   await page.route('**/api/settings/status-autopilot', async route => {
@@ -33,7 +34,7 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
     o.effective_enabled = o.mode === 'on' || o.mode === 'inherit' && settings.enabled
     return route.fulfill({ json: o })
   })
-  await page.route('**/api/status-autopilot/changes*', route => route.fulfill({ json: { items: changes } }))
+  await page.route('**/api/status-autopilot/changes*', route => route.fulfill({ json: { items: route.request().url().includes('suggestions=true') ? suggestions : changes } }))
   await page.route('**/api/events/41/undo', route => { undo++; changes[0]!.undone = true; changes[0]!.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
   return { settings, writes, conflict: () => { conflict = true }, undos: () => undo }
 }
@@ -43,6 +44,9 @@ test('approved rules, master switch, validation, inheritance and audited Undo', 
   await page.goto('/settings/workspace')
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await expect(card.getByRole('switch', { name: 'Status autopilot', exact: true })).toBeChecked()
+  await expect(card.locator('.rules')).toHaveCSS('margin-top', '14px')
+  await expect(card.locator('.rule').first()).toHaveCSS('border-top-width', '1px')
+  await expect(card.locator('.rule').first()).toHaveCSS('border-top-style', 'solid')
   expect(await card.locator('input[type=number]').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value))).toEqual(['7', '90', '14', '3', '14', '30'])
   await expect(card.getByText('On publish', { exact: true })).toBeVisible()
   const accept = card.getByLabel('Days delivered without objection before Accepted')
@@ -57,6 +61,10 @@ test('approved rules, master switch, validation, inheritance and audited Undo', 
   await card.getByRole('switch', { name: 'Status autopilot', exact: true }).uncheck()
   await expect(accept).toBeDisabled()
   await expect(card.getByText('Off: nothing moves on its own. Suggestions are still listed.')).toBeVisible()
+  const attention = page.getByRole('region', { name: 'Tickets needing attention', exact: true })
+  for (const [i, label] of ['Triage list', 'Cancel suggested', 'Blocked reminders', 'Missed releases'].entries()) {
+    await expect(attention.getByRole('region', { name: label, exact: true }).getByText(`ORB-${i + 1}`, { exact: true })).toBeVisible()
+  }
   const group = page.getByRole('radiogroup', { name: /Status autopilot in/ }).first()
   await group.getByRole('radio', { name: 'On', exact: true }).click()
   await expect(group.getByRole('radio', { name: 'On', exact: true })).toHaveAttribute('aria-checked', 'true')

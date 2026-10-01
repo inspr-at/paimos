@@ -55,8 +55,8 @@ func TestEvaluateRules(t *testing.T) {
 				if d == nil || !d.Skip || d.To != "" {
 					t.Fatal("human check was accepted")
 				}
-			} else if d != nil {
-				t.Fatal("human flagged ticket changed")
+			} else if d == nil || d.Skip {
+				t.Fatal("human check suppressed a non-delivery rule")
 			}
 		})
 	}
@@ -70,25 +70,24 @@ func TestEvaluateRules(t *testing.T) {
 		t.Fatal("active session reopened")
 	}
 	c.Work = false
+	c.WorkActivity = now.Add(-24 * time.Hour)
+	if evaluate(c, Defaults(), now) != nil {
+		t.Fatal("recent work reopened")
+	}
+	c.WorkActivity = now.Add(-10 * 24 * time.Hour)
+	// Legacy fields are not authoritative evidence; neither they nor ticket
+	// comments/title edits can keep an otherwise stalled work episode alive.
 	c.Node.Fields["branch"] = json.RawMessage(`"work/ticket"`)
-	if evaluate(c, Defaults(), now) != nil {
-		t.Fatal("unknown branch activity guessed stale")
-	}
-	c.Node.Fields["branch_activity_at"] = json.RawMessage(`"2026-09-30T00:00:00Z"`)
-	if evaluate(c, Defaults(), now) != nil {
-		t.Fatal("recent branch reopened")
-	}
-	c.Node.Fields["branch_activity_at"] = json.RawMessage(`"2026-09-20T00:00:00Z"`)
-	if evaluate(c, Defaults(), now) == nil {
-		t.Fatal("stale branch never reopened")
-	}
 	c.Node.Fields["pr_url"] = json.RawMessage(`"https://example.test/pr/1"`)
-	if evaluate(c, Defaults(), now) != nil {
-		t.Fatal("unknown PR activity guessed stale")
+	c.Activity = now
+	if evaluate(c, Defaults(), now) == nil {
+		t.Fatal("non-work activity suppressed reopening")
 	}
-	c.Node.Fields["pr_activity_at"] = json.RawMessage(`"2026-09-30T00:00:00Z"`)
-	if evaluate(c, Defaults(), now) != nil {
-		t.Fatal("recent PR reopened")
+	for _, state := range []string{"inprogress", " In -- Progress ", "IN-PROGRESS", "active", "progress"} {
+		c.Node.State = state
+		if evaluate(c, Defaults(), now) == nil {
+			t.Fatalf("missed progress spelling %q", state)
+		}
 	}
 	c.Node.State = "delivered"
 	c.Objection = true

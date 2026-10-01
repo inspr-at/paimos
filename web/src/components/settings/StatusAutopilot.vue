@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getProjects } from '../../lib/api'
-import { getAutomaticChanges, getProjectAutopilot, getStatusAutopilot, saveProjectAutopilot, saveStatusAutopilot, type AutopilotSettings, type AutomaticChange, type ProjectOverride, type RuleKey } from '../../lib/statusAutopilot'
+import { getAutomaticChanges, getAutopilotSuggestions, getProjectAutopilot, getStatusAutopilot, saveProjectAutopilot, saveStatusAutopilot, type AutopilotSettings, type AutomaticChange, type ProjectOverride, type RuleKey } from '../../lib/statusAutopilot'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 import AutomaticChangeRow from '../work/AutomaticChangeRow.vue'
@@ -11,6 +11,8 @@ import SettingsCard from './SettingsCard.vue'
 const settings = ref<AutopilotSettings | null>(null)
 const projects = ref<{ id: string; key: string; title: string; override: ProjectOverride }[]>([])
 const changes = ref<AutomaticChange[]>([])
+const suggestions = ref<AutomaticChange[]>([])
+const lists = [{ flag: 'triage_list', label: 'Triage list' }, { flag: 'cancel_suggested', label: 'Cancel suggested' }, { flag: 'blocked_reminder', label: 'Blocked reminders' }, { flag: 'missed_release', label: 'Missed releases' }]
 const error = ref('')
 const pending = ref(false)
 const errors = ref<Partial<Record<RuleKey, string>>>({})
@@ -37,7 +39,10 @@ async function load() {
     await recent()
   } catch (e) { error.value = e instanceof Error ? e.message : 'Autopilot could not be loaded.' }
 }
-async function recent() { changes.value = (await getAutomaticChanges()).items }
+async function recent() {
+  changes.value = (await getAutomaticChanges()).items
+  suggestions.value = (await getAutopilotSuggestions()).items
+}
 onMounted(load)
 async function save(next: AutopilotSettings) {
   pending.value = true; error.value = ''
@@ -98,6 +103,14 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
           <div v-for="project in projects" :key="project.id" class="proj"><span class="proj-name"><span class="key-badge">{{ project.key }}</span><span>{{ project.title }}</span></span><div class="proj-ctl"><span class="ctl-cap">Status autopilot</span><div class="seg" role="radiogroup" :aria-label="`Status autopilot in ${project.title}`" @keydown="modeKey($event, project)"><button v-for="value in modes" :key="value" type="button" role="radio" :aria-checked="project.override.mode === value" :tabindex="project.override.mode === value ? 0 : -1" :disabled="pending" @click="mode(project, value)">{{ value === 'inherit' ? 'Inherit' : value === 'on' ? 'On' : 'Off' }}</button></div><span v-if="project.override.mode === 'inherit'" class="eff">Workspace: {{ settings.enabled ? 'On' : 'Off' }}</span></div></div>
         </div>
       </SettingsCard>
+      <SettingsCard title="Tickets needing attention" icon="list" anchor="autopilot-suggestions">
+        <template #lead>Current triage suggestions, blocked reminders and missed releases stay listed until resolved.</template>
+        <section v-for="list in lists" :key="list.flag" class="attention-list" :aria-label="list.label">
+          <h3>{{ list.label }}</h3>
+          <ul class="auto-changes"><li v-for="change in suggestions.filter(item => item.to === list.flag)" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
+          <p v-if="!suggestions.some(item => item.to === list.flag)" class="empty">No tickets listed.</p>
+        </section>
+      </SettingsCard>
       <SettingsCard title="Recent automatic changes" icon="history" anchor="autopilot-recent">
         <template #lead>The latest moves by Status autopilot, with their reasons. The full record stays in each ticket’s Activity.</template>
         <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
@@ -111,7 +124,7 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
 .set-note { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .set-note > svg { margin-top: 2.5px; color: var(--ink-3); }
 .error { color: var(--danger); grid-template-columns: 1fr auto; }
-.rules { display: grid; }
+.rules { display: grid; margin-top: 14px; }
 .rule { display: grid; grid-template-columns: 236px minmax(0, 1fr) 132px 44px; align-items: center; column-gap: 20px; row-gap: 4px; min-height: 48px; padding: 8px 0; border-top: 1px solid var(--line); }
 .rule > .switch { justify-self: end; }
 .rule-value { display: grid; justify-items: end; gap: 2px; }
@@ -120,7 +133,7 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
 .limit.event { display: grid; place-items: center; width: 108px; height: 30px; border-radius: 8px; background: var(--code-bg); font: 500 11.5px/1 var(--mono); color: var(--teal-ink); }
 .rule-text { min-width: 0; line-height: 1.4; }
 .rule-value .rule-error { text-align: right; }
-.rule:first-child { border-top: 0; }
+.rule:first-child { border-top: 1px solid var(--line); }
 .rule-move { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .rule-move .arrow, .rule-move .glyph { color: var(--ink-3); }
 .rule-move .to { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -147,6 +160,8 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
 .change-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .change-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--ink); }
 .auto { display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 7px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); }
+.attention-list + .attention-list { margin-top: 16px; }
+.attention-list h3 { margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .empty { color: var(--ink-3); font-size: 13px; }
 @media (max-width: 760px) {
  .proj { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 0; }

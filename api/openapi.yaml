@@ -89,7 +89,7 @@ paths:
         - {name: suggestions, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Latest 50 visible changes; suggestions selects current triage and cancellation suggestions
+          description: Latest 50 visible changes; suggestions=true lists every currently flagged visible ticket (triage, cancellation, blocked reminder and missed release), independent of the recent-change window
           content:
             application/json:
               schema:
