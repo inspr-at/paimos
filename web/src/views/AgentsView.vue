@@ -105,13 +105,36 @@ function openAgent(principalId: string) {
 }
 
 // ---------- Actions ----------
-async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
-  await agents.decide(approval, decision, reason)
-  toast(`${decision === 'approved' ? 'Approved' : 'Denied'}: ${agents.askerName(approval.agent_principal_id, approval.agent_name).name} was told.`)
-  await nextTick()
-  const next = agents.pending[0]
-  cursor.value = next ? `a:${next.id}` : ''
-  if (next) focusRow(cursor.value)
+// A decision confirms on its own card, which moves focus on and announces it (AEON-505);
+// the page keeps Needs you while a decided card still shows, then folds it away.
+const settling = ref(false)
+const announcement = ref('')
+function announce(text: string) { announcement.value = ''; void nextTick(() => { announcement.value = text }) }
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+let foldHadFocus = false
+// The height folds to nothing and a negative margin takes the column gap with it, so
+// what follows moves up smoothly and does not jump when the card is gone.
+function foldNeeds(el: Element, done: () => void) {
+  const card = el as HTMLElement
+  foldHadFocus = card.contains(document.activeElement)
+  if (reducedMotion() || !card.parentElement) { done(); return }
+  const px = (value: string) => parseFloat(value) || 0
+  const style = getComputedStyle(card)
+  const edges = px(style.borderTopWidth) + px(style.borderBottomWidth) + px(style.paddingTop) + px(style.paddingBottom)
+  const gap = px(getComputedStyle(card.parentElement).rowGap)
+  Object.assign(card.style, { height: `${card.offsetHeight}px`, minHeight: '0', overflow: 'clip' })
+  void card.offsetHeight
+  Object.assign(card.style, { transition: 'height .28s cubic-bezier(.4, 0, .2, 1), margin-bottom .28s cubic-bezier(.4, 0, .2, 1), opacity .2s ease', height: '0px', marginBottom: `${-(gap + edges)}px`, opacity: '0' })
+  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); done() }
+  const ended = (event: TransitionEvent) => { if (event.target === card && event.propertyName === 'height') finish() }
+  const timer = setTimeout(finish, 450)
+  card.addEventListener('transitionend', ended)
+}
+// Focus that was inside the folded card goes to Decided, never to the page body.
+function needsFolded() {
+  if (!foldHadFocus) return
+  foldHadFocus = false
+  document.querySelector<HTMLElement>('.agents-page .decided .history-toggle')?.focus({ preventScroll: true })
 }
 async function resolveHeld(request: HeldRequest, decision: 'resolved' | 'dismissed', note: string) {
   await agents.resolve(request, decision, note)
@@ -280,12 +303,14 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
         <AttachPending ref="attachPending" :now="agents.now" @review="request => attachDialog?.show(request)" />
-        <ApprovalQueue
-          v-if="agents.loaded && waiting"
-          ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
-          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
-          @focus-row="id => cursor = id" @open-agent="openAgent"
-        />
+        <Transition :css="false" @leave="foldNeeds" @after-leave="needsFolded">
+          <ApprovalQueue
+            v-if="agents.loaded && (waiting || settling)"
+            ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
+            :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
+            @focus-row="id => cursor = id" @open-agent="openAgent" @settling="active => settling = active" @announce="announce"
+          />
+        </Transition>
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
@@ -297,9 +322,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <ApprovalQueue
-          v-if="agents.loaded && !waiting && history.length" history-only
+          v-if="agents.loaded && !waiting && !settling && history.length" history-only
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
-          :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
         <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
@@ -313,6 +338,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       @close="closePanel" @control="control" @review="review"
     />
     <StartAgentDialog ref="startDialog" />
+    <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
   </section>
 </template>
 
@@ -334,7 +360,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .freshness.stale .live-mark { background: var(--gold); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
-.main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+/* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
+.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
