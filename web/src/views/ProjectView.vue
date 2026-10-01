@@ -10,9 +10,9 @@ import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
+import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
-import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
-import { COST_COLUMNS } from '../lib/planning'
+import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
 import { useDeveloperSettings } from '../lib/developerSettings'
@@ -28,6 +28,7 @@ import { rowStore } from '../lib/rowStore'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
+import { useLiveAgents } from '../stores/liveAgents'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
 import PanelSplitter from '../components/PanelSplitter.vue'
@@ -43,6 +44,7 @@ import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
 import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
+import ListFreshness from '../components/work/ListFreshness.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
@@ -94,9 +96,14 @@ const tablePrefs = computed<ListPrefs | null>(() => {
   return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
 })
 const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
-// ≈ Cost and Paid are offered only to people who may see usage (the server sends no cost otherwise).
+// Cost is offered only to people who may see usage (harness.read).
 const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
-const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value).filter(id => usageVisible.value || !(COST_COLUMNS as ColumnId[]).includes(id)), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+const toolbarColumns = computed(() => {
+  const columns = pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value)
+  const notes = columns.visible.includes('list_cost') && !planningPresent([...rowsById.value.values()]).list_cost
+    ? { list_cost: 'Nothing reported in this list yet; cells show —' } : {}
+  return { ...columns, notes }
+})
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
@@ -234,6 +241,12 @@ const liveList = useLiveList({
 
 const activeLive = computed(() => outlineActive.value ? outline.live : liveList)
 const liveActive = computed(() => listActive.value || outlineActive.value)
+const liveAgents = useLiveAgents()
+const liveDataStale = computed(() => activeLive.value.dataStale.value || liveAgents.dataStale)
+const liveUpdatedAt = computed(() => {
+  const listAt = activeLive.value.updatedAt.value, agentsAt = liveAgents.updatedAt
+  return listAt === null || agentsAt === null ? null : Math.min(listAt, agentsAt)
+})
 const bulkBar = ref<InstanceType<typeof BulkBar>>()
 const bulkHeight = ref(0)
 let bulkResize: ResizeObserver | undefined
@@ -1573,6 +1586,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <component :is="activeTicketView.component" v-else-if="activeTicketView.component"
         :project="project" :filters="filters" ref="ticketGraphView" @open="openKey" @state="(value: TicketGraphState) => graphState = value" />
       <template v-else>
+      <ListFreshness v-if="liveActive" class="ticket-freshness" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" />
       <LiveUpdatesChip v-if="liveActive && activeLive.pill.value" :text="activeLive.pill.value" :overflow="activeLive.pending.overflow" @show="showUpdates" />
       <p v-if="liveActive" class="sr-only live-said" role="status" aria-live="polite">{{ activeLive.message.value }}</p>
       <TicketTable
@@ -1583,7 +1597,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
-        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
         :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
@@ -1592,6 +1606,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
         :live-labels="liveActive ? activeLive.labels.value : undefined" :live-flash="liveActive ? activeLive.flash.value : undefined"
+        :live-stale="liveDataStale"
         :live-pill="liveActive && activeLive.pill.value ? { text: activeLive.pill.value, overflow: activeLive.pending.overflow } : null" @show-updates="showUpdates"
       />
       </template>
@@ -1719,6 +1734,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .flow-disabled h2 { font-size: 18px; }
 .flow-disabled p { max-width: 65ch; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
+.ticket-freshness { margin: 0 0 8px 4px; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
 /* The hint waits for the rows, like the footer, so it never jumps while they load. */

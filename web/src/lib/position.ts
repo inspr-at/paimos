@@ -5,8 +5,9 @@
 // own, keeps the newest answer per entity: an older one never overwrites a newer
 // one, whatever order the answers arrive in.
 //
-//   - A read's position names the exact snapshot it returns: no event committed
-//     while it ran. A read an event interrupted carries no position.
+//   - The node list carries the counter before its handler as a lower bound on
+//     the events its projections include. Other reads name an exact snapshot:
+//     no event committed while they ran; interrupted reads may carry no position.
 //   - A write's position is at or above the write's own event. A read below the
 //     newest write this tab made may predate it, and is asked again.
 //

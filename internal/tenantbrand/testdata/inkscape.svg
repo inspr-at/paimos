@@ -1,0 +1,6 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" viewBox="0 0 160 40" inkscape:version="1.4" sodipodi:docname="logo.svg">
+<metadata><rdf:RDF><rdf:Description>Editor data</rdf:Description></rdf:RDF></metadata>
+<sodipodi:namedview pagecolor="#ffffff"><inkscape:page x="0" y="0"/></sodipodi:namedview>
+<path d="M0 0h40v40H0z" fill="#0b6e6e" inkscape:label="Mark"/><text x="44" y="28" font-size="24">Acme</text>
+</svg>

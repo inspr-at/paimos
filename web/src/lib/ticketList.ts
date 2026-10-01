@@ -10,7 +10,7 @@
 import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery } from './api.ts'
-import { COLUMN_BY_ID, PINNED, type ColumnId } from './columns.ts'
+import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release'
@@ -111,7 +111,7 @@ export function serializeDate(date: DateFilter): string {
 }
 function parseCols(raw: unknown): ColumnId[] | null {
   if (typeof raw !== 'string') return null
-  const ids = list(raw).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
+  const ids = normalizeColumnIds(list(raw)).filter(id => !PINNED.includes(id))
   return ids.length ? ids : null
 }
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

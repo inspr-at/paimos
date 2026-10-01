@@ -7,6 +7,22 @@ import {
   autoApplyDelay, canAutoApply, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
 } from '../src/lib/liveUpdates'
 
+it('session lifecycle and telemetry hints invalidate both old and new bound ticket projections', () => {
+  const changes = parseNodeChanges(JSON.stringify({
+    id: 51, type: 'harness.bound', actor_principal_id: 'agent',
+    before: { ticket_node_id: 'old', project_id: 'p1' },
+    after: { ticket_node_id: 'new', project_id: 'p1', row_version: 7 },
+  }))
+  expect(changes.map(change => [change.id, change.revision, change.fields])).toEqual([
+    ['old', null, ['eta', 'lead_worker']], ['new', null, ['eta', 'lead_worker']],
+  ])
+  for (const type of ['harness.registered', 'harness.stopped', 'harness.heartbeat', 'harness.metadata_changed']) {
+    expect(parseNodeChanges(JSON.stringify({ id: 52, type, after: { ticket_node_id: 'new', project_id: 'p1' } }))).toHaveLength(1)
+  }
+  expect(parseNodeChanges(JSON.stringify({ id: 53, type: 'harness.control_requested', after: { ticket_node_id: 'new' } }))).toEqual([])
+  expect(parseNodeChanges('{')).toEqual([])
+})
+
 describe('compareRevision', () => {
   it('orders microseconds that Date.parse would merge', () => {
     expect(compareRevision('2026-09-29T10:00:00.000001Z', '2026-09-29T10:00:00.000002Z')).toBeLessThan(0)
@@ -251,6 +267,15 @@ describe('LiveNodeStore', () => {
     fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
     rows = new RowStore()
     store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200], refetchMs: [10, 20], rows })
+  })
+
+  it('forwards a streamed session stop to the list without inventing a node revision', () => {
+    const list = view([])
+    store.subscribe(list.v)
+    latest().ready(40, false)
+    latest().emit('harness.stopped', { id: 41, type: 'harness.stopped', after: { ticket_node_id: 'n1', project_id: 'A' } }, 41)
+    expect(list.calls).toEqual([{ id: 'n1', node: undefined, change: expect.objectContaining({ fields: ['eta', 'lead_worker'], revision: null }) }])
+    expect(fetchNode).not.toHaveBeenCalled()
   })
   afterEach(() => vi.useRealTimers())
 
@@ -512,6 +537,47 @@ describe('LiveNodeStore', () => {
     const offline = new LiveNodeStore({ open: () => null, fetchNode, rows })
     offline.subscribe(view(['n1']).v)
     expect(offline.state).toBe('off')
+  })
+
+  it('clock-gap wake reconnects, invalidates pre-sleep pages and fully resyncs every view', () => {
+    const list = view([]), outline = view([])
+    store.subscribe(list.v); store.subscribe(outline.v)
+    const sleeping = latest()
+    sleeping.ready(40, false)
+    const sent = rows.mark()
+    vi.setSystemTime(Date.now() + 12 * 60_000)
+    vi.advanceTimersByTime(5_000)
+    expect(sleeping.closed).toBe(true)
+    expect(latest().url).toBe('/api/events/stream?after=latest')
+    expect(rows.gapSince(sent)).toBe(true)
+    expect(list.resyncs).toEqual(['initial', 'gap'])
+    expect(outline.resyncs).toEqual(['initial', 'gap'])
+    // Late events from the retired source cannot revive it or apply old state.
+    sleeping.node(41, [{ id: 'n1', revision: '2026-09-29T10:00:01Z' }])
+    expect(list.calls).toEqual([])
+    expect(store.state).toBe('reconnecting')
+    latest().ready(50, false)
+    expect(store.state).toBe('live')
+  })
+
+  it('pings keep a quiet stream alive without row reads; missing pings reconnect and resync at 45s', () => {
+    const list = view([])
+    store.subscribe(list.v)
+    const source = latest()
+    source.ready(40, false)
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(15_000)
+      source.emit('stream.ping', {})
+    }
+    expect(source.closed).toBe(false)
+    expect(list.resyncs).toEqual(['initial'])
+    expect(fetchNode).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(44_999)
+    expect(source.closed).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(source.closed).toBe(true)
+    expect(list.resyncs).toEqual(['initial', 'gap'])
+    expect(latest().url).toBe('/api/events/stream?after=latest')
   })
 
   it('fetch() reads any node for a view and keeps it', async () => {

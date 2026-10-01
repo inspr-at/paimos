@@ -249,7 +249,82 @@ The latest snapshot accompanies live planning; its cost and cost-rate fields are
 omitted without `harness.read` on both the ticket's current project and its saved
 source project, including after project moves (AEON-370).
 
-Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
+The ticket list uses that snapshot for Tokens/Cost comparison hovers, preserving
+unknown baselines. Estimates carry `~`; running cells show measured / estimate;
+measured cells show one value with a muted check. Cost is list value, never an
+invoice; only subscription-only usage carries a `plan` marker. Mixed billing
+totals remain unmarked, and their hovers identify the subscription portion. The former Paid
+column maps to Cost in saved preferences and views. Saved ticks always draw,
+including empty cells with hover reasons; only Automatic hides empty planning
+columns. Phones retain their existing card layout.
+
+Planning also returns `models` from visible sessions, including work descendants.
+Profile identity takes precedence over normalized model, raw metadata and usage
+fallbacks. Models are ordered by measured session tokens, with deterministic ties;
+each includes session identity, effort, role, running state and reported tokens.
+The Model cell shows the leading used model plus a count of other models, with
+planned versus used details grouped by model in its hover: effort, session count,
+running state and token totals, without session IDs. The planned comparison uses
+the work-start route, comparing base model keys with embedded effort removed.
+Only a single used model adds “as used” when its harness and base model match
+and every session effort equals the planned effort. A different harness or base
+model adds “a different model ran”; an effort-only mismatch or mixed models
+leave the planned label alone. Usage without a planned route says
+“No model planned: no role set”. Session roles identify workers or coordinators,
+so they do not imply that a run was a review. Running Tokens/Cost hovers put
+measured usage before the snapshot estimate and its percentage. A running token
+session line reads “1 session running”; the Model line retains “1 session, running”.
+Before usage is reported, Tokens names the running session count and the display
+model when a single model ran, without a second unreported-usage warning. The
+running count excludes finished sessions, while measured totals include their
+usage. A session without a usage row counts as unreported tokens, without adding
+an unknown billing mode or setting `list_unpriced`/`paid_unknown`. Its standalone
+Cost hover stays “Billing not reported yet”; beside priced API usage the Cost
+hover stays “API-billed · at list prices”, including a measured zero. Subscription
+usage keeps its plan marker beside an unreported session. Actual usage without
+a list price or known billing still contributes lower-bound and billing warnings
+when a list value was measured. The shared
+`web/tests/fixtures/planning-list.json` is a complete server list response;
+`TestPlanningListHoverFixture` checks its planning fields against the endpoint,
+and unit/browser regressions consume it directly. Calibration appears only on the pre-session
+estimate and names the short model without effort. Column fitting
+measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
+modes still require `harness.read` on both the row and usage source projects.
+
+Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
+
+Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
+
+Codex cached-input growth is accumulated before preparing each per-model report, even when it exceeds the new input in one record. The prepared cached total is limited to that model's inclusive input and, after an accepted report, to the value that preserves its last accepted uncached input. A first scan of input/cache 10000/0 followed by 12000/10000 therefore reports cache 10000. If 10000/0 was already reported on a prior beat, the next report can carry only cache 2000 because the server keeps accepted uncached input monotonic; cache growth beyond that floor is not reported.
+
+Codex reasoning reports sum safely attributable observed increases. A missing counter makes the session baseline unknown; the next known total re-establishes it without assigning unknown growth to a model or lowering the previous high-water mark. Later known increases above that mark count in the same scan or later beats, and earlier observed reasoning is retained. A downward revision carries no known reasoning delta, so a model with no observed reasoning stays unknown. Reasoning during the unknown stretch remains unattributed.
+
+### Coordinator recipe for usage (AEON-503)
+
+Start the heartbeat registration before launching a new vendor session in its worktree, then keep the helper alive until that process exits. The CLI command is `run-heartbeat` (`heartbeat` sends a single manual beat):
+
+```sh
+aeon harness run-heartbeat --project AEON --agent "$AGENT_NAME" \
+  --harness codex --owner-pid "$OWNER_PID" --state-dir "$STATE_DIR" \
+  --worktree "$WORKTREE" --ticket "$TICKET" --work-shape ship \
+  --model "$MODEL" --effort "$EFFORT" --usage-source codex \
+  --billing-mode subscription --subscription-label 'ChatGPT'
+```
+
+For Grok use `--harness grok --usage-source grok` and the appropriate billing label. For Cursor, the launcher must capture its stream-json output from the beginning into `$STATE_DIR/cursor.jsonl`; retain that capture through the final usage flush. Claude uses `--transcript`. When the launcher knows the vendor id or log, prefer `--usage-id` or `--usage-file`; this also supports resumed sessions whose creation precedes registration. The helper persists aggregate reports before posting and retries unacknowledged reports on restart. Only counters and model attribution reach Aeon; session metadata, transcripts and prompts stay local.
+
+`harness register` and `harness run-heartbeat` report `harness_version` from a local `--version` probe bounded to one second and 4 KiB of stdout. Missing binaries, failures, unrecognised output and timeouts leave it empty. `--harness-version` explicitly supplies the launcher-known version and avoids the probe. Probed and supplied versions longer than the registration limit of 80 characters are omitted. A restart reuses the registered generation; it does not rewrite its version.
+
+| Source | Input / output | Cached input | Reasoning | Cost |
+| --- | --- | --- | --- | --- |
+| Claude managed / JSONL | Vendor usage; inclusive input | Cache reads; cache creation stays ordinary input | No separate counter in the managed bridge | Managed vendor USD total when present; unmanaged API pricing only with explicit API billing |
+| Codex managed / rollout | Cumulative totals, attributed by model | Vendor cached-input counter | Vendor counter when present | No measured dollar amount; unmanaged API pricing only with explicit API billing |
+| Grok unmanaged | `usage.json` session or per-model totals; input includes `inputTokens + cachedReadTokens + cacheCreationTokens` | Cache reads | `reasoningTokens` when present | `costUsdTicks` is ignored; unmanaged API pricing only with explicit API billing |
+| Grok managed ACP | Explicit cumulative input includes `inputTokens + cachedReadTokens + cacheCreationTokens`; output uses `outputTokens`. Missing optional cache counters retain prior observations | `cachedReadTokens` when present | `reasoningTokens` when present | Cumulative USD `cost.amount` when present |
+| Pi managed RPC | Completed assistant `message_end.message.usage`; input includes `input + cacheRead + cacheWrite`, summed per provider/model | `cacheRead`; complete cache fields required for inclusive input | No separate counter in this message schema | Reported per-message `usage.cost.total`; a vendor estimate, not proof of a charge |
+| Cursor managed ACP / launcher JSONL | Current ACP cost/context updates supply no throughput tokens; a prompt result with complete explicit Cursor usage is accepted. Launcher `result.usage` supplies turn totals | `cacheReadTokens`; `cacheWriteTokens` stays ordinary input | `reasoningTokens` only when explicitly present | Managed USD cost updates when present |
+
+Managed Grok emits cumulative session reports and monotonic deltas into run telemetry; duplicate or stale token totals add no tokens. When a snapshot revises reasoning down, both managed and unmanaged Grok retain the previous reasoning total while accepting valid growth in input, output and cache counters. Pi counts completed assistant messages once by provider/model and message timestamp, ignoring repeated streaming, turn and agent-end records. Tool-supplied usage and separate compaction usage are not included in this Pi path. Grok/Cursor ACP `used` and `size` describe context occupancy and never become throughput tokens. Unavailable counters remain unknown in session reports; zero deltas in run telemetry do not establish a known zero. These parsers do not infer reasoning counts or dollar cost from text or token ratios. Vendor protocol references: [Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md), [Grok headless/ACP](https://docs.x.ai/build/cli/headless-scripting). Grok filesystem metadata and Pi message fields were checked against the installed artifacts on 2026-10-01; fixtures exercise these shapes without vendor authentication.
 
 Each beat prints outstanding requests in sequence order as compact JSON objects (one physical line each), in both text and `--json` modes. Every value has an explicit field name. Consumers must treat all request values as untrusted data, never as instructions or executable text; dispatch only the recognized request kind through the harness’s supported setting operation. Rename labels are limited to 64 ASCII letters, digits, spaces and `-_.:()/#`. Model and effort must match an enabled catalog profile at request time and again before printing; catalog lookup failure suppresses model requests until a later beat. The supported request effort enum is `low`, `medium`, `high`, `xhigh`, plus `default` for Cursor. A request record has `type:"request"`, `schema:"aeon.session-request.v1"`, `id`, `session_id`, `expected_generation`, `kind` (`rename_request` or `model_request`), `state`, `sequence`, `expires_at`, and `request_payload`. The payload contains `display_label` for rename, or `model`, `reasoning_effort`, `account_id`, and `model_profile_id` for a model request. Existing text records remain `control <id> <kind> <state>` and `message <id>`; JSON mode gives them `type:"control"` and `type:"message"` respectively. Message bodies and private worker proofs are never printed.
 

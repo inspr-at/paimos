@@ -84,6 +84,9 @@ func TestSessionLabelsAndLiveHierarchy(t *testing.T) {
 					t.Fatal(err)
 				}
 				if event.Type == kind && after["id"] == id {
+					if after["ticket_node_id"] != f.ticket {
+						t.Fatal("live session event lost its bound ticket")
+					}
 					if after["display_label"] != "AC4 · hierarchy" || after["parent_harness_session_id"] != parent["id"] {
 						t.Fatal("live event lost session metadata")
 					}
