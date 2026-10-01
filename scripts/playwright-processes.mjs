@@ -26,6 +26,44 @@ export function signalGroup(pgid, signal) {
   try { process.kill(-pgid, signal) } catch (error) { if (error.code !== 'ESRCH') throw error }
 }
 
+const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+// Only call for the process just spawned, or for this preload's own root.
+// Root and detached launches must establish identity before starting work.
+function* identityAttempts(child, append, { start = processStart, attempts = 20 } = {}) {
+  if (!child.pid) return child
+  const terminate = () => signalGroup(child.pid, 'SIGKILL')
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (child.exitCode != null || child.signalCode != null) return child
+    const started = start(child.pid)
+    if (validStart(started)) {
+      try { append({ pid: child.pid, started }); return child }
+      catch (error) { terminate(); throw error }
+    }
+    try { process.kill(child.pid, 0) }
+    catch (error) { if (error.code === 'ESRCH') return child; throw error }
+    if (attempt + 1 < attempts) yield 10
+  }
+  terminate()
+  throw new Error('Could not establish spawned process group start time; spawned group terminated')
+}
+
+export function recordSpawnedGroup(child, append, { wait = pause, ...options } = {}) {
+  const attempts = identityAttempts(child, append, options)
+  let step = attempts.next()
+  while (!step.done) { wait(step.value); step = attempts.next() }
+  return step.value
+}
+
+// Yield in the parent so Node can reap fast roots and update their exit code
+// during retries. The preload and spawn hooks stay synchronous before work.
+export async function recordRootGroup(child, append, { wait = ms => new Promise(resolve => setTimeout(resolve, ms)), ...options } = {}) {
+  const attempts = identityAttempts(child, append, options)
+  let step = attempts.next()
+  while (!step.done) { await wait(step.value); step = attempts.next() }
+  return step.value
+}
+
 // Read the full journal each time. A failed ps, malformed record or signal
 // cannot consume a record and silently lose another owned group on retry.
 export function trackGroups(log, { table = processTable, kill = signalGroup } = {}) {

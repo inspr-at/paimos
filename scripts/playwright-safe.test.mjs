@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { acquireLock, localWorkerArgs, runOwnedCommand } from './playwright-safe.mjs'
 import { runUIShards } from './playwright-ui-shards-safe.mjs'
-import { processStart, trackGroups } from './playwright-processes.mjs'
+import { processStart, recordRootGroup, trackGroups, validStart } from './playwright-processes.mjs'
 import { recordDetachedChild } from './playwright-owned-groups.mjs'
 import requireSupervisor from './playwright-global-setup.mjs'
 
@@ -97,19 +97,23 @@ test('unknown start times, missing journals and partial journals fail closed', a
   }
 })
 
-test('stale recovery refuses a reused detached PID and preserves its process', async () => {
+test('stale recovery skips a reused detached PID and releases the stale lock', async () => {
   const sentinel = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' })
   const sentinelExit = new Promise(resolve => sentinel.once('exit', resolve))
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-stale-reuse-')), 'suite.lock'), owner = expiredOwner()
   const log = `${path}.${owner.token}.groups`
   writeFileSync(path, JSON.stringify(owner))
   writeFileSync(log, JSON.stringify({ pid: sentinel.pid, started: 'Mon Jan 1 00:00:00 2001' }) + '\n')
+  let lock
   try {
-    await assert.rejects(acquireLock(path, { graceMs: 50 }), /Stale browser lock retained/)
+    lock = await acquireLock(path, { graceMs: 50 })
     process.kill(sentinel.pid, 0)
-    assert.equal(existsSync(log), true)
-    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), owner)
-  } finally { sentinel.kill('SIGTERM'); await sentinelExit }
+    assert.equal(existsSync(log), false)
+    assert.notEqual(lock.token, owner.token)
+    lock.release(); lock = undefined
+    assert.equal(existsSync(path), false)
+    process.kill(sentinel.pid, 0)
+  } finally { lock?.release(); sentinel.kill('SIGTERM'); await sentinelExit }
 })
 
 function detachedProbe() {
@@ -118,19 +122,42 @@ function detachedProbe() {
   return { child, completion }
 }
 
-test('stale recovery reaps verified siblings before retaining reused, unverified or malformed rows', async () => {
-  for (const mode of ['reused', 'unverified', 'invalid', 'torn']) {
+test('stale recovery reaps verified siblings and ignores reused group PIDs', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-mixed-reused-')), 'suite.lock'), owner = expiredOwner()
+  const sibling = detachedProbe(), sentinel = detachedProbe(), log = `${path}.${owner.token}.groups`
+  let lock
+  try {
+    writeFileSync(path, JSON.stringify(owner))
+    writeFileSync(log, [
+      { pid: sibling.child.pid, started: processStart(sibling.child.pid) },
+      { pid: sentinel.child.pid, started: 'Mon Jan 1 00:00:00 2001' },
+    ].map(entry => JSON.stringify(entry)).join('\n') + '\n')
+    lock = await acquireLock(path, { graceMs: 50 })
+    await sibling.completion
+    assert.throws(() => process.kill(sibling.child.pid, 0), { code: 'ESRCH' })
+    process.kill(sentinel.child.pid, 0)
+    assert.equal(existsSync(log), false)
+    lock.release(); lock = undefined
+    assert.equal(existsSync(path), false)
+    assert.equal(existsSync(`${path}.guard`), false)
+    process.kill(sentinel.child.pid, 0)
+  } finally {
+    lock?.release()
+    sibling.child.kill('SIGKILL'); sentinel.child.kill('SIGKILL')
+    await Promise.all([sibling.completion, sentinel.completion])
+  }
+})
+
+test('stale recovery reaps verified siblings before retaining unverified or malformed rows', async () => {
+  for (const mode of ['unverified', 'invalid', 'torn']) {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-mixed-recovery-'))
     const path = join(directory, 'suite.lock'), owner = expiredOwner(), sibling = detachedProbe()
-    let sentinel, orphan
+    let orphan
     const log = `${path}.${owner.token}.groups`
     try {
       writeFileSync(path, JSON.stringify(owner))
       let bad
-      if (mode === 'reused') {
-        sentinel = detachedProbe()
-        bad = JSON.stringify({ pid: sentinel.child.pid, started: 'Mon Jan 1 00:00:00 2001' }) + '\n'
-      } else if (mode === 'unverified') {
+      if (mode === 'unverified') {
         const helper = spawnSync(process.execPath, [new URL('./testdata/playwright/orphan-group.mjs', import.meta.url).pathname], { encoding: 'utf8' })
         assert.equal(helper.status, 0, helper.stderr)
         orphan = JSON.parse(helper.stdout)
@@ -140,14 +167,12 @@ test('stale recovery reaps verified siblings before retaining reused, unverified
       await assert.rejects(acquireLock(path, { graceMs: 50 }), /Stale browser lock retained/)
       await sibling.completion
       assert.throws(() => process.kill(sibling.child.pid, 0), { code: 'ESRCH' }, `${mode} must not block sibling reaping`)
-      if (sentinel) process.kill(sentinel.child.pid, 0)
       if (orphan) process.kill(orphan.helper, 0)
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), owner)
       assert.equal(existsSync(log), true)
       assert.equal(existsSync(`${path}.guard`), false)
     } finally {
       sibling.child.kill('SIGKILL'); await sibling.completion
-      if (sentinel) { sentinel.child.kill('SIGKILL'); await sentinel.completion }
       if (orphan) { try { process.kill(-orphan.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error } }
     }
   }
@@ -201,7 +226,7 @@ test('persistent ps misses kill the spawned detached child without journalling a
   try {
     assert.throws(() => recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), {
       start: () => { calls++; return '' }, attempts: 3,
-    }), /spawned child terminated/)
+    }), /spawned group terminated/)
     await probe.completion
     assert.equal(calls, 3)
     assert.deepEqual(entries, [])
@@ -224,6 +249,132 @@ test('journal write failure kills the newly spawned detached child', async () =>
     assert.throws(() => process.kill(probe.child.pid, 0), { code: 'ESRCH' })
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
+
+test('root identity retries a first-ps miss and records only its verified start', async () => {
+  const probe = detachedProbe(), entries = []
+  let calls = 0
+  try {
+    assert.equal(await recordRootGroup(probe.child, entry => entries.push(entry), {
+      start: pid => ++calls === 1 ? '' : processStart(pid),
+    }), probe.child)
+    assert.ok(calls >= 2)
+    assert.deepEqual(entries, [{ pid: probe.child.pid, started: processStart(probe.child.pid) }])
+  } finally { probe.child.kill('SIGKILL'); await probe.completion }
+})
+
+test('unverifiable live roots terminate their group without an invalid journal entry', async () => {
+  const probe = detachedProbe(), entries = []
+  let calls = 0
+  try {
+    await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
+      start: () => { calls++; return '' }, attempts: 3,
+    }), /spawned group terminated/)
+    await probe.completion
+    assert.equal(calls, 3)
+    assert.deepEqual(entries, [])
+    assert.throws(() => process.kill(-probe.child.pid, 0), { code: 'ESRCH' })
+  } finally { probe.child.kill('SIGKILL'); await probe.completion }
+})
+
+test('root retries allow a fast child to exit normally instead of failing verification', async () => {
+  const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { detached: true, stdio: 'ignore' })
+  const exited = new Promise(resolve => child.once('exit', resolve)), entries = []
+  try {
+    assert.equal(await recordRootGroup(child, entry => entries.push(entry), { start: () => '', attempts: 200 }), child)
+    assert.equal(await exited, 7)
+    assert.deepEqual(entries, [])
+    assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' })
+  } finally { child.kill('SIGKILL'); await exited }
+})
+
+test('supervisor retries a root ps miss without overriding a successful suite exit', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-retry-')), 'suite.lock')
+  const original = childProcess.spawnSync
+  let calls = 0
+  const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid) && ++calls === 1) return { status: 1, stdout: '' }
+    return original(command, args, options)
+  })
+  syncBuiltinESMExports()
+  try {
+    const result = await runOwnedCommand(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 100)'], { lockPath: path, graceMs: 50 })
+    assert.equal(result.code, 0)
+    assert.ok(calls >= 2)
+    assert.equal(result.metrics.remaining_processes, 0)
+    assert.equal(existsSync(path), false)
+  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+})
+
+test('supervisor leaves an already-exited root exit code alone after repeated ps misses', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-exited-')), 'suite.lock')
+  const original = childProcess.spawnSync
+  let calls = 0
+  const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return { status: 1, stdout: '' } }
+    return original(command, args, options)
+  })
+  syncBuiltinESMExports()
+  try {
+    const result = await runOwnedCommand(process.execPath, ['-e', 'process.exit(7)'], { lockPath: path, graceMs: 50 })
+    assert.equal(result.code, 7)
+    assert.ok(calls > 0)
+    assert.equal(result.metrics.remaining_processes, 0)
+    assert.equal(existsSync(path), false)
+  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+})
+
+test('persistent supervisor root verification failure kills the group before releasing its lock', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-supervisor-fail-')), 'suite.lock')
+  const original = childProcess.spawnSync
+  let calls = 0, rootPid
+  const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) {
+      calls++; rootPid = Number(args[1]); return { status: 1, stdout: '' }
+    }
+    return original(command, args, options)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(runOwnedCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { lockPath: path, graceMs: 50 }), /spawned group terminated/)
+    assert.equal(calls, 20)
+    assert.throws(() => process.kill(-rootPid, 0), { code: 'ESRCH' })
+    assert.equal(existsSync(path), false)
+    assert.deepEqual(readdirSync(join(path, '..')), [], 'terminated root leaves neither lock nor journal')
+  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+})
+
+for (const mode of ['transient', 'persistent', 'owner-change']) {
+  test(`root preload handles ${mode} ps misses before suite code executes`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
+    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
+    const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
+    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
+    const result = await runOwnedCommand(process.execPath, ['-e', script], {
+      lockPath, graceMs: 50,
+      env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+    })
+    const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
+    assert.ok(calls >= 2)
+    assert.equal(result.metrics.remaining_processes, 0)
+    assert.equal(existsSync(lockPath), false)
+    if (mode === 'transient') {
+      assert.equal(result.code, 0)
+      const entries = readFileSync(ready, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      assert.ok(entries.length >= 2, 'both supervisor and preload must record the verified root')
+      assert.ok(entries.every(entry => validStart(entry.started)))
+      assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
+    } else if (mode === 'persistent') {
+      assert.equal(result.code, 1)
+      assert.equal(existsSync(ready), false, 'unverifiable root must not execute suite code')
+      assert.equal(calls, 20)
+      assert.equal(result.metrics.signal, 'SIGKILL')
+    } else {
+      assert.equal(result.code, 1)
+      assert.equal(existsSync(ready), false, 'supervisor identity must be checked after recording the root')
+      assert.equal(calls, 2)
+    }
+  })
+}
 
 function seedGuard(path, owner, legacy = false) {
   if (legacy) writeFileSync(`${path}.guard`, JSON.stringify(owner))

@@ -4,26 +4,11 @@
 import childProcess from 'node:child_process'
 import { appendFileSync, closeSync, constants, openSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
-import { processStart, processTable, validStart } from './playwright-processes.mjs'
+import { processStart, recordSpawnedGroup } from './playwright-processes.mjs'
 
-const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-
-export function recordDetachedChild(child, options, append, { start = processStart, attempts = 20, wait = pause } = {}) {
+export function recordDetachedChild(child, options, append, identityOptions) {
   if (!child.pid || !options?.detached) return child
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const started = start(child.pid)
-    if (validStart(started)) {
-      try { append({ pid: child.pid, started }); return child }
-      catch (error) { child.kill('SIGKILL'); throw error }
-    }
-    try { process.kill(child.pid, 0) }
-    catch (error) { if (error.code === 'ESRCH') return child; throw error }
-    if (attempt + 1 < attempts) wait(10)
-  }
-  // This is the child just returned by spawn, not a PID read from a journal.
-  // Never let a live, unverified detached launch escape the supervisor.
-  child.kill('SIGKILL')
-  throw new Error('Could not establish detached child process start time; spawned child terminated')
+  return recordSpawnedGroup(child, append, identityOptions)
 }
 
 const path = process.env.AEON_PW_GROUP_LOG
@@ -33,10 +18,12 @@ if (path) {
     const fd = openSync(path, constants.O_WRONLY | constants.O_APPEND)
     try { appendFileSync(fd, `${JSON.stringify(entry)}\n`) } finally { closeSync(fd) }
   }
-  const root = processTable().find(row => row.pid === process.pid && row.group === process.pid)
-  if (root && validStart(root.started)) append({ pid: root.pid, started: root.started })
-  // A root whose supervisor died before recording it must not begin a suite.
   const owner = Number(process.env.AEON_PW_OWNER)
+  // The supervisor directly spawns its detached root. Descendants are already
+  // recorded by their parent's spawn hook and must not register as roots.
+  if (process.ppid === owner) recordSpawnedGroup({ pid: process.pid }, append)
+  // Check after publishing the root: a recovery that saw an empty journal
+  // cannot race this preload into starting work after the supervisor's death.
   if (owner) {
     try {
       process.kill(owner, 0)

@@ -104,7 +104,7 @@ function ownerDead(owner) {
   catch (error) { return error.code === 'ESRCH' }
 }
 function assertGone(state) {
-  if (state.rows.length || state.unknown.length || state.unverified.length || state.issues.length) throw new Error('Stale browser lock retained: process identity or cleanup could not be proven')
+  if (state.rows.length || state.unverified.length || state.issues.length) throw new Error('Stale browser lock retained: process identity or cleanup could not be proven')
 }
 
 async function recover(path, fd, owner, graceMs, interrupted) {

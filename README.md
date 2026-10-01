@@ -1105,16 +1105,18 @@ failed run terminates only its own process groups, checks that they are empty, a
 then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
 and wall time. A Node preload records detached browser groups when they spawn,
 preserving Playwright's normal browser shutdown behavior. The lock descriptor
-stays open throughout the run. Detached launches retry transient process-table
-misses; if a start identity cannot be verified, the newly spawned child is killed
-without appending an incomplete record. After forced supervisor termination (SIGKILL),
+stays open throughout the run. Root and detached launches retry transient process-table
+misses; a live launch whose identity cannot be verified has its process group killed
+without appending an incomplete record. The root preload verifies its identity before
+executing suite code; an already-exited root keeps its original exit code.
+After forced supervisor termination (SIGKILL),
 the next run recovers a dead owner's lock under an exclusive recovery claim:
 it signals only journalled groups with matching process start identities,
 verifies that they have exited, and removes that owner's journal and lock before
 starting. Live owners and missing identities/journals refuse recovery. Reused
-group PIDs, unverified orphan groups and malformed journal rows retain the lock,
-but do not prevent verified sibling groups from being reaped. One mismatched
-group cannot prevent an active run from cleaning up its other verified groups.
+group PIDs are never signalled and do not retain the lock after verified siblings
+are reaped. Unverified orphan groups and malformed journal rows retain the lock,
+but do not prevent verified sibling groups from being reaped.
 Metrics use stderr so JSON reporter stdout remains parseable. Never kill other
 workers' or desktop browsers.
 Recovery handles SIGINT, SIGTERM and SIGHUP before acquiring its claim, finishes

@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { suiteLockPath } from './playwright-global-setup.mjs'
 import { acquireLock } from './playwright-lock.mjs'
-import { processStart, trackGroups, validStart } from './playwright-processes.mjs'
+import { recordRootGroup, trackGroups } from './playwright-processes.mjs'
 export { acquireLock } from './playwright-lock.mjs'
 export { groupProcesses } from './playwright-processes.mjs'
 
@@ -61,14 +61,9 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
       // 'exit', not 'close': an orphan may still hold inherited output pipes.
       child.once('exit', (code, signal) => resolveExit({ code, signal }))
     })
-    if (child.pid) {
-      const started = processStart(child.pid)
-      if (!validStart(started)) {
-        // Fast commands can exit before ps. The preload also journals the
-        // root before executing user code; never create an unverified entry.
-        monitoringError = new Error('Could not establish root process start time')
-      } else appendFileSync(groupLog, `${JSON.stringify({ pid: child.pid, started })}\n`)
-    }
+    try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`)) }
+    catch (error) { await exited; throw error }
+    if (interrupt) signalOwned(interrupt)
     console.error('AEON_PW_PROCESSES before=0 (new owned group)')
     sample()
     timer = setInterval(sample, 250)
