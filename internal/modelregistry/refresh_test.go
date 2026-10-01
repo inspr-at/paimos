@@ -81,7 +81,7 @@ func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	decode[[]Route](t, &p, "PUT", "/api/models/routes", string(raw), 200)
-	if !reflect.DeepEqual(registryRoutes(t, p), routes) {
+	if !routesEqual(registryRoutes(t, p), routes) {
 		t.Fatal("route replacement lost the security override")
 	}
 	gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
