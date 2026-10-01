@@ -40,6 +40,7 @@ var workflowConcurrency = map[string]map[string]any{
 
 var reservedCIJobs = map[string]bool{
 	"go": true, "web": true, "release-check": true, "e2e": true,
+	"cross-family": true, "gate/cross-family": true,
 	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
 }
 

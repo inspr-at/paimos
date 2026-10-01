@@ -20,6 +20,75 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Cross-family verdict and merge queue (AEON-411)
+
+CI's hosted job **`gate/cross-family`** runs on every `pull_request` and
+`merge_group: checks_requested`, and is skipped on main pushes and manual
+dispatches. Its token has only `contents: read`, `statuses: read` and
+`pull-requests: read`. It checks evidence; it never conducts a review or posts a
+verdict. The coordinator owns the independent review and records its explicit
+`ok` for the complete PR head in the ticket before posting a commit status:
+
+```sh
+# Set these from the completed review, never from an assumed verdict.
+gh api "repos/inspr-at/paimos/statuses/$REVIEWED_SHA" \
+  -f state=success -f context=gate/verdict \
+  -f description="model=$REVIEW_MODEL; route=$REVIEW_ROUTE; review=$REVIEW_FILE"
+```
+
+`REVIEWED_SHA` is the full reviewed head SHA; model and route are the resolved
+reviewer profile/model and actual route, and file identifies the durable review
+artifact. Keep the description within GitHub's 140-character limit. If a review
+is withdrawn, the coordinator posts `failure` in the same context at that SHA.
+The latest trusted status takes precedence, including pending/error/failure;
+statuses from other creators do not grant or revoke approval. The allowlist in
+`.github/gate-posters.json` requires both the creator's GitHub login and immutable
+numeric ID. Initially it permits `markus-barta` (ID `276789`), whose authorized
+CLI the lead uses; the read-only Actions token is not a poster.
+
+The workflow extracts the checker and allowlist from the event's **base commit**,
+then executes that checker outside the proposed checkout. Candidate gate tests
+run separately in `release-check`. Proposed policy changes therefore need to
+land through the existing coordinator review path before taking effect.
+Required Actions workflows themselves remain a coordinator review boundary;
+this job does not replace GitHub's controls on workflow changes.
+
+An exact reviewed head passes. Follow-ups pass only along the first-parent
+chain when every step has exactly two parents, the second parent is on main's
+first-parent history, and `git merge-tree --write-tree` reproduces the actual
+commit tree. This compares blobs, paths and modes, preserving the reviewed
+branch-only changes while allowing automatic main merges. Additional edits in a
+merge, conflict resolutions, normal commits (even empty or reverted), rebases
+and squashes require a fresh verdict. Missing evidence, API errors, incomplete
+pagination and changed PR heads fail closed.
+
+For a merge-commit queue, the checker walks the group's first-parent chain from
+`head_sha` to `base_sha`, resolves **each** second-parent head against paginated
+open PRs targeting main, reproduces every synthetic merge tree and checks every
+resolved PR's verdict. An empty, ambiguous or unresolved group is rejected.
+This supports batched groups; a verdict for only the PR named in the queue ref
+cannot approve the rest of the group. Queue runs remain hosted under mode B.
+
+**Coordinator rollout:** this initial draft's gate deliberately fails with
+`Trusted base gate policy is absent` until these files land on main. First use
+the existing required checks and independent review to land the bootstrap;
+then enable `gate/cross-family` as an additional required check bound to GitHub
+Actions (integration `15368`) in ruleset `24240960`, preserving `go`, `web`,
+`release-check`, `e2e` and `migration-compat`. Configure the queue for merge
+commits, maximum 5; do not substitute a directly posted `gate/cross-family`
+status for this job. Ruleset changes also require the owning nixcfg coordinator
+to review/re-pin `modules/aeon-builder/paimos-main-ruleset.json`, or its pool
+pauses on drift. Workers do not change settings, merge, queue or deploy.
+
+Posting `gate/verdict` does not trigger this workflow. After posting, the lead
+reruns the PR's CI with `gh run rerun RUN_ID` (all jobs, refreshing runner routing)
+without adding a commit. A new queue group runs its own check on the synthetic
+SHA. Before enabling enforcement, record live evidence that an unreviewed PR
+fails, a trusted exact head and automatic main merge pass, and both PRs in a
+two-PR queue group must be reviewed. These live coordinator checks remain
+separate from the Git fixtures in `node --test scripts/cross-family-gate.test.mjs`.
+The process runbook is PPM AEON `runbook/flywheel`, especially §2.5–§2.7.
+
 ### Test runner routing (AEON-438, AEON-459)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle

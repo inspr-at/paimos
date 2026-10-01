@@ -21,6 +21,40 @@ permissions:
   contents: read
 
 jobs:
+  cross-family:
+    name: gate/cross-family
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Verify the verdict with the base commit's gate policy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid gate base commit'; exit 1; }
+          # First installation fails closed until the coordinator lands this policy.
+          # Subsequent PRs cannot add themselves to the allowlist or change their checker.
+          if ! git cat-file -e "$GATE_BASE_SHA:scripts/cross-family-gate.mjs" || ! git cat-file -e "$GATE_BASE_SHA:.github/gate-posters.json"; then
+            echo 'Trusted base gate policy is absent; coordinator bootstrap required before enabling the required check.'
+            exit 1
+          fi
+          git show "$GATE_BASE_SHA:scripts/cross-family-gate.mjs" > "$RUNNER_TEMP/cross-family-gate.mjs"
+          git show "$GATE_BASE_SHA:.github/gate-posters.json" > "$RUNNER_TEMP/gate-posters.json"
+          node "$RUNNER_TEMP/cross-family-gate.mjs" "$RUNNER_TEMP/gate-posters.json"
+
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
     with:
@@ -174,6 +208,7 @@ jobs:
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
+      - run: node --test scripts/cross-family-gate.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
