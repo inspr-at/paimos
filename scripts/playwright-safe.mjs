@@ -13,12 +13,9 @@ const delay = ms => new Promise(resolveDelay => setTimeout(resolveDelay, ms))
 
 export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false } = {}) {
   if (process.platform === 'win32') throw new Error('Browser supervision requires POSIX process groups; use Linux CI on Windows')
-  const lock = await acquireLock(lockPath, { graceMs })
-  const groupLog = `${lockPath}.${lock.token}.groups`
   const start = Date.now()
-  let child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = ''
+  let lock, groupLog, snapshot, child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = ''
   const browserCount = rows => rows.filter(row => /chrom(?:e|ium)|headless_shell/i.test(row.name)).length
-  const snapshot = trackGroups(groupLog)
   const rowsOwned = () => snapshot.snapshot().rows
   const signalOwned = signal => {
     try {
@@ -32,7 +29,25 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
   }
   const handlers = new Map()
   let escalation
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    const handler = () => {
+      if (interrupt) return
+      interrupt = signal
+      if (!journalCreated || !child?.pid) return
+      // Capture live browsers before signalling; short runs may finish
+      // between periodic samples, especially immediately after readiness.
+      sample()
+      signalOwned(signal)
+      escalation = setTimeout(() => signalOwned('SIGKILL'), graceMs)
+    }
+    handlers.set(signal, handler)
+    process.on(signal, handler)
+  }
   try {
+    lock = await acquireLock(lockPath, { graceMs })
+    groupLog = `${lockPath}.${lock.token}.groups`
+    snapshot = trackGroups(groupLog)
+    if (interrupt) throw Object.assign(new Error(`Browser startup interrupted by ${interrupt}`), { signal: interrupt })
     writeFileSync(groupLog, '', { flag: 'wx', mode: 0o600 })
     journalCreated = true
     const preload = new URL('./playwright-owned-groups.mjs', import.meta.url).href
@@ -53,19 +68,6 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
         // root before executing user code; never create an unverified entry.
         monitoringError = new Error('Could not establish root process start time')
       } else appendFileSync(groupLog, `${JSON.stringify({ pid: child.pid, started })}\n`)
-    }
-    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-      const handler = () => {
-        if (interrupt) return
-        interrupt = signal
-        // Capture live browsers before signalling; short runs may finish
-        // between periodic samples, especially immediately after readiness.
-        sample()
-        signalOwned(signal)
-        escalation = setTimeout(() => signalOwned('SIGKILL'), graceMs)
-      }
-      handlers.set(signal, handler)
-      process.on(signal, handler)
     }
     console.error('AEON_PW_PROCESSES before=0 (new owned group)')
     sample()
@@ -92,7 +94,6 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
   } finally {
     clearInterval(timer)
     clearTimeout(escalation)
-    for (const [signal, handler] of handlers) process.off(signal, handler)
     // Always attempt cleanup after a throw. A reused PID is excluded by the
     // tracker; it cannot abort signalling or lock release for valid siblings.
     let releasable = !child?.pid
@@ -105,9 +106,13 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
         releasable = state.rows.length === 0 && state.unverified.length === 0 && state.issues.length === 0
       }
       if (releasable) {
-        lock.release({ journal: journalCreated })
+        lock?.release({ journal: journalCreated })
       }
-    } finally { lock.close() }
+    } finally {
+      lock?.close()
+      clearTimeout(escalation)
+      for (const [signal, handler] of handlers) process.off(signal, handler)
+    }
   }
 }
 
@@ -131,5 +136,5 @@ export async function runPlaywright(args, options = {}) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = (await runPlaywright(process.argv.slice(2))).code }
-  catch (error) { console.error(error.message); process.exitCode = 1 }
+  catch (error) { console.error(error.message); process.exitCode = ({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[error.signal]) ?? 1 }
 }

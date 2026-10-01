@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, fstatSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import childProcess, { spawn, spawnSync } from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
+import { appendFileSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import { test } from 'node:test'
 import { acquireLock, localWorkerArgs, runOwnedCommand } from './playwright-safe.mjs'
 import { runUIShards } from './playwright-ui-shards-safe.mjs'
 import { processStart, trackGroups } from './playwright-processes.mjs'
+import { recordDetachedChild } from './playwright-owned-groups.mjs'
 import requireSupervisor from './playwright-global-setup.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -17,6 +19,13 @@ async function waitReady(path, exited) {
   while (!existsSync(path)) {
     assert.ok(!exited(), 'child exited before ready')
     assert.ok(Date.now() < deadline, 'child startup timed out')
+    await sleep(25)
+  }
+}
+async function waitFor(check) {
+  const deadline = Date.now() + 15000
+  while (!check()) {
+    assert.ok(Date.now() < deadline, 'condition timed out')
     await sleep(25)
   }
 }
@@ -103,14 +112,256 @@ test('stale recovery refuses a reused detached PID and preserves its process', a
   } finally { sentinel.kill('SIGTERM'); await sentinelExit }
 })
 
-test('interrupted recovery claim refuses new suites without removing ownership', async () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-reaper-')), 'suite.lock'), owner = expiredOwner()
-  writeFileSync(path, JSON.stringify(owner))
-  writeFileSync(`${path}.guard`, JSON.stringify(owner))
-  await assert.rejects(acquireLock(path), /recovery guard retained/)
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), owner)
-  assert.equal(existsSync(`${path}.guard`), true)
+function detachedProbe() {
+  const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' })
+  const completion = new Promise(resolve => child.once('exit', resolve))
+  return { child, completion }
+}
+
+test('stale recovery reaps verified siblings before retaining reused, unverified or malformed rows', async () => {
+  for (const mode of ['reused', 'unverified', 'invalid', 'torn']) {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-mixed-recovery-'))
+    const path = join(directory, 'suite.lock'), owner = expiredOwner(), sibling = detachedProbe()
+    let sentinel, orphan
+    const log = `${path}.${owner.token}.groups`
+    try {
+      writeFileSync(path, JSON.stringify(owner))
+      let bad
+      if (mode === 'reused') {
+        sentinel = detachedProbe()
+        bad = JSON.stringify({ pid: sentinel.child.pid, started: 'Mon Jan 1 00:00:00 2001' }) + '\n'
+      } else if (mode === 'unverified') {
+        const helper = spawnSync(process.execPath, [new URL('./testdata/playwright/orphan-group.mjs', import.meta.url).pathname], { encoding: 'utf8' })
+        assert.equal(helper.status, 0, helper.stderr)
+        orphan = JSON.parse(helper.stdout)
+        bad = JSON.stringify({ pid: orphan.pid, started: orphan.started }) + '\n'
+      } else bad = mode === 'invalid' ? '{"pid":42,"started":""}\n' : '{"pid":'
+      writeFileSync(log, JSON.stringify({ pid: sibling.child.pid, started: processStart(sibling.child.pid) }) + '\n' + bad)
+      await assert.rejects(acquireLock(path, { graceMs: 50 }), /Stale browser lock retained/)
+      await sibling.completion
+      assert.throws(() => process.kill(sibling.child.pid, 0), { code: 'ESRCH' }, `${mode} must not block sibling reaping`)
+      if (sentinel) process.kill(sentinel.child.pid, 0)
+      if (orphan) process.kill(orphan.helper, 0)
+      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), owner)
+      assert.equal(existsSync(log), true)
+      assert.equal(existsSync(`${path}.guard`), false)
+    } finally {
+      sibling.child.kill('SIGKILL'); await sibling.completion
+      if (sentinel) { sentinel.child.kill('SIGKILL'); await sentinel.completion }
+      if (orphan) { try { process.kill(-orphan.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error } }
+    }
+  }
 })
+
+test('partial stale-recovery signalling reaps siblings and leaves failed identities retryable', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-recovery-signal-')), 'suite.lock'), owner = expiredOwner()
+  const first = detachedProbe(), second = detachedProbe(), kill = process.kill.bind(process)
+  const log = `${path}.${owner.token}.groups`
+  writeFileSync(path, JSON.stringify(owner))
+  writeFileSync(log, [first, second].map(probe => JSON.stringify({ pid: probe.child.pid, started: processStart(probe.child.pid) })).join('\n') + '\n')
+  const injected = t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -first.child.pid) throw Object.assign(new Error('injected signal denial'), { code: 'EPERM' })
+    return kill(pid, signal)
+  })
+  let lock
+  try {
+    await assert.rejects(acquireLock(path, { graceMs: 10 }), /Stale browser lock retained/)
+    await second.completion
+    kill(first.child.pid, 0)
+    assert.throws(() => kill(second.child.pid, 0), { code: 'ESRCH' })
+    assert.equal(existsSync(log), true)
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), owner)
+    injected.mock.restore()
+    lock = await acquireLock(path, { graceMs: 10 })
+    await first.completion
+    assert.equal(existsSync(log), false)
+  } finally {
+    injected.mock.restore()
+    first.child.kill('SIGKILL'); second.child.kill('SIGKILL')
+    await Promise.all([first.completion, second.completion])
+    lock?.release()
+  }
+})
+
+test('a transient ps miss retries and records the verified detached child', async () => {
+  const probe = detachedProbe(), entries = []
+  let calls = 0
+  try {
+    assert.equal(recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), {
+      start: pid => ++calls === 1 ? '' : processStart(pid),
+    }), probe.child)
+    assert.ok(calls >= 2)
+    assert.deepEqual(entries, [{ pid: probe.child.pid, started: processStart(probe.child.pid) }])
+  } finally { probe.child.kill('SIGKILL'); await probe.completion }
+})
+
+test('persistent ps misses kill the spawned detached child without journalling an invalid start', async () => {
+  const probe = detachedProbe(), entries = []
+  let calls = 0
+  try {
+    assert.throws(() => recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), {
+      start: () => { calls++; return '' }, attempts: 3,
+    }), /spawned child terminated/)
+    await probe.completion
+    assert.equal(calls, 3)
+    assert.deepEqual(entries, [])
+    assert.throws(() => process.kill(probe.child.pid, 0), { code: 'ESRCH' })
+  } finally { probe.child.kill('SIGKILL'); await probe.completion }
+})
+
+test('an already-exited detached child creates no journal entry after a ps miss', async () => {
+  const probe = detachedProbe(), entries = []
+  probe.child.kill('SIGKILL'); await probe.completion
+  assert.equal(recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), { start: () => '' }), probe.child)
+  assert.deepEqual(entries, [])
+})
+
+test('journal write failure kills the newly spawned detached child', async () => {
+  const probe = detachedProbe()
+  try {
+    assert.throws(() => recordDetachedChild(probe.child, { detached: true }, () => { throw new Error('journal unavailable') }), /journal unavailable/)
+    await probe.completion
+    assert.throws(() => process.kill(probe.child.pid, 0), { code: 'ESRCH' })
+  } finally { probe.child.kill('SIGKILL'); await probe.completion }
+})
+
+function seedGuard(path, owner, legacy = false) {
+  if (legacy) writeFileSync(`${path}.guard`, JSON.stringify(owner))
+  else {
+    mkdirSync(`${path}.guard`)
+    writeFileSync(`${path}.guard/${owner.token}`, JSON.stringify(owner))
+  }
+}
+
+test('dead and reused recovery guards are reclaimed without signalling their PIDs', async () => {
+  for (const legacy of [false, true]) {
+    for (const reused of [false, true]) {
+      const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-reaper-')), 'suite.lock'), owner = expiredOwner()
+      writeFileSync(path, JSON.stringify(owner))
+      writeFileSync(`${path}.${owner.token}.groups`, '')
+      const reaper = reused ? { pid: process.pid, token: randomUUID(), started: 'Mon Jan 1 00:00:00 2001' } : owner
+      seedGuard(path, reaper, legacy)
+      const lock = await acquireLock(path, { graceMs: 50 })
+      assert.notEqual(lock.token, owner.token)
+      assert.equal(existsSync(`${path}.guard`), false)
+      lock.release()
+      assert.equal(existsSync(path), false)
+    }
+  }
+})
+
+test('live matching and malformed recovery guards stay held with their exact path in the error', async () => {
+  for (const legacy of [false, true]) {
+    for (const malformed of [false, true]) {
+      const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-reaper-live-')), 'suite.lock')
+      const owner = { pid: process.pid, token: randomUUID(), started: malformed ? '' : processStart(process.pid) }
+      seedGuard(path, owner, legacy)
+      await assert.rejects(acquireLock(path), error => error.message.includes(`${path}.guard`))
+      assert.equal(existsSync(path), false)
+      assert.deepEqual(JSON.parse(readFileSync(legacy ? `${path}.guard` : `${path}.guard/${owner.token}`, 'utf8')), owner)
+      assert.deepEqual(readdirSync(join(path, '..')), ['suite.lock.guard'], 'failed contenders leave no prepared claims')
+    }
+  }
+})
+
+test('a failed ps cannot turn a live recovery guard into stale ownership', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-guard-ps-')), 'suite.lock'), sentinel = detachedProbe()
+  const owner = { pid: sentinel.child.pid, token: randomUUID(), started: processStart(sentinel.child.pid) }
+  seedGuard(path, owner)
+  const original = childProcess.spawnSync
+  const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command === 'ps' && args[0] === '-p' && args[1] === String(sentinel.child.pid)) return { status: 1, stdout: '' }
+    return original(command, args, options)
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(acquireLock(path), /recovery guard retained/)
+    assert.equal(statSync(`${path}.guard`).isDirectory(), true)
+    assert.deepEqual(JSON.parse(readFileSync(`${path}.guard/${owner.token}`, 'utf8')), owner)
+    process.kill(sentinel.child.pid, 0)
+    assert.equal(existsSync(path), false)
+  } finally {
+    injected.mock.restore(); syncBuiltinESMExports()
+    sentinel.child.kill('SIGKILL'); await sentinel.completion
+  }
+})
+
+test('competing stale-guard reapers cannot remove a replacement claim or admit two suites', async () => {
+  for (const legacy of [false, true]) {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-guard-race-')), path = join(directory, 'suite.lock'), owner = expiredOwner()
+    writeFileSync(path, JSON.stringify(owner))
+    writeFileSync(`${path}.${owner.token}.groups`, '')
+    seedGuard(path, owner, legacy)
+    const contenders = Array.from({ length: 3 }, (_, index) => {
+      const ready = join(directory, `claim-${index}.ready`)
+      const child = spawn(process.execPath, [new URL('./testdata/playwright/lock-claim.mjs', import.meta.url).pathname, path, ready], { stdio: ['ignore', 'pipe', 'pipe'] })
+      let done = false, log = ''
+      child.stderr.on('data', data => { log += data })
+      const completion = new Promise(resolve => child.once('close', code => { done = true; resolve(code) }))
+      return { child, ready, completion, exited: () => done, log: () => log }
+    })
+    try {
+      await waitFor(() => contenders.filter(probe => probe.exited() || existsSync(probe.ready)).length === contenders.length)
+      const winners = contenders.filter(probe => existsSync(probe.ready))
+      assert.equal(winners.length, 1, contenders.map(probe => probe.log()).join('\n'))
+      const winner = winners[0], token = JSON.parse(readFileSync(path, 'utf8')).token
+      assert.equal(JSON.parse(readFileSync(winner.ready, 'utf8')).token, token)
+      assert.equal(existsSync(`${path}.guard`), false)
+      await assert.rejects(acquireLock(path), /Another Aeon browser suite/)
+      assert.equal(JSON.parse(readFileSync(path, 'utf8')).token, token)
+      winner.child.kill('SIGTERM')
+      await winner.completion
+      assert.equal(existsSync(path), false)
+    } finally {
+      for (const probe of contenders) if (!probe.exited()) probe.child.kill('SIGTERM')
+      await Promise.all(contenders.map(probe => probe.completion))
+    }
+  }
+})
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGKILL']) {
+  test(`${signal} during stale recovery cannot strand the recovery guard or launch a suite`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-reaper-interrupt-')), probe = fixture('hang', directory)
+    let reaper, tracker, lock
+    try {
+      await waitReady(probe.ready, probe.exited)
+      const owner = JSON.parse(readFileSync(probe.lock, 'utf8')), log = `${probe.lock}.${owner.token}.groups`
+      tracker = trackGroups(log); tracker.snapshot()
+      const killed = new Promise(resolve => probe.child.once('exit', resolve))
+      probe.child.kill('SIGKILL'); await killed
+      reaper = fixture('normal', directory)
+      await waitFor(() => {
+        const directory = `${probe.lock}.guard`
+        if (!existsSync(directory)) return false
+        const entries = readdirSync(directory)
+        return entries.length === 1 && JSON.parse(readFileSync(`${directory}/${entries[0]}`, 'utf8')).pid === reaper.child.pid
+      })
+      reaper.child.kill(signal)
+      if (signal === 'SIGKILL') {
+        await reaper.completion
+        assert.equal(existsSync(`${probe.lock}.guard`), true)
+        lock = await acquireLock(probe.lock, { graceMs: 50 })
+        assert.equal(existsSync(`${probe.lock}.guard`), false)
+        assert.equal(existsSync(log), false)
+        lock.release(); lock = undefined
+      } else {
+        assert.equal(await reaper.completion, { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[signal], reaper.log())
+        assert.equal(existsSync(`${probe.lock}.guard`), false)
+        assert.equal(existsSync(probe.lock), false)
+      }
+      assert.equal(existsSync(reaper.ready), false, 'interruption must not start the requested suite')
+      assert.throws(() => process.kill(Number(readFileSync(probe.pid, 'utf8')), 0), { code: 'ESRCH' })
+      await probe.completion
+    } finally {
+      if (reaper && !reaper.exited()) { reaper.child.kill('SIGTERM'); await reaper.completion }
+      if (!probe.exited()) {
+        if (tracker) { try { tracker.signal('SIGKILL') } catch { /* recovery already removed the journal */ } }
+        probe.child.kill('SIGTERM'); await probe.completion
+      }
+      lock?.release()
+    }
+  })
+}
 
 test('SIGKILL recovery reaps only journalled groups before allowing one new owner', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-crash-')), probe = fixture('hang', directory)

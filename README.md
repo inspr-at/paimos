@@ -1078,17 +1078,27 @@ failed run terminates only its own process groups, checks that they are empty, a
 then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
 and wall time. A Node preload records detached browser groups when they spawn,
 preserving Playwright's normal browser shutdown behavior. The lock descriptor
-stays open throughout the run. After forced supervisor termination (SIGKILL),
+stays open throughout the run. Detached launches retry transient process-table
+misses; if a start identity cannot be verified, the newly spawned child is killed
+without appending an incomplete record. After forced supervisor termination (SIGKILL),
 the next run recovers a dead owner's lock under an exclusive recovery claim:
 it signals only journalled groups with matching process start identities,
 verifies that they have exited, and removes that owner's journal and lock before
-starting. Live owners, missing identities/journals, reused PIDs and unverified
-orphan groups refuse recovery. One mismatched group cannot prevent an active
-run from cleaning up its other verified groups. Metrics use stderr so JSON
-reporter stdout remains parseable. Never kill other workers' or desktop browsers.
-If recovery itself is interrupted, its `.guard` claim deliberately remains:
-inspect the exact lock, journal and claim before an operator clears them; no
-automatic recovery can steal a claim from a potentially active reaper.
+starting. Live owners and missing identities/journals refuse recovery. Reused
+group PIDs, unverified orphan groups and malformed journal rows retain the lock,
+but do not prevent verified sibling groups from being reaped. One mismatched
+group cannot prevent an active run from cleaning up its other verified groups.
+Metrics use stderr so JSON reporter stdout remains parseable. Never kill other
+workers' or desktop browsers.
+Recovery handles SIGINT, SIGTERM and SIGHUP before acquiring its claim, finishes
+verified cleanup and exits without starting a new suite. If the reaper is killed
+with SIGKILL, the next starter reclaims its `.guard` only after proving that the
+reaper PID is gone or its start identity has changed. A matching live reaper or
+an unknown identity still refuses recovery and prints the exact guard path.
+Claims are atomically published as nonempty directories containing a unique
+owner record, so competing reapers cannot remove a new owner's claim. Stale
+file-based claims from earlier versions are also recognized. Invalid claims and
+journals remain for operator inspection.
 
 When AEON-410's runner from PR #29 is integrated, use `npm run test:ui-shards --
 --shard=1/8` (or `node scripts/playwright-ui-shards-safe.mjs --shard=1/8` from

@@ -6,6 +6,26 @@ import { appendFileSync, closeSync, constants, openSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { processStart, processTable, validStart } from './playwright-processes.mjs'
 
+const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+export function recordDetachedChild(child, options, append, { start = processStart, attempts = 20, wait = pause } = {}) {
+  if (!child.pid || !options?.detached) return child
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const started = start(child.pid)
+    if (validStart(started)) {
+      try { append({ pid: child.pid, started }); return child }
+      catch (error) { child.kill('SIGKILL'); throw error }
+    }
+    try { process.kill(child.pid, 0) }
+    catch (error) { if (error.code === 'ESRCH') return child; throw error }
+    if (attempt + 1 < attempts) wait(10)
+  }
+  // This is the child just returned by spawn, not a PID read from a journal.
+  // Never let a live, unverified detached launch escape the supervisor.
+  child.kill('SIGKILL')
+  throw new Error('Could not establish detached child process start time; spawned child terminated')
+}
+
 const path = process.env.AEON_PW_GROUP_LOG
 if (path) {
   const append = entry => {
@@ -14,7 +34,7 @@ if (path) {
     try { appendFileSync(fd, `${JSON.stringify(entry)}\n`) } finally { closeSync(fd) }
   }
   const root = processTable().find(row => row.pid === process.pid && row.group === process.pid)
-  if (root) append({ pid: root.pid, started: root.started })
+  if (root && validStart(root.started)) append({ pid: root.pid, started: root.started })
   // A root whose supervisor died before recording it must not begin a suite.
   const owner = Number(process.env.AEON_PW_OWNER)
   if (owner) {
@@ -23,16 +43,7 @@ if (path) {
       if (processStart(owner) !== process.env.AEON_PW_OWNER_STARTED) process.exit(1)
     } catch { process.exit(1) }
   }
-  const record = (child, options) => {
-    if (child.pid && options?.detached) {
-      const started = processStart(child.pid)
-      if (!validStart(started)) {
-        try { process.kill(child.pid, 0) } catch (error) { if (error.code === 'ESRCH') return child }
-      }
-      append({ pid: child.pid, started })
-    }
-    return child
-  }
+  const record = (child, options) => recordDetachedChild(child, options, append)
   const spawn = childProcess.spawn, fork = childProcess.fork
   childProcess.spawn = function (command, args, options) {
     return record(spawn.call(this, command, args, options), Array.isArray(args) ? options : args)
