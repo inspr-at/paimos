@@ -2435,8 +2435,8 @@
     ]
   },
   "me": {
-    "version": "me/1.1",
-    "sha256": "b0fbf80bf6a67d3f61e656801ff75ba08bae4fb76d08d9598045692944b0c31e",
+    "version": "me/1.2",
+    "sha256": "fc3949fd89221d495d61295bd91cbc732ab595948aef47b8467f89381e155b0a",
     "shape": {
       "GET /me 200": {
         "properties": {
@@ -2481,6 +2481,10 @@
                 "type": "null"
               }
             ]
+          },
+          "oidc_display_name": {
+            "maxLength": 48,
+            "type": "string"
           },
           "principal": {
             "properties": {

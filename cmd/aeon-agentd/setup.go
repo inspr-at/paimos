@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
-	"github.com/inspr-at/paimos/internal/version"
 )
 
 type stringsFlag []string
@@ -436,13 +436,17 @@ func setupVersionStatus(ctx context.Context, api agentsetup.PairingAPI, origin s
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	g, err := api.Guide(ctx)
-	if err != nil || g.Protocol != "pairing-v1" || strings.TrimRight(g.InstanceURL, "/") != strings.TrimRight(origin, "/") || g.Version == "" || g.Version == "dev" || version.Version == "dev" {
+	if err != nil || strings.TrimRight(g.InstanceURL, "/") != strings.TrimRight(origin, "/") || g.AgentCompatibility == nil {
 		return p
 	}
-	p.VersionStatus = "matching"
-	if g.Version != version.Version {
-		p.VersionStatus = "mismatch"
-		p.Action = strings.TrimSpace(p.Action + " Installed helper and instance versions differ; check the published releases before upgrading.")
+	policy := *g.AgentCompatibility
+	if g.Protocol != policy.Protocol {
+		return p
+	}
+	result := policy.Check(agentcompat.Current())
+	p.VersionStatus = result.Status
+	if result.Action != "" {
+		p.Action = strings.TrimSpace(p.Action + " " + result.Action)
 	}
 	return p
 }

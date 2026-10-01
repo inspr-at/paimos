@@ -48,7 +48,7 @@ const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine)
 const addTarget = ref<PairingView | null>(null)
 const grantedKeys = ref<string[] | null>(null)
 const platformKey = ref('')
-const installMethod = ref('homebrew')
+const installMethod = ref('manual')
 const copied = ref('')
 const busy = ref('')
 const message = ref('')
@@ -498,13 +498,12 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       <template v-else>
         <label v-if="methods.length" class="install-choice">Install on this computer
           <select v-model="installMethod" class="field" aria-label="Install on this computer" @change="rememberInstall(($event.target as HTMLSelectElement).value)">
-            <option v-if="methods.includes('homebrew')" value="homebrew">macOS · Homebrew</option>
             <option v-if="methods.includes('manual')" value="manual">macOS or Linux · direct download</option>
+            <option v-if="methods.includes('homebrew')" value="homebrew">macOS · Homebrew</option>
             <option v-if="methods.includes('nix')" value="nix">{{ presentation.nixLabel }}</option>
           </select>
         </label>
         <p v-if="presentation.nixHint" class="nix-hint">{{ presentation.nixHint.replaceAll(' · ', '\u00a0·\u00a0') }}</p>
-        <p v-if="presentation.homebrewPending" class="pending-note">{{ presentation.homebrewPending }}</p>
         <div v-if="presentation.homebrewCommand && installMethod === 'homebrew'" class="install-guide">
           <p class="copy">Run these from your project folder.</p>
           <pre class="command"><code>{{ presentation.homebrewCommand }}</code></pre>
@@ -512,8 +511,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <p class="copy">Confirm the folder and accounts, then approve the code below to start the service.</p>
           <details class="service-details">
             <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Release and upgrades</summary>
-            <p class="copy">This formula matches this {{ brand.short_name }}’s version.</p>
-            <p class="copy"><code>aeon-agentd status</code> reports a helper/instance version mismatch when the instance is reachable.</p>
+            <p class="copy">Homebrew installs the latest INSPR release; <code>aeon-agentd status</code> tells you if this server needs a different version.</p>
             <p class="copy">Upgrading or rerunning pair does not drain or restart an existing daemon; arrange a restart after work finishes and verify Touch ID on the new daemon.</p>
           </details>
         </div>
@@ -525,7 +523,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
                 <option v-for="target in presentation.targets" :key="`${target.platform}/${target.arch}`" :value="`${target.platform}/${target.arch}`">{{ platformCaption(target.platform, target.arch) }}</option>
               </select>
             </label>
-            <p class="copy">Copy the checksum installer into your terminal, then pair from your project folder.</p>
+            <p class="copy">Direct download for this server’s version. Copy the checksum installer into your terminal, then pair from your project folder.</p>
             <button type="button" class="btn sm" @click="copyText(selectedTarget.command, 'Install command')"><AppIcon :name="copied === 'Install command' ? 'check' : 'copy'" :size="13" />{{ copied === 'Install command' ? 'Copied' : 'Copy checksum installer' }}</button>
             <details class="service-details"><summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Read installer</summary><pre class="command installer-source"><code>{{ selectedTarget.command }}</code></pre></details>
           </template>

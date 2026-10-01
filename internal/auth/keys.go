@@ -44,10 +44,11 @@ type identityJSON struct {
 }
 
 type meJSON struct {
-	DevMode   bool          `json:"dev_mode"`
-	Principal principalJSON `json:"principal"`
-	Tenant    tenantJSON    `json:"tenant"`
-	Identity  *identityJSON `json:"identity"`
+	DevMode         bool          `json:"dev_mode"`
+	OIDCDisplayName string        `json:"oidc_display_name"`
+	Principal       principalJSON `json:"principal"`
+	Tenant          tenantJSON    `json:"tenant"`
+	Identity        *identityJSON `json:"identity"`
 }
 
 type agentKeyJSON struct {
@@ -73,7 +74,8 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 		roles = []string{}
 	}
 	out := meJSON{
-		DevMode: m.cfg.Dev(),
+		DevMode:         m.cfg.Dev(),
+		OIDCDisplayName: m.cfg.OIDCDisplayName,
 		Principal: principalJSON{
 			ID:       v.Principal.ID,
 			TenantID: v.Principal.TenantID,
