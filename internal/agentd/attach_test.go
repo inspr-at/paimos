@@ -272,17 +272,26 @@ func TestAttachLocalConsentPeerPollAndNoReplay(t *testing.T) {
 		t.Fatal("attach wrote local hooks or journals")
 	}
 }
-// The server's admission bound on waiting requests is named to the person; any
-// other refusal stays the generic line, and either way nothing stays attached.
-func TestAttachRefusalNamesAFullWaitingList(t *testing.T) {
+
+// Only recognized owner causes get a fixed next step. Either way the refused
+// request leaves no attach state or transcript reader behind.
+func TestAttachRefusalNamesOwnerCausesAndClearsLocalState(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err  error
 		want string
 	}{
-		"full list":    {&client.StatusError{Status: 429, Message: attachwatch.LiveLimitMessage}, "attach requests already wait for approval in Aeon"},
-		"other limit":  {&client.StatusError{Status: 429, Message: "computer attach limit reached"}, "paired instance refused attach"},
-		"other status": {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "paired instance refused attach"},
-		"offline":      {errors.New("offline"), "paired instance refused attach"},
+		"full list":      {&client.StatusError{Status: 429, Message: attachwatch.LiveLimitMessage}, "attach requests already wait for approval in Aeon"},
+		"other limit":    {&client.StatusError{Status: 429, Message: "computer attach limit reached"}, "paired instance refused attach"},
+		"other status":   {&client.StatusError{Status: 403, Message: attachwatch.LiveLimitMessage}, "paired instance refused attach"},
+		"offline":        {errors.New("offline"), "paired instance refused attach"},
+		"version":        {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion}, "Update Aeon and paimos-agentd"},
+		"pairing":        {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalPairing}, "pair this computer again"},
+		"revoked bearer": {&client.StatusError{Status: 401, Message: "unauthorized"}, "pairing no longer authenticates"},
+		"ticket":         {&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalTicket}, "Check the ticket belongs to the selected project"},
+		"ticket access":  {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalTicket}, "owner has project access"},
+		"expired":        {&client.StatusError{Status: 410, AttachRefusal: attachwatch.RefusalExpired}, "approve the new code"},
+		"wrong status":   {&client.StatusError{Status: 403, AttachRefusal: attachwatch.RefusalVersion}, "paired instance refused attach"},
+		"unrecognized":   {&client.StatusError{Status: 409, AttachRefusal: "private arbitrary server payload"}, "paired instance refused attach"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := attachFixtureFile(t, "old turns\n")
@@ -336,6 +345,34 @@ func TestAttachRefusalNamesAFullWaitingList(t *testing.T) {
 				t.Fatal("the local reply lost the message")
 			}
 		})
+	}
+}
+
+func TestDisabledAttachKeepsRefusalBehindLocalAuthentication(t *testing.T) {
+	for _, cause := range []error{
+		&client.StatusError{Status: 409, AttachRefusal: attachwatch.RefusalVersion},
+		&client.StatusError{Status: 400, Message: "invalid attach request"},
+		&client.StatusError{Status: 409, Message: "update agentd to attach protocol 2"},
+		&AttachLocalError{Code: "attach_version_mismatch", Hint: "Update the server and restart agentd."},
+	} {
+		m := DisabledAttachManager(cause)
+		_, err := m.handle(t.Context(), attachObservation{}, AttachLocalRequest{Operation: "preview"})
+		var detail *AttachLocalError
+		if !errors.As(err, &detail) || detail.Code != "attach_version_mismatch" || len(m.sessions) != 0 {
+			t.Fatal("disabled manager lost the fixed repair or created attach state")
+		}
+		for _, bearer := range []string{"", "wrong", "fixture-local-token"} {
+			r := httptest.NewRequest("POST", "/v1/attach", strings.NewReader(`{"operation":"preview"}`))
+			if bearer != "" {
+				r.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			w := httptest.NewRecorder()
+			m.serve(w, r, "fixture-local-token")
+			if w.Code != 403 || strings.Contains(w.Body.String(), "attach_version_mismatch") || strings.Contains(w.Body.String(), "Update") {
+				t.Fatal("disabled cause leaked before bearer and kernel-peer checks")
+			}
+		}
+		m.Close(t.Context())
 	}
 }
 func TestAttachInjectedJoinAndClientOptionsFailClosed(t *testing.T) {
