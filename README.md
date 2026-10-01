@@ -281,6 +281,26 @@ paimos issue list --project AEON
 paimos mcp
 ```
 
+`aeon status help --json` (also `paimos status help --json`) reads
+`GET /api/status/help`: the ordered status definitions, hints, Queued explanation
+and effective workspace rules. `--project KEY` resolves that project's
+Inherit/On/Off override. The help sheet and agents use the same definitions;
+the API reads live Status autopilot limits when its settings tables are present,
+otherwise it explicitly reports the defaults. Queued means Open in the work
+queue (AEON-522), rather than another stored status.
+
+Tickets and tasks can carry `human_check`, nullable text describing what only a
+person can confirm. Create or patch it through the nodes API, and filter lists
+with `human_check=pending` or `none` (prefix `!` to exclude); request
+`facets=human_check` for counts. A person marks it checked with
+`PATCH /api/nodes/{id}` and `{"human_check":null}`. The server records the original
+text, person ID and UTC time in `fields.human_check_completed`; replacing fields
+preserves that provenance and cannot forge it. Only a person can set another
+pending check when it clears a stored completion. Agents may add or edit pending
+checks that have no stored completion. Check and Undo in the ticket use the existing revision
+preconditions. Part B's automation skips pending checks when moving tickets to
+Delivered or Accepted.
+
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger

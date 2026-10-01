@@ -51,6 +51,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/views":                              true,
 	"GET /api/views/{viewId}":                     true,
 	"GET /api/kinds":                              true,
+	"GET /api/status/help":                        true,
 	"GET /api/kinds/{kindId}":                     true,
 	"GET /api/me":                                 true,
 	"GET /api/brand/logo/{variant}":               true,

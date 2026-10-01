@@ -270,6 +270,40 @@ jobs:
           path: web/test-results/footer-release-pill/phone-dark.png
           if-no-files-found: error
 
+  status-help-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - name: Status definitions and human-check unit tests
+        working-directory: web
+        run: node --experimental-strip-types --test tests/status-definitions.test.ts tests/work.test.ts tests/activity.test.ts
+      - name: Human-check action permission regressions
+        working-directory: web
+        run: npx vitest run tests/live-ticket.unit.test.ts --maxWorkers=1 --no-file-parallelism
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Status help and human-check browser regressions
+        working-directory: web
+        env:
+          AEON_521A_SHOTS: ${{ runner.temp }}/aeon-521a-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: aeon-521a-status-help
+          path: |
+            ${{ runner.temp }}/aeon-521a-shots
+            web/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
   release-check:
     runs-on: ubuntu-latest
     steps:

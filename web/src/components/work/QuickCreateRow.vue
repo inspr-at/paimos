@@ -81,7 +81,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
     <td :colspan="span ? span + 2 : trailing + 4"><span class="create-hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> create and keep going · <kbd class="keycap">tab</kbd> type, status, priority, epic · <kbd class="keycap">esc</kbd> close</span></td>
   </tr>
   <OptionMenu v-if="menu?.kind === 'type'" :anchor="menu.anchor" title="Type" subject="the new ticket" kind="type" :options="kindOptions" :current="draft.kind" @choose="value => choose(() => { draft.kind = value })" @close="close" />
-  <StatusMenu v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" ticket-key="the new ticket" @choose="value => choose(() => { draft.state = value })" @close="close" />
+  <StatusMenu :project-id="projectId" v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" ticket-key="the new ticket" @choose="value => choose(() => { draft.state = value })" @close="close" />
   <OptionMenu v-if="menu?.kind === 'priority'" :anchor="menu.anchor" title="Priority" subject="the new ticket" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => choose(() => { draft.priority = value })" @close="close" />
   <EpicPicker v-if="menu?.kind === 'epic'" :anchor="menu.anchor" :project-id="projectId" :current="draft.epic?.id ?? null" subject="the new ticket" allow-none @choose="epic => choose(() => { draft.epic = epic })" @close="close" />
 </template>

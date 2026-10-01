@@ -26,6 +26,7 @@ import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import StatusMenu from './StatusMenu.vue'
+import HumanCheck from './HumanCheck.vue'
 import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
@@ -42,6 +43,7 @@ import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
+import { useSession } from '../../stores/session'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
 
 // The ticket workspace: the same parts in the docked side panel and in the
@@ -93,6 +95,9 @@ function closeConvert() {
   void nextTick(() => header.value?.focusMore())
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
+const session = useSession()
+const humanCheckPerson = computed(() => session.identity?.principal.kind === 'person')
+const humanCheckEditable = computed(() => humanCheckPerson.value || !item.value?.fields.human_check_completed)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
 const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
 const linkable = computed(() => props.canLink && !ticket.readOnly.value && !ticket.gone.value)
@@ -135,7 +140,7 @@ const saving = ref(false)
 const benefitNotice = ref('')
 const benefitInvalidKey = ref('')
 const titleField = ref<HTMLTextAreaElement>()
-const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
+const draft = reactive({ ...benefitDraft({}), title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '', humanCheck: '' })
 let base = { ...draft }
 // The draft's values from one server copy: the editor's base (the copy its
 // save is checked against), never whatever object shows at the moment.
@@ -143,6 +148,7 @@ function snapshot(it: ListItem = ticket.base() ?? item.value!) {
   return {
     ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
     notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
+    humanCheck: it.human_check ?? '',
   }
 }
 const editDirty = computed(() => editing.value && (Object.keys(base) as (keyof typeof base)[]).some(key => draft[key] !== base[key]))
@@ -206,6 +212,14 @@ async function saveEdit() {
   if (draft.title.trim() !== base.title) patch.title = draft.title.trim()
   if (draft.body !== base.body) patch.body = draft.body
   if (draft.state !== base.state) patch.state = draft.state
+  if (draft.humanCheck.trim() !== base.humanCheck) {
+    if (!humanCheckPerson.value && (!draft.humanCheck.trim() || !humanCheckEditable.value)) {
+      toast(!draft.humanCheck.trim() ? 'Only a person can mark a human check checked.' : 'Only a person can undo a human check.', { tone: 'error' })
+      root.value?.querySelector<HTMLInputElement>('.edit-human-check')?.focus()
+      return
+    }
+    patch.human_check = draft.humanCheck.trim() || null
+  }
   const changed: Record<string, unknown> = {}
   const setField = (name: string, value: string, before: string) => { if (value === before) return; changed[name] = value.trim() ? value : undefined }
   setField('acceptance_criteria', draft.acceptance, base.acceptance)
@@ -335,6 +349,11 @@ const showNotes = ref(false)
 
 const acceptance = computed(() => typeof item.value?.fields.acceptance_criteria === 'string' ? item.value.fields.acceptance_criteria : '')
 const notes = computed(() => typeof item.value?.fields.notes === 'string' ? item.value.fields.notes : '')
+async function saveHumanCheck(text: string | null) {
+  const result = await ticket.patch({ human_check: text })
+  if (result === 'ok') { activity.load(); toast(text ? 'Human check restored' : 'Human check marked checked') }
+  return result
+}
 const hasChildren = computed(() => !!item.value && (item.value.kind_slug === 'epic' || item.value.children_count > 0 || ticket.children.value.length > 0))
 const priorityOptions: MenuOption[] = [{ value: 'high', label: 'High' }, { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }, { value: '', label: 'No priority' }]
 const assigneeOptions = computed<MenuOption[]>(() => {
@@ -547,6 +566,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
           <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
         </section>
+        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
@@ -564,6 +584,7 @@ defineExpose({
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
+          <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
@@ -652,7 +673,7 @@ defineExpose({
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <OptionMenu v-if="menu?.kind === 'assignee' && item" :anchor="menu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="item.assignee?.id ?? ''" searchable @choose="chooseAssignee" @close="closeMenu" />
-    <StatusMenu v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <RelationPicker
@@ -717,6 +738,7 @@ defineExpose({
 }
 .edit-title.large { font-size: 28px; }
 .edit-title:focus { box-shadow: var(--focus-ring); }
+.hc-edit-hint { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
 .edit-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .edit-prop { display: grid; gap: 4px; }
 .prop-label { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
