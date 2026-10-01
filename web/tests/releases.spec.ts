@@ -17,7 +17,7 @@ function versionLabel(version: string, copy = true): string {
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
-const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
+const pill = (page: Page) => page.getByRole('button', { name: /^Release history, (?:.*?, )?version / })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
 async function setup(page: Page, options: { lastSeen?: string; running?: string; bigProject?: number } = {}) {
@@ -538,6 +538,6 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
     expect(drawn).not.toContain('.0.0')
     expect((await row.locator('[data-collapsed="true"]').first().boundingBox())?.width ?? 0).toBe(0)
   }
-  // AEON-430: the footer leads with the marketing name; its version is the hover chip.
-  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toBeVisible()
+  // AEON-515: the footer pill shows the marketing name beside its Pretty version.
+  await expect(page.locator('footer.app-footer .version-pill .footer-codename')).toBeVisible()
 })
