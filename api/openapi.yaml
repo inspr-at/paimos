@@ -3227,7 +3227,7 @@ paths:
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
       responses:
-        '200': {description: Definitions, rules and effective settings, content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
+        '200': {description: 'Definitions, rules and effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
         '400': {description: Invalid project id}
         '401': {$ref: '#/components/responses/Error'}
         '404': {description: Project is not visible}

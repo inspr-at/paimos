@@ -59,7 +59,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if !jsonEqual(t, string(fields), `{"custom":"keep","legacy_score":2}`) {
 			t.Fatalf("rewritten history: %s", fields)
 		}
-		// The later AEON-503 expansion adds work classification to tasks.
+		// Later expansions add work classification and human checks to tasks.
 		// Remove only those declared extensions to compare the historical
 		// roadmap result; publication must still not add anything to tasks.
 		var taskFields map[string]any
@@ -67,7 +67,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 			return err
 		}
 		properties := taskFields["properties"].(map[string]any)
-		for _, key := range []string{"route_role_source", "area_source", "route_role_confirmed", "area_confirmed", "complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed"} {
+		for _, key := range []string{"route_role_source", "area_source", "route_role_confirmed", "area_confirmed", "complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed", "human_check_completed"} {
 			delete(properties, key)
 		}
 		priorTask, err := json.Marshal(taskFields)
