@@ -12085,7 +12085,7 @@ components:
                   properties:
                     id: {type: string, format: uuid}
                     profile_id: {type: string, format: uuid}
-                    model_raw: {type: string, description: Original harness metadata, retained for audit.}
+                    model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
                     effort: {type: string}
                     role: {type: string}
                     running: {type: boolean}
@@ -12099,7 +12099,7 @@ components:
             output: {type: integer, minimum: 0}
             cached: {type: integer, minimum: 0}
             sessions: {type: integer, minimum: 0}
-            running: {type: integer, minimum: 0, description: Visible sessions that have not stopped, including those with no model or usage yet.}
+            running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
             estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
             calibration:
