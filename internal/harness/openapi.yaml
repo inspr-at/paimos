@@ -21,6 +21,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessRegistration'}
       responses:
         '201': {description: Registered or exact active replay}
+        '409': {description: 'Conflicting active harness_session_ref lease or metadata, duplicate vendor_session_ref for the agent in the tenant across any harness, or hierarchy/predecessor conflict; private values are never returned'}
   /api/projects/{projectId}/harness-sessions/orchestrator:
     get:
       operationId: resolveHarnessOrchestrator
@@ -418,7 +419,7 @@ components:
         work_shape: {type: string, enum: [unknown, ship, scout]}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, writeOnly: true}
-        vendor_session_ref: {type: string, writeOnly: true, description: 'Optional harness-native session id. Digested like harness_session_ref. Omitted on replay does not clear a stored value.'}
+        vendor_session_ref: {type: string, writeOnly: true, description: 'Optional harness-native session id for this generation, not its parent. Digested like harness_session_ref. Unique among active generations per tenant and agent across all harnesses. Omitted on replay does not clear a stored value.'}
         worker_lease: {type: string, writeOnly: true}
     HarnessBinding:
       type: object

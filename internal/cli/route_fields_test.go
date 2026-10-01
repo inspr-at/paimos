@@ -17,15 +17,16 @@ func TestIssueRouteFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"aeon", "issue", "update", "AEON-1", "--role", "gruntwork"},
 		{"aeon", "issue", "update", "AEON-1", "--area", "mobile"},
+		{"aeon", "issue", "update", "AEON-1", "--complexity", "XL"},
 		{"aeon", "issue", "update", "AEON-1", "--role", ""},
 	} {
 		code, _, errOut := runCLI(args, "")
-		if code != 2 || (!strings.Contains(errOut, "--role") && !strings.Contains(errOut, "--area") && !strings.Contains(errOut, "nothing to update")) {
+		if code != 2 || (!strings.Contains(errOut, "--role") && !strings.Contains(errOut, "--area") && !strings.Contains(errOut, "--complexity") && !strings.Contains(errOut, "nothing to update")) {
 			t.Fatalf("%v: %d %s", args, code, errOut)
 		}
 	}
 	code, out, errOut := runCLI([]string{"aeon", "issue", "update", "--help"}, "")
-	if code != 0 || !strings.Contains(out, "--role") || !strings.Contains(out, "--area") || errOut != "" {
+	if code != 0 || !strings.Contains(out, "--role") || !strings.Contains(out, "--area") || !strings.Contains(out, "--complexity") || errOut != "" {
 		t.Fatalf("help: %d %s %s", code, out, errOut)
 	}
 	code, out, errOut = runCLI([]string{"aeon", "issue", "update", "AEON-1", "--role", " build-hard ", "--area", "full-stack", "--dry-run"}, "")
@@ -70,21 +71,21 @@ func TestIssueRouteFlags(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
-	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "issue", "update", "AEON-1", "--role", " build ", "--area", "backend"}
+	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "issue", "update", "AEON-1", "--estimate", "2", "--role", " build ", "--area", "backend", "--complexity", "M"}
 	code, out, errOut = runCLI(args, "")
 	if code != 0 || errOut != "" {
 		t.Fatalf("update: %d %s %s", code, out, errOut)
 	}
-	if wrote["route_role"] != "build" || wrote["area"] != "backend" || wrote["priority"] != "high" {
+	if wrote["route_role"] != "build" || wrote["area"] != "backend" || wrote["priority"] != "high" || wrote["estimate_hours"] != float64(2) || wrote["complexity"] != "M" {
 		t.Fatal(wrote)
 	}
-	for _, key := range []string{"route_role_source", "route_role_by", "route_role_at", "area_source", "area_by", "area_at"} {
+	for _, key := range []string{"route_role_source", "route_role_by", "route_role_at", "area_source", "area_by", "area_at", "complexity_source", "complexity_by", "complexity_at"} {
 		if wrote[key] != nil {
 			t.Fatalf("client sent %s: %#v", key, wrote)
 		}
 	}
 	var view issueView
-	if err := json.Unmarshal([]byte(out), &view); err != nil || view.RouteRole != "build" || view.Area != "backend" {
+	if err := json.Unmarshal([]byte(out), &view); err != nil || view.RouteRole != "build" || view.Area != "backend" || view.Complexity != "M" {
 		t.Fatalf("json %s %v", out, err)
 	}
 	code, _, errOut = runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "issue", "update", "AEON-2", "--role", "scout"}, "")
@@ -160,5 +161,18 @@ func TestIssueRouteRepeatKeepsPersonProvenance(t *testing.T) {
 	}
 	if wrote["area"] != "backend" || wrote["area_source"] != "person" || wrote["area_by"] != personID || wrote["area_at"] != roleAt {
 		t.Fatalf("role change restamped area: %#v", wrote)
+	}
+}
+
+func TestIssueSuggestionConfirmationDropsOnlyRequestedStamps(t *testing.T) {
+	fields := map[string]any{"route_role": "build", "route_role_source": "suggested", "route_role_by": "agent", "route_role_at": "now", "route_role_confirmed": false, "area": "backend", "area_source": "suggested", "complexity": "S", "complexity_source": "suggested"}
+	applyRouteFields(fields, "build", "", "")
+	if fields["route_role_source"] != nil || fields["route_role_confirmed"] != nil || fields["area_source"] != "suggested" || fields["complexity_source"] != "suggested" {
+		t.Fatal(fields)
+	}
+	rt := &runtime{}
+	v := rt.viewIssue(apiNode{KindID: "ticket", Fields: json.RawMessage(`{"complexity":"S","complexity_source":"suggested","complexity_confirmed":false}`)}, kindTable{})
+	if v.Complexity != "S" || v.ComplexityConfirmed == nil || *v.ComplexityConfirmed {
+		t.Fatal(v)
 	}
 }

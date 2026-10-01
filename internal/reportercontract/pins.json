@@ -700,7 +700,7 @@
   },
   "harness-session": {
     "version": "harness-session/2.0",
-    "sha256": "bdab69f83901a0c07bceeb6f799f2679cb88cfdf9b17e8156891d27739c7efee",
+    "sha256": "4b15e1df4ccc6d039df4e80e327104454d72c2a77ba34b704aa2be8c944b03de",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1137,6 +1137,22 @@
           },
           "model": {
             "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_profile_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_raw": {
+            "maxLength": 128,
+            "readOnly": true,
             "type": [
               "string",
               "null"
@@ -1820,6 +1836,22 @@
           },
           "model": {
             "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_profile_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_raw": {
+            "maxLength": 128,
+            "readOnly": true,
             "type": [
               "string",
               "null"
