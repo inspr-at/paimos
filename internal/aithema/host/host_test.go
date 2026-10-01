@@ -172,6 +172,28 @@ func (f *fixture) cap(sid, design string, mutate func(map[string]any)) string {
 	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(f.private, []byte(input)))
 }
 
+func TestSessionCreationNormalizesHostClockToContractPrecision(t *testing.T) {
+	f := newFixture(t, nil)
+	// Linux clocks provide nanoseconds; the pinned timestamp profile permits
+	// at most six fractional digits. Exercise that precision on every OS.
+	now := time.Date(2026, time.October, 1, 9, 0, 0, 123456789, time.FixedZone("host", 2*60*60))
+	f.m.clock = func() time.Time { return now }
+	s := f.session()
+	state, err := f.m.Journal.Current(t.Context(), f.p.TenantID, f.project, s.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authorization struct {
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(state.Authorization, &authorization); err != nil {
+		t.Fatal(err)
+	}
+	if authorization.CreatedAt != "2026-10-01T07:00:00.123456Z" {
+		t.Fatal("host timestamp did not use the contract's UTC microsecond profile")
+	}
+}
+
 func TestSecretSettingsMaskedEncryptedAuditedAndRLS(t *testing.T) {
 	f := newFixture(t, nil)
 	w := f.call("GET", "/api/plugins/aithema/settings", nil)

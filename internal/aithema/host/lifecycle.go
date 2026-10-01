@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
@@ -87,7 +86,9 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	auth["sid"] = sid
 	auth["epoch"] = 1
 	auth["withdrawn_at"] = nil
-	auth["created_at"] = m.clock().UTC().Format(time.RFC3339Nano)
+	// The pinned contract permits at most six fractional digits, including
+	// when the host clock has nanosecond precision.
+	auth["created_at"] = m.clock().UTC().Format("2006-01-02T15:04:05.000000Z")
 	var out sessionTokens
 	err = db.InTransaction(r.Context(), m.Pool, func(ctx context.Context) error {
 		var s Settings
