@@ -12062,6 +12062,10 @@ components:
             harness: {type: string}
             model: {type: string}
             effort: {type: string}
+            display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+            short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+            model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
             revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
         route_gap:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
@@ -12077,6 +12081,9 @@ components:
               label: {type: string, description: Short model label without effort.}
               harness: {type: string}
               model: {type: string}
+              display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+              short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+              model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
               sessions:
                 type: array
                 items:
@@ -12087,6 +12094,7 @@ components:
                     profile_id: {type: string, format: uuid}
                     model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
                     effort: {type: string}
+                    effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, description: 'Resolved from model_profile_id and matching reported effort; null when unregistered or unknown.'}
                     role: {type: string}
                     running: {type: boolean}
                     tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
@@ -12545,10 +12553,13 @@ components:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
         version: {type: string, minLength: 1, maxLength: 64}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
-        family: {type: string, enum: [openai, anthropic, xai, cursor, unknown]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, google, unknown]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
+        display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+        short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+        model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
     ModelProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfileWrite'}
@@ -12558,6 +12569,7 @@ components:
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: Shared effort scale; unknown stays null.}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]

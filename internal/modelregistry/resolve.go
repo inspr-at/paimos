@@ -94,7 +94,7 @@ func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) 
 func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
-		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at
+		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, p.model_display->>'display_name', p.model_display->>'short_name', p.model_display->>'model_version', p.effort_level
 		FROM model_role_routes r
 		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
 		WHERE r.role = $1
@@ -110,7 +110,7 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 			&step.Priority, &step.ProfileID, &step.State, &step.Reason, &step.ValidUntil,
 			&step.Profile.ID, &step.Profile.Slug, &step.Profile.Version, &step.Profile.Harness,
 			&step.Profile.Family, &step.Profile.Model, &step.Profile.Effort, &step.Profile.Tier,
-			&step.Profile.Enabled, &step.Profile.CreatedAt,
+			&step.Profile.Enabled, &step.Profile.CreatedAt, &step.Profile.DisplayName, &step.Profile.ShortName, &step.Profile.ModelVersion, &step.Profile.EffortLevel,
 		); err != nil {
 			return nil, err
 		}

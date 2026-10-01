@@ -56,7 +56,15 @@ func TestPlanningActualModels(t *testing.T) {
 		foundRaw := false
 		for _, s := range main.Sessions {
 			if s.Raw != nil && *s.Raw == "gpt-6-sol-xhigh" {
-				foundRaw = s.ProfileID != nil && s.Tokens != nil && *s.Tokens == 1150
+				foundRaw = s.ProfileID != nil && s.Tokens != nil && *s.Tokens == 1150 && s.EffortLevel != nil && *s.EffortLevel == 4
+			}
+		}
+		if main.DisplayName != "Codex Sol" || main.ModelVersion != "6" {
+			t.Fatalf("registry display identity: %+v", main)
+		}
+		for _, s := range main.Sessions {
+			if s.ProfileID == nil && s.EffortLevel != nil {
+				t.Fatal("unregistered session effort was guessed")
 			}
 		}
 		if !foundRaw {

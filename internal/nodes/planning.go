@@ -61,12 +61,14 @@ type planningView struct {
 	Children *planningChildren `json:"children,omitempty"`
 }
 type planningRoute struct {
-	Label    string `json:"label"`
-	Profile  string `json:"profile"`
-	Harness  string `json:"harness"`
-	Model    string `json:"model"`
-	Effort   string `json:"effort"`
-	Revision string `json:"revision"`
+	modelregistry.Display
+	EffortLevel *int   `json:"effort_level"`
+	Label       string `json:"label"`
+	Profile     string `json:"profile"`
+	Harness     string `json:"harness"`
+	Model       string `json:"model"`
+	Effort      string `json:"effort"`
+	Revision    string `json:"revision"`
 }
 type planningTokens struct {
 	Spent  *int64 `json:"spent"`
@@ -998,7 +1000,7 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		route := &planRoute{}
 		if resolved != nil {
 			p := resolved.Profile
-			route.view = &planningRoute{Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
+			route.view = &planningRoute{Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort)}
 			var in, outRate, cached *float64
 			price := &planPrice{}

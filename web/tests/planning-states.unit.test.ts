@@ -60,14 +60,14 @@ describe('actual models and saved picker choices', () => {
       { label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's1', effort: 'high', role: 'reviewer', running: false, tokens: 2_300_000 }] },
       { label: 'Codex gpt-6.1-sol', harness: 'codex', model: 'gpt-6.1-sol', sessions: [{ id: 's2', model_raw: 'gpt-6-sol-xhigh', effort: 'xhigh', role: 'worker', running: true, tokens: 500_000 }] },
     ]
-    expect(modelCell(r)).toMatchObject({ text: 'Claude opus', state: 'measured', more: 1 })
+    expect(modelCell(r)).toMatchObject({ text: 'opus', state: 'measured', more: 1 })
     expect(modelCell(r).tip).toContain('session s1 (reviewer)')
     expect(modelCell(r).tip).toContain('reported: gpt-6-sol-xhigh')
     expect(modelCell(r).tip).toContain('Planned: Codex sol · xhigh')
     r.planning!.models.reverse()
-    expect(modelCell(r).text).toBe('Codex sol')
+    expect(modelCell(r).text).toBe('gpt-6.1-sol')
     delete r.planning!.models
-    expect(modelCell(r)).toMatchObject({ text: 'Codex sol', state: 'planned', more: 0 })
+    expect(modelCell(r)).toMatchObject({ text: 'sol', state: 'planned', more: 0 })
   })
   it('keeps empty saved ticks through width changes, reloads, views and phone cards', () => {
     const prefs = { order: ['model', 'paid', 'tokens'] as const, visible: ['model', 'paid', 'tokens'] as const }

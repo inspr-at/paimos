@@ -2,15 +2,18 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import { listCostCell, modelCell, tokensCell, type PlanningColumn, type PlanningRow } from '../../lib/planning'
+import { useModelDisplay } from '../../lib/prefs'
+import EffortMeter from './EffortMeter.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 import MeasuredMark from './MeasuredMark.vue'
 
 // AEON-511 approved fragment: the measured mark has a fixed figure slot.
 // Measured values stand alone; running values retain a quiet estimate.
+const { modelDisplay } = useModelDisplay()
 const autoId = useId()
 const props = defineProps<{ column: PlanningColumn; row: PlanningRow; rowId?: string }>()
 const descriptionId = computed(() => props.rowId ? `plan-${props.rowId}-${props.column}` : autoId)
-const model = computed(() => props.column === 'model' ? modelCell(props.row) : null)
+const model = computed(() => props.column === 'model' ? modelCell(props.row, modelDisplay.value) : null)
 const figure = computed(() => props.column === 'tokens' ? tokensCell(props.row) : listCostCell(props.row))
 const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cost', paid: 'No cost' }
 </script>
@@ -18,6 +21,7 @@ const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cos
 <template>
   <span v-if="model" class="plan-model" :class="{ empty: model.state === 'none', planned: model.state === 'planned' }" :data-tip="model.tip" role="img" :aria-label="model.label" :aria-describedby="descriptionId">
     <HarnessMark v-if="model.harness" class="brand" :harness="model.harness" :size="12" />
+    <EffortMeter :level="model.effort" :enabled="modelDisplay.effortMeter" :planned="model.state === 'planned'" />
     <span class="model-name" aria-hidden="true">{{ model.state === 'planned' ? '~' : '' }}{{ model.text || '—' }}</span>
     <MeasuredMark v-if="model.state === 'measured'" />
     <span v-if="model.more" class="more" aria-hidden="true">+{{ model.more }}</span>
