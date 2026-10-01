@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -15,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Capture the real list response for both client test runners. Only session IDs
-// are ignored when comparing planning: they are random, opaque identifiers.
+// Capture the real list response for both client test runners. Session IDs and
+// their ID-based ordering vary between runs; compare the complete session set.
 var capturePlanningListFixture = flag.Bool("capture-planning-list-fixture", false, "emit the planning hover list fixture as base64")
 
 func TestPlanningListHoverFixture(t *testing.T) {
@@ -91,9 +92,15 @@ func planningFixtureProjection(t *testing.T, body []byte) map[string]any {
 	for _, item := range page.Items {
 		planning := item["planning"].(map[string]any)
 		for _, model := range planning["models"].([]any) {
-			for _, session := range model.(map[string]any)["sessions"].([]any) {
+			sessions := model.(map[string]any)["sessions"].([]any)
+			for _, session := range sessions {
 				session.(map[string]any)["id"] = "session"
 			}
+			sort.Slice(sessions, func(i, j int) bool {
+				a, _ := json.Marshal(sessions[i])
+				b, _ := json.Marshal(sessions[j])
+				return string(a) < string(b)
+			})
 		}
 		projection[item["key"].(string)] = planning
 	}
