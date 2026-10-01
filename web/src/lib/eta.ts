@@ -2,6 +2,7 @@
 // Ready and live estimates. Unknown stays empty; a past instant is overdue, which
 // is separate from a report that has gone stale.
 
+import { STALE_LIST_TIP } from './listFreshness.ts'
 export type EtaMode = 'relative' | 'clock' | 'both'
 export type EtaKind = 'Ready' | 'Live'
 
@@ -135,26 +136,29 @@ function doneTip(finished: NonNullable<EtaInput['finished']>, now: number, timeZ
 
 // formatEta returns null when nothing was reported. `timeZone` is explicit so tests
 // can pin a clock; the screen passes the viewer's zone.
-export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now: number, timeZone = 'UTC'): EtaView | null {
+export function formatEta(input: EtaInput | null | undefined, mode: EtaMode, now: number, timeZone = 'UTC', connectionStale = false): EtaView | null {
   if (!input) return null
   const sides = [input.ready, input.live].filter((side): side is EtaSide => !!side && valid(side.at))
   const pct = typeof input.progress === 'number' ? Math.max(0, Math.min(100, Math.round(input.progress))) : null
   if (!sides.length && pct == null && !input.finished) return null
   const complete = pct === 100 || !!input.finished
   const main = complete ? null : sides[0] ?? null
-  const stale = !complete && (!!input.stale || sides.some(side => side.stale))
+  const stale = connectionStale || (!complete && (!!input.stale || sides.some(side => side.stale)))
   const tip = input.finished ? [doneTip(input.finished, now, timeZone)] : complete ? ['100% done'] : [
     ...sides.flatMap(side => sideTip(side, now, timeZone)),
     ...(pct != null ? [`${pct}% done`] : []),
   ]
   if (stale && !sides.some(side => side.stale && valid(side.reported_at))) tip.push('Estimate not refreshed in time')
+  if (connectionStale) {
+    tip.splice(0, tip.length, STALE_LIST_TIP, ...sides.map(side => `Last ${side.kind.toLowerCase()} estimate: ${clock(side.at, now, timeZone)}`))
+  }
   return {
     kind: main?.kind ?? null,
-    text: main ? (mode === 'clock' ? clock(main.at, now, timeZone) : relative(main.at, now)) : null,
-    hover: main && mode === 'both' ? clock(main.at, now, timeZone) : null,
+    text: main ? (connectionStale ? `Last ${clock(main.at, now, timeZone)}` : mode === 'clock' ? clock(main.at, now, timeZone) : relative(main.at, now)) : null,
+    hover: main && mode === 'both' && !connectionStale ? clock(main.at, now, timeZone) : null,
     progress: pct != null ? `${pct}%` : null,
     pct,
-    overdue: !!main && Date.parse(main.at) < now,
+    overdue: !connectionStale && !!main && Date.parse(main.at) < now,
     stale,
     done: !!input.finished,
     tip: tip.join('\n'),

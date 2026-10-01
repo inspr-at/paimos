@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Diagnostic mirror only. The REQUIRED status is posted outside Actions by App
+# 5134402 from trusted main; PR-controlled jobs cannot satisfy that binding.
+name: Cross-family policy preview
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+permissions:
+  contents: read
+jobs:
+  policy-preview:
+    name: gate/policy-preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Verify the verdict with the base commit's gate policy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid gate base commit'; exit 1; }
+          # First installation fails closed until the coordinator lands this policy.
+          # Subsequent PRs cannot add themselves to the allowlist or change their checker.
+          if ! git cat-file -e "$GATE_BASE_SHA:scripts/cross-family-gate.mjs" || ! git cat-file -e "$GATE_BASE_SHA:.github/gate-posters.json"; then
+            echo 'Trusted base gate policy is absent; coordinator bootstrap required before enabling the required check.'
+            exit 1
+          fi
+          git show "$GATE_BASE_SHA:scripts/cross-family-gate.mjs" > "$RUNNER_TEMP/cross-family-gate.mjs"
+          git show "$GATE_BASE_SHA:.github/gate-posters.json" > "$RUNNER_TEMP/gate-posters.json"
+          node "$RUNNER_TEMP/cross-family-gate.mjs" "$RUNNER_TEMP/gate-posters.json"
