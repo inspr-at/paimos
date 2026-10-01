@@ -2,8 +2,9 @@
 package harness_test
 
 import (
-	"github.com/jackc/pgx/v5"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestRegistrationAndBindingCaptureOneEstimateBaseline(t *testing.T) {
