@@ -390,7 +390,7 @@ test('an OIDC round trip in another tab invalidates the old review and records t
   await other.route('**/api/auth/login', route => { returned = true; return route.fulfill({ status: 302, headers: { location: '/agents' } }) })
   await list(other, [request('r-ola', 'pending', { host: 'Ola’s Mac' })])
   await other.goto('/signin')
-  await other.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await other.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(strip(other)).toContainText('Ola’s Mac')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Attach session' })).toHaveCount(0)

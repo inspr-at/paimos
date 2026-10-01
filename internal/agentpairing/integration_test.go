@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -39,6 +40,42 @@ import (
 )
 
 const origin = "https://pairing.test"
+
+func TestComputerCompatibilityUsesItsReportedAgent(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	policy := agentcompat.Supported()
+	for _, tc := range []struct {
+		name    string
+		release *agentcompat.Release
+		status  string
+	}{
+		{"inside", &agentcompat.Release{Protocol: policy.Protocol, Version: "261002072608.0.0", VersionScheme: policy.VersionScheme}, "compatible"},
+		{"below minimum", &agentcompat.Release{Protocol: policy.Protocol, Version: "260930072608.0.0", VersionScheme: policy.VersionScheme}, "update_required"},
+		{"wrong protocol", &agentcompat.Release{Protocol: "pairing-v2", Version: policy.MinVersion, VersionScheme: policy.VersionScheme}, "protocol_mismatch"},
+		{"legacy downgrade clears report", nil, "unknown"},
+		{"invalid report is advisory", &agentcompat.Release{Protocol: policy.Protocol, Version: strings.Repeat("x", 65), VersionScheme: policy.VersionScheme}, "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			progress := agentpairing.SetupProgress{State: "connected", AgentRelease: tc.release}
+			var report agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}, false, "", 200), &report)
+			if report.AgentCompatibility.Status != tc.status || report.SetupState != "connected" || *report.ComputerState != "connected" {
+				t.Fatalf("incorrect advisory or enrollment changed: %+v", report.AgentCompatibility)
+			}
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+			if listed.AgentCompatibility != report.AgentCompatibility || listed.AgentRelease != report.AgentRelease {
+				t.Fatal("person view and lifecycle response disagree")
+			}
+			if strings.Contains(listed.AgentCompatibility.Action, "Update aeon-agentd to at least "+policy.MinVersion) != (tc.status == "update_required" || tc.status == "protocol_mismatch") {
+				t.Fatal("update advice missing or invented")
+			}
+		})
+	}
+}
 
 func nixGuideFixture() *config.PairingNixGuide {
 	return &config.PairingNixGuide{

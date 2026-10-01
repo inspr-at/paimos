@@ -95,12 +95,12 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
   }
 }
 
-test('401 redirects, production hides email sign-in, INSPR navigates to login', async ({ page }) => {
+test('401 redirects, production hides email sign-in, OIDC navigates to login', async ({ page }) => {
   await mockAPI(page, { signedIn: false })
   await page.goto('/')
   await expect(page).toHaveURL('/signin')
   await expect(page.getByLabel('Email address')).toHaveCount(0)
-  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL('/api/auth/login')
 })
 
@@ -151,12 +151,12 @@ test('a revoked session is checked on the next navigation', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
 })
 
-test('INSPR ID sign-in resumes the saved path after the full-page callback', async ({ page }) => {
+test('OIDC sign-in resumes the saved path after the full-page callback', async ({ page }) => {
   const auth = { signedIn: false }
   await mockAPI(page, { auth })
   await page.goto('/signin?error=expired&return=/agents')
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
-  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL('/api/auth/login')
   auth.signedIn = true
   await page.goto('/') // The OIDC callback returns home with its new session.

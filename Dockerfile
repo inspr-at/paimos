@@ -38,8 +38,8 @@ RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 \
 RUN apk add --no-cache tini=0.19.0-r3
 COPY --from=build /paimos /paimos
 COPY NOTICE /usr/share/doc/aeon/NOTICE
-# The runtime UID/GID is a contract with the host: csb1's aeon-files directory
-# is owned by 65532 (the former distroless nonroot user). Never let it float.
+# The runtime UID/GID is a contract with every host: writable file mounts
+# must be owned by 65532 (the former distroless nonroot user). Never let it float.
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/sbin/tini", "--", "/paimos", "serve"]

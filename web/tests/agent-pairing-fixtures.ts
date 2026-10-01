@@ -24,7 +24,6 @@ export function pairingGuide() {
     platform_qualification: 'candidate; consult the exact release service qualification evidence',
     setup_command: SETUP_COMMAND,
     homebrew_command: HOMEBREW_COMMAND,
-    homebrew_formula_current: true,
     verification_capabilities: { pi: { supported: false, policy: 'unavailable', reason: 'pi verification has no qualified no-tools policy for extensions and provider configuration.' } },
     install_available: false,
     install_targets: [],

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/version"
@@ -86,6 +87,7 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 	r.Host = "attacker.invalid"
 	mux.ServeHTTP(w, r)
 	var guide struct {
+		Policy  agentcompat.Policy           `json:"agent_compatibility"`
 		Pair    string                       `json:"setup_command"`
 		Brew    string                       `json:"homebrew_command"`
 		Targets []agentpairing.InstallTarget `json:"install_targets"`
@@ -95,7 +97,7 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 	}
 	want := "aeon-agentd pair --url '" + origin + "'"
 	brew := "brew install inspr-at/tap/aeon-agentd\nenv \"$(brew --prefix)/bin/aeon-agentd\" pair --url '" + origin + "'"
-	if guide.Pair != want || guide.Brew != brew || len(guide.Targets) != 4 {
+	if guide.Pair != want || guide.Brew != brew || len(guide.Targets) != 4 || guide.Policy != agentcompat.Supported() || strings.Contains(w.Body.String(), "homebrew_formula_current") {
 		t.Fatal("guide commands differ from instance")
 	}
 	for _, target := range guide.Targets {
@@ -105,12 +107,16 @@ func TestGuideCommandsHaveNoPlaceholders(t *testing.T) {
 	}
 	html := httptest.NewRecorder()
 	agentpairing.GuidePage(http.NotFoundHandler(), nil, origin, nixGuideFixture()).ServeHTTP(html, httptest.NewRequest("GET", "/agents/register-agent", nil))
-	for _, forbidden := range []string{"placeholder", "&lt;verified", "attacker.invalid", "Install only the matching verified release"} {
+	for _, forbidden := range []string{"placeholder", "&lt;verified", "attacker.invalid", "Install only the matching verified release", "formula matches", "on its way", "homebrew_formula_current"} {
 		if strings.Contains(html.Body.String(), forbidden) {
 			t.Fatalf("HTML includes %s", forbidden)
 		}
 	}
-	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "$(brew --prefix)/bin/aeon-agentd", "$HOME/.nix-profile/bin/aeon-agentd", "add-harness", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "This formula matches this Aeon’s version", "helper/instance version mismatch", "does not drain or restart", "verify Touch ID on the new daemon", "Trouble?", "usage: paimos-agentd setup|status…", "Nix or Home Manager on this Mac? Choose macOS · Nix.", "Setting up another computer, or letting an agent do it? Share this address:"} {
+	if strings.Index(html.Body.String(), "Direct download for this instance’s version") > strings.Index(html.Body.String(), "macOS · Homebrew") {
+		t.Fatal("pinned direct download must come first")
+	}
+
+	for _, required := range []string{"brew install inspr-at/tap/aeon-agentd", "$(brew --prefix)/bin/aeon-agentd", "$HOME/.nix-profile/bin/aeon-agentd", "add-harness", "aeon-agentd disconnect", "brew uninstall aeon-agentd", "~/.local/bin", "Nix / Home Manager", "Homebrew installs the latest INSPR release", "tells you if this server needs a different version", "does not drain or restart", "verify Touch ID on the new daemon", "Trouble?", "usage: paimos-agentd setup|status…", "Nix or Home Manager on this Mac? Choose macOS · Nix.", "Setting up another computer, or letting an agent do it? Share this address:"} {
 		if !strings.Contains(html.Body.String(), required) {
 			t.Fatalf("HTML missing %s", required)
 		}

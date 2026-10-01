@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -359,7 +360,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	if err := ExpireUnclaimedVerifications(ctx, tx); err != nil {
 		return View{}, err
 	}
-	v := View{RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
+	v := View{AgentCompatibility: agentcompat.Result{Status: "unknown"}, RequestID: rec.ID, TenantID: rec.TenantID, State: rec.State, Digest: rec.Digest, ExpiresAt: rec.ExpiresAt, ComputerName: rec.Details.ComputerName, Platform: rec.Details.Platform, Arch: rec.Details.Arch, Workspace: rec.Details.Workspace, Capabilities: rec.Details.Capabilities, Requested: rec.Details.Accounts, ComputerID: rec.ComputerID, Cleanup: "pending", Processes: "unconfirmed", Enrollments: []Enrollment{}, Verification: Verification{"read_only", rec.Mode, 1, 1, VerificationSeconds, 1, "requests", rec.VerificationExpiresAt, VerificationTask}}
 	if err := tx.QueryRow(ctx, `SELECT name FROM tenants WHERE id=$1`, rec.TenantID).Scan(&v.TenantName); err != nil {
 		return v, err
 	}
@@ -377,10 +378,11 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	var keyPrefix string
 	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
- CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt)
+ CASE WHEN EXISTS(SELECT 1 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id WHERE e.computer_id=c.id AND e.state='connected' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes') THEN 'online' WHEN c.last_seen_at IS NULL THEN 'unknown' ELSE 'offline' END,c.archived_at,c.agent_protocol,c.agent_version,c.agent_version_scheme FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.id=$1`, *rec.ComputerID).Scan(&v.ComputerState, &v.PrincipalID, &v.DaemonID, &v.Cleanup, &v.Processes, &v.Revision, &keyPrefix, &v.SetupState, &v.SetupError, &v.HarnessStatuses, &v.HarnessDetails, &v.LastSeenAt, &v.Connectivity, &v.ArchivedAt, &v.AgentRelease.Protocol, &v.AgentRelease.Version, &v.AgentRelease.VersionScheme)
 	if err != nil {
 		return v, err
 	}
+	v.AgentCompatibility = agentcompat.Supported().Check(v.AgentRelease)
 	if *v.ComputerState == "revoked" {
 		v.State = "revoked"
 	} else if prefix && *v.ComputerState == "connected" {

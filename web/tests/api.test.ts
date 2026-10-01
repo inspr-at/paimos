@@ -45,6 +45,20 @@ test('only a literal server true enables development sign-in', async () => {
   assert.deepEqual(await getSession(), { identity: null, devMode: true })
 })
 
+test('reads the public OIDC display name on anonymous and authenticated responses', async () => {
+  const identity = { principal: { id: 'p1', name: 'Person' }, tenant: { id: 't1', name: 'Workspace' } }
+  for (const status of [200, 401]) {
+    for (const oidc_display_name of ['', ' \t ', ' Acme SSO ', 'INSPR ID']) {
+      respond({ ...(status === 200 ? identity : {}), oidc_display_name }, status)
+      assert.equal((await getSession()).oidcDisplayName, oidc_display_name.trim())
+    }
+    for (const oidc_display_name of [undefined, null, true, 123, {}]) {
+      respond({ ...(status === 200 ? identity : {}), oidc_display_name }, status)
+      assert.equal((await getSession()).oidcDisplayName, undefined)
+    }
+  }
+})
+
 test('rejects malformed identities and server errors', async () => {
   for (const body of [{}, { principal: { name: 'Someone' }, tenant: { name: 'INSPR' } }]) {
     respond(body)

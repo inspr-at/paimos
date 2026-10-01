@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
-  PairingError, activeRunIds, applyComputerListRefresh, computerRemoval, describeComputerStatus, removeComputer, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
+  PairingError, agentUpdateAdvice, activeRunIds, applyComputerListRefresh, computerRemoval, describeComputerStatus, removeComputer, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
@@ -291,6 +291,7 @@ function assign(error: unknown, fallback: string) {
                 <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
               </template>
             </p>
+            <p v-if="agentUpdateAdvice(computer)" class="agent-update" role="status">{{ agentUpdateAdvice(computer) }}</p>
           </div>
         </div>
         <div v-if="hasHarnessReports(computer)" class="harness-line reported">
@@ -394,6 +395,7 @@ function assign(error: unknown, fallback: string) {
 .computer { padding: 8px 10px; border-top: 1px solid var(--line); }
 .identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .identity-text { min-width: 0; }
+.agent-update { margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
 .name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
 .identity .meta { display: flex; align-items: baseline; min-width: 0; max-width: 100%; overflow: hidden; font-size: 12px; color: var(--ink-3); white-space: nowrap; }

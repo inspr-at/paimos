@@ -14,6 +14,7 @@ int aeon_enclave_create(const char *, void **, int *);
 int aeon_enclave_capability(void);
 int aeon_enclave_create_disposition(int);
 int aeon_vault_legacy_stored_attributes(const char *, int);
+int aeon_vault_access_fixture(int);
 void *aeon_enclave_sign_start(const char *, const void *, int, const char *);
 int aeon_enclave_sign_result(void *, void **, int *);
 void aeon_enclave_sign_close(void *);
@@ -33,7 +34,12 @@ import (
 var (
 	_ = enclaveCreateDisposition
 	_ = vaultLegacyStoredAttributes
+	_ = vaultAccessShapeFixture
 )
+
+func vaultAccessShapeFixture(scenario int) int {
+	return int(C.aeon_vault_access_fixture(C.int(scenario)))
+}
 
 func enclaveCreateDisposition(copyStatus int) int {
 	return int(C.aeon_enclave_create_disposition(C.int(copyStatus)))
