@@ -291,7 +291,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('the original integration exception remains the unchanged merged 1054 contract migration', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1100_aithema_pending_content.sql']);
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   assert.equal(entry.ticket, 'AEON-397');
@@ -303,6 +303,20 @@ test('the original integration exception remains the unchanged merged 1054 contr
   assert.equal(destructive(source), true);
 });
 
+test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review exception', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === '1100_aithema_pending_content.sql');
+  assert.equal(entry.ticket, 'AEON-483');
+  assert.match(entry.reason, /coordinator review before merge\/release/);
+  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
+  const source = readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8');
+  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(destructive(source), true);
+  assert.match(source, /octet_length\(original_bytes\) <= 1048576/);
+  assert.match(source, /OR contract = 'aithema\.spec\.snapshot'/);
+  assert.match(source, /contract = 'aithema\.journal\.record' AND kind = 'pending_op\.content'/);
+});
+
 test('the current tree passes only with the explicit pinned contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -311,6 +325,6 @@ test('the current tree passes only with the explicit pinned contract exceptions'
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1100_aithema_pending_content.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
