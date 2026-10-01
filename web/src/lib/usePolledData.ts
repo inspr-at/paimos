@@ -77,28 +77,43 @@ export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>
 export function usePoller(run: () => Promise<unknown> | void, period: number, options: { enabled?: () => boolean; invalidate?: () => void } = {}) {
   let timer: ReturnType<typeof setInterval> | undefined
   let running = false
+  let started = false
   let pending = false
+  let generation = 0
   let lastTick = Date.now()
   const enabled = () => document.visibilityState === 'visible' && navigator.onLine !== false && (options.enabled?.() ?? true)
   function tick(force = false) {
     const at = Date.now()
     const wake = at - lastTick > period * 2
-    if (wake) options.invalidate?.()
+    if (wake) { restart(); return }
     lastTick = at
     if (!enabled()) return
-    if (running) { if (force || wake) pending = true; return }
+    if (running) { if (force && started) pending = true; return }
     if (!force && document.visibilityState !== 'visible') return
     running = true
-    Promise.resolve().then(run).catch(() => { /* the data owner presents refresh errors */ }).finally(() => {
+    started = false
+    const turn = generation
+    Promise.resolve().then(() => { if (turn === generation) { started = true; return run() } }).catch(() => { /* the data owner presents refresh errors */ }).finally(() => {
+      if (turn !== generation) return
       running = false
+      started = false
       if (pending) { pending = false; tick(true) }
     })
   }
-  function visibility() {
-    if (document.visibilityState === 'hidden') { pending = false; options.invalidate?.(); return }
+  // A suspended request cannot block the first read in a new awake period.
+  // Its data owner invalidates it; its eventual completion cannot run this poller.
+  function restart() {
+    generation++
+    running = false; started = false; pending = false
+    options.invalidate?.()
+    lastTick = Date.now()
     tick(true)
   }
-  function online() { tick(true) }
+  function visibility() {
+    if (document.visibilityState === 'hidden') { generation++; running = false; started = false; pending = false; options.invalidate?.(); return }
+    restart()
+  }
+  function online() { restart() }
   function start(immediate = false) {
     if (timer) return
     lastTick = Date.now()
@@ -110,9 +125,11 @@ export function usePoller(run: () => Promise<unknown> | void, period: number, op
   function stop() {
     clearInterval(timer); timer = undefined
     pending = false
+    generation++
+    running = false; started = false
     document.removeEventListener('visibilitychange', visibility)
     window.removeEventListener('online', online)
     options.invalidate?.()
   }
-  return { start, stop, tick }
+  return { start, stop, tick, restart }
 }
