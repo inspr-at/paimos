@@ -1,0 +1,51 @@
+{
+  "forward": {
+    "direction": "forward", "release": "99", "sequence": 99,
+    "version": "260930000000.0.0",
+    "cut_at": "2026-09-30T01:00:00Z", "live_at": "2026-09-30T01:30:00Z"
+  },
+  "live_rollback": {
+    "schema": "aeon.rollout.v1", "outcome": "live", "release": "99", "sequence": 99,
+    "version": "260930000000.0.0",
+    "cut_at": "2026-09-30T00:30:00Z", "live_at": "2026-09-30T00:45:00Z",
+    "rollback_started_at": "2026-09-30T00:30:00Z", "rollback_finished_at": "2026-09-30T00:45:00Z"
+  },
+  "incomplete_forwards": [
+    {"cut_at": null},
+    {"cut_at": "2026-09-30T01:00:00"},
+    {"cut_at": "2026-09-30T02:00:00Z"},
+    {"live_at": null}
+  ],
+  "unnumbered_rerun": {
+    "id": "fixture-r3-ci", "workflowName": "CI", "event": "pull_request", "conclusion": "success",
+    "headBranch": "rel/r99", "runAttempt": 3,
+    "createdAt": "2026-09-30T01:00:00Z", "updatedAt": "2026-09-30T01:25:00Z",
+    "attempts": [
+      {"conclusion": "success", "startedAt": "2026-09-30T01:05:00Z", "completedAt": "2026-09-30T01:10:00Z"},
+      {"conclusion": "success", "startedAt": "2026-09-30T01:10:00Z", "completedAt": "2026-09-30T01:15:00Z"},
+      {"conclusion": "success", "startedAt": "2026-09-30T01:20:00Z", "completedAt": "2026-09-30T01:25:00Z"}
+    ]
+  },
+  "idless_status_pages": [
+    [
+      {"context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:00:00Z"},
+      {"context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:10:00Z"}
+    ],
+    [
+      {"context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:00:00Z"},
+      {"context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:10:00Z"}
+    ],
+    [{"id": 3, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:20:00Z"}]
+  ],
+  "stable_status_pages": [
+    [
+      {"id": 1, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:00:00Z"},
+      {"id": 2, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:10:00Z"}
+    ],
+    [
+      {"id": 1, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:00:00Z"},
+      {"id": 2, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:10:00Z"}
+    ],
+    [{"id": 3, "context": "gate/cross-family", "state": "success", "updated_at": "2026-09-30T00:20:00Z"}]
+  ]
+}
