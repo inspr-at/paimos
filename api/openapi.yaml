@@ -2328,7 +2328,7 @@ paths:
     post:
       operationId: createMemberInvite
       summary: Create an invite and return its join link once
-      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance. Imported people without a sign-in identity can be invited. Acceptance links a unique active, unlinked imported person with the same email in this tenant to the new person, preserving the imported identity and history. Email matching is exact apart from case; multiple matches require manual linking. The invited roles determine access; imported roles are not inherited.
+      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance. Imported people without a sign-in identity can be invited. Acceptance links a unique active, unlinked imported person with the same email in this tenant to the new person, preserving the imported identity and history. Email matching is exact apart from case; multiple unlinked matches require manual linking, including inactive records or records that already have aliases. Inactive records and existing link targets are never auto-linked. The invited roles determine access; imported roles are not inherited.
       requestBody:
         required: true
         content:

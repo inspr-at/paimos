@@ -129,8 +129,8 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 			return tenant.Principal{}, err
 		}
 	}
-	if len(imported) == 1 {
-		out, err := apply.Apply(ctx, tx, tenantID, imported[0], person.ID)
+	if len(imported) == 1 && imported[0].canLink {
+		out, err := apply.Apply(ctx, tx, tenantID, imported[0].id, person.ID)
 		if err != nil {
 			return tenant.Principal{}, err
 		}
@@ -156,26 +156,40 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	return person, nil
 }
 
-// ImportedPeopleForEmail returns at most two unlinked, active people without a
+// ImportedPeopleForEmail returns at most two unlinked people without a
 // sign-in identity in this tenant. Two means ambiguous: never pick the first.
 // Callers must verify the email before using these IDs for account linking or
 // revealing that an earlier account exists. Matching does not fold aliases,
 // strip plus tags, or infer relationships from a name.
 func ImportedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string) ([]string, error) {
-	return importedPeopleForEmail(ctx, tx, tenantID, email, false)
+	people, err := importedPeopleForEmail(ctx, tx, tenantID, email, false)
+	ids := make([]string, len(people))
+	for i, person := range people {
+		ids[i] = person.id
+	}
+	return ids, err
 }
 
-func importedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string, lock bool) ([]string, error) {
+type importedPerson struct {
+	id      string
+	canLink bool
+}
+
+func importedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string, lock bool) ([]importedPerson, error) {
 	email = strings.TrimSpace(email)
 	if !emailPattern.MatchString(email) {
-		return []string{}, nil
+		return []importedPerson{}, nil
 	}
-	query := `SELECT p.id::text FROM principals p
+	// Count every unlinked match for ambiguity, including inactive records and
+	// existing link targets. They cannot be auto-linked, but omitting them could
+	// let us claim the wrong person's history by selecting another match.
+	query := `SELECT p.id::text, p.status='active' AND NOT EXISTS (
+		SELECT 1 FROM principals a WHERE a.tenant_id=p.tenant_id AND a.linked_to=p.id)
+		FROM principals p
 		LEFT JOIN identities i ON i.id=p.identity_id
-		WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.linked_to IS NULL AND p.status='active'
+		WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.linked_to IS NULL
 		  AND (p.identity_id IS NULL OR i.issuer='paimos-classic')
 		  AND lower(coalesce(nullif(p.email,''),i.email,''))=lower($2)
-		  AND NOT EXISTS (SELECT 1 FROM principals a WHERE a.tenant_id=p.tenant_id AND a.linked_to=p.id)
 		ORDER BY p.id LIMIT 2`
 	if lock {
 		query += ` FOR UPDATE OF p`
@@ -185,15 +199,15 @@ func importedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email stri
 		return nil, err
 	}
 	defer rows.Close()
-	ids := []string{}
+	people := []importedPerson{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var person importedPerson
+		if err := rows.Scan(&person.id, &person.canLink); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		people = append(people, person)
 	}
-	return ids, rows.Err()
+	return people, rows.Err()
 }
 
 func scanNewPerson(ctx context.Context, tx pgx.Tx, tenantID, identityID, name, email string) (tenant.Principal, error) {

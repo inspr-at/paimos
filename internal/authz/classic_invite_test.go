@@ -24,11 +24,14 @@ func TestClassicInviteLinking(t *testing.T) {
 		name, issuer, email                                          string
 		candidates                                                   int
 		foreign, deactivated, linked, blocked, wantLink, projectOnly bool
+		inactiveExtra, hasAliases                                    bool
 	}{
 		{name: "classic", issuer: "paimos-classic", email: "person@example.com", candidates: 1, wantLink: true},
 		{name: "no identity", email: "person@example.com", candidates: 1, wantLink: true},
 		{name: "identity email only", issuer: "paimos-classic", candidates: 1, wantLink: true},
 		{name: "ambiguous", issuer: "paimos-classic", email: "person@example.com", candidates: 2},
+		{name: "ambiguous inactive record", issuer: "paimos-classic", email: "person@example.com", candidates: 2, inactiveExtra: true},
+		{name: "already has aliases", issuer: "paimos-classic", email: "person@example.com", candidates: 1, hasAliases: true},
 		{name: "other tenant", issuer: "paimos-classic", email: "person@example.com", candidates: 1, foreign: true},
 		{name: "different mailbox", issuer: "paimos-classic", email: "person+alias@example.com", candidates: 1},
 		{name: "deactivated", issuer: "paimos-classic", email: "person@example.com", candidates: 1, deactivated: true},
@@ -60,6 +63,7 @@ func TestClassicInviteLinking(t *testing.T) {
 			var aliases, identities []string
 			if err := db.InTenant(ctx, d.App, candidateTenant, func(tx pgx.Tx) error {
 				for n := range tc.candidates {
+					deactivated := tc.deactivated || tc.inactiveExtra && n > 0
 					var identity any
 					identityID := ""
 					if tc.issuer != "" {
@@ -70,15 +74,20 @@ func TestClassicInviteLinking(t *testing.T) {
 					}
 					var id string
 					if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,email,roles,status)
-						VALUES($1::uuid,'person',$2::uuid,$3,$4,ARRAY['admin'],$5) RETURNING id::text`, candidateTenant, identity, fmt.Sprintf("Classic %d", n), tc.email, map[bool]string{true: "deactivated", false: "active"}[tc.deactivated]).Scan(&id); err != nil {
+						VALUES($1::uuid,'person',$2::uuid,$3,$4,ARRAY['admin'],$5) RETURNING id::text`, candidateTenant, identity, fmt.Sprintf("Classic %d", n), tc.email, map[bool]string{true: "deactivated", false: "active"}[deactivated]).Scan(&id); err != nil {
 						return err
 					}
 					aliases = append(aliases, id)
 					identities = append(identities, identityID)
-					if !tc.foreign && !tc.deactivated {
+					if !tc.foreign && !deactivated {
 						if err := dbtest.BindLegacyTx(ctx, tx, tid, id); err != nil {
 							return err
 						}
+					}
+				}
+				if tc.hasAliases {
+					if _, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name,linked_to) VALUES($1::uuid,'person','Existing alias',$2::uuid)`, tid, aliases[0]); err != nil {
+						return err
 					}
 				}
 				if tc.linked {
