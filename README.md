@@ -1426,11 +1426,15 @@ the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
 ancestors are acceptable. The selected target still requires its executable
 and working directory.
 Those checks are defence in depth. A program running as the same user can open
-another terminal and request the review. On a Mac that can use Touch ID, attach
-approval asks for it by default until the person saves a choice. People without
-Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
-Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
-Mac that can show Touch ID prompts on that Mac's screen.
+another terminal and request the review. On a Mac whose browser-approved pairing
+pinned a Secure Enclave public key, attach approval requires that key's Touch ID
+signature by default until the person saves a choice, even when the daemon
+reports that Touch ID cannot run. Linux and older pairings without a pinned key
+keep approval in Aeon. To allow an upgraded Mac without a graphical login or
+usable Touch ID, explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching**. Saving Mac confirmation
+fails closed where Touch ID cannot run. SSH to a Mac that can show Touch ID
+prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 

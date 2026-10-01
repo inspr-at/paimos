@@ -616,9 +616,11 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
-unsaved default also requires an enclave-signed confirmation before a session
-exists. Type `WATCH`, then open the paired
+Mac with a browser-pinned Secure Enclave public key, the unsaved default also
+requires that key's signature before a session exists, even if the daemon reports
+that Touch ID cannot run. A person can explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching** to opt out. Type `WATCH`,
+then open the paired
 instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
