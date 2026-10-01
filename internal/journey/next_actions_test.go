@@ -26,6 +26,9 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 			continue
 		}
 		if state == "accepted" {
+			if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.tenant, project); err != nil {
+				t.Fatal(err)
+			}
 			f.acceptBrief(t, project)
 			continue
 		}
