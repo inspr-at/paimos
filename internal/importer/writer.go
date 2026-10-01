@@ -307,7 +307,7 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, co
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles,created_at,email) VALUES($1,'person',$2,$3,$4,coalesce($5::timestamptz,now()),$6) ON CONFLICT(tenant_id,identity_id) WHERE identity_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,email=coalesce(EXCLUDED.email,principals.email) RETURNING id`, tenantID, identityID, name, roles, createdAt, nullString(stringField(u, "email"))).Scan(&principalID); err != nil {
 			return "", nil, err
 		}
-		if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, principalID); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tenantID, principalID); err != nil {
 			return "", nil, err
 		}
 		var after []byte

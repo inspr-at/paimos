@@ -71,7 +71,7 @@ func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to string) (Outcome, 
 		if _, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid`, tenantID, source.ID); err != nil {
 			return Outcome{}, err
 		}
-	} else if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, source.ID); err != nil {
+	} else if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tenantID, source.ID); err != nil {
 		return Outcome{}, err
 	}
 	out.Person.LinkedTo = target

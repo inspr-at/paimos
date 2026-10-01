@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork } from './work-fixtures'
 import { accessWorld, mockAccess } from './access-fixtures'
 
@@ -58,3 +59,20 @@ test('verified imported-account sign-in explains the invite and preserves ambigu
   await alert.getByRole('button', { name: 'Dismiss' }).click()
   await expect(alert).toHaveCount(0)
 })
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`imported invite actions fit a phone and remain accessible in ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ colorScheme })
+    await mockWork(page, fixtures())
+    await mockAccess(page, accessWorld())
+    await page.goto('/settings/access/people')
+    await page.getByRole('button', { name: /Imported from classic, no sign-in/ }).click()
+    await expect(page.getByRole('button', { name: 'Invite jw (classic)' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Link jw (classic) to a person' })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+    const result = await new AxeBuilder({ page }).include('.imported').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
+    expect(result.violations).toEqual([])
+    await page.locator('.imported').screenshot({ path: testInfo.outputPath(`classic-invite-${colorScheme}.png`) })
+  })
+}

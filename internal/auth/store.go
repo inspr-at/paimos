@@ -286,7 +286,7 @@ func (m *Module) startSession(ctx context.Context, identityID, tenantID, princip
 			RETURNING id`, sessionID(raw), identityID, tenantID, principalID).Scan(&id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, principalID)
+		_, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tenantID, principalID)
 		return err
 	})
 	if err != nil {

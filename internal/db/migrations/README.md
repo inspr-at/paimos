@@ -50,6 +50,10 @@ child contributes 100 without retaining its stopped session's ETA. Nested epics
 still count as one direct child, and unknown or failed work stays unknown.
 The published `aeon_node_eta` function remains available to previous binaries.
 
+AEON-523 adds `aeon_bind_legacy_uninvited`, used by sign-in, import and unlink
+to preserve an accepted invite's explicit access. The original legacy binder
+stays available for previous binaries; no published SQL or function is replaced.
+
 Every new migration containing any statement outside the expand-safe allowlist
 must have this standalone line comment in its header, before SQL (after `aeon:no-transaction`
 when applicable):

@@ -34,6 +34,7 @@ func TestClassicInviteLinking(t *testing.T) {
 		{name: "deactivated", issuer: "paimos-classic", email: "person@example.com", candidates: 1, deactivated: true},
 		{name: "already linked", issuer: "paimos-classic", email: "person@example.com", candidates: 1, linked: true, blocked: true},
 		{name: "real member", issuer: "https://id.example", email: "person@example.com", candidates: 1, blocked: true},
+		{name: "real member identity email", issuer: "https://id.example", email: "previous@example.com", candidates: 1, blocked: true},
 		{name: "project only", issuer: "paimos-classic", email: "person@example.com", candidates: 1, wantLink: true, projectOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,11 +156,11 @@ func TestClassicInviteLinking(t *testing.T) {
 					t.Fatalf("link events: %d", count)
 				}
 				// This is the legacy binder called by both startSession and import.
-				if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, person.ID); err != nil {
+				if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tid, person.ID); err != nil {
 					return err
 				}
 				if tc.wantLink {
-					if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, aliases[0]); err != nil {
+					if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tid, aliases[0]); err != nil {
 						return err
 					}
 					if err := tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid`, tid, aliases[0]).Scan(&count); err != nil {
