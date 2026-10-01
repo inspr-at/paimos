@@ -88,7 +88,7 @@ func TestVendorSessionBinding(t *testing.T) {
 	second["worker_lease"] = "vendor-lease-000000000000000000000003"
 	w = f.call(f.person, "POST", base, second, "")
 	expect(t, w, 409)
-	if decode(t, w)["error"] != "vendor_session_ref is already bound to an active generation for this agent and harness" {
+	if decode(t, w)["error"] != "vendor_session_ref is already bound to an active generation for this agent" {
 		t.Fatal("duplicate vendor diagnostic did not name the conflict")
 	}
 

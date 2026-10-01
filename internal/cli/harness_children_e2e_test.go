@@ -107,13 +107,35 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	// an inherited ambient reference is not an exemption from uniqueness.
 	duplicate := map[string]any{"agent_principal_id": key.PrincipalID, "harness": "claude", "host": "children-test", "management_mode": "unmanaged", "role": "worker", "parent_harness_session_id": parent.ID, "harness_session_ref": "duplicate-child-registration-ref", "worker_lease": "synthetic-duplicate-child-lease-00000000", "vendor_session_ref": vendor}
 	err := c.Do(t.Context(), http.MethodPost, path, duplicate, nil)
-	if err == nil || err.Error() != "api 409: vendor_session_ref is already bound to an active generation for this agent and harness" || strings.Contains(err.Error(), vendor) {
+	if err == nil || err.Error() != "api 409: vendor_session_ref is already bound to an active generation for this agent" || strings.Contains(err.Error(), vendor) {
 		t.Fatalf("duplicate native reference diagnostic: %v", err)
 	}
-	for _, family := range []string{"codex", "grok", "cursor"} {
+	assertParentBinding := func() {
+		t.Helper()
+		var binding struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := c.Do(t.Context(), http.MethodPost, "/api/inbox/session-binding", map[string]string{"harness_session_ref": vendor}, &binding); err != nil {
+			t.Fatalf("parent native reference lookup: %v", err)
+		}
+		if binding.SessionID != parent.ID {
+			t.Fatal("parent native reference no longer resolves to the parent")
+		}
+	}
+	assertParentBinding()
+	for _, family := range []string{"codex", "grok", "cursor", "pi"} {
 		duplicate["harness"] = family
 		duplicate["harness_session_ref"] = "child-family-reference-" + family
 		duplicate["worker_lease"] = "synthetic-child-family-lease-00000000-" + family
+		duplicate["vendor_session_ref"] = vendor
+		err := c.Do(t.Context(), http.MethodPost, path, duplicate, nil)
+		if err == nil || err.Error() != "api 409: vendor_session_ref is already bound to an active generation for this agent" || strings.Contains(err.Error(), vendor) {
+			t.Fatalf("%s duplicate native reference diagnostic: %v", family, err)
+		}
+		assertParentBinding()
+
+		// A child with its own native reference still registers on every harness.
+		duplicate["vendor_session_ref"] = "child-family-native-reference-" + family
 		var child harness.Session
 		if err := c.Do(t.Context(), http.MethodPost, path, duplicate, &child); err != nil {
 			t.Fatalf("%s child registration: %v", family, err)
@@ -121,6 +143,7 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 		if child.ParentID == nil || *child.ParentID != parent.ID || child.AgentPrincipalID != key.PrincipalID {
 			t.Fatalf("%s child changed hierarchy or identity", family)
 		}
+		assertParentBinding()
 	}
 
 	wrongAgent := append([]string{}, firstArgs...)

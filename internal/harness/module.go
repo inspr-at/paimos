@@ -410,8 +410,8 @@ func registrationConflict(err error) error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
 		switch pg.ConstraintName {
-		case "harness_one_active_vendor_ref", "harness_one_active_vendor_ref_per_harness":
-			return workorders.Fail(409, "vendor_session_ref is already bound to an active generation for this agent and harness")
+		case "harness_one_active_vendor_ref":
+			return workorders.Fail(409, "vendor_session_ref is already bound to an active generation for this agent")
 		case "harness_one_active_ref":
 			return workorders.Fail(409, "harness_session_ref is already bound to an active generation in this project")
 		default:
