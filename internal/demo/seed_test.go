@@ -394,23 +394,13 @@ func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := newAPI(t.Context(), database.App)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeder := &seeder{ctx: t.Context(), pool: database.App, slug: "missing-harness-demo", tenantID: tenantID}
-	admin, err := seeder.person("demo-operator", "Demo Operator", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var profiles []modelregistry.Profile
-	if err := api.do(admin, "", http.MethodGet, "/api/models", nil, http.StatusOK, &profiles, nil); err != nil {
-		t.Fatal(err)
-	}
 	// An incomplete registry must not borrow another harness's profile or
 	// commit Scribe's completed history before finding Claude unavailable.
+	// Pins are immutable, so create this state rather than updating a pin.
 	err = db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_profiles SET enabled=false WHERE harness='claude'`)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+			VALUES($1::uuid,'demo-enabled-codex','1','codex','openai','test-model','high','standard',true),
+			      ($1::uuid,'demo-disabled-claude','1','claude','anthropic','test-model','high','standard',false)`, tenantID)
 		return err
 	})
 	if err != nil {
