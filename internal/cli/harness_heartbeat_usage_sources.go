@@ -574,12 +574,10 @@ func addUsageDelta(sums map[string]usageSum, poisoned map[string]bool, parsed se
 }
 
 func addUsageReasoning(cur usageSum, parsed sessionusage.HeartbeatLine) (int64, bool, bool) {
-	fresh := cur.input == 0 && cur.output == 0 && cur.cached == 0 && cur.reasoning == 0 && !cur.reasoningKnown
-	if fresh {
-		return parsed.Reasoning, parsed.ReasoningKnown, true
-	}
-	if !cur.reasoningKnown || !parsed.ReasoningKnown {
-		return 0, false, true
+	// Sum only observed reasoning deltas. An unavailable delta must neither
+	// erase earlier observations nor hide later ones within the same scan.
+	if !parsed.ReasoningKnown {
+		return cur.reasoning, cur.reasoningKnown, true
 	}
 	next, ok := addTokens(cur.reasoning, parsed.Reasoning)
 	return next, true, ok

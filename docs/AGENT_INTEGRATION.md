@@ -253,6 +253,8 @@ Usage is reported on each beat when a log is available. `--transcript` remains t
 
 Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
 
+Codex reasoning reports sum safely attributable observed increases. A missing counter makes the session baseline unknown; the next known total re-establishes it without assigning unknown growth to a model. Later known increases count in the same scan or later beats, and earlier observed reasoning is retained. Reasoning during the unknown stretch remains unattributed.
+
 ### Coordinator recipe for usage (AEON-503)
 
 Start the heartbeat registration before launching a new vendor session in its worktree, then keep the helper alive until that process exits. The CLI command is `run-heartbeat` (`heartbeat` sends a single manual beat):
