@@ -17,9 +17,9 @@ const agents = useAgents()
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 // Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
-// person who followed a link, before permissions are known; `review` to the dialog
-// and only while that person may manage accounts. Each drops what is still on its
-// way the moment the person, the workspace or the right changes.
+// person who followed a link, before permissions are known, and to decisions that
+// must finish after the dialog closes; `dialogScope` to the visible review while
+// that person may manage accounts. Identity changes drop both scopes.
 const link = useIdentityScope()
 const dialogScope = useIdentityScope(() => allowed.value)
 const lookups = dialogScope.lane()
@@ -100,13 +100,15 @@ function lookup() {
 function decide(revoke = false) {
   if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return Promise.resolve()
   const current = review.value
-  return decisions.run(({ after: forDialog, signal }) => {
+  return decisions.run(({ after: forDialog }) => {
     busy.value = true; error.value = ''
-    return link.run(({ after }) => after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
-      // The accepted write refreshes the canonical lists for this person even
-      // when the dialog closed during decoding; only a live dialog uses its body.
+    return link.run(({ after, signal }) => after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
+      // The POST and its body belong to the person, not the dialog: closing the
+      // review cannot cancel an accepted write's canonical session/pending reads.
+      // A changed identity still aborts it; only a live dialog uses its body.
       void agents.afterWrite()
-      return forDialog(result, current => { review.value = current; emit('changed') })
+      emit('changed')
+      return forDialog(result, current => { review.value = current })
     }))
   }, {
     failed: e => { error.value = e instanceof Error ? e.message : 'Could not update this watch.' },

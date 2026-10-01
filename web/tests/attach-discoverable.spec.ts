@@ -48,6 +48,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: b
   await mockAgents(page, data)
   await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
   await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
+  return data
 }
 async function list(page: Page, requests: ReturnType<typeof request>[]) {
   await page.route(PENDING, route => route.fulfill({ json: { requests } }))
@@ -475,40 +476,113 @@ test('a decision still on its way when the person changes shows nothing to the n
   await expect(page.getByText('Approved. Keep the attach terminal open')).toHaveCount(0)
 })
 
-test('an accepted decision still refreshes canonical sessions when its review closes during body decoding', async ({ page }) => {
-  await setup(page)
-  await list(page, [request('r-wait', 'pending')])
-  let sessionReads = 0
-  await page.route('**/api/harness-sessions?*', route => { sessionReads++; return route.fallback() })
-  await page.route('**/api/agent-pairing/attach/r-wait/approve', route => route.fulfill({ json: request('r-wait', 'approved') }))
-  await page.goto('/agents')
-  await strip(page).getByRole('button', { name: 'Review' }).click()
-  await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
-  // The server already accepted the write. Delay only decoding its returned body,
-  // so closing the dialog cannot undo it and must not stop the canonical reread.
-  await page.evaluate(() => {
+// Keep native Response.json() decoding a live body after the 2xx status arrived.
+// Like a fetch body, this stream errors if the POST's signal aborts. The previous
+// json() promise stub ignored that signal and hid the close/decoding race.
+async function holdDecisionBody(page: Page, action: 'approve' | 'revoke') {
+  await page.evaluate(action => {
     const original = window.fetch.bind(window)
-    const state = window as typeof window & { __finishAttachBody?: () => void }
+    const state = window as typeof window & { __attachBody?: HeldDecisionBody }
     window.fetch = async (...args) => {
       const response = await original(...args)
-      if (String(args[0]).endsWith('/r-wait/approve')) {
-        const body = await response.json()
-        response.json = () => new Promise(resolve => { state.__finishAttachBody = () => resolve(body) })
-      }
-      return response
+      if (!String(args[0]).endsWith(`/r-wait/${action}`)) return response
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const signal = args[1]?.signal
+      const held: HeldDecisionBody = { decoding: false, aborted: false, finish: () => {} }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const abort = () => { held.aborted = true; controller.error(signal?.reason) }
+          signal?.addEventListener('abort', abort, { once: true })
+          held.finish = () => {
+            if (held.aborted) return
+            signal?.removeEventListener('abort', abort)
+            controller.enqueue(bytes); controller.close()
+          }
+          if (signal?.aborted) abort()
+        },
+      })
+      const delayed = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers })
+      const json = delayed.json.bind(delayed)
+      delayed.json = () => { held.decoding = true; return json() }
+      state.__attachBody = held
+      return delayed
     }
-  })
-  await page.getByRole('button', { name: 'Allow live watch' }).click()
-  await expect.poll(() => page.evaluate(() => '__finishAttachBody' in window)).toBe(true)
-  await page.getByRole('button', { name: 'Close attach review' }).click()
-  const before = sessionReads
-  await page.evaluate(() => (window as typeof window & { __finishAttachBody: () => void }).__finishAttachBody())
-  await expect.poll(() => sessionReads).toBeGreaterThan(before)
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Attach session' }).click()
-  await expect(page.getByLabel('Attach code')).toHaveValue('')
-  await expect(page.getByRole('dialog')).not.toContainText('Approved. Keep the attach terminal open')
+  }, action)
+}
+interface HeldDecisionBody { decoding: boolean; aborted: boolean; finish: () => void }
+const decisionBody = (page: Page) => page.evaluate(() => {
+  const held = (window as typeof window & { __attachBody?: HeldDecisionBody }).__attachBody
+  return { decoding: held?.decoding ?? false, aborted: held?.aborted ?? false }
 })
+const finishDecisionBody = (page: Page) => page.evaluate(() => (window as typeof window & { __attachBody: HeldDecisionBody }).__attachBody.finish())
+
+for (const action of ['approve', 'revoke'] as const) {
+  test(`an accepted ${action} refreshes pending requests and sessions after its review closes during body decoding`, async ({ page }) => {
+    const data = await setup(page)
+    let state: State = 'pending', pendingReads = 0, sessionReads = 0
+    await page.route(PENDING, route => { pendingReads++; return route.fulfill({ json: { requests: [request('r-wait', state)] } }) })
+    await page.route('**/api/harness-sessions?*', route => { sessionReads++; return route.fallback() })
+    await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => {
+      state = action === 'approve' ? 'approved' : 'detached'
+      Object.assign(data.sessions[0], { host: 'Accepted attach session', revision: 3 })
+      return route.fulfill({ json: request('r-wait', state) })
+    })
+    await page.goto('/agents')
+    const session = page.locator(`[data-row="s:${data.sessions[0].id}"]`)
+    await expect(session).toContainText('imac0')
+    await strip(page).getByRole('button', { name: 'Review' }).click()
+    await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+    // Pause below both polling intervals: only the accepted write can refresh.
+    await page.clock.pauseAt(NOW + 1_000)
+    await holdDecisionBody(page, action)
+    await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
+    await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
+    await page.getByRole('button', { name: 'Close attach review' }).click()
+    expect(await decisionBody(page)).toEqual({ decoding: true, aborted: false })
+    const before = { pendingReads, sessionReads }
+    await finishDecisionBody(page)
+    await expect.poll(() => pendingReads).toBeGreaterThan(before.pendingReads)
+    // afterWrite batches session reads in a zero-delay timer, scheduled once the
+    // native body decoder finishes. Flush it without reaching a polling tick.
+    await page.clock.runFor(1)
+    await expect.poll(() => sessionReads).toBeGreaterThan(before.sessionReads)
+    await expect(session).toContainText('Accepted attach session')
+    await expect(strip(page).locator(`[data-outcome="${action === 'approve' ? 'approved' : 'cancelled'}"]`)).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Attach session' }).click()
+    await expect(page.getByLabel('Attach code')).toHaveValue('')
+    await expect(page.getByRole('dialog')).not.toContainText('Approved. Keep the attach terminal open')
+  })
+
+  test(`an accepted ${action} body is aborted and dropped when the identity changes during decoding`, async ({ page }) => {
+    await setup(page)
+    await list(page, [request('r-wait', 'pending')])
+    await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => route.fulfill({ json: request('r-wait', action === 'approve' ? 'approved' : 'detached') }))
+    await page.goto('/agents')
+    await strip(page).getByRole('button', { name: 'Review' }).click()
+    await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+    await page.clock.pauseAt(NOW + 1_000)
+    await holdDecisionBody(page, action)
+    await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
+    await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
+    await list(page, [request('r-next', 'pending', { host: 'Ola’s Mac' })])
+    await signInAsOla(page)
+    await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: true })
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(strip(page)).toContainText('Ola’s Mac')
+    let rereads = 0
+    await page.route('**/api/harness-sessions?*', route => { rereads++; return route.fallback() })
+    await page.route(PENDING, route => { rereads++; return route.fallback() })
+    await finishDecisionBody(page)
+    await page.clock.runFor(1)
+    await page.waitForTimeout(200)
+    expect(rereads).toBe(0)
+    await expect(strip(page)).toContainText('Ola’s Mac')
+    await expect(strip(page).locator('[data-outcome="approved"], [data-outcome="cancelled"]')).toHaveCount(0)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+}
 
 test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
   await setup(page)

@@ -284,6 +284,10 @@ invalidates other tabs through a random authentication-change marker (no code,
 cookie or identity in browser storage). Those tabs drop attach codes, reviews,
 permissions and outstanding answers while retaining drafts; sign in explicitly
 to resume there, even when the same person signs out and back in elsewhere.
+Closing a review leaves its submitted decision bound to that identity: an accepted
+response finishes decoding and refreshes both the pending requests and canonical
+session lists even after the dialog closes. A changed identity still aborts and
+drops the old response; it cannot update the next person's lists or review.
 
 `GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
 their requests that are not a session yet, waiting ones first: every pending or
