@@ -73,7 +73,7 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 	ats := []time.Time{now.Add(-time.Hour), now.Add(-3 * time.Hour), now.Add(-time.Hour)}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		for _, at := range ats {
-			if _, err := Append(t.Context(), tx, p, Change{Type: "test.changed", At: &at}); err != nil {
+			if _, err := Append(t.Context(), tx, p, Change{Type: "test.changed", After: map[string]bool{"test": true}, At: &at}); err != nil {
 				return err
 			}
 		}
