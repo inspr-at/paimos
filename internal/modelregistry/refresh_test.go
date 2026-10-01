@@ -95,7 +95,7 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 	})
 	var before []Route
 	inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
-	New(appPool).sweep(t.Context())
+	NewWithVault(appPool, nil).sweep(t.Context())
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
 		t.Fatal("v3 profiles missing")
