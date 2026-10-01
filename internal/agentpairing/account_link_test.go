@@ -2,12 +2,17 @@
 package agentpairing_test
 
 import (
+	"crypto/hkdf"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -23,15 +28,20 @@ import (
 const accountLinkPath = "/api/agent-pairing/account-link"
 
 type linkReview struct {
-	RequestID string `json:"request_id"`
-	TenantID  string `json:"tenant_id"`
-	AccountID string `json:"account_id"`
-	PersonID  string `json:"person_id"`
-	Label     string `json:"account_label"`
-	Computer  string `json:"computer_name"`
-	Revision  int64  `json:"revision"`
-	State     string `json:"state"`
-	Digest    string `json:"request_digest"`
+	RequestID  string    `json:"request_id"`
+	TenantID   string    `json:"tenant_id"`
+	TenantName string    `json:"tenant_name"`
+	AccountID  string    `json:"account_id"`
+	Harness    string    `json:"harness"`
+	Label      string    `json:"account_label"`
+	Computer   string    `json:"computer_name"`
+	PersonID   string    `json:"person_id"`
+	PersonName string    `json:"person_name"`
+	Revision   int64     `json:"revision"`
+	State      string    `json:"state"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	Digest     string    `json:"request_digest"`
+	Code       string    `json:"-"`
 }
 
 func linkFixture(t *testing.T) (*fixture, *proposal, agentpairing.View, string) {
@@ -51,10 +61,11 @@ func reviewLink(t *testing.T, f *fixture, v agentsetup.AccountLinkView) linkRevi
 	t.Helper()
 	var out linkReview
 	decodeResult(t, f.call("POST", accountLinkPath+"/lookup", map[string]string{"user_code": v.Code}, true, "", 200), &out)
+	out.Code = v.Code
 	return out
 }
 func approveLinkBody(v linkReview) map[string]any {
-	return map[string]any{"tenant_id": v.TenantID, "person_id": v.PersonID, "expected_revision": v.Revision, "request_digest": v.Digest}
+	return map[string]any{"tenant_id": v.TenantID, "person_id": v.PersonID, "expected_revision": v.Revision, "request_digest": v.Digest, "user_code": v.Code}
 }
 func TestAccountLinkSingleUseAndOwnerUnlink(t *testing.T) {
 	f, p, v, key := linkFixture(t)
@@ -255,8 +266,24 @@ func TestAccountLinkCodeHashAtRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := strings.ReplaceAll(offer.Code, " ", "")
-	if stored != hash(code) || stored == code {
-		t.Fatal("account link did not store only the code digest")
+	pepper, err := hkdf.Key(sha256.New, f.sessionKey, nil, "aeon/account-link-code/v1", sha256.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, pepper)
+	mac.Write([]byte(code))
+	direct := hmac.New(sha256.New, f.sessionKey)
+	direct.Write([]byte(code))
+	otherKey := append([]byte(nil), f.sessionKey...)
+	otherKey[0] ^= 1
+	otherPepper, err := hkdf.Key(sha256.New, otherKey, nil, "aeon/account-link-code/v1", sha256.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := hmac.New(sha256.New, otherPepper)
+	other.Write([]byte(code))
+	if stored != hex.EncodeToString(mac.Sum(nil)) || stored == hash(code) || stored == code || stored == hex.EncodeToString(direct.Sum(nil)) || stored == hex.EncodeToString(other.Sum(nil)) {
+		t.Fatal("account link did not store a domain-separated, server-peppered code HMAC")
 	}
 	if reviewLink(t, f, offer).RequestID != offer.RequestID {
 		t.Fatal("hash lookup lost the offered request")
@@ -271,6 +298,67 @@ func TestAccountLinkCodeHashAtRest(t *testing.T) {
 		if result.Code != "" || result.ShowPrompt {
 			t.Fatal("clear code returned after its first offer")
 		}
+	}
+}
+
+func TestAccountLinkDatabaseReviewCannotApproveWithoutCode(t *testing.T) {
+	f, p, v, key := linkFixture(t)
+	offer := offerLink(t, f, p, key, v.Enrollments[0].AccountID)
+	// Recreate the entire review and its public digest using database columns,
+	// without performing a code lookup or knowing the server pepper.
+	var forged linkReview
+	var storedHash string
+	err := f.db.Admin.QueryRow(t.Context(), `SELECT l.id::text,l.tenant_id::text,t.name,a.id::text,a.harness,a.label,q.details->>'computer_name',person.id::text,person.name,a.link_revision,l.state,l.expires_at,l.user_code_hash
+FROM account_person_link_requests l JOIN agent_accounts a ON a.tenant_id=l.tenant_id AND a.id=l.account_id
+JOIN tenants t ON t.id=l.tenant_id JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+JOIN principals person ON person.tenant_id=l.tenant_id AND person.id=$2
+WHERE l.id=$1`, offer.RequestID, f.person).Scan(&forged.RequestID, &forged.TenantID, &forged.TenantName, &forged.AccountID, &forged.Harness, &forged.Label, &forged.Computer, &forged.PersonID, &forged.PersonName, &forged.Revision, &forged.State, &forged.ExpiresAt, &storedHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged.Digest = hash(string(b))
+	wrong := "000000"
+	if strings.ReplaceAll(offer.Code, " ", "") == wrong {
+		wrong = "000001"
+	}
+	for _, code := range []string{"", wrong, "12345", "123\n456", storedHash} {
+		body := approveLinkBody(forged)
+		if code == "" {
+			delete(body, "user_code")
+		} else {
+			body["user_code"] = code
+		}
+		f.call("POST", accountLinkPath+"/"+forged.RequestID+"/approve", body, true, "", 404)
+		var pending bool
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT l.state='pending' AND a.owner_person_id IS NULL FROM account_person_link_requests l JOIN agent_accounts a ON a.tenant_id=l.tenant_id AND a.id=l.account_id WHERE l.id=$1`, forged.RequestID).Scan(&pending); err != nil || !pending || f.events("account.linked") != 0 {
+			t.Fatal("a database-only confirmation consumed the code or changed ownership")
+		}
+	}
+	// The same database-built digest succeeds only with the actual offered code.
+	forged.Code = strings.ReplaceAll(offer.Code, " ", "-")
+	f.call("POST", accountLinkPath+"/"+forged.RequestID+"/approve", approveLinkBody(forged), true, "", 200)
+	if f.events("account.linked") != 1 {
+		t.Fatal("code-backed confirmation did not link exactly once")
+	}
+}
+
+func TestAccountLinkRequiresServerKey(t *testing.T) {
+	m := agentpairing.New(nil, origin, "pairtest")
+	if err := m.ConfigureAccountLink([]byte("short")); err == nil {
+		t.Fatal("short session key enabled account linking")
+	}
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", accountLinkPath, nil))
+	if w.Code != 503 {
+		t.Fatal("account linking offered codes without a server pepper")
 	}
 }
 
@@ -333,11 +421,15 @@ func TestAccountLinkSecondPersonAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: []byte(nonce()), BootstrapTenantSlug: "link-foreign", BootstrapAdminEmail: "foreign@example.test"}, f.db.App)
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "link-foreign", BootstrapAdminEmail: "foreign@example.test"}, f.db.App)
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, agentpairing.New(f.db.App, origin, "link-foreign")}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	foreignPairing := agentpairing.New(f.db.App, origin, "link-foreign")
+	if err := foreignPairing.ConfigureAccountLink(f.sessionKey); err != nil {
+		t.Fatal(err)
+	}
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, foreignPairing}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
 	other := &fixture{t: t, db: f.db, h: api.Handler(), tenantID: foreign}
 	other.cookie = other.call("POST", "/api/auth/dev-login", map[string]string{"email": "foreign@example.test"}, false, "", 200).Result().Cookies()[0]
 	other.call("POST", accountLinkPath+"/lookup", map[string]string{"user_code": offer2.Code}, true, "", 404)

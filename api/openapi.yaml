@@ -1972,11 +1972,12 @@ paths:
         '404': {description: Code not found in current tenant}
         '410': {description: Code expired or consumed}
         '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
   /agent-pairing/account-link/{requestId}/approve:
     post:
       operationId: approveAccountLink
       summary: Link the reviewed account to the current person in one confirmation
-      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Atomically consumes the code and appends account.linked. Observing expiry persists the expired state and account.link_expired event before returning 410. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
+      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Requires the entered user_code and verifies its server-peppered HMAC in constant time inside the transaction before atomically consuming the request and appending account.linked. Observing expiry persists the expired state and account.link_expired event before returning 410. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
       parameters: [{name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody:
         required: true
@@ -1985,19 +1986,21 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [tenant_id, person_id, expected_revision, request_digest]
+              required: [tenant_id, person_id, expected_revision, request_digest, user_code]
               properties:
                 tenant_id: {type: string, format: uuid}
                 person_id: {type: string, format: uuid}
                 expected_revision: {type: integer, minimum: 0}
                 request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                user_code: {type: string, maxLength: 16, writeOnly: true, description: Six-digit code entered by the person; spaces and hyphens are ignored}
       responses:
         '200': {description: Linked account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
         '403': {description: Same-origin signed-in person required}
-        '404': {description: Request not found in current tenant}
+        '404': {description: Request or code not found in current tenant}
         '409': {description: Account or session changed}
         '410': {description: Code expired or consumed}
         '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
   /agent-pairing/account-links:
     get:
       operationId: listMyAccountLinks

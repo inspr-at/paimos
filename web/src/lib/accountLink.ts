@@ -35,9 +35,11 @@ export async function lookupAccountLink(code: string, signal?: AbortSignal) {
   if (!validAccountLinkCode(code)) throw new Error('Enter the six-digit code from the agent window.')
   return parse(await request('/account-link/lookup', 'POST', { user_code: accountLinkCode(code) }, signal))
 }
-export async function approveAccountLink(review: AccountLinkReview, signal?: AbortSignal) {
+export async function approveAccountLink(review: AccountLinkReview, code: string, signal?: AbortSignal) {
+  if (!validAccountLinkCode(code)) throw new Error('Enter the six-digit code from the agent window.')
   return parse(await request(`/account-link/${encodeURIComponent(review.request_id)}/approve`, 'POST', {
     tenant_id: review.tenant_id, person_id: review.person_id, expected_revision: review.revision, request_digest: review.request_digest,
+    user_code: accountLinkCode(code),
   }, signal))
 }
 export async function listAccountLinks(signal?: AbortSignal): Promise<AccountLinkReview[]> {

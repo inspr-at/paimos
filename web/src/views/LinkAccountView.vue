@@ -65,7 +65,7 @@ async function confirm() {
   busy.value = true; error.value = ''
   controller?.abort(); controller = new AbortController()
   try {
-    const result = await approveAccountLink(current, controller.signal)
+    const result = await approveAccountLink(current, code.value, controller.signal)
     if (started !== turn || owner !== scope.value) return
     if (result.person_id !== current.person_id || result.tenant_id !== current.tenant_id || result.account_id !== current.account_id || result.state !== 'linked') throw new Error('Account confirmation could not be verified. Check your linked accounts.')
     review.value = result; linked.value = true; linksRevision.value++

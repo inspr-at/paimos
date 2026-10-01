@@ -35,6 +35,7 @@ type Module struct {
 	watch                 watchRelay
 	watchKeys             watchPollKeys
 	managed               *ManagedSetup
+	accountLinkPepper     []byte
 }
 type rate struct {
 	start time.Time

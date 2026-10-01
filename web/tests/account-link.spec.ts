@@ -50,7 +50,7 @@ test('one person confirmation names account, computer and workspace; unlink is o
   await page.getByRole('button', { name: 'Link account', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Linked to Markus' })).toBeVisible()
   expect(calls.writes).toHaveLength(1)
-  expect(calls.writes[0]!.body).toEqual({ tenant_id: 't1', person_id: me.id, expected_revision: 0, request_digest: initial.request_digest })
+  expect(calls.writes[0]!.body).toEqual({ tenant_id: 't1', person_id: me.id, expected_revision: 0, request_digest: initial.request_digest, user_code: '482913' })
   await page.getByRole('button', { name: 'Unlink Claude (markus@example.test)' }).click()
   await expect(page.getByRole('button', { name: /^Unlink/ })).toHaveCount(0)
   expect(calls.writes).toHaveLength(2)

@@ -3,8 +3,12 @@ package agentpairing
 
 import (
 	"context"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +23,33 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// ConfigureAccountLink runs once at startup with the existing session-signing
+// secret. HKDF domain-separates the account-link pepper from session signing;
+// only this derived key lives in memory, never in the database or a new config.
+// Rotating the session key also invalidates any outstanding ten-minute codes.
+func (m *Module) ConfigureAccountLink(sessionKey []byte) error {
+	if len(sessionKey) < 32 {
+		return errors.New("account linking requires the session-signing key")
+	}
+	pepper, err := hkdf.Key(sha256.New, sessionKey, nil, "aeon/account-link-code/v1", sha256.Size)
+	if err != nil {
+		return err
+	}
+	m.accountLinkPepper = pepper
+	return nil
+}
+
+func (m *Module) accountLinkCodeHash(code string) string {
+	mac := hmac.New(sha256.New, m.accountLinkPepper)
+	mac.Write([]byte(code))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func normalizeAccountLinkCode(value string) (string, bool) {
+	code := strings.NewReplacer(" ", "", "-", "").Replace(value)
+	return code, len(value) <= 16 && len(code) == 6 && strings.IndexFunc(code, func(c rune) bool { return c < '0' || c > '9' }) < 0
+}
 
 type accountLinkReview struct {
 	RequestID  string    `json:"request_id"`
@@ -45,8 +76,8 @@ func (m *Module) mountAccountLink(mux *http.ServeMux) {
 }
 
 func (m *Module) accountLinkDevice(w http.ResponseWriter, r *http.Request) {
-	if m.origin == "" {
-		WriteError(w, fail(503, "unavailable", "account linking needs the configured instance origin"))
+	if m.origin == "" || len(m.accountLinkPepper) == 0 {
+		WriteError(w, fail(503, "unavailable", "account linking needs the configured instance origin and signing key"))
 		return
 	}
 	p, ok := tenant.PrincipalFrom(r.Context())
@@ -147,7 +178,7 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 			}
 			code = fmt.Sprintf("%06d", n.Int64())
 			var exists bool
-			if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM account_person_link_requests WHERE user_code_hash=$1)`, digest(code)).Scan(&exists); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM account_person_link_requests WHERE user_code_hash=$1)`, m.accountLinkCodeHash(code)).Scan(&exists); err != nil {
 				return err
 			}
 			if !exists {
@@ -158,7 +189,7 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 		if code == "" {
 			return fail(429, "rate_limited", "try again later")
 		}
-		if err = tx.QueryRow(r.Context(), `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code_hash,account_revision) VALUES($1,$2,$3,$4) RETURNING id::text,expires_at`, p.TenantID, in.AccountID, digest(code), revision).Scan(&out.RequestID, &expiry); err != nil {
+		if err = tx.QueryRow(r.Context(), `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code_hash,account_revision) VALUES($1,$2,$3,$4) RETURNING id::text,expires_at`, p.TenantID, in.AccountID, m.accountLinkCodeHash(code), revision).Scan(&out.RequestID, &expiry); err != nil {
 			return err
 		}
 		out.State = "pending"
@@ -224,6 +255,10 @@ func (m *Module) accountLinkLookup(w http.ResponseWriter, r *http.Request, p ten
 		WriteError(w, fail(403, "forbidden", "person session required"))
 		return
 	}
+	if len(m.accountLinkPepper) == 0 {
+		WriteError(w, fail(503, "unavailable", "account linking needs the configured signing key"))
+		return
+	}
 	var in struct {
 		Code string `json:"user_code"`
 	}
@@ -235,8 +270,8 @@ func (m *Module) accountLinkLookup(w http.ResponseWriter, r *http.Request, p ten
 		WriteError(w, err)
 		return
 	}
-	code := strings.NewReplacer(" ", "", "-", "").Replace(in.Code)
-	if len(in.Code) > 16 || len(code) != 6 || strings.IndexFunc(code, func(c rune) bool { return c < '0' || c > '9' }) >= 0 {
+	code, valid := normalizeAccountLinkCode(in.Code)
+	if !valid {
 		WriteError(w, fail(404, "not_found", "account code not found"))
 		return
 	}
@@ -244,7 +279,7 @@ func (m *Module) accountLinkLookup(w http.ResponseWriter, r *http.Request, p ten
 	var terminal bool
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var id, storedHash string
-		codeHash := digest(code)
+		codeHash := m.accountLinkCodeHash(code)
 		if err := tx.QueryRow(r.Context(), `SELECT id::text,user_code_hash FROM account_person_link_requests WHERE user_code_hash=$1`, codeHash).Scan(&id, &storedHash); err != nil {
 			return notFound(err)
 		}
@@ -275,11 +310,16 @@ func (m *Module) accountLinkApprove(w http.ResponseWriter, r *http.Request, p te
 		WriteError(w, fail(403, "forbidden", "person session required"))
 		return
 	}
+	if len(m.accountLinkPepper) == 0 {
+		WriteError(w, fail(503, "unavailable", "account linking needs the configured signing key"))
+		return
+	}
 	var in struct {
 		TenantID string `json:"tenant_id"`
 		PersonID string `json:"person_id"`
 		Revision *int64 `json:"expected_revision"`
 		Digest   string `json:"request_digest"`
+		Code     string `json:"user_code"`
 	}
 	if err := decode(w, r, &in); err != nil {
 		WriteError(w, err)
@@ -295,6 +335,7 @@ func (m *Module) accountLinkApprove(w http.ResponseWriter, r *http.Request, p te
 	}
 	var out accountLinkReview
 	var terminal bool
+	code, valid := normalizeAccountLinkCode(in.Code)
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = readAccountLink(r.Context(), tx, r.PathValue("requestId"), p)
@@ -311,6 +352,13 @@ func (m *Module) accountLinkApprove(w http.ResponseWriter, r *http.Request, p te
 		}
 		if out.Revision != *in.Revision || subtle.ConstantTimeCompare([]byte(out.Digest), []byte(in.Digest)) != 1 {
 			return fail(409, "conflict", "account details changed; review the code again")
+		}
+		var storedHash string
+		if err := tx.QueryRow(r.Context(), `SELECT user_code_hash FROM account_person_link_requests WHERE id=$1`, out.RequestID).Scan(&storedHash); err != nil {
+			return err
+		}
+		if !valid || subtle.ConstantTimeCompare([]byte(storedHash), []byte(m.accountLinkCodeHash(code))) != 1 {
+			return fail(404, "not_found", "account code not found")
 		}
 		consumed, err := tx.Exec(r.Context(), `UPDATE account_person_link_requests SET state='linked',person_id=$2 WHERE id=$1 AND state='pending' AND expires_at>clock_timestamp()`, out.RequestID, p.ID)
 		if err != nil {
