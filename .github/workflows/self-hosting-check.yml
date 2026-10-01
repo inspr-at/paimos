@@ -17,10 +17,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: self-hosting-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   compose-smoke:
     runs-on: ubuntu-latest
