@@ -16,6 +16,41 @@ import (
 )
 
 // This fixture executable speaks vendor ACP frames and makes no model calls.
+func TestACPVersionOnlyProbeNeverEstablishesReadiness(t *testing.T) {
+	for _, name := range []string{Gemini, OpenCode} {
+		t.Run(name, func(t *testing.T) {
+			// Any non-version command fails: these probes must never call a model
+			// or read a vendor identity/credential store to guess sign-in.
+			path := fakeScript(t, versionAnswer+"exit 9\n")
+			a := &ACPAdapter{Harness: name, Path: path, Homes: map[string]string{"local": privateHome(t)}}
+			if a.Probe(t.Context(), "local") {
+				t.Error("version-only probe returned true")
+			}
+			if got := probeAccount(t.Context(), a, "local"); got.OK || got.Failure != "sign_in_unverified" {
+				t.Errorf("version-only account probe: %+v", got)
+			}
+			s, api, _ := testSupervisor(t)
+			api.run.Status = "running" // Health-only poll; no queued run launches.
+			s.accounts[0].Harness = name
+			s.adapters = map[string]Adapter{name: a}
+			if err := s.Poll(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			for _, now := range []time.Time{time.Now(), time.Now().Add(2 * time.Minute)} {
+				v := s.lifecycleAt("", now)
+				d := v.AccountStatuses["account"]
+				if v.Ready || d.State != "blocked" || d.Reason != "sign_in_unverified" || s.accountAvailable("account") || v.LoginRequired {
+					t.Errorf("version-only lifecycle: %+v", v)
+				}
+			}
+			a.Path = filepath.Join(t.TempDir(), "missing")
+			if got := probeAccount(t.Context(), a, "local"); got.OK || got.Failure != ProbeUnavailable {
+				t.Errorf("missing launcher: %+v", got)
+			}
+		})
+	}
+}
+
 func TestACPVendorFixture(t *testing.T) {
 	fixture := os.Getenv("AEON_ACP_FIXTURE")
 	if fixture == "" {

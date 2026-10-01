@@ -34,7 +34,7 @@ func TestAdditionalHarnessDiscoveryIsExplicitLocalProfile(t *testing.T) {
 			probe := &profileProbe{}
 			d := Discovery{Home: home, Workspace: workspace, Executor: probe, LookPath: func(string) (string, error) { return path, nil }}
 			c, err := d.Detect(t.Context(), name, "")
-			if err != nil || c.Home != home || c.Login != "local_profile" || c.Identity != "local-profile" || !candidateReady(c) || len(probe.calls) != 1 {
+			if err != nil || c.Home != home || c.Login != "unverified" || c.Identity != "local-profile" || candidateReady(c) || len(probe.calls) != 1 {
 				t.Fatal("profile discovery", c, err, len(probe.calls))
 			}
 			if _, err := d.Detect(t.Context(), name, "person@example.test"); err == nil {
@@ -43,6 +43,10 @@ func TestAdditionalHarnessDiscoveryIsExplicitLocalProfile(t *testing.T) {
 			c.Login = "signed_out"
 			if candidateReady(c) {
 				t.Fatal("signed-out profile enrolled")
+			}
+			c.Login = "local_profile"
+			if candidateReady(c) {
+				t.Fatal("legacy version-only profile enrolled as ready")
 			}
 		})
 	}
