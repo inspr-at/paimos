@@ -57,6 +57,7 @@ test('audit events read as sentences from the server’s shape', () => {
   assert.equal(auditSentence(e('role.updated', { name: 'Lead', permissions: ['a'] }, { name: 'Lead', permissions: ['a', 'b', 'c'] }), names).text, 'changed the role Lead (2 added)')
   assert.equal(auditSentence(e('principal.alias_linked', { principal_id: 'jw', linked_to: null }, { principal_id: 'jw', linked_to: 'mira' }, 'jw'), names).text, 'linked jw (classic) to Mira')
   assert.equal(auditSentence(e('principal.deactivated', { principal_id: 'mira', status: 'active' }, { principal_id: 'mira', status: 'deactivated' }, 'mira'), names).text, 'deactivated Mira; their sessions and keys were revoked')
+  assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', role: { name: 'Agent worker', permissions: ['nodes.read'] } }, { name: 'worker', role: { name: 'Agent worker', permissions: ['nodes.read', 'nodes.write'] }, pruned_scopes: ['retired.scope'] }), names).text, 'changed scopes for the key worker; added nodes.write to the role Agent worker; pruned unknown scopes retired.scope')
   assert.equal(auditSentence(e('agent_key.revoked', null, { principal_id: 'x', name: 'deployer', prefix: 'ph4r' }), names).text, 'revoked the key deployer (aeon_ph4r_…)')
   assert.equal(auditSentence(e('something.else', null, {}), names).text, 'something else')
   assert.deepEqual(['role.created', 'binding.removed', 'invite.revoked', 'principal.deactivated', 'agent_key.created', 'node.updated'].map(categoryOf), ['roles', 'bindings', 'invites', 'lifecycle', 'keys', null])
