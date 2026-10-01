@@ -384,7 +384,8 @@ badge or its floating pencil to set **Your name for this computer**. Save applie
 to all rows of that host for that person; **Use '<registered host>'** resets it.
 Labels are stored server-side under tenant/person/host with person-only RLS.
 `GET /api/me/host-labels` reads only your overrides; `PUT` with `{host, label}`
-saves one and a null label resets it. Agents cannot read or write overrides.
+saves one and a null label resets it. Both require `harness.read`; a project-only
+role with that permission suffices. Agents cannot read or write overrides.
 
 Harness status and heartbeat declare `Aeon-Contract: harness-session/2.0`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 2.0 declares the expanded harness enum and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. The pin checker classifies expansion of an existing enum as a major change, so strict reporters must explicitly accept this contract before rollout.
 
