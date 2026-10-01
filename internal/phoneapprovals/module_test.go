@@ -221,7 +221,9 @@ func TestPhoneDecisionCryptographyAndBinding(t *testing.T) {
 				dbtest.BindRole(t, f.db, f.p.TenantID, f.p.ID, "member")
 			}
 			w := f.call(t, p, "POST", "/api/phone-approvals/approval/"+target+"/decision", proof, testOrigin)
-			if w.Code != 403 && w.Code != 409 {
+			if name == "permission lost" {
+				status(t, w, 404)
+			} else if w.Code != 403 && w.Code != 409 {
 				t.Fatalf("bad proof accepted: %d %s", w.Code, w.Body.String())
 			}
 			var n int
@@ -237,7 +239,7 @@ func TestPhoneDecisionCryptographyAndBinding(t *testing.T) {
 	d, c := f.options(t, id)
 	proof := DecisionProof{Decision: d, Proof: Proof{ChallengeID: c.ID, Credential: f.assertion(t, c, true, testOrigin, "aeon.example")}}
 	status(t, f.call(t, f.p, "POST", "/api/phone-approvals/approval/"+id+"/decision", proof, testOrigin), 200)
-	status(t, f.call(t, f.p, "POST", "/api/phone-approvals/approval/"+id+"/decision", proof, testOrigin), 409)
+	status(t, f.call(t, f.p, "POST", "/api/phone-approvals/approval/"+id+"/decision", proof, testOrigin), 404)
 	var grants, verified int
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM agent_permission_grants WHERE approval_request_id=$1),(SELECT count(*) FROM events WHERE type='phone_approval.verified' AND after->>'request_id'=$1::text)`, id).Scan(&grants, &verified); err != nil || grants != 1 || verified != 1 {
 		t.Fatalf("grant/audit not atomic: %d %d %v", grants, verified, err)

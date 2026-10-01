@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -48,16 +49,21 @@ type Module struct {
 
 // New accepts only deployment-owned origin and file-provisioned VAPID keys.
 // Missing keys disable push. An absent/invalid origin disables ceremonies.
-func New(pool *pgxpool.Pool, pairing *agentpairing.Module, publicURL string, vaultKey []byte, vapid *webpush.Options) *Module {
+// The provisioned master key derives a separate phone-push encryption key.
+func New(pool *pgxpool.Pool, pairing *agentpairing.Module, publicURL string, masterKey []byte, vapid *webpush.Options) *Module {
 	m := &Module{pool: pool, pairing: pairing, send: webpush.SendNotificationWithContext}
 	u, err := url.Parse(publicURL)
 	if err == nil && u.User == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1")) {
 		m.origin = u.Scheme + "://" + u.Host
 		m.wa, _ = webauthn.New(&webauthn.Config{RPID: u.Hostname(), RPDisplayName: "Aeon approvals", RPOrigins: []string{m.origin}, AuthenticatorSelection: protocol.AuthenticatorSelection{AuthenticatorAttachment: protocol.Platform, UserVerification: protocol.VerificationRequired}, Timeouts: webauthn.TimeoutsConfig{Login: webauthn.TimeoutConfig{Enforce: true, Timeout: 2 * time.Minute}, Registration: webauthn.TimeoutConfig{Enforce: true, Timeout: 2 * time.Minute}}})
 	}
-	if len(vaultKey) == 32 {
-		block, _ := aes.NewCipher(vaultKey)
-		m.vault, _ = cipher.NewGCM(block)
+	if len(masterKey) == 32 {
+		// Quote capabilities use the master directly. Separate the nonce domains
+		// so a push nonce collision cannot compromise either encryption key.
+		if key, err := hkdf.Key(sha256.New, masterKey, nil, "aeon.phone.push.encryption.v1", 32); err == nil {
+			block, _ := aes.NewCipher(key)
+			m.vault, _ = cipher.NewGCM(block)
+		}
 	}
 	if vapid != nil && m.vault != nil && m.wa != nil {
 		options := *vapid
@@ -464,7 +470,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 			if errors.As(err, &own) {
 				respond(w, nil, err)
 			} else {
-				approvals.WriteDecisionError(w, err)
+				respond(w, nil, fail(404, "request unavailable"))
 			}
 			return
 		}
@@ -481,7 +487,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 			if errors.As(err, &own) {
 				respond(w, nil, err)
 			} else {
-				agentpairing.WriteError(w, err)
+				respond(w, nil, fail(404, "request unavailable"))
 			}
 			return
 		}

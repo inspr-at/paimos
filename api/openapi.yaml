@@ -5845,7 +5845,7 @@ paths:
   /phone-approvals/{kind}/{requestId}/decision:
     post:
       operationId: decidePhoneApproval
-      description: Verify required WebAuthn UV, origin, RP ID, signature, counter, request hash and one-use challenge in the existing decision transaction. Push payload never authorizes a decision.
+      description: Verify required WebAuthn UV, origin, RP ID, signature, counter, request hash and one-use challenge in the existing decision transaction. Push payload never authorizes a decision. Missing, unauthorized, expired and already decided store requests return 404 request unavailable; phone verification errors retain their status.
       security: [{session: []}]
       parameters: [{name: kind, in: path, required: true, schema: {type: string, enum: [approval, attach]}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhoneDecisionProof'}}}}
