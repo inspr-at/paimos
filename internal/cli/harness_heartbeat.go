@@ -78,6 +78,9 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	LinkAccountID     string
+	LinkSetupRoot     string
+	LinkSocket        string
 	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int

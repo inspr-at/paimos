@@ -24,6 +24,11 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"POST /api/agent-pairing/account-link":                                    "account.probe",
+	"POST /api/agent-pairing/account-link/lookup":                             "profile.write",
+	"POST /api/agent-pairing/account-link/{requestId}/approve":                "profile.write",
+	"GET /api/agent-pairing/account-links":                                    "profile.write",
+	"POST /api/agent-pairing/account-links/{accountId}/unlink":                "profile.write",
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",

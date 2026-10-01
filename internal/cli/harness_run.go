@@ -19,6 +19,9 @@ func (rt *runtime) harnessRun() *Command {
 	var role string
 	return &Command{Name: "run", Short: "Register a short job, heartbeat it, and stop its session on exit", Use: "harness run --label LABEL --ticket KEY --role reviewer -- <command> [args...]", minArgs: 1, maxArgs: -1,
 		addFlags: func(fs *flagSet) {
+			fs.string(&o.LinkAccountID, "account-id", 0, "optional enrolled account UUID for the one-code ownership prompt")
+			fs.string(&o.LinkSetupRoot, "setup-root", 0, "private pairing state for account linking")
+			fs.string(&o.LinkSocket, "socket", 0, "owner-only daemon socket for account linking")
 			fs.string(&o.Project, "project", 'p', "project key (defaults to the ticket prefix)")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name (defaults to the caller)")
 			fs.string(&o.Harness, "harness", 0, "adapter family (defaults to the command name)")
@@ -115,6 +118,8 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	if ctx.Err() != nil {
 		return errors.Join(&exitError{code: 143}, finish())
 	}
+	stopLink := rt.startAccountLink(ctx, o)
+	defer stopLink()
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = rt.stdin, rt.stdout, rt.stderr
 	if !ownedprocess.Configure(cmd) {
