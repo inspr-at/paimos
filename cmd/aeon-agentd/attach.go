@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -105,9 +106,11 @@ func attachCommand(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("attach", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	var root, language string
+	var noBrowser bool
 	in := agentd.AttachLocalRequest{Operation: "preview"}
 	f.StringVar(&root, "setup-root", "", "paired local setup root")
 	f.StringVar(&language, "language", "en", "attach wording language: en or de")
+	f.BoolVar(&noBrowser, "no-browser", false, "print the approval link without opening a browser")
 	f.IntVar(&in.PID, "pid", 0, "running harness PID")
 	f.StringVar(&in.Harness, "harness", "", "paired harness name")
 	f.StringVar(&in.ProjectID, "project-id", "", "project UUID")
@@ -115,7 +118,7 @@ func attachCommand(args []string, out io.Writer) error {
 	f.StringVar(&in.Transcript, "transcript", "", "physical transcript file path for the default conversation watch")
 	f.BoolVar(&in.StatusOnly, "status-only", false, "report status without reading or sharing conversation text")
 	if f.Parse(args) != nil || len(f.Args()) != 0 || !filepath.IsAbs(root) || in.PID < 1 || in.Transcript != "" && !filepath.IsAbs(in.Transcript) || language != "en" && language != "de" {
-		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only] [--language en|de]")
+		return errors.New("usage: aeon-agentd attach --setup-root PATH --pid PID --harness NAME --project-id UUID --ticket-id UUID [--transcript PATH] [--status-only] [--language en|de] [--no-browser]")
 	}
 	// Never read confirmation from stdin, an agent pipe, a flag or fetched text.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -156,9 +159,9 @@ func attachCommand(args []string, out io.Writer) error {
 	words := attachWording(language)
 	fmt.Fprintln(tty, words.Unlinked)
 	fmt.Fprintln(tty, words.PairingHelp)
-	verb, confirmation := "Attach", "ATTACH"
+	verb := "Attach"
 	if !in.StatusOnly {
-		verb, confirmation = "Watch", "WATCH"
+		verb = "Watch"
 	}
 	fmt.Fprintf(tty, "%s this running session on %s\nHost: %s · %s · PID %d · UID %d\nStarted: %s\nExecutable: %s\nFolder: %s\nProject: %s · Ticket: %s\n", verb, view.Origin, view.Snapshot.Host, view.Snapshot.Harness, p.PID, p.UID, p.Started, p.Executable, p.CWD, view.Snapshot.ProjectID, view.Snapshot.TicketID)
 	if in.StatusOnly {
@@ -168,20 +171,10 @@ func attachCommand(args []string, out io.Writer) error {
 	}
 	fmt.Fprintln(tty, "Only attach a single trust context. Same-user processes are not isolated.")
 	fmt.Fprintln(tty, "Touch ID is the default on an upgraded Mac pairing even when this daemon reports that it cannot run. Linux and older pairings keep approval in Aeon. Save approval in Aeon to allow a headless Mac.")
-	fmt.Fprintln(tty, words.Next)
-	fmt.Fprintf(tty, "%s — type %s: ", words.LocalCheck, confirmation)
-	answer, err := readAttachAnswer(ctx, reader)
+	view, err = confirmAttachApproval(ctx, reader, tty, out, view, language, noBrowser || runtime.GOOS != "darwin", client.Attach, openAttachBrowser)
 	if err != nil {
 		return err
 	}
-	if answer != confirmation {
-		return errors.New("attach cancelled")
-	}
-	view, err = client.Attach(ctx, agentd.AttachLocalRequest{Operation: "confirm", ID: view.ID, Digest: view.Digest})
-	if err != nil {
-		return err
-	}
-	fmt.Fprint(out, attachApprovalNotice(view.Origin, view.Code, view.ExpiresAt, time.Now()))
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	previous := view.State
@@ -225,11 +218,12 @@ func attachApprovalNotice(origin, code string, expires *time.Time, now time.Time
 		fmt.Fprintf(&b, " (expires in %s)", left)
 	}
 	b.WriteString(".\n")
-	if len(code) != 9 || strings.Trim(code, "0123456789") != "" {
-		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter the attach code.\n", origin)
+	link := attachApprovalURL(origin, code)
+	if link == "" {
+		b.WriteString("  Open Aeon → Attach session and enter the attach code.\n")
 	} else {
-		fmt.Fprintf(&b, "  Open %s/agents \u2192 Attach session and enter code %s-%s-%s\n", origin, code[:3], code[3:6], code[6:])
-		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s/agents#attach=%s\n", origin, code)
+		fmt.Fprintf(&b, "  Open %s \u2192 Attach session and enter code %s-%s-%s\n", strings.Split(link, "#")[0], code[:3], code[3:6], code[6:])
+		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s\n", link)
 	}
 	b.WriteString("Keep this terminal open; Ctrl-C detaches.\n")
 	return b.String()

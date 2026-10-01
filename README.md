@@ -1304,6 +1304,13 @@ text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
 
+After reviewing the process and sharing mode, press Enter or `y` in the separate
+terminal for the local check. The CLI then opens the prefilled approval page on
+macOS and always prints the link as a fallback. `--no-browser` disables opening;
+other platforms use the printed link. Opening the page only fills in the code;
+the person must still review and approve in Aeon, followed by Touch ID when the
+pairing requires it. Keep the terminal open while linked; Ctrl-C detaches.
+
 On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
 root-owned `login` or `sshd-session` leader; tmux also remains supported.
 Ancestry and session-leader checks use kernel PID, parent, UID, start time,

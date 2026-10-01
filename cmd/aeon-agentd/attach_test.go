@@ -4,10 +4,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 )
 
@@ -153,5 +156,106 @@ func TestAttachWordingSeparatesComputerAndSession(t *testing.T) {
 		if !strings.Contains(words.Linked, tc.linked) || !strings.Contains(words.Next, tc.next) || !strings.Contains(words.Next, "Touch ID") {
 			t.Fatalf("%s hides activation or the next approval step", tc.language)
 		}
+	}
+}
+
+func TestAttachLocalPresencePrecedesConfirmAndBrowser(t *testing.T) {
+	for _, input := range []string{"\n", "y\n", "Y\n", "n\n", "ATTACH\n", "", "yes\n"} {
+		t.Run(fmtInput(input), func(t *testing.T) {
+			var out bytes.Buffer
+			var steps []string
+			preview := agentd.AttachLocalView{ID: "local-request", Digest: "snapshot-digest"}
+			_, err := confirmAttachApproval(t.Context(), bufio.NewReader(strings.NewReader(input)), &out, &out, preview, "en", false, func(_ context.Context, in agentd.AttachLocalRequest) (agentd.AttachLocalView, error) {
+				if in.Operation != "confirm" || in.ID != preview.ID || in.Digest != preview.Digest {
+					t.Fatal("confirmation lost its local snapshot binding")
+				}
+				steps = append(steps, "confirm")
+				return agentd.AttachLocalView{Origin: "https://paired.example", Code: "123456789", State: "pending"}, nil
+			}, func(_ context.Context, link string) error {
+				steps = append(steps, "open")
+				if link != "https://paired.example/agents#attach=123456789" || !strings.Contains(out.String(), "https://paired.example/agents#attach=123456789") {
+					t.Fatal("opener destination changed or fallback was not printed first")
+				}
+				return nil
+			})
+			accepted := input == "\n" || input == "y\n" || input == "Y\n"
+			if (err == nil) != accepted {
+				t.Fatalf("wrong presence decision: %v", err)
+			}
+			if accepted && strings.Join(steps, ",") != "confirm,open" || !accepted && len(steps) != 0 {
+				t.Fatalf("presence/confirm/browser order: %v", steps)
+			}
+			if !strings.Contains(out.String(), "Next: approve in the browser window") || !strings.Contains(out.String(), "press Enter or y") {
+				t.Fatal("next step or single-key local check hidden")
+			}
+		})
+	}
+}
+
+func TestAttachConfirmFailureNeverOpensBrowser(t *testing.T) {
+	var out bytes.Buffer
+	_, err := confirmAttachApproval(t.Context(), bufio.NewReader(strings.NewReader("\n")), &out, &out, agentd.AttachLocalView{}, "en", false, func(context.Context, agentd.AttachLocalRequest) (agentd.AttachLocalView, error) {
+		return agentd.AttachLocalView{}, errors.New("paired instance refused attach")
+	}, func(context.Context, string) error { t.Fatal("opened after a refused local confirmation"); return nil })
+	if err == nil || strings.Contains(out.String(), "#attach=") {
+		t.Fatal("refusal printed an approval link")
+	}
+}
+
+func fmtInput(input string) string {
+	if input == "" {
+		return "EOF"
+	}
+	if input == "\n" {
+		return "Enter"
+	}
+	return strings.TrimSpace(input)
+}
+
+func TestAttachBrowserFailureDisableAndInvalidURLs(t *testing.T) {
+	expired := time.Now().Add(-time.Minute)
+	for _, tc := range []struct {
+		name, origin, code, state string
+		disabled                  bool
+		expires                   *time.Time
+		fail                      bool
+		opens                     int
+	}{
+		{name: "opens", origin: "https://paired.example", code: "123456789", state: "pending", opens: 1},
+		{name: "failure", origin: "https://paired.example", code: "123456789", state: "pending", fail: true, opens: 1},
+		{name: "disabled", origin: "https://paired.example", code: "123456789", state: "pending", disabled: true},
+		{name: "expired", origin: "https://paired.example", code: "123456789", state: "pending", expires: &expired},
+		{name: "local review", origin: "https://paired.example", code: "123456789", state: "local_review"},
+		{name: "code injection", origin: "https://paired.example", code: "123456789&x=1", state: "pending"},
+		{name: "credentials", origin: "https://person:password@paired.example", code: "123456789", state: "pending"},
+		{name: "query", origin: "https://paired.example?code=123456789", code: "123456789", state: "pending"},
+		{name: "fragment", origin: "https://paired.example#other", code: "123456789", state: "pending"},
+		{name: "path", origin: "https://paired.example/other", code: "123456789", state: "pending"},
+		{name: "unsafe protocol", origin: "file:///tmp/approval", code: "123456789", state: "pending"},
+		{name: "remote cleartext", origin: "http://paired.example", code: "123456789", state: "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			calls := 0
+			openAttachApproval(t.Context(), &out, agentd.AttachLocalView{Origin: tc.origin, Code: tc.code, State: tc.state, ExpiresAt: tc.expires}, "en", tc.disabled, func(ctx context.Context, _ string) error {
+				calls++
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("opener has no timeout")
+				}
+				if tc.fail {
+					return errors.New("opener output must not be printed")
+				}
+				return nil
+			})
+			if calls != tc.opens {
+				t.Fatalf("opened %d times, want %d", calls, tc.opens)
+			}
+			if tc.fail && !strings.Contains(out.String(), "Open the printed link") {
+				t.Fatal("fallback hidden")
+			}
+			if strings.Contains(out.String(), "opener output") {
+				t.Fatal("raw opener error printed")
+			}
+		})
 	}
 }
