@@ -127,24 +127,30 @@ func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(tap), &wf); err != nil {
 		t.Fatalf("homebrew-tap.yml: %v", err)
 	}
-	if want := map[string]any{"release": map[string]any{"types": []any{"published"}}}; !reflect.DeepEqual(wf.On, want) {
-		t.Fatalf("tap workflow must trigger only on release publication, got %#v", wf.On)
+	if _, ok := wf.On["workflow_dispatch"]; !ok || len(wf.On) != 1 {
+		t.Fatalf("tap workflow must use trusted main dispatch only, got %#v", wf.On)
 	}
 	for _, needle := range []string{
-		"github.event.release.draft == false",
-		"github.event.release.prerelease == false",
-		"ref: ${{ github.event.release.tag_name }}",
+		"github.ref == 'refs/heads/main'",
+		"github.actor_id == '276789'",
+		"github.triggering_actor == 'markus-barta'",
+		"ref: ${{ github.workflow_sha }}",
+		"persist-credentials: false",
 		"contents: read",
+		"actions: read",
 		"environment: homebrew-tap",
-		`node scripts/release-tag.mjs "$RELEASE_TAG"`,
+		"node scripts/verify-live-policy.mjs homebrew-tap",
 		"node scripts/homebrew-tap-pr.mjs",
 		"secrets.HOMEBREW_TAP_APP_ID",
 		"secrets.HOMEBREW_TAP_APP_KEY",
-		"steps.version.outputs.version",
+		"inputs.version",
 	} {
 		if !strings.Contains(tap, needle) {
 			t.Fatalf("homebrew-tap job missing %s", needle)
 		}
+	}
+	if strings.Contains(tap, "github.event.release") {
+		t.Fatal("tap credentials must never be passed to a tag-controlled release workflow")
 	}
 	if strings.Contains(tap, "secrets.APPLE_") || strings.Contains(tap, "release-signing") {
 		t.Fatal("homebrew-tap job references signing secrets")
