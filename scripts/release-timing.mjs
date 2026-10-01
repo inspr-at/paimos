@@ -10,7 +10,7 @@
 //
 // GitHub access is read-only. Lists are paginated GET gh api calls; a pin's checks
 // come from gh pr view. Workflow dispatch, rerun, and release writes are refused.
-// -X/--method other than GET, --field/-f/-F, and --input are refused before gh runs.
+// Only frozen calls issued by ghRead's fixed operation templates may reach gh.
 //
 // Rollback is the latest rollout interval, otherwise the latest pin PR whose title
 // says rollback. A forward pin stays the forward pin. Disagreeing sources are
@@ -25,36 +25,59 @@ import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const VERSION_RE = /(\d{12}\.\d+\.\d+)/;
-const READ_ONLY = new Set(["pr list", "pr view", "run list", "run view", "api"]);
+const GH_READ_CALLS = new WeakSet();
+const GH_READ_FIELDS = {
+  "release-runs": ["repo", "page", "pageSize"],
+  "ci-runs": ["repo", "branch", "page", "pageSize"],
+  pulls: ["repo", "page", "pageSize"],
+  "pin-search": ["repo", "page", "pageSize"],
+  jobs: ["repo", "id", "page", "pageSize"],
+  statuses: ["repo", "sha", "page", "pageSize"],
+  attempt: ["repo", "id", "attempt"],
+  "pin-view": ["repo", "number"],
+};
 
-function ghApiMethod(args) {
-  let method = "GET";
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--method" || arg === "-X") {
-      method = String(args[i + 1] || "").toUpperCase();
-      i++;
-    } else if (arg.startsWith("--method=")) {
-      method = arg.slice("--method=".length).toUpperCase();
-    } else if (arg.startsWith("-X") && arg.length > 2) {
-      method = arg.slice(2).toUpperCase();
-    }
+// No arbitrary argv, path, method, or flag is accepted. All API calls have no
+// body flags and therefore use GET; the sole PR operation has exact JSON flags.
+export function ghRead(operation, params = {}) {
+  const fields = Object.hasOwn(GH_READ_FIELDS, operation) ? GH_READ_FIELDS[operation] : null;
+  if (!fields || Object.keys(params).some((key) => !fields.includes(key))) throw new Error("refusing unapproved gh operation");
+  const repo = params.repo;
+  if (typeof repo !== "string" || !/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.split("/").some((part) => part === "." || part === "..")) {
+    throw new Error("refusing invalid gh repository");
   }
-  return method;
-}
-
-function ghApiWrites(args) {
-  return args.some((arg) => arg === "-f" || arg === "-F" || arg === "--input" || arg === "--field" || arg === "--raw-field"
-    || arg.startsWith("--input=") || arg.startsWith("--field=") || arg.startsWith("--raw-field="));
+  const positive = (key, max = Number.MAX_SAFE_INTEGER) => {
+    const value = params[key];
+    if (!/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) > max) throw new Error(`refusing invalid gh ${key}`);
+    return String(value);
+  };
+  let path;
+  switch (operation) {
+    case "release-runs": path = `repos/${repo}/actions/workflows/release.yml/runs`; break;
+    case "ci-runs":
+      if (typeof params.branch !== "string" || !params.branch) throw new Error("refusing invalid gh branch");
+      path = `repos/${repo}/actions/workflows/ci.yml/runs?branch=${encodeURIComponent(params.branch)}&event=pull_request`;
+      break;
+    case "pulls": path = `repos/${repo}/pulls?state=closed&sort=updated&direction=desc`; break;
+    case "pin-search": path = `search/issues?q=${encodeURIComponent(`repo:${repo} is:pr AEON: pin in:title`)}&sort=updated&order=desc`; break;
+    case "jobs": path = `repos/${repo}/actions/runs/${positive("id")}/jobs`; break;
+    case "statuses":
+      if (typeof params.sha !== "string" || !/^[a-fA-F0-9]{3,64}$/.test(params.sha)) throw new Error("refusing invalid gh SHA");
+      path = `repos/${repo}/commits/${params.sha}/statuses`;
+      break;
+    case "attempt": path = `repos/${repo}/actions/runs/${positive("id")}/attempts/${positive("attempt")}`; break;
+    case "pin-view": break;
+  }
+  if (fields.includes("page")) path += `${path.includes("?") ? "&" : "?"}page=${positive("page")}&per_page=${positive("pageSize", 100)}`;
+  const args = Object.freeze(operation === "pin-view"
+    ? ["pr", "view", positive("number"), "--repo", repo, "--json", "number,title,createdAt,mergedAt,statusCheckRollup"]
+    : ["api", path]);
+  GH_READ_CALLS.add(args);
+  return args;
 }
 
 export function assertReadOnly(args) {
-  if (!Array.isArray(args) || args.length < 1) throw new Error("empty gh command");
-  const head = args[0] === "pr" || args[0] === "run" ? `${args[0]} ${args[1]}` : args[0];
-  if (!READ_ONLY.has(head)) throw new Error(`refusing gh ${args.slice(0, 2).join(" ")}`);
-  if (args[0] !== "api") return;
-  if (ghApiMethod(args) !== "GET") throw new Error("refusing non-GET gh api");
-  if (ghApiWrites(args)) throw new Error("refusing gh api write fields");
+  if (!GH_READ_CALLS.has(args)) throw new Error("refusing unapproved gh command; arbitrary flags, write fields and non-GET methods are forbidden");
 }
 
 function redact(text) {
@@ -91,7 +114,7 @@ function at(obj, ...keys) {
 const ZONE_RE = /(?:[zZ]|[+-]\d{2}:\d{2})$/;
 
 function instant(value) {
-  if (value == null || value === "") return { ms: null, reason: null };
+  if (value == null || value === "") return { ms: null, reason: "missing timestamp" };
   const text = String(value).trim();
   if (!ZONE_RE.test(text)) return { ms: null, reason: "missing timezone" };
   const ms = Date.parse(text);
@@ -107,13 +130,8 @@ function parseTime(value, label) {
 }
 
 function span(start, end) {
-  if (start == null || start === "" || end == null || end === "") return { seconds: null, reason: null };
-  const a = instant(start);
-  const b = instant(end);
-  if (a.reason === "missing timezone" || b.reason === "missing timezone") return { seconds: null, reason: "missing timezone" };
-  if (a.ms == null || b.ms == null) return { seconds: null, reason: a.reason || b.reason };
-  if (b.ms < a.ms) return { seconds: null, reason: "reversed" };
-  return { seconds: Math.round((b.ms - a.ms) / 1000), reason: null };
+  const interval = validateInterval(validateTime(start), validateTime(end));
+  return { seconds: duration(interval), reason: reasonOf(interval) };
 }
 
 export function secondsBetween(start, end) {
@@ -122,9 +140,7 @@ export function secondsBetween(start, end) {
 
 // §1's published walls are the difference of the timestamps with seconds dropped.
 export function wallMin(start, end) {
-  const timed = span(start, end);
-  if (timed.seconds == null) return null;
-  return Math.floor(instant(end).ms / 60000) - Math.floor(instant(start).ms / 60000);
+  return minuteSpan(validateInterval(validateTime(start), validateTime(end)));
 }
 
 export function roundMin(seconds) {
@@ -173,7 +189,7 @@ export function normalizeInput(raw) {
   const normalized = {
     pullRequests: asArray(raw.pull_requests ?? raw.pullRequests).map(normalizePullRequest),
     pinPullRequests: asArray(raw.pin_pull_requests ?? raw.pinPullRequests).map(normalizePin),
-    runs: asArray(raw.workflow_runs ?? raw.workflowRuns).map(normalizeRun),
+    runs: asArray(raw.workflow_runs ?? raw.workflowRuns ?? raw.runs).map(normalizeRun),
     statuses: asArray(raw.statuses).map(normalizeStatus),
     rollouts: asArray(raw.rollouts).map(normalizeRollout),
   };
@@ -216,6 +232,7 @@ function normalizeStep(step) {
 
 function normalizeAttempt(attempt) {
   return {
+    number: attempt.number ?? attempt.runAttempt ?? attempt.run_attempt ?? null,
     conclusion: String(attempt.conclusion || "").toLowerCase(),
     startedAt: at(attempt, "startedAt", "started_at", "runStartedAt", "run_started_at"),
     completedAt: at(attempt, "completedAt", "completed_at", "updatedAt", "updated_at"),
@@ -231,7 +248,7 @@ function normalizeRun(run) {
     conclusion: String(run.conclusion || "").toLowerCase(),
     createdAt: at(run, "createdAt", "created_at"),
     updatedAt: at(run, "updatedAt", "updated_at"),
-    runAttempt: Number.isFinite(attempt) && attempt > 0 ? attempt : 1,
+    runAttempt: attempt,
     runStartedAt: at(run, "runStartedAt", "run_started_at"),
     jobsTruncated: Boolean(run.jobsTruncated),
     headBranch: run.headBranch || run.head_branch || "",
@@ -248,6 +265,7 @@ function normalizeRun(run) {
 
 function normalizeStatus(status) {
   return {
+    id: status.id ?? null,
     sha: status.sha || "",
     context: status.context || "",
     state: String(status.state || "").toLowerCase(),
@@ -259,6 +277,9 @@ function normalizeStatus(status) {
 
 function normalizeRollout(rollout) {
   return {
+    id: rollout.id ?? null,
+    outcome: rollout.outcome || "",
+    direction: rollout.direction || "",
     release: rollout.release || null,
     version: rollout.version || null,
     sequence: Number.isInteger(rollout.sequence) ? rollout.sequence : null,
@@ -273,144 +294,323 @@ function normalizeRollout(rollout) {
   };
 }
 
-function chooseReleaseRun(runs, version) {
-  const tagged = runs.filter((run) => run.workflow === "Release" && versionIn(run.headBranch) === version);
-  const pushed = tagged.filter((run) => run.conclusion === "success" && run.event === "push");
-  const pool = pushed.length ? pushed : tagged;
-  pool.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  return pool[0] || null;
+/** @typedef {{state: "complete" | "partial", reasons: string[]}} Completeness */
+/** @typedef {{value: string|null, ms: number|null, completeness: Completeness}} Timestamp */
+/** @typedef {{start: Timestamp, end: Timestamp, completeness: Completeness}} Interval */
+
+function completeness(reasons = []) {
+  const unique = [...new Set(reasons.filter(Boolean))];
+  return { state: unique.length ? "partial" : "complete", reasons: unique };
 }
 
-function digestSeconds(run) {
-  if (!run) return null;
-  for (const job of run.jobs) {
-    for (const step of job.steps) {
-      if (/^record pushed digest$/i.test(step.name) && step.completedAt) {
-        return secondsBetween(run.createdAt, step.completedAt);
+function reasonOf(record) {
+  const reasons = record?.completeness.reasons || [];
+  for (const primary of ["truncated", "attempt history unavailable"]) {
+    if (reasons.includes(primary)) return primary;
+  }
+  return reasons.join("; ") || null;
+}
+
+function isComplete(record) {
+  return record?.completeness.state === "complete";
+}
+
+/** @returns {Timestamp} */
+function validateTime(value) {
+  const parsed = instant(value);
+  return { value: value ?? null, ms: parsed.ms, completeness: completeness([parsed.reason]) };
+}
+
+/** @param {Timestamp} start @param {Timestamp} end @returns {Interval} */
+function validateInterval(start, end) {
+  const reasons = [...start.completeness.reasons, ...end.completeness.reasons];
+  if (!reasons.length && end.ms < start.ms) reasons.push("reversed");
+  return { start, end, completeness: completeness(reasons) };
+}
+
+// Arithmetic consumes only validated intervals. Missing or invalid evidence has
+// a completeness reason before any duration, median, or adjustment is computed.
+function duration(interval) {
+  return isComplete(interval) ? Math.round((interval.end.ms - interval.start.ms) / 1000) : null;
+}
+
+function minuteSpan(interval) {
+  return isComplete(interval) ? Math.floor(interval.end.ms / 60000) - Math.floor(interval.start.ms / 60000) : null;
+}
+
+function validateRecord(record, fields, start, end) {
+  const times = Object.fromEntries(fields.map((key) => [key, validateTime(record[key])]));
+  const interval = validateInterval(times[start], times[end]);
+  const reasons = [...interval.completeness.reasons];
+  for (const key of fields) {
+    if (record[key] != null) reasons.push(...times[key].completeness.reasons);
+  }
+  return { ...record, times, interval, completeness: completeness(reasons) };
+}
+
+function uniqueRecords(records, keyOf) {
+  const seen = new Set();
+  return records.filter((record) => {
+    const key = keyOf(record);
+    if (key == null) return true;
+    if (seen.has(String(key))) return false;
+    seen.add(String(key));
+    return true;
+  });
+}
+
+function validateRun(run) {
+  const record = validateRecord(run, ["createdAt", "updatedAt", "runStartedAt"], "createdAt", "updatedAt");
+  if (run.runStartedAt) {
+    record.completeness = completeness([
+      ...record.completeness.reasons,
+      ...validateInterval(record.times.createdAt, record.times.runStartedAt).completeness.reasons,
+      ...validateInterval(record.times.runStartedAt, record.times.updatedAt).completeness.reasons,
+    ]);
+  }
+  const supplied = run.attempts.length > 0;
+  const attempts = supplied ? run.attempts : [{
+    number: run.runAttempt,
+    conclusion: run.conclusion,
+    startedAt: run.runStartedAt || (run.runAttempt === 1 ? run.createdAt : null),
+    completedAt: run.updatedAt,
+  }];
+  const historyReasons = [];
+  if (!Number.isSafeInteger(run.runAttempt) || run.runAttempt < 1) historyReasons.push("invalid runAttempt");
+  if (run.runAttempt > 1 && (!supplied || attempts.length !== run.runAttempt)) historyReasons.push("attempt history unavailable");
+  // Legacy bundles may list attempts in order without numbers. When GitHub
+  // supplies numbers, require exactly 1..runAttempt with no duplicates or gaps.
+  if (supplied && (attempts.length !== run.runAttempt || attempts.some((item) => item.number != null))) {
+    const numbers = attempts.map((item) => Number(item.number)).sort((a, b) => a - b);
+    if (numbers.length !== run.runAttempt || numbers.some((n, i) => n !== i + 1)) historyReasons.push("attempt history unavailable");
+  }
+  let previousEnd = null;
+  record.attempts = attempts.map((attempt) => {
+    const validated = validateRecord(attempt, ["startedAt", "completedAt"], "startedAt", "completedAt");
+    if (isComplete(validated)) {
+      if (previousEnd != null && validated.interval.start.ms < previousEnd) historyReasons.push("attempt intervals overlap or are unordered");
+      previousEnd = validated.interval.end.ms;
+      if (isComplete(record.interval) && (validated.interval.start.ms < record.interval.start.ms || validated.interval.end.ms > record.interval.end.ms)) {
+        historyReasons.push("attempt outside workflow lifetime");
       }
     }
-  }
-  return null;
+    if (!["success", "failure", "cancelled", "skipped", "timed_out", "action_required", "neutral", "startup_failure", "stale"].includes(attempt.conclusion)) {
+      validated.completeness = completeness([...validated.completeness.reasons, "attempt conclusion unavailable"]);
+    }
+    historyReasons.push(...validated.completeness.reasons);
+    return validated;
+  });
+  record.history = { completeness: completeness([...record.completeness.reasons, ...historyReasons]) };
+  record.completeness = record.history.completeness;
+  record.jobs = run.jobs.map((job) => ({
+    ...validateRecord(job, ["startedAt", "completedAt"], "startedAt", "completedAt"),
+    steps: job.steps.map((step) => validateRecord(step, ["startedAt", "completedAt"], "startedAt", "completedAt")),
+  }));
+  return record;
 }
 
-function longPole(checks) {
-  let best = null;
-  for (const check of checks) {
-    const duration = secondsBetween(check.startedAt, check.completedAt);
-    if (duration == null) continue;
-    if (!best || duration > best.s) best = { name: check.name, s: duration };
-  }
-  return best;
+function stableKey(record) {
+  return String(record.id ?? record.number ?? JSON.stringify(record));
 }
 
-function attemptIntervals(run) {
-  if (run.attempts.length) {
-    return run.attempts.map((attempt) => ({
-      conclusion: attempt.conclusion,
-      start: attempt.startedAt,
-      end: attempt.completedAt,
-    }));
-  }
-  if (run.runAttempt > 1 && !run.runStartedAt) return { unavailable: true };
-  return [{
-    conclusion: run.conclusion,
-    start: run.runAttempt > 1 ? run.runStartedAt : run.createdAt,
-    end: run.updatedAt,
-  }];
+function byTime(items, timeOf, newest = false) {
+  return [...items].sort((a, b) => {
+    const x = timeOf(a).ms;
+    const y = timeOf(b).ms;
+    // An unorderable candidate cannot establish that another is the latest.
+    if (x == null || y == null) {
+      if (x == null && y != null) return -1;
+      if (y == null && x != null) return 1;
+    } else if (x !== y) return newest ? (x > y ? -1 : 1) : (x < y ? -1 : 1);
+    return stableKey(a).localeCompare(stableKey(b));
+  });
 }
 
-function overlapsWindow(start, end, opened, merged) {
-  if (opened != null && (start == null || start < opened)) return false;
-  if (merged != null && (end == null || end > merged)) return false;
-  return start != null && end != null;
+function selectReleaseRun(runs, version) {
+  const tagged = runs.filter((run) => run.workflow === "Release" && versionIn(run.headBranch) === version);
+  const pushed = tagged.filter((run) => run.conclusion === "success" && run.event === "push");
+  return byTime(pushed.length ? pushed : tagged, (run) => run.times.createdAt)[0] || null;
 }
 
-function ciMetrics(runs, branch, openedAt, mergedAt, opts = {}) {
-  const empty = { failed_s: null, success_s: null, failure_and_fix_s: null, attempts: null, reason: null };
-  if (!branch) return empty;
-  if (opts.truncated) return { ...empty, reason: "truncated" };
-  const opened = openedAt ? instant(openedAt).ms : null;
-  const merged = mergedAt ? instant(mergedAt).ms : null;
-  const rows = runs.filter((run) => run.workflow === "CI" && run.event === "pull_request" && run.headBranch === branch);
+function validateCI(runs, pr, truncated) {
+  const empty = { samples: [], observedAttempts: 0, completeness: completeness(["missing PR lifetime"]), stall: null };
+  if (!pr || !isComplete(pr.interval)) return { ...empty, completeness: completeness([`invalid PR lifetime: ${reasonOf(pr?.interval) || "missing timestamp"}`]) };
+  if (truncated) return { ...empty, completeness: completeness(["truncated"]) };
+  if (!pr.headRef) return { ...empty, completeness: completeness(["missing PR branch"]) };
   const samples = [];
-  let unavailable = false;
-  for (const run of rows) {
-    const attempts = attemptIntervals(run);
-    if (attempts.unavailable) {
-      const created = instant(run.createdAt).ms;
-      const updated = instant(run.updatedAt).ms;
-      const couldMatter = (merged == null || (created != null && created <= merged))
-        && (opened == null || (updated != null && updated >= opened));
-      if (couldMatter) unavailable = true;
-      continue;
-    }
-    for (const attempt of attempts) {
-      const timed = span(attempt.start, attempt.end);
-      if (timed.seconds == null) continue;
-      const startMs = instant(attempt.start).ms;
-      const endMs = instant(attempt.end).ms;
-      if (!overlapsWindow(startMs, endMs, opened, merged)) continue;
-      samples.push({
-        conclusion: attempt.conclusion,
-        start: attempt.start,
-        startMs,
-        seconds: timed.seconds,
-      });
+  const reasons = [];
+  let observedAttempts = 0;
+  for (const run of runs) {
+    if (run.workflow !== "CI" || run.event !== "pull_request" || run.headBranch !== pr.headRef) continue;
+    if (isComplete(run.interval) && (run.interval.end.ms < pr.interval.start.ms || run.interval.start.ms > pr.interval.end.ms)) continue;
+    reasons.push(...run.history.completeness.reasons);
+    for (const attempt of run.attempts) {
+      if (!isComplete(attempt)) continue;
+      if (attempt.interval.start.ms < pr.interval.start.ms || attempt.interval.end.ms > pr.interval.end.ms) continue;
+      observedAttempts++;
+      samples.push(attempt);
     }
   }
-  if (unavailable) return { ...empty, reason: "attempt history unavailable" };
-  samples.sort((a, b) => a.startMs - b.startMs);
-  const failure = samples.find((item) => item.conclusion === "failure");
+  samples.sort((a, b) => a.interval.start.ms - b.interval.start.ms);
+  if (!samples.length && !reasons.length) reasons.push("no CI attempts in PR lifetime");
+  const failure = samples.find((item) => item.conclusion === "failure") || null;
   const success = failure
-    ? samples.find((item) => item.conclusion === "success" && item.startMs >= failure.startMs)
-    : [...samples].reverse().find((item) => item.conclusion === "success");
+    ? samples.find((item) => item.conclusion === "success" && item.interval.start.ms >= failure.interval.start.ms) || null
+    : [...samples].reverse().find((item) => item.conclusion === "success") || null;
+  const stall = failure && success ? validateInterval(failure.interval.start, success.interval.start) : null;
+  return { samples, failure, success, stall, observedAttempts, completeness: completeness(reasons) };
+}
+
+function validateGate(rollout, statuses, sha, live, truncated) {
+  const tickets = rollout?.tickets || [];
+  const records = tickets.length ? tickets : statuses.filter((status) => status.sha === sha && status.context === "gate/cross-family" && status.state === "success");
+  const intervals = records.map((record) => {
+    const interval = validateInterval(tickets.length ? record.gateTime : record.times.updatedAt, live);
+    interval.completeness = completeness([...interval.completeness.reasons, ...record.completeness.reasons]);
+    return interval;
+  });
+  const missing = intervals.filter((item) => !isComplete(item)).length;
+  const reasons = [];
+  if (!tickets.length && truncated) reasons.push("truncated");
+  if (missing) reasons.push("incomplete");
+  if (!intervals.length && !reasons.length) reasons.push("no gate evidence");
+  return { intervals, missing, completeness: completeness(reasons) };
+}
+
+function isRollbackRollout(rollout) {
+  return Boolean(rollout.rollbackStartedAt || rollout.rollbackFinishedAt || /rollback/i.test(`${rollout.outcome} ${rollout.direction}`));
+}
+
+function validateRollback(rollouts, pins, truncated) {
+  const rollout = byTime(rollouts.filter((item) => item.rollbackStartedAt || item.rollbackFinishedAt), (item) => item.times.rollbackStartedAt, true)[0] || null;
+  const pin = byTime(pins, (item) => item.times.createdAt, true)[0] || null;
+  if (truncated) return { interval: null, source: null, completeness: completeness(["truncated"]) };
+  // Select the attempt before checking completeness; never fall back to an
+  // older measured duration when the newest attempt has not finished.
+  const candidates = [rollout && { interval: rollout.rollback, source: "rollout" }, pin && { interval: pin.interval, source: "pin" }].filter(Boolean);
+  const latest = byTime(candidates, (item) => item.interval.start, true)[0];
+  if (!latest) return { interval: null, source: null, completeness: completeness(["no rollback evidence"]) };
+  if (!isComplete(latest.interval)) return { ...latest, completeness: latest.interval.completeness };
+  if (candidates.length === 2 && candidates.every((item) => isComplete(item.interval))) {
+    // Both sources describe the same attempt only when their boundaries agree.
+    const [a, b] = candidates.map((item) => item.interval);
+    if (a.start.ms !== b.start.ms || a.end.ms !== b.end.ms) return { interval: null, source: null, completeness: completeness(["ambiguous"]) };
+    return { ...candidates[0], completeness: completeness() };
+  }
+  return { ...latest, completeness: completeness() };
+}
+
+function validateRelease(input, version) {
+  const run = selectReleaseRun(input.runs, version);
+  const matches = input.rollouts.filter((item) => item.version === version);
+  const forward = matches.filter((item) => (item.cutAt || item.liveAt) && (
+    !isRollbackRollout(item) || item.outcome === "live"
+    || (matches.length === 1 && (item.release || item.sequence != null) && !/rollback/i.test(`${item.outcome} ${item.direction}`))
+  ));
+  // A rollout with an embedded rollback still carries its own forward interval;
+  // standalone rollback records must never overwrite another forward record.
+  const rollout = byTime(forward, (item) => item.times.cutAt)[0] || null;
+  const prMatches = input.pullRequests.filter((pr) => run && pr.mergeSha && pr.mergeSha === run.headSha);
+  const prs = prMatches.length ? prMatches : input.pullRequests.filter((pr) => versionIn(pr.title) === version);
+  const pr = byTime(prs, (item) => item.times.createdAt)[0] || null;
+  const pins = input.pinPullRequests.filter((item) => versionIn(item.title) === version);
+  const forwardPins = pins.filter((item) => !isRollbackTitle(item.title));
+  const names = input.collection.truncated;
+  const pinReason = names.includes("pin_pull_requests") ? "truncated" : forwardPins.length > 1 ? "ambiguous" : null;
+  const pin = pinReason ? null : forwardPins[0] || null;
+  const cut = rollout?.interval || validateInterval(validateTime(null), validateTime(null));
+  const live = rollout?.times.liveAt || validateTime(null);
+  const prInterval = pr?.interval || validateInterval(validateTime(null), validateTime(null));
+  const prLive = validateInterval(pr?.times.createdAt || validateTime(null), live);
+  const ci = validateCI(input.runs, pr, names.includes("pull_requests") || names.includes("ci") || input.collection.ciTruncatedBranches.includes(pr?.headRef));
+  const adjustmentReasons = [];
+  if (!isComplete(cut)) adjustmentReasons.push(reasonOf(cut));
+  if (!isComplete(ci)) adjustmentReasons.push(reasonOf(ci));
+  if (!ci.stall) adjustmentReasons.push("no complete CI stall");
+  else if (!isComplete(ci.stall)) adjustmentReasons.push(reasonOf(ci.stall));
+  else if (isComplete(cut) && (ci.stall.start.ms < cut.start.ms || ci.stall.end.ms > cut.end.ms)) adjustmentReasons.push("CI stall outside rollout window");
+  const adjustment = { completeness: completeness(adjustmentReasons) };
+  const gate = validateGate(rollout, input.statuses, run?.headSha || "", live, input.collection.statusTruncatedShas.includes(run?.headSha || "") || names.includes("statuses") || names.includes("workflow_runs"));
+  const rollback = validateRollback(matches, pins.filter((item) => isRollbackTitle(item.title)), names.includes("pin_pull_requests"));
+  const digestSteps = run?.jobs.flatMap((job) => job.steps).filter((step) => /^record pushed digest$/i.test(step.name)) || [];
+  const digest = digestSteps.length === 1 ? validateInterval(run.times.createdAt, digestSteps[0].times.completedAt) : validateInterval(validateTime(null), validateTime(null));
+  const digestReasons = [...digest.completeness.reasons];
+  if (digestSteps.length > 1) digestReasons.push("ambiguous digest evidence");
+  if (run?.jobsTruncated || names.includes("workflow_runs")) digestReasons.push("truncated");
+  if (run && !isComplete(run)) digestReasons.push(...run.completeness.reasons);
+  if (run && digestSteps[0]) digestReasons.push(...validateInterval(digestSteps[0].times.completedAt, run.times.updatedAt).completeness.reasons);
+  if (digestSteps[0] && !isComplete(digestSteps[0])) digestReasons.push(...digestSteps[0].completeness.reasons);
+  digest.completeness = completeness(digestReasons);
+  const checks = pin?.checks || [];
+  const checksCompleteness = { completeness: completeness(checks.length ? checks.flatMap((check) => check.completeness.reasons) : ["no check evidence"]) };
+  const start = rollout?.cutAt ? rollout.times.cutAt : pr?.createdAt ? pr.times.createdAt : run?.times.createdAt || validateTime(null);
+  return { version, start, run, rollout, pr, pin, pinReason, cut, prInterval, prLive, ci, adjustment, gate, rollback, digest, checksCompleteness };
+}
+
+export function validateEvidence(raw) {
+  const input = normalizeInput(raw);
+  input.collection = {
+    truncated: asArray(input.collection?.truncated),
+    ciTruncatedBranches: asArray(input.collection?.ciTruncatedBranches),
+    statusTruncatedShas: asArray(input.collection?.statusTruncatedShas),
+  };
+  input.pullRequests = uniqueRecords(input.pullRequests, (pr) => pr.number).map((pr) => validateRecord(pr, ["createdAt", "mergedAt"], "createdAt", "mergedAt"));
+  input.pinPullRequests = uniqueRecords(input.pinPullRequests, (pr) => pr.number).map((pr) => ({
+    ...validateRecord(pr, ["createdAt", "mergedAt"], "createdAt", "mergedAt"),
+    checks: pr.checks.map((check) => validateRecord(check, ["startedAt", "completedAt"], "startedAt", "completedAt")),
+  }));
+  input.runs = uniqueRecords(input.runs, (run) => run.id).map(validateRun);
+  input.statuses = uniqueRecords(input.statuses, (status) => status.id).map((status) => {
+    const times = { createdAt: validateTime(status.createdAt), updatedAt: validateTime(status.updatedAt) };
+    const interval = status.createdAt ? validateInterval(times.createdAt, times.updatedAt) : validateInterval(times.updatedAt, times.updatedAt);
+    return { ...status, times, interval, completeness: interval.completeness };
+  });
+  input.rollouts = uniqueRecords(input.rollouts, (rollout) => rollout.id).map((rollout) => {
+    const record = validateRecord(rollout, ["cutAt", "liveAt", "rollbackStartedAt", "rollbackFinishedAt"], "cutAt", "liveAt");
+    record.rollback = validateInterval(record.times.rollbackStartedAt, record.times.rollbackFinishedAt);
+    record.tickets = rollout.tickets.map((ticket) => {
+      const gateTime = validateTime(ticket.gateOkAt);
+      return { ...ticket, gateTime, completeness: gateTime.completeness };
+    });
+    return record;
+  });
+  // Complete every association and cross-record interval before rowFor performs
+  // any duration arithmetic. Consumers cannot bypass this stage with camelCase.
+  input.releases = versionsOf(input).map((version) => validateRelease(input, version));
+  return input;
+}
+
+function ciMetrics(evidence) {
+  const empty = { failed_s: null, success_s: null, failure_and_fix_s: null, attempts: null, observed_attempts: evidence.observedAttempts, reason: reasonOf(evidence) };
+  empty.reasons = {
+    ...(!isComplete(evidence) || !evidence.failure ? { failed_s: reasonOf(evidence) || "no failed CI attempt in PR lifetime" } : {}),
+    ...(!isComplete(evidence) || !evidence.success ? { success_s: reasonOf(evidence) || "no successful CI attempt in PR lifetime" } : {}),
+    ...(!isComplete(evidence) || !evidence.stall ? { failure_and_fix_s: reasonOf(evidence) || "no complete CI stall" } : {}),
+  };
+  if (!isComplete(evidence)) return empty;
   return {
-    failed_s: failure ? failure.seconds : null,
-    success_s: success ? success.seconds : null,
-    failure_and_fix_s: failure && success ? span(failure.start, success.start).seconds : null,
-    attempts: samples.length || null,
-    reason: null,
+    ...empty,
+    failed_s: duration(evidence.failure?.interval),
+    success_s: duration(evidence.success?.interval),
+    failure_and_fix_s: duration(evidence.stall),
+    attempts: evidence.samples.length,
   };
 }
 
-function gateResult(seconds, samples, missing, reason) {
-  const result = { gate_ok_to_live_s: seconds, gate_samples: samples };
-  if (missing) result.gate_missing = missing;
-  if (reason) result.gate_reason = reason;
-  return result;
+function gateMetrics(evidence) {
+  const samples = evidence.intervals.filter(isComplete);
+  return {
+    gate_ok_to_live_s: isComplete(evidence) ? median(samples.map(duration)) : null,
+    gate_samples: samples.length,
+    ...(evidence.missing ? { gate_missing: evidence.missing } : {}),
+    ...(reasonOf(evidence) ? { gate_reason: reasonOf(evidence) } : {}),
+  };
 }
 
-function gateSeconds(liveAt, rollout, statuses, sha, opts = {}) {
-  if (!liveAt) return gateResult(null, 0, 0, null);
-  const tickets = rollout?.tickets || [];
-  if (tickets.length) {
-    const samples = [];
-    let missing = 0;
-    for (const ticket of tickets) {
-      if (!ticket.gateOkAt) {
-        missing++;
-        continue;
-      }
-      const timed = span(ticket.gateOkAt, liveAt);
-      if (timed.seconds == null) {
-        missing++;
-        continue;
-      }
-      samples.push(timed.seconds);
-    }
-    if (missing > 0) return gateResult(null, samples.length, missing, "incomplete");
-    return gateResult(median(samples), samples.length, 0, null);
-  }
-  if (opts.statusesTruncated) return gateResult(null, 0, 0, "truncated");
-  const samples = [];
-  for (const status of statuses) {
-    if (status.sha !== sha) continue;
-    if (status.context !== "gate/cross-family" || status.state !== "success" || !status.updatedAt) continue;
-    const timed = span(status.updatedAt, liveAt);
-    if (timed.seconds == null) continue;
-    samples.push(timed.seconds);
-  }
-  return gateResult(median(samples), samples.length, 0, null);
+function longPole(pin, checksCompleteness) {
+  if (!pin || !isComplete(checksCompleteness)) return null;
+  const checks = pin.checks.map((check) => ({ name: check.name, s: duration(check.interval) })).sort((a, b) => b.s - a.s);
+  return checks[0] || null;
 }
 
 function versionsOf(input) {
@@ -431,10 +631,6 @@ function versionsOf(input) {
     if (version) versions.add(version);
   }
   return [...versions];
-}
-
-function releaseStart(row) {
-  return row.cut_at || row.pull_request?.created_at || row.tag_at || null;
 }
 
 function explain(row) {
@@ -495,108 +691,31 @@ function isRollbackTitle(title) {
   return /rollback/i.test(title || "");
 }
 
-function latestBy(items, stampOf) {
-  let best = null;
-  let bestMs = null;
-  items.forEach((item, index) => {
-    const ms = instant(stampOf(item)).ms;
-    const later = !best || index >= best.index;
-    if (!best || (ms != null && (bestMs == null || ms > bestMs || (ms === bestMs && later))) || (ms == null && bestMs == null && later)) {
-      best = { item, index };
-      bestMs = ms;
-    }
-  });
-  return best ? best.item : null;
-}
-
-function mergeRollouts(matches) {
-  if (!matches.length) return null;
-  const merged = {
-    release: null,
-    version: matches[0].version,
-    sequence: null,
-    cutAt: null,
-    liveAt: null,
-    rollbackStartedAt: null,
-    rollbackFinishedAt: null,
-    tickets: [],
-  };
-  for (const item of matches) {
-    if (item.release) merged.release = item.release;
-    if (item.sequence != null) merged.sequence = item.sequence;
-    if (item.cutAt) merged.cutAt = item.cutAt;
-    if (item.liveAt) merged.liveAt = item.liveAt;
-    if (item.tickets.length) merged.tickets = item.tickets;
-  }
-  const rollback = latestBy(
-    matches.filter((item) => item.rollbackStartedAt && item.rollbackFinishedAt),
-    (item) => item.rollbackStartedAt,
-  );
-  if (rollback) {
-    merged.rollbackStartedAt = rollback.rollbackStartedAt;
-    merged.rollbackFinishedAt = rollback.rollbackFinishedAt;
-  }
-  return merged;
-}
-
-function rollbackOf(rollout, rollbackPins, pinTruncated) {
-  const measured = Boolean(rollout?.rollbackStartedAt && rollout?.rollbackFinishedAt);
-  const rolloutSpan = measured ? span(rollout.rollbackStartedAt, rollout.rollbackFinishedAt) : null;
-  if (pinTruncated) {
-    if (rolloutSpan?.seconds != null && rollbackPins.length === 0) {
-      return { rollback_s: rolloutSpan.seconds, rollback_source: "rollout" };
-    }
-    return { rollback_s: null, rollback_source: null, rollback_reason: "truncated" };
-  }
-  const rollbackPin = latestBy(rollbackPins, (pr) => pr.createdAt || pr.mergedAt);
-  const pinSpan = rollbackPin ? span(rollbackPin.createdAt, rollbackPin.mergedAt) : null;
-  if (measured && rollbackPin) {
-    if (rolloutSpan.seconds != null && pinSpan.seconds != null && rolloutSpan.seconds === pinSpan.seconds) {
-      return { rollback_s: rolloutSpan.seconds, rollback_source: "rollout" };
-    }
-    return { rollback_s: null, rollback_source: null, rollback_reason: "ambiguous" };
-  }
-  if (rolloutSpan?.seconds != null) return { rollback_s: rolloutSpan.seconds, rollback_source: "rollout" };
-  if (measured && rolloutSpan?.reason) return { rollback_s: null, rollback_source: null, rollback_reason: rolloutSpan.reason };
-  if (pinSpan?.seconds != null) return { rollback_s: pinSpan.seconds, rollback_source: "pin" };
-  if (rollbackPin && pinSpan?.reason) return { rollback_s: null, rollback_source: null, rollback_reason: pinSpan.reason };
-  return { rollback_s: null, rollback_source: null };
-}
-
-function rowFor(input, version) {
-  const run = chooseReleaseRun(input.runs, version);
-  const rollout = mergeRollouts(input.rollouts.filter((item) => item.version === version));
-  const pullRequest = input.pullRequests.find((pr) => run && pr.mergeSha && pr.mergeSha === run.headSha)
-    || input.pullRequests.find((pr) => versionIn(pr.title) === version)
-    || null;
-  const versionPins = input.pinPullRequests.filter((pr) => versionIn(pr.title) === version);
-  const forwardPins = versionPins.filter((pr) => !isRollbackTitle(pr.title));
-  const rollbackPins = versionPins.filter((pr) => isRollbackTitle(pr.title));
-  const pin = forwardPins.length === 1 ? forwardPins[0] : null;
-  const pinReason = forwardPins.length > 1 ? "ambiguous" : null;
+function rowFor(evidence) {
+  const { version, run, rollout, pr: pullRequest, pin, pinReason, cut, prInterval, prLive, ci: ciEvidence, adjustment, gate: gateEvidence, rollback, digest, checksCompleteness } = evidence;
   const label = rollout?.release || labelFromRef(pullRequest?.headRef) || null;
   const cutAt = rollout?.cutAt || null;
   const liveAt = rollout?.liveAt || null;
-  const cutSpan = span(cutAt, liveAt);
-  const elapsed = cutSpan.seconds;
-  const names = Array.isArray(input.collection?.truncated) ? input.collection.truncated : [];
-  const ciTruncated = (input.collection?.ciTruncatedBranches || []).includes(pullRequest?.headRef);
-  const ci = ciMetrics(input.runs, pullRequest?.headRef, pullRequest?.createdAt, pullRequest?.mergedAt, { truncated: ciTruncated });
-  const without = elapsed != null && ci.failure_and_fix_s != null ? elapsed - ci.failure_and_fix_s : null;
-  const statusesTruncated = (input.collection?.statusTruncatedShas || []).includes(run?.headSha || "");
-  const gate = gateSeconds(liveAt, rollout, input.statuses, run?.headSha || "", { statusesTruncated });
-  const rollback = rollbackOf(rollout, rollbackPins, names.includes("pin_pull_requests"));
-  const digestReason = run?.jobsTruncated ? "truncated" : null;
-  const prOpenToLive = secondsBetween(pullRequest?.createdAt, liveAt);
+  const elapsed = duration(cut);
+  const ci = ciMetrics(ciEvidence);
+  const without = isComplete(adjustment) ? elapsed - ci.failure_and_fix_s : null;
   const ciBody = {
     failed_s: ci.failed_s,
     success_s: ci.success_s,
     failure_and_fix_s: ci.failure_and_fix_s,
     cut_to_live_without_failure_s: without,
     cut_to_live_without_failure_min: roundMin(without),
+    observed_attempts: ci.observed_attempts,
+    completeness: ciEvidence.completeness,
+    reasons: ci.reasons,
   };
   if (ci.attempts != null) ciBody.attempts = ci.attempts;
   if (ci.reason) ciBody.reason = ci.reason;
+  if (reasonOf(adjustment)) ciBody.adjustment_reason = reasonOf(adjustment);
+  const reasons = {};
+  for (const [name, interval] of Object.entries({ cut_to_live: cut, pr_to_merge: prInterval, pr_open_to_live: prLive })) {
+    if (reasonOf(interval)) reasons[name] = reasonOf(interval);
+  }
   const row = {
     label,
     version,
@@ -606,7 +725,7 @@ function rowFor(input, version) {
     cut_source: cutAt ? "rollout" : null,
     live_source: liveAt ? "rollout" : null,
     elapsed_s: elapsed,
-    wall_min: wallMin(cutAt, liveAt),
+    wall_min: minuteSpan(cut),
     cut_to_live_s: elapsed,
     tag_at: run?.createdAt || null,
     pull_request: pullRequest ? {
@@ -614,28 +733,42 @@ function rowFor(input, version) {
       created_at: pullRequest.createdAt,
       merged_at: pullRequest.mergedAt,
       head: pullRequest.headRef,
-      pr_to_merge_s: secondsBetween(pullRequest.createdAt, pullRequest.mergedAt),
+      pr_to_merge_s: duration(prInterval),
+      completeness: pullRequest.completeness,
     } : null,
-    pr_to_merge_s: pullRequest ? secondsBetween(pullRequest.createdAt, pullRequest.mergedAt) : null,
-    pr_open_to_live_s: prOpenToLive,
-    pr_open_to_live_wall_min: wallMin(pullRequest?.createdAt, liveAt),
+    pr_to_merge_s: duration(prInterval),
+    pr_open_to_live_s: duration(prLive),
+    pr_open_to_live_wall_min: minuteSpan(prLive),
     ci: ciBody,
-    digest_after_tag_s: digestReason ? null : digestSeconds(run),
+    digest_after_tag_s: duration(digest),
     pin: pin ? {
       number: pin.number,
       created_at: pin.createdAt,
       merged_at: pin.mergedAt,
-      open_to_merge_s: secondsBetween(pin.createdAt, pin.mergedAt),
-      long_pole: longPole(pin.checks),
+      open_to_merge_s: duration(pin.interval),
+      long_pole: longPole(pin, checksCompleteness),
+      completeness: pin.completeness,
+      ...(reasonOf(pin.interval) ? { reason: reasonOf(pin.interval) } : {}),
+      ...(reasonOf(checksCompleteness) ? { long_pole_reason: reasonOf(checksCompleteness) } : {}),
     } : null,
-    ...gate,
-    rollback_s: rollback.rollback_s,
-    rollback_source: rollback.rollback_source,
+    ...gateMetrics(gateEvidence),
+    rollback_s: isComplete(rollback) ? duration(rollback.interval) : null,
+    rollback_source: isComplete(rollback) ? rollback.source : null,
+    evidence: {
+      cut_to_live: cut.completeness,
+      pr_to_merge: prInterval.completeness,
+      pr_open_to_live: prLive.completeness,
+      ci: ciEvidence.completeness,
+      adjustment: adjustment.completeness,
+      gate: gateEvidence.completeness,
+      rollback: rollback.completeness,
+      digest: digest.completeness,
+    },
   };
   if (pinReason) row.pin_reason = pinReason;
-  if (rollback.rollback_reason) row.rollback_reason = rollback.rollback_reason;
-  if (digestReason) row.digest_reason = digestReason;
-  if (cutSpan.reason) row.reasons = { cut_to_live: cutSpan.reason };
+  if (reasonOf(rollback)) row.rollback_reason = reasonOf(rollback);
+  if (reasonOf(digest)) row.digest_reason = reasonOf(digest);
+  if (Object.keys(reasons).length) row.reasons = reasons;
   row.notes = explain(row);
   row.section1 = section1(row);
   return row;
@@ -648,7 +781,7 @@ function gapText(rows) {
     if (rows.some((row) => row.gate_reason === "truncated")) {
       text = "gate-ok → live is empty because the status list was truncated. An incomplete collection is not evidence that the gate succeeded or failed.";
     } else if (rows.some((row) => row.gate_reason === "incomplete")) {
-      text = "gate-ok → live is incomplete: a rollout ticket is missing gate_ok_at, so no median is taken from that partial sample.";
+      text = "gate-ok → live is incomplete: a rollout ticket or successful status has a missing or invalid timestamp, so no median is taken from that partial sample.";
     }
     gaps.push({ id: "gate-ok", text });
   }
@@ -662,6 +795,8 @@ function gapText(rows) {
       text = "rollback is empty because the pin list was truncated. An incomplete collection is not an observed absence.";
     } else if (rows.some((row) => row.rollback_reason === "ambiguous")) {
       text = "rollback is ambiguous: the rollout interval and the rollback pin PR disagree, so neither duration is reported.";
+    } else if (rows.some((row) => row.rollback_reason && row.rollback_reason !== "no rollback evidence")) {
+      text = "rollback is unknown: the newest attempt has an incomplete or invalid interval; no older duration is substituted.";
     }
     gaps.push({ id: "rollback", text });
   }
@@ -677,18 +812,15 @@ function matchesRelease(row, filter) {
 }
 
 export function buildReport(input, opts = {}) {
-  const source = input.pullRequests ? input : normalizeInput(input);
-  let rows = versionsOf(source).map((version) => rowFor(source, version));
-  rows = rows.filter((row) => row.label || row.version);
+  const source = validateEvidence(input);
+  let evidence = source.releases;
   if (opts.since) {
     const since = parseTime(opts.since, "--since");
-    rows = rows.filter((row) => {
-      const start = instant(releaseStart(row)).ms;
-      return start != null && start >= since;
-    });
+    evidence = evidence.filter((item) => isComplete(item.start) && item.start.ms >= since);
   }
+  evidence.sort((a, b) => (a.start.ms ?? 0) - (b.start.ms ?? 0) || a.version.localeCompare(b.version));
+  let rows = evidence.map(rowFor).filter((row) => row.label || row.version);
   if (opts.release) rows = rows.filter((row) => matchesRelease(row, opts.release));
-  rows.sort((a, b) => (instant(releaseStart(a)).ms ?? 0) - (instant(releaseStart(b)).ms ?? 0));
   const now = opts.now instanceof Date ? opts.now : new Date(opts.now || Date.now());
   const truncated = Array.isArray(source.collection?.truncated) ? [...source.collection.truncated] : [];
   return {
@@ -737,6 +869,9 @@ export function formatTable(report) {
   }
   for (const row of report.releases) {
     for (const note of row.notes) lines.push(`${row.label}: ${note}`);
+    for (const [metric, evidence] of Object.entries(row.evidence)) {
+      if (evidence.state === "partial") lines.push(`${row.label || row.version}: ${metric} unknown (${evidence.reasons.join("; ")}).`);
+    }
   }
   for (const gap of report.gaps) lines.push(gap.text);
   return lines.join("\n");
@@ -759,7 +894,7 @@ export function readRollouts(path) {
 function rolloutsFrom(json, file) {
   if (Array.isArray(json)) return json;
   if (json && Array.isArray(json.rollouts)) return json.rollouts;
-  if (json && json.version && (json.cut_at || json.cutAt || json.live_at || json.liveAt)) return [json];
+  if (json && json.version && (json.cut_at || json.cutAt || json.live_at || json.liveAt || json.rollback_started_at || json.rollbackStartedAt || json.rollback_finished_at || json.rollbackFinishedAt)) return [json];
   throw new Error(`rollout file has no rollouts: ${basename(file)}`);
 }
 
@@ -767,42 +902,55 @@ const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_LIST_CAP = 1000;
 
 function unpackPage(body, keys) {
-  if (Array.isArray(body)) return { items: body, total: null };
-  if (!body || typeof body !== "object") return { items: [], total: null };
+  if (Array.isArray(body)) return { items: body, total: null, incomplete: false };
+  if (!body || typeof body !== "object") return { items: [], total: null, incomplete: true };
   const total = Number.isFinite(body.total_count) ? body.total_count : null;
   for (const key of keys) {
-    if (Array.isArray(body[key])) return { items: body[key], total };
+    if (Array.isArray(body[key])) return { items: body[key], total, incomplete: Boolean(body.incomplete_results) };
   }
-  return { items: [], total };
+  return { items: [], total, incomplete: true };
 }
 
-function collectPages(gh, path, keys, pageSize, listCap) {
+function collectPages(gh, operation, params, keys, pageSize, listCap) {
   const items = [];
+  const seen = new Set();
   let page = 1;
   let total = null;
   let complete = false;
-  const sep = path.includes("?") ? "&" : "?";
-  while (items.length < listCap) {
-    const perPage = Math.min(pageSize, listCap - items.length);
-    const body = gh(["api", "--method", "GET", `${path}${sep}page=${page}&per_page=${perPage}`]);
+  let incomplete = false;
+  let scanned = 0;
+  // Keep the remote width fixed. Bound scanned rows (including duplicates) so
+  // an unstable endpoint cannot loop forever or silently exhaust the local cap.
+  while (scanned < listCap && items.length < listCap) {
+    const body = gh(ghRead(operation, { ...params, page, pageSize }));
     const unpacked = unpackPage(body, keys);
+    incomplete ||= unpacked.incomplete;
     if (unpacked.total != null) total = unpacked.total;
     if (unpacked.items.length === 0) {
       complete = true;
       break;
     }
-    items.push(...unpacked.items);
-    if (total != null && items.length >= total) {
+    scanned += unpacked.items.length;
+    let omitted = false;
+    for (const item of unpacked.items) {
+      const id = item.id ?? item.databaseId ?? item.number ?? null;
+      if (id != null && seen.has(String(id))) continue;
+      if (id != null) seen.add(String(id));
+      if (items.length < listCap) items.push(item);
+      else omitted = true;
+    }
+    incomplete ||= omitted;
+    if (total != null && scanned >= total) {
       complete = true;
       break;
     }
-    if (total == null && unpacked.items.length < perPage) {
+    if (total == null && unpacked.items.length < pageSize) {
       complete = true;
       break;
     }
     page += 1;
   }
-  return { items, truncated: !complete || (total != null && items.length < total) };
+  return { items, truncated: incomplete || !complete || (total != null && items.length < total) };
 }
 
 function noteTruncation(names, name, truncated) {
@@ -827,11 +975,11 @@ function rawBranch(pr) {
 
 function withAttempts(gh, repo, run) {
   const count = Number(run.run_attempt ?? run.runAttempt ?? 1);
-  if (!Number.isFinite(count) || count <= 1 || Array.isArray(run.attempts)) return run;
+  if (!Number.isSafeInteger(count) || count <= 1 || Array.isArray(run.attempts)) return run;
   const id = run.databaseId ?? run.id;
   const attempts = [];
   for (let n = 1; n <= count; n++) {
-    attempts.push(gh(["api", "--method", "GET", `repos/${repo}/actions/runs/${id}/attempts/${n}`]));
+    attempts.push(gh(ghRead("attempt", { repo, id, attempt: n })));
   }
   return { ...run, attempts };
 }
@@ -843,10 +991,11 @@ export function fetchInputs(opts) {
   };
   const repo = opts.repo || "inspr-at/paimos";
   const pinRepo = opts.pinRepo || "markus-barta/nixcfg";
-  const pageSize = Math.max(1, Number(opts.pageSize) || DEFAULT_PAGE_SIZE);
-  const listCap = Math.max(1, Number(opts.listCap) || DEFAULT_LIST_CAP);
+  const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
+  const listCap = opts.listCap ?? DEFAULT_LIST_CAP;
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isSafeInteger(listCap) || listCap < 1) throw new Error("invalid pagination bounds");
   const truncated = [];
-  const releasePages = collectPages(gh, `repos/${repo}/actions/workflows/release.yml/runs`, ["workflow_runs"], pageSize, listCap);
+  const releasePages = collectPages(gh, "release-runs", { repo }, ["workflow_runs"], pageSize, listCap);
   noteTruncation(truncated, "workflow_runs", releasePages.truncated);
   const runs = releasePages.items.map((run) => ({
     ...run,
@@ -854,15 +1003,14 @@ export function fetchInputs(opts) {
   }));
   const pullPages = collectPages(
     gh,
-    `repos/${repo}/pulls?state=closed&sort=updated&direction=desc`,
+    "pulls", { repo },
     ["items"],
     pageSize,
     listCap,
   );
   noteTruncation(truncated, "pull_requests", pullPages.truncated);
   const pullRequests = pullPages.items.filter((pr) => at(pr, "mergedAt", "merged_at"));
-  const pinQuery = encodeURIComponent(`repo:${pinRepo} is:pr is:merged AEON: pin in:title`);
-  const pinPages = collectPages(gh, `search/issues?q=${pinQuery}&sort=updated&order=desc`, ["items"], pageSize, listCap);
+  const pinPages = collectPages(gh, "pin-search", { repo: pinRepo }, ["items"], pageSize, listCap);
   noteTruncation(truncated, "pin_pull_requests", pinPages.truncated);
   const pins = pinPages.items;
   const listed = {
@@ -877,7 +1025,7 @@ export function fetchInputs(opts) {
   const enrichedRuns = runs.map((run) => {
     if (!wanted.has(rawVersion(run))) return run;
     const id = run.databaseId ?? run.id;
-    const jobPages = collectPages(gh, `repos/${repo}/actions/runs/${id}/jobs`, ["jobs"], pageSize, listCap);
+    const jobPages = collectPages(gh, "jobs", { repo, id }, ["jobs"], pageSize, listCap);
     noteTruncation(truncated, "jobs", jobPages.truncated);
     return { ...run, jobs: jobPages.items, jobsTruncated: jobPages.truncated };
   });
@@ -896,7 +1044,7 @@ export function fetchInputs(opts) {
   for (const branch of branches) {
     const ciPages = collectPages(
       gh,
-      `repos/${repo}/actions/workflows/ci.yml/runs?branch=${encodeURIComponent(branch)}&event=pull_request`,
+      "ci-runs", { repo, branch },
       ["workflow_runs"],
       pageSize,
       listCap,
@@ -911,14 +1059,14 @@ export function fetchInputs(opts) {
   const statuses = [];
   const statusTruncatedShas = [];
   for (const sha of shas) {
-    const statusPages = collectPages(gh, `repos/${repo}/commits/${sha}/statuses`, ["statuses"], pageSize, listCap);
+    const statusPages = collectPages(gh, "statuses", { repo, sha }, ["statuses"], pageSize, listCap);
     noteTruncation(truncated, "statuses", statusPages.truncated);
     if (statusPages.truncated) statusTruncatedShas.push(sha);
     for (const status of statusPages.items) statuses.push({ ...status, sha });
   }
   const pinDetails = pins.map((pin) => {
     if (!wanted.has(versionIn(pin.title))) return pin;
-    return gh(["pr", "view", String(pin.number), "--repo", pinRepo, "--json", "number,title,createdAt,mergedAt,statusCheckRollup"]);
+    return gh(ghRead("pin-view", { repo: pinRepo, number: pin.number }));
   });
   return {
     workflow_runs: [...enrichedRuns, ...ciRuns],
@@ -963,7 +1111,7 @@ export function parseArgs(argv) {
 
 function usage() {
   return `usage: node scripts/release-timing.mjs [--since ISO] [--release LABEL|VERSION|SEQUENCE] [--rollout PATH] [--fixture PATH] [--json]
-Reads GitHub with paginated GET gh api and gh pr view, plus rollout JSON. A truncated list is named in collection.truncated. --fixture runs from a recorded bundle and does not call gh.`;
+Reads GitHub through fixed GET API templates and one PR-view template, plus rollout JSON. Lists use a fixed page width and de-duplicate ids. Truncation and incomplete search results are named in collection.truncated. Timing evidence is validated before arithmetic; partial records report unknown with reasons. --fixture runs from a recorded bundle and does not call gh.`;
 }
 
 export function reportFromArgs(argv, gh = defaultGh) {

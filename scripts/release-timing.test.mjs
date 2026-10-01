@@ -11,11 +11,15 @@ import {
   buildReport,
   defaultGh,
   fetchInputs,
+  ghRead,
+  normalizeInput,
   parseArgs,
+  validateEvidence,
 } from "./release-timing.mjs";
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "testdata/release-timing/section1.json");
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+const reviewFixture = JSON.parse(readFileSync(join(dirname(fixturePath), "review-r2.json"), "utf8"));
 const now = new Date("2026-10-01T00:00:00Z");
 
 function report(opts = {}, input = fixture) {
@@ -154,8 +158,8 @@ test("gh commands that write are refused", () => {
   assert.throws(() => assertReadOnly(["run", "rerun", "1"]), /refusing/);
   assert.throws(() => assertReadOnly(["release", "edit", "v1"]), /refusing/);
   assert.throws(() => assertReadOnly(["api", "--method", "POST", "repos/inspr-at/paimos/dispatches"]), /non-GET/);
-  assert.doesNotThrow(() => assertReadOnly(["api", "--method", "GET", "repos/inspr-at/paimos/commits/abc/status"]));
-  assert.doesNotThrow(() => assertReadOnly(["pr", "list", "--repo", "inspr-at/paimos"]));
+  assert.doesNotThrow(() => assertReadOnly(ghRead("statuses", { repo: "inspr-at/paimos", sha: "abc", page: 1, pageSize: 100 })));
+  assert.doesNotThrow(() => assertReadOnly(ghRead("pin-view", { repo: "inspr-at/paimos", number: 1 })));
 });
 
 test("fetch asks GitHub for lists and GET details only", () => {
@@ -186,7 +190,7 @@ test("fetch asks GitHub for lists and GET details only", () => {
   };
   const raw = fetchInputs({ release: "99", gh });
   for (const args of calls) assertReadOnly(args);
-  assert.ok(calls.some((args) => args.includes("--method") && args[args.indexOf("--method") + 1] === "GET"));
+  assert.ok(calls.some((args) => args[0] === "api" && args.length === 2));
   const row = buildReport(raw, { now, release: "99" }).releases[0];
   assert.equal(row.digest_after_tag_s, 270);
   assert.equal(row.pr_to_merge_s, 3600);
@@ -259,6 +263,239 @@ function releaseInput(extra = {}) {
     ...extra,
   };
 }
+
+test("r2 attached field flags are rejected before the GitHub executor", () => {
+  for (const flag of reviewFixture.write_flags) {
+    assert.throws(() => assertReadOnly(["api", flag, "repos/inspr-at/paimos/pulls"]), /refusing/);
+    assert.throws(() => defaultGh(["api", flag, "repos/inspr-at/paimos/pulls"]), /refusing/);
+  }
+});
+
+test("r2 rollback cut/live timestamps cannot overwrite the coherent forward rollout", () => {
+  const forward = releaseInput().rollouts[0];
+  const rollback = reviewFixture.rollback_with_forward_times;
+  for (const rollouts of [[forward, rollback], [rollback, forward]]) {
+    const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+    assert.equal(row.elapsed_s, 1800);
+    assert.equal(row.cut_at, forward.cut_at);
+    assert.equal(row.live_at, forward.live_at);
+    assert.equal(row.rollback_s, 900);
+  }
+});
+
+test("r2 newest rollback attempt is selected even when unfinished", () => {
+  const forward = releaseInput().rollouts[0];
+  const older = { ...reviewFixture.rollback_with_forward_times, rollback_finished_at: "2026-09-30T03:10:00Z" };
+  const latest = reviewFixture.unfinished_rollback;
+  for (const rollouts of [[forward, older, latest], [latest, older, forward]]) {
+    const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+    assert.equal(row.rollback_s, null);
+    assert.match(row.rollback_reason, /incomplete|missing/i);
+  }
+});
+
+test("r2 CI association requires zoned, valid and ordered PR bounds", () => {
+  const base = releaseInput();
+  for (const bounds of reviewFixture.invalid_pr_bounds) {
+    const row = buildReport(releaseInput({
+      pull_requests: [{ ...base.pull_requests[0], ...bounds }],
+      workflow_runs: [...base.workflow_runs, ...reviewFixture.incompatible_stall],
+    }), { now }).releases[0];
+    assert.equal(row.ci.success_s, null);
+    assert.equal(row.ci.failed_s, null);
+    assert.equal(row.ci.attempts, undefined);
+    assert.match(row.ci.reason, /PR lifetime/);
+  }
+});
+
+test("r2 a supplied latest attempt does not imply complete rerun history", () => {
+  const base = releaseInput();
+  const row = buildReport(releaseInput({
+    workflow_runs: [...base.workflow_runs, reviewFixture.partial_rerun],
+  }), { now }).releases[0];
+  assert.equal(row.ci.success_s, null);
+  assert.equal(row.ci.failed_s, null);
+  assert.equal(row.ci.attempts, undefined);
+  assert.equal(row.ci.observed_attempts, 1);
+  assert.match(row.ci.reason, /attempt history/);
+});
+
+test("r2 status gate medians account for every missing or invalid sample", () => {
+  for (const invalid of reviewFixture.partial_statuses.slice(1)) {
+    const row = buildReport(releaseInput({ statuses: [reviewFixture.partial_statuses[0], invalid] }), { now }).releases[0];
+    assert.equal(row.gate_ok_to_live_s, null);
+    assert.equal(row.gate_samples, 1);
+    assert.equal(row.gate_missing, 1);
+    assert.equal(row.gate_reason, "incomplete");
+  }
+});
+
+test("r2 a stall outside the rollout cannot yield a negative adjusted duration", () => {
+  const base = releaseInput();
+  const row = buildReport(releaseInput({ workflow_runs: [...base.workflow_runs, ...reviewFixture.incompatible_stall] }), { now }).releases[0];
+  assert.equal(row.ci.failure_and_fix_s, 2940);
+  assert.equal(row.ci.cut_to_live_without_failure_s, null);
+  assert.equal(row.ci.cut_to_live_without_failure_min, null);
+  assert.match(row.ci.adjustment_reason, /rollout window/);
+});
+
+function pageFixtureGh(calls, overrides = {}) {
+  return (args) => {
+    calls.push(args);
+    if (args[0] === "pr") return { number: 7, title: "AEON: pin rollback v260930000000.0.0", createdAt: "2026-09-30T03:00:00Z", mergedAt: "2026-09-30T03:10:00Z", statusCheckRollup: [] };
+    const path = args.at(-1);
+    const url = new URL(path, "https://api.github.com/");
+    const page = Number(url.searchParams.get("page"));
+    const width = Number(url.searchParams.get("per_page"));
+    if (path.includes("release.yml")) {
+      const ids = overrides.ids || reviewFixture.pagination_ids;
+      const items = ids.slice((page - 1) * width, page * width).map((id) => ({
+        id, workflowName: "Release", event: "push", conclusion: "success", run_attempt: 1,
+        created_at: "2026-09-30T00:00:00Z", updated_at: "2026-09-30T00:10:00Z",
+        head_branch: "v260930000000.0.0", head_sha: "abc",
+      }));
+      return { total_count: ids.length, workflow_runs: items };
+    }
+    if (path.includes("search/issues")) return overrides.search || { total_count: 0, items: [] };
+    if (path.includes("/jobs")) return { total_count: 0, jobs: [] };
+    if (path.includes("ci.yml")) return { total_count: 0, workflow_runs: [] };
+    return [];
+  };
+}
+
+test("r2 pagination keeps constant width, applies the cap locally and reports the tail", () => {
+  const calls = [];
+  const raw = fetchInputs({ gh: pageFixtureGh(calls), pageSize: 2, listCap: 3 });
+  assert.deepEqual(raw.workflow_runs.map((run) => run.id), [9, 10, 11]);
+  assert.ok(raw.collection.truncated.includes("workflow_runs"));
+  const releaseCalls = calls.filter((args) => args.at(-1).includes("release.yml"));
+  assert.equal(releaseCalls.length, 2);
+  assert.ok(releaseCalls.every((args) => args.at(-1).includes("per_page=2")));
+});
+
+test("r2 pagination de-duplicates stable ids across pages", () => {
+  const raw = fetchInputs({ gh: pageFixtureGh([], { ids: [9, 10, 10, 11] }), pageSize: 2, listCap: 10 });
+  assert.deepEqual(raw.workflow_runs.map((run) => run.id), [9, 10, 11]);
+});
+
+test("r2 incomplete search invalidates pin and rollback completeness", () => {
+  const raw = fetchInputs({
+    gh: pageFixtureGh([], { search: reviewFixture.incomplete_search }),
+    rollouts: releaseInput().rollouts,
+  });
+  assert.ok(raw.collection.truncated.includes("pin_pull_requests"));
+  const row = buildReport(raw, { now }).releases[0];
+  assert.equal(row.rollback_s, null);
+  assert.equal(row.rollback_reason, "truncated");
+  assert.equal(row.pin, null);
+  assert.equal(row.pin_reason, "truncated");
+});
+
+test("the allowlist accepts only builder-issued immutable templates", () => {
+  const commands = [
+    ghRead("release-runs", { repo: "inspr-at/paimos", page: 1, pageSize: 100 }),
+    ghRead("ci-runs", { repo: "inspr-at/paimos", branch: "rel/r99&event=push", page: 2, pageSize: 2 }),
+    ghRead("pulls", { repo: "inspr-at/paimos", page: 1, pageSize: 100 }),
+    ghRead("pin-search", { repo: "markus-barta/nixcfg", page: 1, pageSize: 100 }),
+    ghRead("jobs", { repo: "inspr-at/paimos", id: 7, page: 1, pageSize: 100 }),
+    ghRead("statuses", { repo: "inspr-at/paimos", sha: "abc", page: 1, pageSize: 100 }),
+    ghRead("attempt", { repo: "inspr-at/paimos", id: 7, attempt: 2 }),
+    ghRead("pin-view", { repo: "markus-barta/nixcfg", number: 7 }),
+  ];
+  for (const command of commands) {
+    assert.doesNotThrow(() => assertReadOnly(command));
+    assert.equal(Object.isFrozen(command), true);
+    assert.throws(() => command.push("-fbody=hi"), TypeError);
+    assert.throws(() => defaultGh([...command]), /refusing/);
+  }
+  const url = new URL(commands[1][1], "https://api.github.com/");
+  assert.equal(url.searchParams.get("branch"), "rel/r99&event=push");
+  assert.equal(url.searchParams.get("event"), "pull_request");
+  for (const operation of ["dispatch", "api", "toString", "__proto__"]) {
+    assert.throws(() => ghRead(operation, { repo: "inspr-at/paimos" }), /refusing/);
+  }
+  for (const params of [
+    { repo: "--hostname", page: 1, pageSize: 100 },
+    { repo: "inspr-at/../dispatches", page: 1, pageSize: 100 },
+    { repo: "inspr-at/paimos", page: 0, pageSize: 100 },
+    { repo: "inspr-at/paimos", page: 1, pageSize: 101 },
+    { repo: "inspr-at/paimos", page: 1, pageSize: 100, method: "POST" },
+    { repo: "inspr-at/paimos", page: 1, pageSize: 100, flags: ["-Fn=1"] },
+  ]) assert.throws(() => ghRead("release-runs", params), /refusing/);
+});
+
+test("validation cannot be bypassed by normalized input and records expose completeness", () => {
+  assert.deepEqual(buildReport(normalizeInput(fixture), { now }), buildReport(fixture, { now }));
+  const raw = releaseInput();
+  raw.pull_requests[0].createdAt = "2026-09-30T01:00:00";
+  const validated = validateEvidence(raw);
+  assert.equal(validated.pullRequests[0].completeness.state, "partial");
+  assert.equal(validated.pullRequests[0].times.createdAt.ms, null);
+  assert.ok(validated.pullRequests[0].completeness.reasons.includes("missing timezone"));
+  assert.equal(validated.rollouts[0].interval.completeness.state, "complete");
+  assert.equal(buildReport(normalizeInput(raw), { now }).releases[0].ci.success_s, null);
+});
+
+test("a standalone rollback never supplies forward cut/live evidence", () => {
+  const row = buildReport(releaseInput({ rollouts: [reviewFixture.rollback_with_forward_times] }), { now }).releases[0];
+  assert.equal(row.elapsed_s, null);
+  assert.equal(row.cut_at, null);
+  assert.equal(row.live_at, null);
+  assert.equal(row.rollback_s, 900);
+});
+
+test("forward intervals stay coherent and cannot splice timestamps from two records", () => {
+  const base = releaseInput().rollouts[0];
+  const cut = { ...base, live_at: null };
+  const live = { ...base, cut_at: null };
+  for (const rollouts of [[cut, live], [live, cut]]) {
+    const row = buildReport(releaseInput({ rollouts }), { now }).releases[0];
+    assert.equal(row.elapsed_s, null);
+    assert.match(row.reasons.cut_to_live, /missing/);
+  }
+});
+
+test("a newer unfinished pin rollback takes precedence over an older measured rollback", () => {
+  const row = buildReport(releaseInput({
+    rollouts: [releaseInput().rollouts[0], reviewFixture.rollback_with_forward_times],
+    pin_pull_requests: [{ number: 8, title: "AEON: pin rollback v260930000000.0.0", createdAt: "2026-09-30T04:00:00Z", mergedAt: null }],
+  }), { now }).releases[0];
+  assert.equal(row.rollback_s, null);
+  assert.match(row.rollback_reason, /missing/);
+});
+
+test("rerun coverage needs unique numbered attempts and valid sample intervals", () => {
+  const base = releaseInput();
+  const attempts = [
+    { run_attempt: 1, conclusion: "failure", startedAt: "2026-09-30T01:05:00Z", completedAt: "2026-09-30T01:10:00Z" },
+    { run_attempt: 2, conclusion: "success", startedAt: "2026-09-30T01:15:00Z", completedAt: "2026-09-30T01:20:00Z" },
+  ];
+  for (const observed of [
+    [attempts[0], { ...attempts[1], run_attempt: 1 }],
+    [attempts[0], { ...attempts[1], completedAt: "2026-09-30T01:20:00" }],
+  ]) {
+    const row = buildReport(releaseInput({ workflow_runs: [...base.workflow_runs, { ...reviewFixture.partial_rerun, runAttempt: 2, attempts: observed }] }), { now }).releases[0];
+    assert.equal(row.ci.success_s, null);
+    assert.equal(row.ci.failed_s, null);
+    assert.equal(row.ci.completeness.state, "partial");
+    assert.ok(row.ci.reason);
+  }
+  const row = buildReport(releaseInput({ workflow_runs: [...base.workflow_runs, { ...reviewFixture.partial_rerun, runAttempt: 2, attempts }] }), { now }).releases[0];
+  assert.equal(row.ci.success_s, 300);
+  assert.equal(row.ci.failed_s, 300);
+  assert.equal(row.ci.attempts, 2);
+});
+
+test("an outside stall stays unknown even if subtracting it would be positive", () => {
+  const base = releaseInput();
+  const row = buildReport(releaseInput({
+    workflow_runs: [...base.workflow_runs, ...reviewFixture.incompatible_stall],
+    rollouts: [{ ...base.rollouts[0], cut_at: "2026-09-30T02:00:00Z", live_at: "2026-09-30T03:00:00Z" }],
+  }), { now }).releases[0];
+  assert.equal(row.ci.failure_and_fix_s, 2940);
+  assert.equal(row.ci.cut_to_live_without_failure_s, null);
+  assert.match(row.ci.adjustment_reason, /rollout window/);
+});
 
 test("rollback is the latest matching deployment and does not replace the forward pin", () => {
   const forward = {
@@ -368,8 +605,10 @@ test("CI stays inside the pull request lifetime and counts rerun attempts", () =
       },
     ],
   }), { now }).releases[0];
-  assert.equal(rerun.ci.success_s, 666);
-  assert.notEqual(rerun.ci.success_s, 1345);
+  // A latest-attempt start is an observed sample, not a complete rerun history.
+  assert.equal(rerun.ci.success_s, null);
+  assert.equal(rerun.ci.observed_attempts, 1);
+  assert.equal(rerun.ci.reason, "attempt history unavailable");
 
   const history = buildReport(releaseInput({
     pull_requests: base.pull_requests,
@@ -638,8 +877,8 @@ test("the read-only guard rejects every write form before gh runs", () => {
   assert.throws(() => assertReadOnly(["api", "-F", "n=1", "repos/x"]), /write/);
   assert.throws(() => assertReadOnly(["api", "--input", "body.json", "repos/x"]), /write/);
   assert.throws(() => assertReadOnly(["api", "--input=body.json", "repos/x"]), /write/);
-  assert.doesNotThrow(() => assertReadOnly(["api", "--method=GET", "repos/x"]));
-  assert.doesNotThrow(() => assertReadOnly(["api", "-X", "GET", "repos/x"]));
+  assert.throws(() => assertReadOnly(["api", "--method=GET", "repos/x"]), /refusing/);
+  assert.throws(() => assertReadOnly(["api", "-X", "GET", "repos/x"]), /refusing/);
 
   const bin = mkdtempSync(join(tmpdir(), "aeon-416-gh-"));
   const marker = join(bin, "called");
@@ -661,7 +900,7 @@ test("the read-only guard rejects every write form before gh runs", () => {
   writeFileSync(join(bin, "gh"), "#!/bin/sh\necho github_pat_TESTONLY ghp_TESTONLY >&2\nexit 1\n");
   process.env.PATH = `${bin}:${previous}`;
   try {
-    assert.throws(() => defaultGh(["api", "--method", "GET", "repos/x"]), (error) => {
+    assert.throws(() => defaultGh(ghRead("release-runs", { repo: "inspr-at/paimos", page: 1, pageSize: 100 })), (error) => {
       assert.equal(error.message.includes("github_pat_"), false);
       assert.equal(error.message.includes("ghp_"), false);
       assert.match(error.message, /redacted/);

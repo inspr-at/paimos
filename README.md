@@ -157,6 +157,19 @@ The same change is available as `aeon keys scopes <key-id> --add harness.worker 
 
 Versioning: INSPR Calendar Versioning, INSPR-CalVer3 (`inspr-calver-3`, `YYMMDDhhmmss.0.0`); releases up to 260929113854.0.0 stay INSPR-CalVer2 history. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
+`node scripts/release-timing.mjs --rollout PATH --release LABEL --json` reports
+cut → live, PR → merge, gate → live and rollback timings. `PATH` is a rollout
+JSON file or directory; `--fixture scripts/testdata/release-timing/section1.json`
+reproduces the recorded release baseline without GitHub access. GitHub calls
+use fixed read-only templates. Lists keep a constant page width, de-duplicate
+ids and name capped or incomplete search results in `collection.truncated`.
+The script validates timestamps with explicit zones, ordered intervals, PR
+lifetime bounds and complete rerun coverage before computing metrics. JSON
+`evidence` records carry `complete` or `partial` with reasons; partial metrics
+are null, with observed sample counts reported separately. A rollback never
+replaces forward rollout timing, and the newest unfinished rollback remains
+unknown. CI stalls outside the rollout window cannot produce adjusted timings.
+
 Session **Messages** shows both directions of that session's conversation, newest
 messages at the bottom. `aeon tell PERSON_UUID --project AEON -m 'Reply text'`
 automatically uses `AEON_SESSION_ID`, `AEON_SESSION_FILE` (or
