@@ -416,6 +416,10 @@ for 10 seconds. Require the control socket (`daemon/agentd.sock` under that
 root) to appear and the process to stay running; then stop it with Ctrl-C.
 Run the attach preview before any Touch ID qualification. Record the exact
 asset, digest and results; in-memory ACL fixtures alone do not qualify a release.
+The native ACL fixtures must also pass with the affected five-entry shape,
+exact root PROCESS selectors and the sole `teamid:P66J39QV6V` partition.
+Unreadable legacy subjects or unexpected partition payloads fail closed;
+qualification must use the existing paired item without rewriting its ACL.
 
 ### Publish after live verification (AEON-356)
 
