@@ -276,6 +276,9 @@ The Model column defaults to 176px. Registry `display_name`, `short_name` and
 `model_version` are separate from the profile's revision `version`; alias versions
 stay unknown unless a new immutable profile explicitly supplies that metadata.
 Hovers, accessible names and model sorting retain the full name and model version.
+Registered aliases with different declared model versions remain separate used
+models. Sorting follows the leading actual model, then the work-start route or
+live route when no actual model is known.
 Migration 1074 stores model display metadata and effort levels in the immutable,
 tenant-isolated `model_profile_display` table without rewriting profile pins.
 Existing profiles are backfilled under each tenant’s RLS in the migration

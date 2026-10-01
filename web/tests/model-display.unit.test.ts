@@ -46,6 +46,16 @@ describe('registry model names and versions', () => {
     // No string guessing when the registry supplies names or an unknown version.
     expect(shownModelName({ ...opus, display_name: 'Claude Model 2000', short_name: 'Model 2000', model_version: '' }, { ...DEFAULT_MODEL_DISPLAY, modelVersion: 'hide' })).toBe('Model 2000')
   })
+  it('distinguishes declared versions when planned and used profiles share an alias', () => {
+    const planned = { ...opus, profile: 'opus-5', model: 'opus', model_version: '5', effort: 'high', revision: '2' }
+    const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route: planned, tokens: { spent: 1, estimated: null, input: 1, output: 0, cached: 0, sessions: 1, unreported: 0 }, models: [{ ...opus, model: 'opus', sessions: [{ id: 's1', effort: 'high', effort_level: 3, role: 'builder', running: false, tokens: 1 }] }] } }
+    const cell = modelCell(row, { effortMeter: false, modelNames: 'short', modelVersion: 'hide' })
+    expect(cell.tip).toContain('Used: Claude Opus 5.5')
+    expect(cell.tip).toContain('Planned: Claude Opus 5 · high (a different model ran)')
+    expect(cell.tip).not.toContain('s1')
+    row.planning!.route!.model_version = '5.5'
+    expect(modelCell(row).tip).toContain('Planned: Claude Opus 5.5 · high, as used')
+  })
   it('keeps full hover/screen-reader identities and effort when the drawing is off', () => {
     const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route: null, tokens: { spent: 1, estimated: null, input: 1, output: 0, cached: 0, sessions: 1, unreported: 0 }, models: [{ ...opus, model: 'opus', sessions: [{ id: 's1', effort: 'max', effort_level: 5, role: 'builder', running: false, tokens: 1 }] }] } }
     const cell = modelCell(row, { effortMeter: false, modelNames: 'short', modelVersion: 'hide' })
