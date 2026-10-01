@@ -99,6 +99,7 @@ type heartbeatPendingUsage struct {
 	Recent            []string              `json:"recent,omitempty"`
 	Discard           bool                  `json:"discard,omitempty"`
 	Codex             *heartbeatCodexCursor `json:"codex,omitempty"`
+	AccountID         string                `json:"account_id,omitempty"`
 	BillingMode       string                `json:"billing_mode,omitempty"`
 	SubscriptionLabel string                `json:"subscription_label,omitempty"`
 }

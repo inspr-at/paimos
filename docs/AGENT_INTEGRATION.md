@@ -209,6 +209,46 @@ The same session ref and lease register again without a second row. A different 
 
 For an unmanaged Claude Code or Codex session, keep `aeon harness run-heartbeat` running with its existing `--owner-pid`, `--state-dir`, `--project`, `--agent`, and `--harness` flags, plus `--print-controls`. In `/agents`, a person with `harness.control` can ask that exact session to rename itself or change model/effort using an account catalog profile. This does not switch accounts or grant the session additional permissions.
 
+Account billing is explicit (AEON-511). A person with `account.manage` can include
+`billing_mode: "subscription"`, `"api"` or `"unknown"` in
+`PUT /api/agent-accounts/{accountId}/metadata`, alongside its existing required
+label, plan, host label and model-profile array. New accounts default to unknown;
+omitting billing preserves the person's setting, including when agentd republishes
+metadata. Agents cannot change this setting. Account and plan names never imply
+billing. Managed usage carries the actual routed account automatically. Agentd
+uses a successful harness auth-kind probe when exposed (Codex ChatGPT login,
+Claude `claude.ai`), then the routed account declaration, then unknown.
+An email-fenced Claude `api_key` login fails authentication and reports no billing;
+its billing can come only from the person-set account declaration, never that probe.
+No credential file is opened to discover billing. Existing identity fences still
+apply. Unknown or subscription usage has no API charge estimate; subscription
+usage may name the saved plan. This remains list-price accounting, never invoices.
+
+For an unmanaged heartbeat, `--account-id ACCOUNT_UUID` binds usage to its known
+Aeon account. An existing `--capacity-account` is reused automatically when
+`--account-id` is omitted. With `--billing-mode unknown` (the default), the server applies that
+account's saved declaration; `--billing-mode api|subscription` supplies an explicit
+known billing mode. A missing account binding remains unknown. Retries replay the
+same request even if account settings change later.
+
+Planning stores a stable `estimate_snapshot` at work start: the first harness
+session binding or entry into the in-progress work bucket, whichever happens first.
+Kind state categories win, then the same fixed spellings as project work counts
+(`in_progress`, `inprogress`, `active` and `qa`). Concurrent starts share one row,
+captured in the same transaction. QA, blocked and open transitions keep that episode
+open. Only done, cancelled or archived work buckets close it, including custom
+states and session-first episodes; the next start adds history. Edits to hours, routes, prices
+or calibration after start update live planning but preserve the baseline, including
+nulls when the original estimate or route was unknown. No historical start is
+backfilled from today's values. The snapshot records hours, estimated tokens and
+API list cost, the planned profile/model/effort and registry revision, and calibration
+and price/mix rates. Cost calibration excludes other projects' private costs.
+The baseline is stored separately from editable ticket fields; closing an episode
+changes only its lifecycle metadata, never the captured estimate.
+The latest snapshot accompanies live planning; its cost and cost-rate fields are
+omitted without `harness.read` on both the ticket's current project and its saved
+source project, including after project moves (AEON-370).
+
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
 
 Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.

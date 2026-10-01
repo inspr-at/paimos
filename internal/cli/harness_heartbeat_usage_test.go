@@ -66,12 +66,13 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 	opts := heartbeatTestOptions(dir)
 	opts.Transcript = claudePath
 	opts.BillingMode = "api"
+	opts.Capacity.Account = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	session := openUsageSession(t, rt, opts)
 	if err = rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
 		t.Fatal(err)
 	}
 	posted := usagePosts(calls)
-	if len(posted) != 1 || posted[0]["model"] != "claude-sonnet-4" || numField(posted[0], "input_tokens") != 21 || numField(posted[0], "cached_input_tokens") != 2 || numField(posted[0], "output_tokens") != 4 || posted[0]["billing_mode"] != "api" || posted[0]["subscription_label"] != nil {
+	if len(posted) != 1 || posted[0]["model"] != "claude-sonnet-4" || numField(posted[0], "input_tokens") != 21 || numField(posted[0], "cached_input_tokens") != 2 || numField(posted[0], "output_tokens") != 4 || posted[0]["billing_mode"] != "api" || posted[0]["account_id"] != opts.Capacity.Account || posted[0]["subscription_label"] != nil {
 		t.Fatalf("claude transcript: %#v", posted)
 	}
 	if err = rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {

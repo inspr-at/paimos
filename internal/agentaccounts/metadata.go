@@ -18,6 +18,7 @@ import (
 )
 
 type metadataWrite struct {
+	BillingMode       *string  `json:"billing_mode"`
 	Label             *string  `json:"label"`
 	Plan              *string  `json:"plan"`
 	HostLabel         *string  `json:"host_label"`
@@ -75,6 +76,14 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if in.Label == nil || in.Plan == nil || in.HostLabel == nil || in.AllowedProfileIDs == nil || len(in.AllowedProfileIDs) > 256 {
 		return Account{}, fail(http.StatusBadRequest, "label, plan, host_label and profile array required")
 	}
+	if in.BillingMode != nil {
+		if p.Kind != tenant.Person {
+			return Account{}, fail(http.StatusForbidden, "only a person can declare account billing")
+		}
+		if *in.BillingMode != "unknown" && *in.BillingMode != "api" && *in.BillingMode != "subscription" {
+			return Account{}, fail(http.StatusBadRequest, "invalid billing mode")
+		}
+	}
 	label, err := metadataText(*in.Label, false)
 	if err != nil {
 		return Account{}, err
@@ -123,10 +132,14 @@ func replaceMetadata(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 			return Account{}, fail(http.StatusBadRequest, "pi grants must match the account model; change the model in Settings")
 		}
 	}
-	if before.Label == label && before.Plan == plan && before.HostLabel == host && before.AllowedProfileIDs != nil && slices.Equal(before.AllowedProfileIDs, ids) {
+	billing := before.BillingMode
+	if in.BillingMode != nil {
+		billing = *in.BillingMode
+	}
+	if before.BillingMode == billing && before.Label == label && before.Plan == plan && before.HostLabel == host && before.AllowedProfileIDs != nil && slices.Equal(before.AllowedProfileIDs, ids) {
 		return before, nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2, plan=$3, host_label=$4, allowed_model_profile_ids=$5::uuid[] WHERE id=$1::uuid`, id, label, plan, host, ids); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET label=$2, plan=$3, host_label=$4, allowed_model_profile_ids=$5::uuid[], billing_mode=$6 WHERE id=$1::uuid`, id, label, plan, host, ids, billing); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, id)

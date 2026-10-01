@@ -18,9 +18,9 @@ type HeartbeatLine struct {
 	Absolute                         bool
 }
 
-// CountReport builds a provisional unknown-billing usage report from known counters.
+// CountReport builds a provisional usage report with explicit billing when supplied.
 // A false result means the model or a counter cannot be reported.
-func CountReport(model string, input, output, cached int64, cachedKnown bool) (UsageReport, bool) {
+func CountReport(model string, input, output, cached int64, cachedKnown bool, billing ...string) (UsageReport, bool) {
 	canonical, err := canonicalModel(model)
 	if err != nil || input < 0 || output < 0 || cached < 0 || input > maxToken || output > maxToken || cached > maxToken {
 		return UsageReport{}, false
@@ -28,8 +28,12 @@ func CountReport(model string, input, output, cached int64, cachedKnown bool) (U
 	if cachedKnown && cached > input {
 		return UsageReport{}, false
 	}
+	mode := "unknown"
+	if len(billing) == 1 {
+		mode = BillingMode(billing[0])
+	}
 	in, out := input, output
-	report := UsageReport{Model: canonical, InputTokens: &in, OutputTokens: &out, Provisional: true, BillingMode: "unknown"}
+	report := UsageReport{Model: canonical, InputTokens: &in, OutputTokens: &out, Provisional: true, BillingMode: mode}
 	if cachedKnown {
 		c := cached
 		report.CachedInputTokens = &c
