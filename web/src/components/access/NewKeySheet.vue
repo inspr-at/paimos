@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, COORDINATOR_SCOPES, createAgentKey, groupPermissions, keyHint, keyScopes, lostPermission, MAX_KEY_SCOPES, permissionLabel, rotateAgentKey } from '../../lib/access'
+import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, createAgentKey, grantablePresetScopes, groupPermissions, keyHint, keyScopes, lostPermission, matchesScope, MAX_KEY_SCOPES, type Permission, rotateAgentKey } from '../../lib/access'
 import type { AgentKey } from '../../lib/settings'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
@@ -10,12 +10,14 @@ import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AccessSheet from './AccessSheet.vue'
 import ScopeCodeField from './ScopeCodeField.vue'
+import ScopeDetails from './ScopeDetails.vue'
+import ScopePresets from './ScopePresets.vue'
 import { problem } from './accessText'
 
 // A new key for an agent: what it may call (its scopes; none means nothing) and
 // how long it works. It never does more than the agent's role allows. Its secret
 // is shown once, here, to copy into the agent's configuration.
-const props = defineProps<{ agent: Agent; rotateKey?: AgentKey; firstKey?: boolean }>()
+const props = defineProps<{ agent: Agent; rotateKey?: AgentKey; firstKey?: boolean; preferredPreset?: string }>()
 const emit = defineEmits<{ close: []; created: [] }>()
 const LIFETIMES = [{ days: 30, label: '30 days' }, { days: 90, label: '90 days' }, { days: 365, label: '365 days' }, { days: 0, label: 'Never' }]
 const expiryAfter = (lifetimeDays: number) => new Date(Math.floor(Date.now() / 1000) * 1000 + lifetimeDays * 86_400_000).toISOString()
@@ -34,17 +36,14 @@ const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles, acce
 const codeCeiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry, true))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.
-watch(held, now => { if (props.rotateKey && !rotationScopesChanged.value) return; const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
+watch([held, () => access.registry], () => { if (props.rotateKey && !rotationScopesChanged.value) return; const kept = grantablePresetScopes([...scopes.value], held.value, access.registry); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
 const why = (key: string) => !mine.value.has(key) ? 'you do not hold this' : `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
 const available = computed(() => keyScopes(access.registry))
-const groups = computed(() => {
-  const needle = term.value.trim().toLowerCase()
-  return groupPermissions(available.value.filter(p => !needle || `${permissionLabel(p.key)} ${p.key} ${p.group}`.toLowerCase().includes(needle)))
-})
-const presets = computed(() => [{ id: 'coordinator', label: 'Coordinator', scopes: COORDINATOR_SCOPES.filter(k => held.value.has(k) && available.value.some(p => p.key === k)) }])
+const groups = computed(() => groupPermissions(available.value.filter(p => matchesScope(p, term.value))))
+const rotationScopes = computed(() => (props.rotateKey?.scopes ?? []).map(key => access.registry.find(p => p.key === key) ?? { key, group: 'Other', description: 'This scope is no longer in the permission registry.', risk: 'low', grantable_at: [], agent_grantable: false } as Permission).filter(p => matchesScope(p, term.value)))
 const tried = ref(false)
-function toggle(key: string) { if (props.rotateKey) rotationScopesChanged.value = true; const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
-function preset(keys: string[]) { if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = new Set(keys) }
+function toggle(key: string) { if (busy.value || !held.value.has(key)) return; if (props.rotateKey) rotationScopesChanged.value = true; const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
+function preset(keys: string[]) { if (busy.value) return; if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = new Set(grantablePresetScopes(keys, held.value, access.registry)) }
 function applyCode(selected: Set<string>) { if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = selected; term.value = '' }
 function codeUnavailable(key: string): string | undefined {
   const permission = access.registry.find(p => p.key === key)
@@ -54,7 +53,6 @@ function codeUnavailable(key: string): string | undefined {
   if (!held.value.has(key)) return why(key)
   return undefined
 }
-const presetOn = (keys: string[]) => keys.length === scopes.value.size && keys.every(k => scopes.value.has(k))
 const allowed = computed(() => can('keys.manage'))
 const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
   : scopes.value.size > MAX_KEY_SCOPES ? `A key holds at most ${MAX_KEY_SCOPES} scopes; clear ${scopes.value.size - MAX_KEY_SCOPES}.` : '')
@@ -83,7 +81,7 @@ async function create() {
   tried.value = true
   if (rotationProblem.value || ((!props.rotateKey || rotationScopesChanged.value) && scopeProblem.value)) { document.getElementById('key-scopes')?.focus(); return }
   // Only scopes I may give go on the key.
-  if ((!props.rotateKey || rotationScopesChanged.value) && [...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
+  if ((!props.rotateKey || rotationScopesChanged.value) && grantablePresetScopes([...scopes.value], held.value, access.registry).length !== scopes.value.size) { scopes.value = new Set(grantablePresetScopes([...scopes.value], held.value, access.registry)); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
   busy.value = true
   error.value = ''
   try {
@@ -126,27 +124,27 @@ async function copyCommand() {
       </fieldset>
       <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(expiryAfter(days))}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
       <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="applyCode" />
+      <label class="search-field">
+        <AppIcon name="search" :size="14" />
+        <input v-model="term" class="field" type="search" placeholder="Find a scope by name, id or group" aria-label="Find a scope" autocomplete="off" spellcheck="false" />
+      </label>
       <div v-if="rotateKey" class="rotation-scopes">
-        <p class="label">{{ rotationScopesChanged ? 'Original scopes' : 'Scopes kept' }}</p>
-        <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono">{{ scope }}</li></ul>
-        <p v-else class="expiry-note">None; this key grants no access.</p>
+        <p class="label">{{ rotationScopesChanged ? 'Original scopes' : `${rotateKey.scopes.length} ${rotateKey.scopes.length === 1 ? 'scope' : 'scopes'} kept` }}</p>
+        <p class="expiry-note">Search only filters the preview.{{ rotationScopesChanged ? '' : ' Rotation keeps every original scope unless you change the selection.' }}</p>
+        <ScopeDetails v-for="scope in rotationScopes" :key="scope.key" :scope="scope" />
+        <p v-if="!rotateKey.scopes.length" class="expiry-note">None; this key grants no access.</p>
+        <p v-else-if="!rotationScopes.length" class="empty">No scope matches “{{ term }}”.</p>
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
       <fieldset v-if="!rotateKey || rotationScopesChanged" id="key-scopes" class="scopes" tabindex="-1" :disabled="busy || !allowed" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
         <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen</span></legend>
-        <div class="presets">
-          <label class="search-field find">
-            <AppIcon name="search" :size="14" />
-            <input v-model="term" class="field" type="search" placeholder="Find a scope" aria-label="Find a scope" autocomplete="off" spellcheck="false" />
-          </label>
-          <button v-for="p in presets" :key="p.id" type="button" class="chip-btn" :aria-pressed="presetOn(p.scopes)" @click="preset(p.scopes)">{{ p.label }}</button>
-          <button type="button" class="chip-btn" :disabled="!scopes.size" @click="preset([])">Clear</button>
-        </div>
+        <ScopePresets :held="held" :registry="access.registry" :disabled="busy || !allowed" :preferred="preferredPreset" @apply="preset" />
+        <button type="button" class="btn sm clear" :disabled="busy || !scopes.size" @click="preset([])">Clear</button>
         <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
           <p class="group-h">{{ group.group }}</p>
           <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
-            <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="!held.has(scope.key)" @change="toggle(scope.key)" />
-            <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono key">{{ scope.key }}{{ held.has(scope.key) ? '' : ` · ${why(scope.key)}` }}</span></span>
+            <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="busy || !allowed || !held.has(scope.key)" @change="toggle(scope.key)" />
+            <ScopeDetails :scope="scope"><span v-if="!held.has(scope.key)" class="unavailable">{{ why(scope.key) }}</span></ScopeDetails>
           </label>
         </div>
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
@@ -189,7 +187,6 @@ async function copyCommand() {
 .copy-status { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .rotation-scopes { display: grid; gap: 8px; }
-.rotation-scopes ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
 .body { display: grid; gap: 14px; }
 .note, .once { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
@@ -200,23 +197,15 @@ async function copyCommand() {
 .scopes { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; border-radius: 10px; }
 .scopes:focus-visible { box-shadow: var(--focus-ring); }
 .count { margin-left: 6px; letter-spacing: .04em; color: var(--ink-3); }
-.presets { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip-btn { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
-@media (hover: hover) { .chip-btn:not(:disabled):hover { color: var(--ink); background: var(--row-hover); } }
-.chip-btn[aria-pressed="true"] { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.chip-btn:disabled { opacity: .55; }
-.chip-btn:focus-visible { box-shadow: var(--focus-ring); }
-.scope-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.clear { justify-self: start; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .group-h { grid-column: 1 / -1; margin: 4px 0 2px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
-.scope-text { display: grid; gap: 1px; font-size: 13px; line-height: 1.35; color: var(--ink); }
-.scope-text .key { font-size: 11px; color: var(--ink-3); }
+.unavailable { font-size: 11px; color: var(--ink-3); }
 .scope-row.off { cursor: default; }
-.scope-row.off .scope-text > span:first-child { color: var(--ink-2); }
-.presets .find { flex: 1 1 180px; }
 .empty { font-size: 13px; color: var(--ink-3); }
 .field-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .token .field { font-size: 12.5px; }
-@media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .seg { grid-template-columns: repeat(2, 1fr); border-radius: 16px; } .seg button { height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } .chip-btn { height: 44px; } }
+@media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .seg { grid-template-columns: repeat(2, 1fr); border-radius: 16px; } .seg button { height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } }
 </style>

@@ -6,6 +6,20 @@ import { etaFromSession, etaFromTicket, formatEta, progressAccessibleName, progr
 const now = Date.parse('2026-09-28T13:15:00Z')
 const ready = { at: '2026-09-28T13:40:00Z', kind: 'Ready' as const, by: 'Ada', reported_at: '2026-09-28T13:10:00Z' }
 
+test('a stale connection dims the last estimate without asserting overdue in any display mode or tooltip', () => {
+  const eta = { live: { ...ready, at: '2026-09-28T13:00:00Z', kind: 'Live' as const }, progress: 60 }
+  for (const mode of ['relative', 'clock', 'both'] as const) {
+    const view = formatEta(eta, mode, now, 'UTC', true)!
+    assert.equal(view.text, 'Last 13:00')
+    assert.equal(view.overdue, false)
+    assert.equal(view.stale, true)
+    assert.equal(view.hover, null)
+    assert.match(view.tip, /Showing the last successful update/)
+    assert.doesNotMatch(view.tip, /overdue \d/)
+  }
+  assert.equal(formatEta(eta, 'relative', now, 'UTC')?.overdue, true)
+})
+
 test('the headline is relative by default; the tooltip names the other form, who and when', () => {
   const relative = formatEta({ ready, progress: 40 }, 'relative', now, 'Europe/Vienna')
   assert.equal(relative?.text, '~25 min')

@@ -3,7 +3,7 @@
 import { estimateDisplay } from '../../lib/estimates'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -56,6 +56,7 @@ const props = defineProps<{
   canDrag?: boolean
   // The person's saved columns, order and widths for this project (null: automatic).
   prefs?: ListPrefs | null
+  costAllowed?: boolean
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
   selected?: Set<string>
@@ -68,6 +69,7 @@ const props = defineProps<{
   // "Deleted", ...) and stay dimmed; rows someone else just changed tint briefly.
   liveLabels?: Map<string, string>
   liveFlash?: Set<string>
+  liveStale?: boolean
   // "3 updates · Show": in the Title header, so it never covers a row.
   livePill?: { text: string; overflow: boolean } | null
 }>()
@@ -141,10 +143,11 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   const eta = etaFromTicket(row.eta)
   if (!eta || typeof eta.progress !== 'number') return null
   const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
-  const stale = !!eta.stale
-  return { pct, stale, label: progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone) }
+  const stale = !!eta.stale || !!props.liveStale
+  const label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
-const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
+const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
 const ids = computed(() => columns.value.map(column => column.id))
 const has = (id: ColumnId) => ids.value.includes(id)
@@ -155,16 +158,17 @@ const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
+const layoutWidth = computed(() => layout.value.customised ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? COLUMN_BY_ID.get(id)!.min : dragWidths.value[id] ?? widthOf(id, props.prefs)), 0)) : width.value)
+const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value))
 function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
   if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
   return releaseCell(props.nativeReleases?.get(row.id))
 }
-const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
+const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: ColumnId) {
-  if (id === 'title') return titleRoom(ids.value, width.value, props.prefs, dragWidths.value)
+  if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value)
   const def = COLUMN_BY_ID.get(id)!
   return { min: def.min, max: def.max }
 }
@@ -248,8 +252,11 @@ function autofit(id: ColumnId) {
   const def = COLUMN_BY_ID.get(id)!
   let widest = 0
   for (const cell of grid.value?.querySelectorAll<HTMLElement>(`.${CLS[id]} .cell, th.${CLS[id]} .th-sort, th.${CLS[id]} .th-label`) ?? []) {
-    const children = [...cell.children] as HTMLElement[]
-    const gap = parseFloat(getComputedStyle(cell).columnGap) || 0
+    // Planning descriptions are hidden siblings whose nowrap scrollWidth is
+    // the whole hover. Fit only the visible model or figure's own children.
+    const content = cell.querySelector<HTMLElement>('.plan-figure, .plan-model') ?? cell
+    const children = ([...content.children] as HTMLElement[]).filter(child => !child.classList.contains('sr-only'))
+    const gap = parseFloat(getComputedStyle(content).columnGap) || 0
     const inner = children.reduce((sum, child) => sum + Math.max(child.scrollWidth, child.getBoundingClientRect().width), 0) + gap * Math.max(0, children.length - 1)
     widest = Math.max(widest, inner)
   }
@@ -470,8 +477,8 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :class="[density, { selectable, selecting }]">
-    <table ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+  <div ref="card" class="table-card" :class="[density, { selectable, selecting, overflowing: !phone && layoutWidth > width + 1 }]">
+    <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
@@ -685,7 +692,7 @@ defineExpose({
                   <span v-if="epicChip(entry.row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(entry.row)!.title }}</span>
                   <span v-else class="parent-title mono">{{ epicChip(entry.row)!.key }}</span>
                 </span>
-                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
+                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                 <span v-if="dropTarget === entry.row.id" class="drop-pill"><AppIcon name="arrow" :size="11" />Move into {{ entry.row.key }}</span>
                 <span v-else-if="entry.tree?.stats && entry.tree.stats.scope" class="epic-progress" :data-tip="`${entry.tree.stats.done} of ${entry.tree.stats.scope} done${entry.tree.stats.total - entry.tree.stats.scope ? ` · ${entry.tree.stats.total - entry.tree.stats.scope} cancelled` : ''}`">
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
@@ -713,7 +720,7 @@ defineExpose({
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
                   <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" />
+                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>
@@ -762,7 +769,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" /></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
               <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>
@@ -1167,5 +1174,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }
   .group-head { height: 40px; }
   .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
+}
+@media (min-width: 721px) {
+  .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
+  .table-card.overflowing thead th { top: 0; }
 }
 </style>

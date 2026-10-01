@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"sync"
 
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 const (
@@ -70,3 +72,123 @@ func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(Ad
 }
 
 func sha256Hex(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
+
+type grokUsageTracker struct {
+	models  map[string]sessionusage.UsageReport
+	created map[string]int64
+	cost    int64
+}
+
+// ACP cost and token totals are separate observations. used/size is context
+// occupancy, never token throughput. No usage counters are inferred from it.
+func (s *grokUsageTracker) event(raw json.RawMessage, model string) (AdapterEvent, bool) {
+	var params struct {
+		Update struct {
+			Kind string `json:"sessionUpdate"`
+			Cost *struct {
+				Amount   json.RawMessage `json:"amount"`
+				Currency string          `json:"currency"`
+			} `json:"cost"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(raw, &params) != nil || params.Update.Kind != "usage_update" {
+		return AdapterEvent{}, false
+	}
+	ev := AdapterEvent{Kind: "usage"}
+	if cost := params.Update.Cost; cost != nil && cost.Currency == "USD" {
+		if current, ok := usdMicros(cost.Amount); ok {
+			ev.CostMicrosDelta = cumulativeDelta(current, &s.cost)
+		}
+	}
+	if report, created, ok := s.grokNativeUsage(raw, model); ok {
+		prev, exists := s.models[report.Model]
+		// Absolute reasoning snapshots can be revised down while other
+		// cumulative counters grow. Keep the known reasoning high-water mark
+		// without dropping the rest of the valid usage update.
+		if prev.ReasoningTokens != nil && (report.ReasoningTokens == nil || *report.ReasoningTokens < *prev.ReasoningTokens) {
+			report.ReasoningTokens = cloneCount(prev.ReasoningTokens)
+		}
+		if (!exists && len(s.models) < 128) || exists && created >= s.created[report.Model] && monotonicGrokUsage(prev, report) {
+			if s.models == nil {
+				s.models = map[string]sessionusage.UsageReport{}
+				s.created = map[string]int64{}
+			}
+			// Missing optional counters retain the last known observation.
+			if report.CachedInputTokens == nil {
+				report.CachedInputTokens = cloneCount(prev.CachedInputTokens)
+			}
+			ev.InputTokensDelta = usageCount(report.InputTokens) - usageCount(prev.InputTokens)
+			ev.OutputTokensDelta = usageCount(report.OutputTokens) - usageCount(prev.OutputTokens)
+			ev.CachedInputTokensDelta = usageCount(report.CachedInputTokens) - usageCount(prev.CachedInputTokens)
+			ev.ReasoningTokensDelta = usageCount(report.ReasoningTokens) - usageCount(prev.ReasoningTokens)
+			s.models[report.Model] = report
+			s.created[report.Model] = created
+			ev.SessionUsage = &report
+		}
+	}
+	return ev, ev.SessionUsage != nil || ev.CostMicrosDelta > 0
+}
+
+func usageCount(n *int64) int64 {
+	if n == nil {
+		return 0
+	}
+	return *n
+}
+
+func monotonicGrokUsage(prev, next sessionusage.UsageReport) bool {
+	for _, pair := range [][2]*int64{{prev.InputTokens, next.InputTokens}, {prev.OutputTokens, next.OutputTokens}, {prev.CachedInputTokens, next.CachedInputTokens}, {prev.ReasoningTokens, next.ReasoningTokens}} {
+		if pair[0] != nil && pair[1] != nil && *pair[1] < *pair[0] {
+			return false
+		}
+	}
+	return next.CachedInputTokens == nil || prev.CachedInputTokens == nil || usageCount(next.InputTokens)-*next.CachedInputTokens >= usageCount(prev.InputTokens)-*prev.CachedInputTokens
+}
+
+func (s *grokUsageTracker) grokNativeUsage(raw json.RawMessage, model string) (sessionusage.UsageReport, int64, bool) {
+	var params struct {
+		Update struct {
+			Input     *int64 `json:"inputTokens"`
+			Output    *int64 `json:"outputTokens"`
+			Cached    *int64 `json:"cachedReadTokens"`
+			Created   *int64 `json:"cacheCreationTokens"`
+			Reasoning *int64 `json:"reasoningTokens"`
+			Model     string `json:"model"`
+		} `json:"update"`
+	}
+	if json.Unmarshal(raw, &params) != nil || params.Update.Input == nil || params.Update.Output == nil {
+		return sessionusage.UsageReport{}, 0, false
+	}
+	u := params.Update
+	name := firstNonempty(u.Model, model)
+	if u.Cached == nil {
+		u.Cached = s.models[name].CachedInputTokens
+	}
+	cached := usageCount(u.Cached)
+	created := s.created[name]
+	if u.Created != nil {
+		created = *u.Created
+	}
+	// Grok inputTokens excludes cache reads and creation, as in usage.json.
+	// Retain missing optional cumulative counters before normalizing so a
+	// later update cannot silently remove them from inclusive input.
+	for _, n := range []int64{*u.Input, *u.Output, cached, created} {
+		if n < 0 || n > managedUsageMax {
+			return sessionusage.UsageReport{}, 0, false
+		}
+	}
+	if *u.Input > managedUsageMax-cached || *u.Input+cached > managedUsageMax-created {
+		return sessionusage.UsageReport{}, 0, false
+	}
+	report, ok := sessionusage.CountReport(name, *u.Input+cached+created, *u.Output, cached, u.Cached != nil)
+	if !ok {
+		return sessionusage.UsageReport{}, 0, false
+	}
+	if u.Reasoning != nil {
+		if *u.Reasoning < 0 || *u.Reasoning > *u.Output {
+			return sessionusage.UsageReport{}, 0, false
+		}
+		report.ReasoningTokens = cloneCount(u.Reasoning)
+	}
+	return report, created, true
+}

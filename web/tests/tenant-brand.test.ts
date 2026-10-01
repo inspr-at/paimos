@@ -3,7 +3,7 @@
 // ever drawn; dark mode without a dark logo uses the light one on a plate.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fitLogo, headerBrand, logoProblem, logoType, publicBrand, safeLogo, shortName } from '../src/lib/tenantBrand.ts'
+import { fitLogo, headerBrand, logoCleanupMessage, logoProblem, logoType, publicBrand, safeLogo, shortName } from '../src/lib/tenantBrand.ts'
 
 const LIGHT = { url: '/api/brand/logo/light?v=0123456789abcdef', width: 240, height: 60 }
 const DARK = { url: '/api/brand/logo/dark?v=fedcba9876543210', width: 240, height: 60 }
@@ -52,4 +52,15 @@ test('picked files are typed by their extension when the browser leaves them unt
   assert.equal(logoType({ name: 'logo.gif', type: 'image/gif' }), '')
   assert.equal(logoProblem({ name: 'a.png', type: 'image/png', size: 300 * 1024 }), 'The file is 300 KB; the limit is 256 KB.')
   assert.equal(logoProblem({ name: 'a.png', type: 'image/png', size: 1000 }), '')
+})
+
+test('SVG removal notice names attributes and uses the profile language', () => {
+  const settings = { cleaned: true, svg_cleanup: { removed_attribute_count: 3, removed_attributes: ['role', 'aria-label', 'data-name'], removed_element_count: 0 } }
+  assert.equal(logoCleanupMessage(settings, 'en-GB'), 'Removed 3 non-drawing attributes (role, aria-label, data-name).')
+  assert.equal(logoCleanupMessage(settings, 'de-AT'), '3 nicht zeichnende Attribute entfernt (role, aria-label, data-name).')
+  assert.equal(logoCleanupMessage({ cleaned: false }), '')
+  assert.equal(logoCleanupMessage({ cleaned: true }), 'Saved. SVG comments were removed.')
+  assert.equal(logoCleanupMessage({ cleaned: true }, 'de'), 'Gespeichert. SVG-Kommentare wurden entfernt.')
+  assert.equal(logoCleanupMessage({ cleaned: true, svg_cleanup: { removed_attribute_count: 1, removed_attributes: ['role'], removed_element_count: 0 } }), 'Removed 1 non-drawing attribute (role).')
+  assert.equal(logoCleanupMessage({ cleaned: true, svg_cleanup: { removed_attribute_count: 0, removed_attributes: [], removed_element_count: 2 } }, 'de'), 'Gespeichert. Nicht zeichnende SVG-Metadaten wurden entfernt.')
 })

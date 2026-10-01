@@ -1,13 +1,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AccessError, changeAgentKeyScopes, getAgentKeyScopes, groupPermissions, keyHint, MAX_KEY_SCOPES, permissionLabel, type Agent, type Role } from '../../lib/access'
+import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, matchesScope, MAX_KEY_SCOPES, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import type { AgentKey } from '../../lib/settings'
 import { useAccess } from '../../stores/access'
 import AccessSheet from './AccessSheet.vue'
 import AppIcon from '../AppIcon.vue'
 import ScopeCodeField from './ScopeCodeField.vue'
+import ScopeDetails from './ScopeDetails.vue'
+import ScopePresets from './ScopePresets.vue'
 import { problem } from './accessText'
 
 const props = defineProps<{ agent: Agent; agentKey: AgentKey }>()
@@ -25,12 +27,15 @@ const error = ref('')
 const term = ref('')
 const showUnavailable = ref(false)
 const allowed = computed(() => can('keys.manage'))
+// Presets never extend a role. Explicit checkbox changes still use the existing
+// server-authorized role-extension confirmation below.
+const ceiling = computed(() => agentScopeCeiling(access.agent(props.agent.principal_id) ?? props.agent, access.roles, access.registry))
+const presetHeld = computed(() => new Set([...grantable.value].filter(key => myPermissions().has(key) && (!ceiling.value || ceiling.value.has(key)))))
 const groups = computed(() => {
-  const needle = term.value.trim().toLowerCase()
   // Keep obsolete or newly restricted scopes visible so they can be removed.
   const scopes = access.registry.filter(p => p.agent_grantable || original.value.includes(p.key))
   for (const key of original.value) if (!scopes.some(p => p.key === key)) scopes.push({ key, group: 'Other', description: key, risk: 'low', grantable_at: [], agent_grantable: false })
-  return groupPermissions(scopes.filter(p => needle ? `${permissionLabel(p.key)} ${p.key} ${p.group}`.toLowerCase().includes(needle) : showUnavailable.value || grantable.value.has(p.key) || mayExtend(p.key) || original.value.includes(p.key)))
+  return groupPermissions(scopes.filter(p => matchesScope(p, term.value) && (term.value.trim() || showUnavailable.value || grantable.value.has(p.key) || mayExtend(p.key) || original.value.includes(p.key))))
 })
 const added = computed(() => [...selected.value].filter(k => !original.value.includes(k)))
 const removed = computed(() => original.value.filter(k => !selected.value.has(k)))
@@ -56,6 +61,9 @@ function toggle(key: string) {
   if (next.has(key)) next.delete(key)
   else if (grantable.value.has(key) || mayExtend(key)) next.add(key)
   selected.value = next
+}
+function preset(keys: string[]) {
+  if (!busy.value && allowed.value) selected.value = new Set(grantablePresetScopes(keys, presetHeld.value, access.registry))
 }
 function unavailableReason(key: string) {
   if (!access.registry.some(p => p.key === key && p.agent_grantable)) return 'Unavailable to agent keys'
@@ -95,15 +103,16 @@ onMounted(load)
         <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="selected = $event" />
         <label class="search-field">
           <AppIcon name="search" :size="14" />
-          <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope" data-autofocus autocomplete="off" />
+          <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
         </label>
+        <ScopePresets :held="presetHeld" :registry="access.registry" :disabled="busy || !allowed" @apply="preset" />
         <fieldset class="scopes" :disabled="busy || !allowed">
           <legend>{{ selected.size }} {{ selected.size === 1 ? 'scope' : 'scopes' }}</legend>
           <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
             <p class="group-h">{{ group.group }}</p>
             <label v-for="scope in group.items" :key="scope.key" class="scope-row">
               <input type="checkbox" :checked="selected.has(scope.key)" :disabled="!grantable.has(scope.key) && !mayExtend(scope.key) && !selected.has(scope.key)" @change="toggle(scope.key)" />
-              <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono detail">{{ scope.key }}</span><span v-if="!grantable.has(scope.key)" class="detail">{{ unavailableReason(scope.key) }}</span></span>
+              <ScopeDetails :scope="scope"><span v-if="!grantable.has(scope.key)" class="detail">{{ unavailableReason(scope.key) }}</span></ScopeDetails>
             </label>
           </div>
           <p v-if="!groups.length" class="note">{{ term ? 'No matching scopes.' : 'No scopes are available for this key.' }}</p>
@@ -141,11 +150,10 @@ onMounted(load)
 .scopes { margin: 0; padding: 0; border: 0; min-width: 0; }
 .scopes legend, .group-h { font: 500 10.5px/1.5 var(--mono); color: var(--ink-3); }
 .scopes legend { margin-bottom: 8px; }
-.scope-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .group-h { grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
 .scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 7px 0; align-items: start; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
-.scope-text { display: grid; gap: 2px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
 .actions { display: flex; justify-content: end; gap: 8px; }
