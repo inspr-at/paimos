@@ -176,7 +176,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       </button>
       <button
         ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
-        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
+        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, human check, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
       >
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
         <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>

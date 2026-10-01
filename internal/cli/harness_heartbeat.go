@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -89,6 +90,8 @@ type heartbeatOptions struct {
 	Project           string
 	Agent             string
 	Harness           string
+	Generator         string
+	CommandLabel      string
 	Host              string
 	Label             string
 	Model             string
@@ -144,7 +147,9 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
-			fs.string(&o.Harness, "harness", 0, "adapter family")
+			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
 			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
@@ -207,10 +212,10 @@ func (o *heartbeatOptions) normalize() {
 	if o.Activity == "" {
 		o.Activity = "busy"
 	}
-	if strings.TrimSpace(o.Model) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Model) == "" {
 		o.Model = os.Getenv("AEON_MODEL")
 	}
-	if strings.TrimSpace(o.Effort) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Effort) == "" {
 		o.Effort = os.Getenv("AEON_EFFORT")
 	}
 	if o.CodexIndex == "" {
@@ -256,19 +261,36 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" || !agentNameRE.MatchString(o.Agent) || !modelHarnesses[o.Harness] {
-		return usagef("--project, --agent and --harness are required")
+	if strings.TrimSpace(o.Project) == "" {
+		return usagef("--project is required")
+	}
+	if !agentNameRE.MatchString(o.Agent) {
+		return usagef("--agent must be a valid agent name")
+	}
+	if err := runkind.Validate(o.Harness, o.Generator, o.CommandLabel); err != nil {
+		return usagef("%s", err)
+	}
+	if runkind.Process(o.Harness) {
+		if o.Parent == "" || o.Ticket == "" {
+			return usagef("--harness %s requires --parent-session and --ticket", o.Harness)
+		}
+		if o.Role != "worker" {
+			return usagef("--role must be worker for media and terminal runs")
+		}
+		if o.Model != "" || o.Effort != "" {
+			return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+		}
 	}
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
 	if !heartbeatPhases[o.Phase] {
-		return usagef("invalid --phase")
+		return usagef("--phase must be starting, working, yielded or stopping")
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
 	} else if !heartbeatActs[o.Activity] {
-		return usagef("invalid --activity")
+		return usagef("--activity must be busy, idle or throttled")
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
@@ -280,7 +302,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("invalid parent session")
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
-		return usagef("invalid management or role")
+		return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 	}
 	if o.Host == "" {
 		host, err := os.Hostname()
@@ -825,6 +847,8 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	putText(body, "generator", o.Generator, true)
+	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)

@@ -53,15 +53,35 @@ jobs:
       # Maintenance database only. This user is the image superuser, so tests may CREATE DATABASE.
       AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
       AEON_GO_SHARD_COUNT: ${{ strategy.job-total }}
+      # Four-shard reruns may retain the Mac layout on hosted hardware. Never
+      # replay test results from the self-hosted runner's persistent GOCACHE.
       GOFLAGS: ${{ strategy.job-total == 4 && '-count=1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        id: setup-go
         with:
           go-version: "1.26"
-          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Locate Go build cache
+        id: go-cache-path
+        run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+      # setup-go's dependency snapshot is immutable. Refresh compiled artifacts
+      # per source revision and shard, restoring the branch first, then main.
+      # GOCACHE also holds test results; all shard tests bypass those below.
+      # GitHub scopes PR writes to refs/pull/N/merge; main cannot restore them.
+      - name: Persist Go build cache
+        id: go-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ steps.go-cache-path.outputs.path }}
+          key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
+            go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells when this shard runs pairing path-proof tests
         run: |
           set -euo pipefail
@@ -70,7 +90,17 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
           fi
       - name: Test this shard
-        run: go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}"
+        env:
+          # Applies to every go test child, including PR and merge-group runs.
+          # External scripts and database images are outside Go's test cache id.
+          GOFLAGS: -count=1
+        run: |
+          set -euo pipefail
+          go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          cached=$(grep -cE '^ok[[:space:]].*\(cached\)$' "$RUNNER_TEMP/go-test.log" || true)
+          packages=$(grep -cE '^ok[[:space:]]' "$RUNNER_TEMP/go-test.log" || true)
+          printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
+          test "$cached" -eq 0
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in
@@ -105,7 +135,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
       - name: Timing budgets, alone
+        env:
+          GOFLAGS: -count=1
         run: go run ./scripts/ci-go-shards test-timing
 
   go-static:
@@ -115,6 +149,30 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Forbid volatile CI identity reads in Go tests
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          # Include multiline calls and indirect reads via named constants.
+          volatile = re.compile(r'\bGITHUB_(?:SHA|RUN_ID|RUN_NUMBER|RUN_ATTEMPT)\b')
+          allowed = '--source-digest \\"$GITHUB_SHA\\"'
+          failures = []
+          for path in sorted(pathlib.Path('.').rglob('*_test.go')):
+              source = path.read_text()
+              # This existing release-contract assertion checks a workflow's
+              # literal binding; it does not read the process environment.
+              if path.as_posix() == 'scripts/releaseworkflow/workflow_test.go':
+                  source = source.replace(allowed, '')
+              for match in volatile.finditer(source):
+                  line = source.count('\n', 0, match.start()) + 1
+                  failures.append(f'{path}:{line}: volatile CI identity in test source')
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              sys.exit(1)
+          print('Go tests do not depend on volatile CI identity')
+          PY
       - run: go vet ./...
       - name: Check prepared rules bootstrap drift
         run: go run ./scripts/rules-bootstrap check
@@ -195,6 +253,9 @@ jobs:
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts tests/account-link.test.ts
+      - name: Scope code wire and ceiling checks
+        working-directory: web
+        run: node --experimental-strip-types --test tests/scope-code.test.ts tests/access.test.ts
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
@@ -211,7 +272,102 @@ jobs:
           name: account-link-browser-evidence
           path: web/test-results/
           retention-days: 7
+      - name: Scope proposals and key management regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
 
+  # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
+  footer-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - name: Install shells for web command tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Web unit tests
+        working-directory: web
+        run: npm run test:unit
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Footer and affected release/brand integration checks
+        working-directory: web
+        env:
+          AEON_SCREENSHOTS_DIR: test-results/footer-release-pill
+        run: >-
+          npx playwright test -c playwright.ui.config.ts --workers=2
+          tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts
+          tests/release-codenames.spec.ts tests/version-reveal.spec.ts
+          tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts
+          tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts
+      - name: Desktop light screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-desktop-light
+          path: web/test-results/footer-release-pill/desktop-light.png
+          if-no-files-found: error
+      - name: Desktop dark screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-desktop-dark
+          path: web/test-results/footer-release-pill/desktop-dark.png
+          if-no-files-found: error
+      - name: Phone light screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-phone-light
+          path: web/test-results/footer-release-pill/phone-light.png
+          if-no-files-found: error
+      - name: Phone dark screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: footer-phone-dark
+          path: web/test-results/footer-release-pill/phone-dark.png
+          if-no-files-found: error
+
+  status-help-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - name: Status definitions and human-check unit tests
+        working-directory: web
+        run: node --experimental-strip-types --test tests/status-definitions.test.ts tests/work.test.ts tests/activity.test.ts
+      - name: Human-check action permission regressions
+        working-directory: web
+        run: npx vitest run tests/live-ticket.unit.test.ts --maxWorkers=1 --no-file-parallelism
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Status help and human-check browser regressions
+        working-directory: web
+        env:
+          AEON_521A_SHOTS: ${{ runner.temp }}/aeon-521a-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: aeon-521a-status-help
+          path: |
+            ${{ runner.temp }}/aeon-521a-shots
+            web/test-results
+          if-no-files-found: warn
+          retention-days: 14
 
   release-check:
     runs-on: ubuntu-latest
@@ -231,10 +387,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
       - name: Enforce test runner trust boundary
         run: |
           node --test scripts/ci-runner-route.test.mjs
-          go test ./scripts/ci-runner-guard
+          go test ./scripts/ci-runner-guard -count=1
           go run ./scripts/ci-runner-guard
 
   e2e:
@@ -262,6 +420,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -365,7 +525,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache: true
+          cache-dependency-path: go.sum
       - name: Checker and migration runner SQL splitter parity
         run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
       - name: Previous binary on the candidate schema

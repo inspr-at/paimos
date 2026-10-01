@@ -11,7 +11,7 @@ import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
-const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
+const pill = (page: Page) => page.getByRole('button', { name: /^Release history, (?:.*?, )?version / })
 
 // A release with a marketing name shows the name and reveals its stamp (AEON-430,
 // release-codenames.spec.ts); these are the versions nobody has named, which keep

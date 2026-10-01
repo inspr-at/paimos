@@ -90,6 +90,9 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   // started at, so a row is merged by them wherever it ends up (AEON-449).
   return stamp(await response.json() as T, response, start)
 }
+export interface HostLabel { host: string; label: string }
+export const listHostLabels = () => request<HostLabel[]>('/me/host-labels')
+export const setHostLabel = (host: string, label: string | null) => request<HostLabel>('/me/host-labels', 'PUT', { host, label })
 const enc = encodeURIComponent
 
 const query = (params: Record<string, string | number | boolean | undefined>) => {
