@@ -60,7 +60,7 @@ func TestPlanningListHoverFixture(t *testing.T) {
             stopped_at=NULL,stop_reason=NULL,phase='working'
             WHERE id IN (SELECT DISTINCT ON (ticket_node_id) id FROM harness_sessions
                 WHERE tenant_id=$1 AND ticket_node_id<>$2 AND ticket_node_id<>$3
-	                ORDER BY ticket_node_id,created_at DESC,id DESC)`, w.admin.TenantID, w.nodes["HOVER-2"].ID, w.nodes["HOVER-8"].ID)
+                ORDER BY ticket_node_id,created_at DESC,id DESC)`, w.admin.TenantID, w.nodes["HOVER-2"].ID, w.nodes["HOVER-8"].ID)
 		return err
 	})
 	if err != nil {
