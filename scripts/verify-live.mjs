@@ -2,17 +2,19 @@
 // Read-only by default. Coordinator-supplied aeon.rollout.v1 evidence extends
 // the existing timing record; it is never obtained through fleet SSH here.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { validCalendarVersion, schemeError } from "./verify-release.mjs";
-import { gh, installationToken, fetchPublishedChecksums, bumpHomebrewTap, mergeHomebrewTap, TapPendingError } from "./homebrew-tap-pr.mjs";
+import { gh, installationToken, revokeInstallationToken, downloadReleaseAsset, RELEASE_ASSETS, fetchPublishedChecksums, bumpHomebrewTap, mergeHomebrewTap, TapPendingError } from "./homebrew-tap-pr.mjs";
 import { parseChecksums } from "./homebrew-formula.mjs";
+import { validateDispatcher, verifyProtectedEnvironment } from "./verify-live-policy.mjs";
 
 const REPO = "inspr-at/paimos";
 const BASE = "https://aeon.barta.cm";
-const ASSETS = ["aeon-cli", "paimos-agentd"].flatMap(name =>
-  ["darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64"].map(platform => `${name}-${platform}`));
+const ASSETS = RELEASE_ASSETS;
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const sha = value => /^[a-f0-9]{40}$/.test(value ?? "");
 const digest = value => /^sha256:[a-f0-9]{64}$/.test(value ?? "");
@@ -60,6 +62,7 @@ async function api(token, path, method = "GET", body) {
 export function validateRelease(release, r) {
   requireOK(Number.isSafeInteger(release?.id) && release.id > 0 && release.tag_name === `v${r.version}` &&
     typeof release.draft === "boolean" && release.prerelease === false, "release identity mismatch");
+  requireOK(release.draft === false && release.immutable === true, "published immutable release required; draft publication remains coordinator-only");
   const names = release.assets?.map(a => a.name).sort();
   requireOK(JSON.stringify(names) === JSON.stringify([...ASSETS, "SHA256SUMS"].sort()), "complete immutable nine-asset release required");
   requireOK(release.assets.every(a => Number.isSafeInteger(a.id) && a.id > 0 && a.state === "uploaded" && a.size > 0 && a.size <= 200_000_000 && digest(a.digest)), "release asset metadata incomplete");
@@ -70,34 +73,7 @@ export function validateRelease(release, r) {
   return release;
 }
 
-async function assetBytes(token, asset) {
-  const url = `https://api.github.com/repos/${REPO}/releases/assets/${asset.id}`;
-  let response = await fetch(url, {
-    redirect: "manual", signal: AbortSignal.timeout(120_000),
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/octet-stream", "X-GitHub-Api-Version": "2022-11-28" },
-  });
-  if (response.status === 302) {
-    const location = new URL(response.headers.get("location"));
-    requireOK(location.protocol === "https:" && !location.username && !location.password &&
-      location.hostname === "release-assets.githubusercontent.com", "asset redirect refused");
-    // Signed storage URL receives no GitHub authorization header and is never logged.
-    response = await fetch(location, { redirect: "error", signal: AbortSignal.timeout(120_000) });
-  }
-  requireOK(response.ok, "release asset download failed");
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    requireOK(size <= asset.size, "release asset size mismatch");
-    chunks.push(chunk);
-  }
-  requireOK(size === asset.size, "release asset size mismatch");
-  const bytes = Buffer.concat(chunks);
-  requireOK(`sha256:${sha256(bytes)}` === asset.digest, "release asset digest mismatch");
-  return bytes;
-}
-
-export async function verifyArtifacts(token, release, r, download = assetBytes) {
+export async function verifyArtifacts(token, release, r, download = downloadReleaseAsset) {
   validateRelease(release, r);
   const sumsBytes = await download(token, release.assets.find(a => a.name === "SHA256SUMS"));
   requireOK(sha256(sumsBytes) === r.qualification.sha256sums, "SHA256SUMS digest mismatch");
@@ -195,18 +171,34 @@ export function liveBody(body, r) {
   return previous.length ? body : `${String(body ?? "").trimEnd()}\n\n${line}\n`;
 }
 
-export async function finalizeRelease(token, r, release, apply = false, request = api) {
+function assetSet(release) {
+  return JSON.stringify(release.assets.map(({ id, name, digest, size, state }) => ({ id, name, digest, size, state })).sort((a, b) => a.name.localeCompare(b.name)));
+}
+
+export async function finalizeRelease(token, r, release, apply = false, request = gh, credentials = {}) {
   validateRelease(release, r);
-  const fresh = await request(token, `/repos/${REPO}/releases/${release.id}`);
+  const path = `/repos/${REPO}/releases/${release.id}`;
+  const response = await request(token, "GET", path);
+  requireOK(response.status === 200, "fresh release lookup failed");
+  const fresh = response.data;
   validateRelease(fresh, r);
-  requireOK(fresh.body === release.body && JSON.stringify(fresh.assets) === JSON.stringify(release.assets) && fresh.draft === release.draft, "release changed during verification");
+  requireOK(fresh.id === release.id && fresh.body === release.body && assetSet(fresh) === assetSet(release), "release changed during verification");
   const body = liveBody(fresh.body, r);
-  if (!apply) return { state: "verified", would_publish: fresh.draft };
-  if (fresh.body === body && !fresh.draft) return { state: "current" };
-  const updated = await request(token, `/repos/${REPO}/releases/${fresh.id}`, "PATCH", { body, draft: false });
-  validateRelease(updated, r);
-  requireOK(updated.draft === false && updated.body === body, "release finalization mismatch");
-  return { state: fresh.draft ? "published" : "finalized" };
+  if (!apply) return { state: "verified", would_publish: false };
+  if (fresh.body === body) return { state: "current" };
+  requireOK(typeof response.etag === "string" && /^(?:W\/)?"[^"\r\n]+"$/.test(response.etag), "release ETag required before finalization");
+  // GitHub documents no atomic asset-id/digest precondition for draft publication.
+  // Never send draft:false. Server-side immutable assets/tag protect the byte set;
+  // If-Match is additional metadata defence, not a claimed publication lock.
+  const mint = credentials.mint ?? installationToken, revoke = credentials.revoke ?? revokeInstallationToken;
+  const writer = await mint(credentials.appId, credentials.privateKey, REPO, "release-write");
+  try {
+    const result = await request(writer, "PATCH", path, { body }, { "If-Match": response.etag });
+    requireOK(result.status === 200, "release finalization refused");
+    validateRelease(result.data, r);
+    requireOK(result.data.id === release.id && result.data.body === body && assetSet(result.data) === assetSet(release), "release finalization mismatch");
+    return { state: "finalized" };
+  } finally { await revoke(writer); }
 }
 
 function command(program, args, env) {
@@ -215,33 +207,40 @@ function command(program, args, env) {
 }
 
 export async function run(r, { apply = false, env = process.env, dependencies = {} } = {}) {
-  const d = { installationToken, verifySource, command, api, verifyArtifacts, probeLive, finalizeRelease,
+  const d = { installationToken, revokeInstallationToken, verifyProtectedEnvironment, verifySource, command, api, verifyArtifacts, probeLive, finalizeRelease,
     fetchPublishedChecksums, bumpHomebrewTap, mergeHomebrewTap, now: Date.now, wait: sleep, ...dependencies };
   validateRollout(r);
-  requireOK(env.GITHUB_REPOSITORY === REPO && env.GITHUB_REF === "refs/heads/main" && env.GITHUB_EVENT_NAME === "workflow_dispatch", "trusted main workflow dispatch required");
+  validateDispatcher(env, "live-verification");
+  await d.verifyProtectedEnvironment(env.WORKFLOW_TOKEN, "live-verification");
   requireOK(/^\d+$/.test(env.RELEASE_APP_ID ?? "") && env.RELEASE_APP_KEY && /^\d+$/.test(env.HOMEBREW_TAP_APP_ID ?? "") && env.HOMEBREW_TAP_APP_KEY, "release and tap App identities required");
-  const token = await d.installationToken(env.RELEASE_APP_ID, env.RELEASE_APP_KEY, REPO);
-  await d.verifySource(token, r);
-  d.command("gh", ["attestation", "verify", `oci://ghcr.io/inspr-at/aeon@${r.image_digest}`, "--repo", REPO,
-    "--signer-workflow", `${REPO}/.github/workflows/release.yml`, "--source-ref", `refs/tags/v${r.version}`,
-    "--source-digest", r.source_commit, "--deny-self-hosted-runners"], { PATH: env.PATH, HOME: env.HOME, GH_TOKEN: token });
-  const release = await d.api(token, `/repos/${REPO}/releases/tags/v${r.version}`);
-  const checksums = await d.verifyArtifacts(token, release, r);
+  const release = await d.api("", `/repos/${REPO}/releases/tags/v${r.version}`);
+  validateRelease(release, r);
+  await d.verifySource("", r);
+  const token = await d.installationToken(env.RELEASE_APP_ID, env.RELEASE_APP_KEY, REPO, "attestation");
+  try {
+    const home = mkdtempSync(join(tmpdir(), "aeon-attestation-home-"));
+    d.command("gh", ["attestation", "verify", `oci://ghcr.io/inspr-at/aeon@${r.image_digest}`, "--repo", REPO,
+      "--signer-workflow", `${REPO}/.github/workflows/release.yml`, "--source-ref", `refs/tags/v${r.version}`,
+      "--source-digest", r.source_commit, "--deny-self-hosted-runners"], { PATH: env.PATH, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GH_CONFIG_DIR: join(home, ".config", "gh"), GH_TOKEN: token });
+  } finally { await d.revokeInstallationToken(token); }
+  const checksums = await d.verifyArtifacts("", release, r);
   const probes = await d.probeLive(r);
   // Browser process has no App/PPM credentials or operator browser profile.
   d.command(process.execPath, ["scripts/verify-live-smoke.mjs"], {
-    PATH: env.PATH, HOME: env.HOME, LIVE_VERSION: r.version, LIVE_SCHEME: r.version_scheme,
+    PATH: env.PATH, HOME: mkdtempSync(join(tmpdir(), "aeon-smoke-home-")), LIVE_VERSION: r.version, LIVE_SCHEME: r.version_scheme,
     LIVE_BUNDLE: r.web.entrypoint, LIVE_BUNDLE_SHA256: r.web.sha256,
   });
   validateRollout(r); // Evidence must still be fresh after slow checks.
-  await d.verifySource(token, r);
-  const final = await d.finalizeRelease(token, r, release, apply);
-  let tap = { state: "pending-publication" };
-  if (!release.draft || apply) {
-    const publicChecksums = await d.fetchPublishedChecksums(r.version);
-    requireOK(sha256(publicChecksums) === r.qualification.sha256sums && publicChecksums === checksums, "public SHA256SUMS mismatch");
-    if (apply) await d.bumpHomebrewTap({ ...env, VERSION: r.version });
-    const tapToken = await d.installationToken(env.HOMEBREW_TAP_APP_ID, env.HOMEBREW_TAP_APP_KEY, "inspr-at/homebrew-tap", true);
+  await d.verifySource("", r);
+  const final = await d.finalizeRelease("", r, release, apply, gh, { appId: env.RELEASE_APP_ID, privateKey: env.RELEASE_APP_KEY,
+    mint: d.installationToken, revoke: d.revokeInstallationToken });
+  let tap;
+  const publicChecksums = await d.fetchPublishedChecksums(r.version);
+  requireOK(sha256(publicChecksums) === r.qualification.sha256sums && publicChecksums === checksums, "public SHA256SUMS mismatch");
+  if (apply) await d.bumpHomebrewTap({ HOMEBREW_TAP_APP_ID: env.HOMEBREW_TAP_APP_ID, HOMEBREW_TAP_APP_KEY: env.HOMEBREW_TAP_APP_KEY, VERSION: r.version },
+    { text: checksums, sha256: r.qualification.sha256sums });
+  const tapToken = await d.installationToken(env.HOMEBREW_TAP_APP_ID, env.HOMEBREW_TAP_APP_KEY, "inspr-at/homebrew-tap", apply ? "tap-merge" : "tap-read");
+  try {
     const deadline = d.now() + 300_000;
     while (true) {
       try { tap = await d.mergeHomebrewTap(tapToken, r.version, publicChecksums, apply); break; }
@@ -251,7 +250,7 @@ export async function run(r, { apply = false, env = process.env, dependencies = 
         await d.wait(Math.min(5000, deadline - d.now()));
       }
     }
-  }
+  } finally { await d.revokeInstallationToken(tapToken); }
   return { schema: "aeon.live-verification.v1", version: r.version, image_digest: r.image_digest,
     source_commit: r.source_commit, checks: "passed", release: final, tap, probes, manual: MANUAL };
 }

@@ -9,4 +9,5 @@
 /scripts/trusted-cross-family-poster* @markus-barta
 /scripts/ci-runner-guard/ @markus-barta
 /scripts/verify-live* @markus-barta
+/.github/live-verification-environment.json @markus-barta
 /scripts/homebrew-tap-pr* @markus-barta

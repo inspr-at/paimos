@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { validateRollout, validateRelease, verifyArtifacts, verifySource, probeLive, liveBody, finalizeRelease, run } from "./verify-live.mjs";
 import { allowLiveRead } from "./verify-live-smoke.mjs";
@@ -26,7 +26,7 @@ function fixture(now = Date.now()) {
     qualification: { version, asset: "paimos-agentd-darwin-arm64", sha256: hash(binaries.get("paimos-agentd-darwin-arm64")), sha256sums: hash(sums),
       operator: "markus-barta", spctl: true, foreground_socket: true, acl_fixture: true, attach_preview: true, touch_id: true, evidence: "AEON-487/comment/native" },
   };
-  const release = { id: 123, tag_name: `v${version}`, draft: true, prerelease: false,
+  const release = { id: 123, tag_name: `v${version}`, draft: false, immutable: true, prerelease: false,
     body: `Container: ghcr.io/inspr-at/aeon:${version}\nDigest: ${r.image_digest}\n`,
     assets: [...bytes].map(([name, b], i) => ({ id: i + 1, name, size: b.length, state: "uploaded", digest: `sha256:${hash(b)}` })) };
   return { r, release, bytes, sums };
@@ -128,30 +128,70 @@ test("failed 5xx probe retains measured window without response payload", async 
   });
 });
 
-test("publication is read-only by default, idempotent after finalization, and rejects concurrent changes", async () => {
+test("immutable finalization is read-only by default, scoped at PATCH, idempotent and rejects concurrent changes", async () => {
   const { r, release } = fixture(); let current = structuredClone(release); const writes = [];
-  const request = async (_, path, method = "GET", body) => {
-    if (method === "PATCH") { writes.push({ path, body }); current = { ...current, ...body }; }
-    return structuredClone(current);
+  let minted = 0, revoked = 0;
+  const credentials = { mint: async (_, __, repo, access) => {
+    assert.equal(repo, "inspr-at/paimos"); assert.equal(access, "release-write"); minted++; return "writer fixture";
+  }, revoke: async () => { revoked++; } };
+  const request = async (token, method, path, body, headers) => {
+    if (method === "PATCH") {
+      assert.equal(token, "writer fixture"); assert.deepEqual(headers, { "If-Match": '"fixture-etag"' });
+      assert.deepEqual(Object.keys(body), ["body"]); // Never publishes or touches assets.
+      writes.push({ path, body }); current = { ...current, ...body };
+    }
+    return { status: 200, data: structuredClone(current), etag: '"fixture-etag"' };
   };
-  assert.equal((await finalizeRelease("fixture", r, release, false, request)).state, "verified");
-  assert.equal(writes.length, 0);
-  assert.equal((await finalizeRelease("fixture", r, release, true, request)).state, "published");
-  assert.equal((await finalizeRelease("fixture", r, current, true, request)).state, "current");
+  assert.equal((await finalizeRelease("", r, release, false, request, credentials)).state, "verified");
+  assert.equal(writes.length, 0); assert.equal(minted, 0);
+  assert.equal((await finalizeRelease("", r, release, true, request, credentials)).state, "finalized");
+  assert.equal((await finalizeRelease("", r, current, true, request, credentials)).state, "current");
+  assert.equal(minted, 1); assert.equal(revoked, 1);
   assert.equal(writes.length, 1);
   assert.equal(current.body.split("Live verification:").length, 2);
   assert.throws(() => liveBody(current.body.replace("restarts=0", "restarts=1"), r), /conflicting/);
   current.body += "\nconcurrent coordinator edit";
-  await assert.rejects(finalizeRelease("fixture", r, release, true, request), /changed during verification/);
+  await assert.rejects(finalizeRelease("", r, release, true, request, credentials), /changed during verification/);
   assert.equal(writes.length, 1);
 });
 
+test("draft or mutable releases can never publish, even with apply", async () => {
+  const { r, release } = fixture(); let calls = 0;
+  const request = async () => { calls++; };
+  for (const unsafe of [{ ...release, draft: true }, { ...release, immutable: false }, { ...release, immutable: undefined }]) {
+    await assert.rejects(finalizeRelease("", r, unsafe, true, request), /published immutable/);
+  }
+  assert.equal(calls, 0);
+});
+
+test("asset replacement or missing ETag refuses before minting; conditional failure revokes and stops", async () => {
+  const { r, release } = fixture(); let minted = 0, revoked = 0, patches = 0, mode = "replacement";
+  const credentials = { mint: async () => { minted++; return "unused writer fixture"; }, revoke: async () => { revoked++; } };
+  const request = async (_, method, path, body) => {
+    if (method === "PATCH") { patches++; assert.equal(body.draft, undefined); return { status: 412 }; }
+    const fresh = structuredClone(release);
+    if (mode === "replacement") fresh.assets[0].id++;
+    return { status: 200, data: fresh, etag: mode === "missing ETag" ? null : '"fixture"' };
+  };
+  await assert.rejects(finalizeRelease("", r, release, true, request, credentials), /changed during verification/);
+  mode = "missing ETag";
+  await assert.rejects(finalizeRelease("", r, release, true, request, credentials), /ETag/);
+  assert.equal(minted, 0); assert.equal(patches, 0);
+  mode = "conditional failure";
+  await assert.rejects(finalizeRelease("", r, release, true, request, credentials), /finalization refused/);
+  assert.equal(minted, 1); assert.equal(revoked, 1); assert.equal(patches, 1);
+});
+
 const workflowEnv = { GITHUB_REPOSITORY: "inspr-at/paimos", GITHUB_REF: "refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch",
+  GITHUB_WORKFLOW_REF: "inspr-at/paimos/.github/workflows/verify-live.yml@refs/heads/main", GITHUB_WORKFLOW_SHA: "a".repeat(40),
+  GITHUB_ACTOR: "markus-barta", GITHUB_ACTOR_ID: "276789", GITHUB_TRIGGERING_ACTOR: "markus-barta", WORKFLOW_TOKEN: "workflow fixture",
   RELEASE_APP_ID: "123", RELEASE_APP_KEY: "unused fixture", HOMEBREW_TAP_APP_ID: "456", HOMEBREW_TAP_APP_KEY: "unused fixture" };
+const policyDependencies = { verifyProtectedEnvironment: async () => {}, revokeInstallationToken: async () => {} };
 for (const failure of ["verifySource", "attestation", "verifyArtifacts", "probeLive", "smoke"]) {
   test(`failed ${failure} never publishes or touches the tap`, async () => {
     const { r, release, sums } = fixture(); const writes = [];
     const dependencies = {
+      ...policyDependencies,
       installationToken: async () => "fixture", verifySource: async () => { if (failure === "verifySource") throw new Error("fixture"); },
       command: program => { if ((failure === "attestation" && program === "gh") || (failure === "smoke" && program !== "gh")) throw new Error("fixture"); },
       api: async () => release, verifyArtifacts: async () => { if (failure === "verifyArtifacts") throw new Error("fixture"); return sums; },
@@ -165,25 +205,30 @@ for (const failure of ["verifySource", "attestation", "verifyArtifacts", "probeL
 test("successful run gates writes and keeps browser credentials isolated; default is read-only", async () => {
   const { r, release, sums } = fixture(); const actions = [];
   const dependencies = {
+    ...policyDependencies,
     installationToken: async () => "fixture", verifySource: async () => actions.push("source"), api: async () => release,
     verifyArtifacts: async () => { actions.push("artifacts"); return sums; }, probeLive: async () => { actions.push("live"); return {}; },
     command: (program, args, env) => { actions.push(program === "gh" ? "attestation" : "smoke");
-      if (program !== "gh") { assert.equal(env.RELEASE_APP_KEY, undefined); assert.equal(env.GH_TOKEN, undefined); assert.equal(env.HOMEBREW_TAP_APP_KEY, undefined); } },
+      assert.deepEqual(readdirSync(env.HOME), []);
+      assert.equal(env.RELEASE_APP_KEY, undefined); assert.equal(env.HOMEBREW_TAP_APP_KEY, undefined);
+      if (program !== "gh") assert.equal(env.GH_TOKEN, undefined); },
     finalizeRelease: async (_, __, ___, apply) => { actions.push(`release:${apply}`); return {}; },
-    fetchPublishedChecksums: async () => sums, bumpHomebrewTap: async () => actions.push("tap-pr"),
+    fetchPublishedChecksums: async () => sums, bumpHomebrewTap: async (env, verified) => {
+      assert.equal(env.RELEASE_APP_KEY, undefined); assert.deepEqual(verified, { text: sums, sha256: r.qualification.sha256sums }); actions.push("tap-pr");
+    },
     mergeHomebrewTap: async (_, __, ___, apply) => { actions.push(`tap:${apply}`); return {}; },
   };
   await run(r, { env: workflowEnv, dependencies });
-  assert.deepEqual(actions, ["source", "attestation", "artifacts", "live", "smoke", "source", "release:false"]);
+  assert.deepEqual(actions, ["source", "attestation", "artifacts", "live", "smoke", "source", "release:false", "tap:false"]);
   actions.length = 0;
   await run(r, { env: workflowEnv, apply: true, dependencies });
   assert.deepEqual(actions, ["source", "attestation", "artifacts", "live", "smoke", "source", "release:true", "tap-pr", "tap:true"]);
-  await assert.rejects(run(r, { env: { ...workflowEnv, GITHUB_REF: "refs/heads/work/aeon-414-live-verify" }, dependencies }), /trusted main/);
+  await assert.rejects(run(r, { env: { ...workflowEnv, GITHUB_REF: "refs/heads/work/aeon-414-live-verify" }, dependencies }), /policy refused/);
 });
 
 test("tap polling retries pending checks, but a failed checksum stops immediately", async () => {
   const { r, release, sums } = fixture(); let clock = 0, calls = 0;
-  const dependencies = { installationToken: async () => "fixture", verifySource: async () => {}, command: () => {},
+  const dependencies = { ...policyDependencies, installationToken: async () => "fixture", verifySource: async () => {}, command: () => {},
     api: async () => release, verifyArtifacts: async () => sums, probeLive: async () => ({}), finalizeRelease: async () => ({}),
     fetchPublishedChecksums: async () => sums, bumpHomebrewTap: async () => {}, now: () => clock, wait: async ms => { clock += ms; },
     mergeHomebrewTap: async () => { if (++calls < 3) throw new TapPendingError("pending fixture"); return { state: "merged" }; } };
@@ -213,7 +258,35 @@ test("workflow is dispatch-only, main-only, hosted, protected and read-only by d
   assert.match(yaml, /workflow_dispatch:/); assert.match(yaml, /default: false/); assert.match(yaml, /github.ref == 'refs\/heads\/main'/);
   assert.match(yaml, /environment: live-verification/); assert.match(yaml, /runs-on: ubuntu-latest/);
   assert.match(yaml, /persist-credentials: false/); assert.match(yaml, /contents: read/); assert.match(yaml, /if: always\(\)/);
+  assert.match(yaml, /needs: environment-policy/); assert.match(yaml, /github.actor_id == '276789'/);
+  assert.match(yaml, /ref: \$\{\{ github.workflow_sha \}\}/);
+  assert.match(yaml, /run: node scripts\/verify-live-policy.mjs live-verification/);
   assert.doesNotMatch(yaml, /pull_request_target|repository_dispatch|self-hosted|--admin|PPMAPIKEY|PAIMOS_API_KEY|ssh /);
+});
+
+test("tap workflow never loads secrets from a release tag or candidate script", () => {
+  const yaml = readFileSync(".github/workflows/homebrew-tap.yml", "utf8");
+  assert.match(yaml, /workflow_dispatch:/); assert.doesNotMatch(yaml, /\n  release:|github.event.release.tag_name/);
+  assert.match(yaml, /github.ref == 'refs\/heads\/main'/); assert.match(yaml, /github.actor_id == '276789'/);
+  assert.match(yaml, /ref: \$\{\{ github.workflow_sha \}\}/); assert.match(yaml, /VERSION: \$\{\{ inputs.version \}\}/);
+  assert.match(yaml, /environment: homebrew-tap/); assert.match(yaml, /verify-live-policy.mjs homebrew-tap/);
+});
+
+test("token lifetimes are read-only during probes and revoked on failed attestation", async () => {
+  const { r, release, sums } = fixture(); const grants = []; let revoked = [];
+  const dependencies = { ...policyDependencies, api: async () => release, verifySource: async () => {},
+    installationToken: async (_, __, repo, access) => { grants.push(access); return access; },
+    revokeInstallationToken: async token => { revoked.push(token); },
+    command: () => {}, verifyArtifacts: async () => sums,
+    probeLive: async () => { assert.deepEqual(grants, ["attestation"]); assert.deepEqual(revoked, ["attestation"]); return {}; },
+    finalizeRelease: async () => ({}), fetchPublishedChecksums: async () => sums, mergeHomebrewTap: async () => ({}),
+  };
+  await run(r, { env: workflowEnv, dependencies });
+  assert.deepEqual(grants, ["attestation", "tap-read"]); assert.deepEqual(revoked, grants);
+  grants.length = 0; revoked = [];
+  dependencies.command = () => { throw new Error("untrusted command output fixture"); };
+  await assert.rejects(run(r, { env: workflowEnv, dependencies }));
+  assert.deepEqual(grants, ["attestation"]); assert.deepEqual(revoked, ["attestation"]);
 });
 
 test("source gate binds actual pin merge, annotated tag and main ancestry", async t => {

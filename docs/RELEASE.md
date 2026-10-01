@@ -503,7 +503,7 @@ The index is the deployment and rollback pin. Partial by-digest platform exports
 
 In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
 
-Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. After publication, the coordinator dispatches `.github/workflows/homebrew-tap.yml` on **main**, passing only the version as data. Release events cannot receive tap secrets: their workflow definition can come from an untrusted tag. The trusted main job requires the exact published immutable release, annotated tag on main, complete digest-pinned assets and `SHA256SUMS` bytes matching the API asset digest before minting a tap token. It renders `Formula/aeon-agentd.rb` from those verified bytes and opens a pull request on `inspr-at/homebrew-tap` using the protected environment's App identity. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either App secret is absent the bump logs `homebrew tap bump skipped: app secrets absent` and succeeds; environment preflight still requires installed protection. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
 To verify a published image independently, use its exact digest and source commit:
 
@@ -565,7 +565,13 @@ gh release edit "$tag" --repo inspr-at/paimos --draft=false
 gh release view "$tag" --repo inspr-at/paimos --json tagName,isDraft,publishedAt,url
 ```
 
-Use the coordinator's approved GitHub CLI identity (or an approved GitHub App identity) with release write access. Do not publish using a workflow's `GITHUB_TOKEN`: GitHub suppresses downstream release-event workflows for that token. Publishing via this CLI step emits `release.published`, which starts the Homebrew workflow at the release tag. The new workflow must be included in the tagged commit. See GitHub's [release event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release) and [workflow token restrictions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+Use the coordinator's approved GitHub CLI identity (or an approved GitHub App identity) with release write access. Enable [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) for future releases before publishing; GitHub locks their assets and associated tag at publication. Existing published releases stay unchanged. Verify the public API reports `immutable: true` and dispatch the trusted workflow from main after qualification/publication:
+
+```sh
+gh workflow run homebrew-tap.yml --repo inspr-at/paimos --ref main -f version="${tag#v}"
+```
+
+The workflow must already be independently reviewed on main. Its checkout is the exact main workflow commit; it never executes code from the release tag. The main-only required-reviewer environment is the credential boundary. A tag-shaped version or a workflow `if` cannot establish that boundary.
 
 Confirm `isDraft: false`, public asset availability and the Homebrew workflow result/PR. The coordinator must finish the tap PR’s own checks and approval, merge it, and verify that Homebrew resolves the exact release and checksums before switching the server. If the tap job fails, fix its cause and rerun that job; do not rerun the tag build, toggle publication to retrigger it, replace assets, or reuse the coordinate. The tap PR still follows its own checks and merge approval. Missing app secrets mean no automatic PR; record that result for the coordinator to resolve before claiming Homebrew is updated.
 
@@ -585,17 +591,49 @@ than introducing another rollout controller. The workflow has no SSH, deploy,
 pin-writing or PPM credential. The worker's draft PR never runs this workflow
 against production.
 
-The lead must configure the `live-verification` environment with required
-reviewers and a main-only policy before enabling it. Store approved non-admin
+Before adding any App secrets, the lead must configure **both**
+`live-verification` and `homebrew-tap` with the payload in
+`.github/live-verification-environment.json` and exactly one deployment policy
+`{"name":"main","type":"branch"}`. This selects only main and requires
+Markus's approval (immutable user ID 276789). Operator dispatch and attended
+operator approval are permitted; the JSON explicitly keeps self-review enabled.
+Replace the old `v*` tap policy and remove any extra branch/tag patterns.
+Store these credentials only as environment secrets, never repository or org
+secrets accessible to arbitrary workflows. Protect the environments **before**
+storing credentials; if credentials already exist, restrict their environment
+before enabling either workflow. A modified branch workflow can remove its own
+guards, so script checks cannot substitute for server-side policy.
+
+`scripts/verify-live-policy.mjs` reads the actual environment and complete branch
+policy list with a read-only Actions token. Missing reviews, extra patterns,
+tags, API failures and partial lists refuse execution. The live workflow runs
+this preflight in a job without App secrets before requesting the protected job;
+both scripts recheck policy before minting tokens. Dispatch and reruns allow only
+`markus-barta`/276789 on the exact main workflow ref. The supplied restart/5xx and
+native qualification fields remain statements from that approved coordinator,
+not cryptographically authenticated host measurements. The attended approval
+must bind them to the collector/native evidence; do not accept arbitrary JSON
+as native qualification.
+
+Store approved non-admin
 App identities as `RELEASE_APP_ID` / `RELEASE_APP_KEY` (paimos release contents
 write) and `HOMEBREW_TAP_APP_ID` / `HOMEBREW_TAP_APP_KEY` (tap contents and pull
 requests write). The release App must read attestations; public nixcfg pin
 metadata is read unauthenticated through the API. The tap App also needs checks
 and commit-status read permissions. Tokens are minted for one repository each
-with those specific permissions; an admin-capable token is refused;
-neither the Actions token nor an admin merge bypass is used for publication or
-tap merge. No environment, App installation, permission or foreign rollout
-collector is provisioned by this change.
+with exact requested permission maps, including GitHub's mandatory read-only
+metadata permission; any missing, extra or upgraded grant is refused and revoked.
+Attestation gets only attestations read in a new empty HOME/config directory and
+its token is revoked before the live probe. Public source/assets use no App token.
+Contents write is minted only inside the release-body PATCH and immediately
+revoked. Read-only tap inspection uses only contents/PR/checks/status reads;
+tap write/merge tokens exist only after verification and are revoked on success
+or failure. Neither the Actions token nor an admin merge bypass performs writes.
+The payload and preflight are repository code, **not evidence of installed
+protection**. The coordinator must install/verify the policy, immutable-release
+setting and App scope before adding keys, and record denial of a modified-branch
+dispatch. No environment, repository setting, App installation, permission or
+foreign rollout collector is provisioned by this worker change.
 
 The dispatch input `rollout` contains JSON with these fields; obtain identifiers,
 hashes and measurements from the trusted collector and qualification evidence,
@@ -667,24 +705,37 @@ uses no operator profile or credentials. Probe 5xx counts and timestamps are
 separate from the host's traffic counters; a failed probe stops the gate.
 
 With `apply: true`, only after all gates pass, the script appends one bound
-`Live verification:` line and publishes a remaining qualified draft, or
-finalizes the already published release. It rereads release state before writing
-and refuses conflicting evidence. Identical reruns leave the line and assets
-unchanged. **Keep AEON-493's normal order:** qualified agent distribution and tap
-merge still precede the server switch; post-switch verification normally
-finalizes an already published release. Draft publication here is a recovery
-path after explicit coordinator approval, not authorization to defer distribution
-or bypass native qualification.
+`Live verification:` line to an already published **immutable** release. Draft
+publication is disabled, including recovery mode: GitHub's documented
+[release PATCH](https://docs.github.com/en/rest/releases/releases#update-a-release)
+has no atomic verified asset-id/digest precondition. A fresh GET, an `If-Match`
+header or a post-publication recheck cannot prove an asset-set lock for a draft.
+The script never sends `draft: false` and refuses drafts or mutable releases
+before minting any App token. Server-side immutability protects the verified
+tag/bytes; finalization compares the fresh stable asset ID/name/size/digest set
+to the verified set and requires an ETag, sent as `If-Match` for additional
+metadata defence. It does not claim that header implements an asset-set CAS.
+Identical reruns leave the line and assets unchanged. **Keep AEON-493's order:**
+qualified agent publication and tap merge precede the server switch; post-switch
+verification finalizes that immutable release. Native qualification and human
+publication approval remain required.
 
 After publication, public `SHA256SUMS` must equal the qualified file. The script
 reuses `homebrew-tap-pr.mjs`, refuses a downgrade or conflicting existing branch,
-and verifies the sole formula change against the exact darwin checksums. It
+and verifies the sole formula change against the exact darwin checksums. Public
+checksum downloads are pinned to the API asset ID and SHA-256, bounded by the
+asset size, and follow only GitHub's HTTPS release-asset host without forwarding
+authorization. The formula writer receives the original qualified bytes and
+does not download a second body. A retry may update an existing branch only at
+the exact default-branch tip. The formula commit has that observed parent and
+updates only the work branch with `force: false`; a concurrent advance refuses
+before opening a PR. Unrelated branches are preserved. It
 waits up to five minutes for the tap PR and green checks, then merges at the
 verified head through the non-admin API, subject to the tap's review and branch
 policy, and rereads the installed formula. Changed heads, extra files, failed,
 absent or incomplete checks fail closed. Already installed exact formula bytes
-are a no-op. Failures before release finalization leave a draft untouched;
-failures after publication retain the immutable public assets and stop further
+are a no-op. Failed checks stop finalization and tap writes; drafts are always
+untouched. Failures after finalization retain the immutable public assets and stop further
 actions. Rerun verification with the same evidence after fixing the cause; never
 unpublish, replace assets or reuse a coordinate.
 
@@ -695,8 +746,9 @@ the lead still announces through `aeon tell` and closes tickets; this workflow
 does not inject a PPM key or send an inbox message. Deployment/rollback and
 environment bootstrap remain separate human/coordinator controls.
 
-Regression coverage: `node --test scripts/verify-live.test.mjs` exercises refusal,
-idempotence, publication ordering, source binding, tap checksum/head races and
+Regression coverage: `node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs scripts/homebrew-tap-pr.test.mjs` exercises refusal,
+idempotence, forbidden draft publication, exact token scope/lifetimes, installed
+policy validation, source binding, asset/redirect/branch races and
 secret-safe output. `web/e2e/live-verification.spec.ts` exercises the actual
 browser driver against isolated HTTP fixtures in PR CI. Neither is a claim of
 production acceptance or native hardware qualification.
