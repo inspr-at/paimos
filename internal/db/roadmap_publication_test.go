@@ -59,7 +59,22 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if !jsonEqual(t, string(fields), `{"custom":"keep","legacy_score":2}`) {
 			t.Fatalf("rewritten history: %s", fields)
 		}
-		if !jsonEqual(t, string(task), taskSchema) {
+		// The later AEON-503 expansion adds work classification to tasks.
+		// Remove only those declared extensions to compare the historical
+		// roadmap result; publication must still not add anything to tasks.
+		var taskFields map[string]any
+		if err := json.Unmarshal(task, &taskFields); err != nil {
+			return err
+		}
+		properties := taskFields["properties"].(map[string]any)
+		for _, key := range []string{"route_role_source", "area_source", "route_role_confirmed", "area_confirmed", "complexity", "complexity_source", "complexity_by", "complexity_at", "complexity_confirmed"} {
+			delete(properties, key)
+		}
+		priorTask, err := json.Marshal(taskFields)
+		if err != nil {
+			return err
+		}
+		if !jsonEqual(t, string(priorTask), taskSchema) {
 			t.Fatalf("task schema changed: %s", task)
 		}
 		var parsed struct {
@@ -71,7 +86,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if err := json.Unmarshal(schema, &parsed); err != nil {
 			return err
 		}
-		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 6 {
+		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 15 {
 			t.Fatalf("custom schema lost: %s", schema)
 		}
 		for _, key := range []string{"custom", "legacy_score", "roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at"} {

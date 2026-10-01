@@ -318,13 +318,17 @@ func (rt *runtime) rejectEpicTicket(n apiNode) error {
 	return usagef("%s is an epic; bind the session to one of its tickets", label)
 }
 
+func harnessAgentMismatch(name string) error {
+	return usagef("--agent must name the authenticated agent %q; child sessions use that same agent with --parent-session and a distinct session reference", name)
+}
+
 func (rt *runtime) harnessRegister() *Command {
 	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
-		fs.string(&agent, "agent", 0, "agent principal name")
+		fs.string(&agent, "agent", 0, "authenticated agent principal name; children use the same agent")
 		fs.string(&harness, "harness", 0, "adapter family")
 		fs.string(&host, "host", 0, "non-secret host label")
 		fs.string(&label, "label", 0, "public session display label (up to 128 characters)")
@@ -396,7 +400,7 @@ func (rt *runtime) harnessRegister() *Command {
 			return err
 		}
 		if me.Principal.Name != agent {
-			return usagef("--agent must name the authenticated agent")
+			return harnessAgentMismatch(me.Principal.Name)
 		}
 		var predecessor *string
 		if succeeds != "" {
@@ -436,7 +440,7 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		body := map[string]any{"succeeds_session_id": predecessor, "max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersionOrProbe(context.Background(), harness, harnessVersion), "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}
-		attachVendorSessionRef(body, harness, ref, lease)
+		attachVendorSessionRef(body, harness, ref, lease, parent, "")
 		var out any
 		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", body, &out)
 		if err != nil {
