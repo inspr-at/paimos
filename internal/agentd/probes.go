@@ -220,7 +220,7 @@ func codexStatus(raw []byte, code int) ProbeStatus {
 	switch strings.TrimSpace(string(raw)) {
 	case "Logged in using ChatGPT":
 		if code == 0 {
-			return probeOK
+			return ProbeStatus{OK: true, BillingMode: "subscription"}
 		}
 	case "Not logged in":
 		return probeAuthFailed
@@ -502,6 +502,14 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	}
 	if status.AccountID != "" {
 		a.quotaIdentities().Store(key, status.AccountID)
+	}
+	switch status.AuthMethod {
+	case "claude.ai":
+		return ProbeStatus{OK: true, BillingMode: "subscription"}
+	case "api_key":
+		// Only an unfenced adapter reaches this case. Email-fenced API-key
+		// logins fail authentication above and never establish billing.
+		return ProbeStatus{OK: true, BillingMode: "api"}
 	}
 	return probeOK
 }

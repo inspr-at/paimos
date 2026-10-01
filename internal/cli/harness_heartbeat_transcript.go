@@ -110,7 +110,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 			Reasoning: reasoningPointer(reasoning, reasoningKnown),
 			ReportID:  usageReportID(session.id, model, seq, input, output, cached, reasoningPointer(reasoning, reasoningKnown)),
 			Offset:    next, Recent: recent, Discard: discarding, Codex: codex,
-			BillingMode: mode, SubscriptionLabel: label,
+			BillingMode: mode, SubscriptionLabel: label, AccountID: usageAccount(o),
 		})
 	}
 	if len(created) == 0 {
@@ -198,6 +198,9 @@ func (rt *runtime) postPendingUsage(ctx context.Context, projectID string, sessi
 		"cached_input_tokens": pending.Cached,
 		"provisional":         provisional,
 		"billing_mode":        pendingBilling(pending),
+	}
+	if pending.AccountID != "" {
+		body["account_id"] = pending.AccountID
 	}
 	if pending.Reasoning != nil {
 		body["reasoning_tokens"] = *pending.Reasoning
