@@ -69,8 +69,15 @@ func TestClassicInviteLinking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ownerID, err := tenantbootstrap.BindOIDC(ctx, d.App, "classic-invite", "https://id.example", "owner", "Owner", "super_admin")
+			ownerID, err := tenantbootstrap.BindOIDC(ctx, d.App, "classic-invite", "https://id.example", "owner", "Owner", "admin")
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='owner')
+					WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, tid, ownerID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			owner := tenant.Principal{ID: ownerID, TenantID: tid, Kind: tenant.Person}
