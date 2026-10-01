@@ -144,12 +144,11 @@ PY
 }
 cp "$repo/scripts/ci-web-exit-guard.cjs" "$snapshot/guard.cjs"
 cd "$repo/web"
-readonly node_options="--require=\"$snapshot/guard.cjs\""
 # Non-PR events, especially merge_group, snapshot every UI spec.
 list="$snapshot/list"
 check_guard
 check_playwright
-if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" node node_modules/@playwright/test/cli.js test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
+if AEON_CI_REPO_ROOT="$repo" node --require "$snapshot/guard.cjs" node_modules/@playwright/test/cli.js test "${args[@]}" --list --reporter=list > "$list" 2>&1; then
   check_inputs
   check_guard
   check_playwright
@@ -178,7 +177,7 @@ fi
 report="$snapshot/result.json"
 check_guard
 check_playwright
-if AEON_CI_REPO_ROOT="$repo" NODE_OPTIONS="$node_options" node node_modules/@playwright/test/cli.js test "${args[@]}" --reporter=json > "$report"; then
+if AEON_CI_REPO_ROOT="$repo" node --require "$snapshot/guard.cjs" node_modules/@playwright/test/cli.js test "${args[@]}" --reporter=json > "$report"; then
   check_inputs
   check_guard
   check_playwright

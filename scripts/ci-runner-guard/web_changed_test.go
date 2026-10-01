@@ -213,7 +213,7 @@ case "$MUTATION" in
   "$phase-ref") git update-ref refs/remotes/origin/main "$PR_BASE_SHA" ;;
   "$phase-path") printf 'changed\n' > src/other.vue; git add src/other.vue ;;
   "$phase-exit") exit 0 ;;
-  "$phase-forged-"*) exec node "$FORGED_SCRIPT" "$phase" "$MUTATION" ;;
+  "$phase-forged-"*) exec node --require "$GUARD" "$FORGED_SCRIPT" "$phase" "$MUTATION" ;;
   "$phase-snapshot")
     git read-tree "$PR_BASE_SHA"
     git show "$PR_BASE_SHA:web/src/fixture.vue" > src/fixture.vue
@@ -259,6 +259,7 @@ fi
 	summary := filepath.Join(dir, "summary")
 	outputs := filepath.Join(dir, "outputs")
 	vars := append(os.Environ(), "PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"),
+		"GUARD="+filepath.Join(dir, "temp/aeon-web-selection/guard.cjs"),
 		"PLAYWRIGHT_MANIFEST="+string(manifest), "STUB="+filepath.Join(dir, "bin/npx"),
 		"GITHUB_EVENT_NAME="+scenario.event, "GITHUB_STEP_SUMMARY="+summary,
 		"GITHUB_OUTPUT="+outputs, "FORGED_SCRIPT="+filepath.Join(dir, forgedScript),
@@ -514,7 +515,8 @@ func TestWebSelectionRejectsPlaywrightLauncherReplacement(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", mutation: phase + "-launcher"})
 			calls := map[string]int{"before": 0, "list": 1, "run": 2}[phase]
-			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls || !strings.Contains(got.output, "Playwright code changed after seal") {
+			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls ||
+				!(strings.Contains(got.output, "Playwright code changed after seal") || strings.Contains(got.output, "UI check rejected process.exit")) {
 				t.Fatalf("returning forged JSON from a replaced launcher must fail: %+v", got)
 			}
 		})
@@ -532,8 +534,8 @@ func TestWebExitGuardChecksExactCompilerSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := `const Module = require('node:module');
-const module = new Module(__filename);
-module._compile("console.log('forged report');", __filename);
+	const loaded = new Module(__filename);
+	loaded._compile("console.log('forged report');", __filename);
 `
 	if err := os.WriteFile(launcher, []byte(source), 0600); err != nil {
 		t.Fatal(err)

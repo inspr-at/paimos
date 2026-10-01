@@ -5,10 +5,13 @@ import importlib.util
 import io
 import json
 import tarfile
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+sys.dont_write_bytecode = True
 
 spec = importlib.util.spec_from_file_location("sealer", Path(__file__).with_name("ci-web-seal.py"))
 sealer = importlib.util.module_from_spec(spec)
