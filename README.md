@@ -59,8 +59,11 @@ requests and available journey decisions. Each fact links to its item and source
 The suggested next step is one of those person actions or recorded findings.
 
 The first visit covers 24 hours; later visits start at that person's saved
-briefing visit. Only a complete successful read advances it. Failed sources and
-pagination limits are shown and retain the earlier cutoff. Very old visits are
+briefing visit. The database clock establishes the window alongside the first
+event page; only complete successful log reads advance the saved server cutoff.
+Denied logs, failed logs and log pagination limits retain the earlier cutoff.
+Pending approvals, held requests, journey actions and usage are separate current
+snapshots: their page limits or failures do not freeze completed log windows. Very old visits are
 bounded to 366 days. Preferences use the existing tenant/person-scoped store;
 there is no new activity tracking or generated narrative.
 
@@ -68,8 +71,10 @@ Usage requires `harness.read`. Its API list value is approximate, includes
 lifetime usage of sessions **started** in the window, and is not interval spend
 or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
-reported usage. Unknown usage stays unknown. Merge reports are read from the
-tenant event feed only with workspace `harness.read`. This slice delivers the
+reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+`harness.read`, using the workspace dashboard only for a workspace grant; source
+links appear only after successful reads. Merge reports are requested in each
+project with `harness.read`. Journey next actions use one batch snapshot query. This slice delivers the
 in-app briefing; e-mail, push and spoken delivery remain future work.
 
 ## Develop

@@ -33,6 +33,7 @@ async function mount(options: { denied?: boolean; fullQueue?: boolean; pendingFa
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
   const dashboard = usageDashboard('reported')
   dashboard.totals.cost_state = 'known'
+  dashboard.totals.cost_unknown_rows = 0; dashboard.totals.unreported_sessions = 0; dashboard.totals.provisional_rows = 0
   const json = async (path: string, _signal?: AbortSignal, init?: RequestInit) => {
     paths.push(path)
     if (path.startsWith('/preferences')) {
@@ -66,8 +67,8 @@ async function mount(options: { denied?: boolean; fullQueue?: boolean; pendingFa
       loadBriefingEvents: async (_range: unknown, _signal: unknown, runs: unknown) => { paths.push(`events:${JSON.stringify(runs)}`); return { items: [], truncated: false } },
       loadBriefingWindow: async () => ({ range: { from: START, to: END, first: false, capped: false }, events: { items: [], truncated: false } }),
     },
-    '../components/AppIcon.vue': { default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
-    '../components/work/PlanningCell.vue': { default: { render: () => Vue.h('span') } },
+    '../components/AppIcon.vue': { __esModule: true, default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
+    '../components/work/PlanningCell.vue': { __esModule: true, default: { render: () => Vue.h('span') } },
   }
   const source = readFileSync(new URL('../src/views/MorningBriefingView.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source)

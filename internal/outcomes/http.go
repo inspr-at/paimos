@@ -166,7 +166,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			where = append(where, "o.rules_version = $"+itoa(len(args)))
 		}
 		if !check("outcome.read", "") {
-			allowed, err := readableOutcomeProjects(r.Context(), tx, where, args, check)
+			allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, "outcome.read")
 			if err != nil {
 				return err
 			}
@@ -238,27 +238,6 @@ func outcomeCursor(raw string, present bool) (*time.Time, string, error) {
 		return nil, "", invalid("invalid outcome cursor")
 	}
 	return &at, parts[1], nil
-}
-
-// readableOutcomeProjects keeps projects in this filter where the caller holds
-// outcome.read. A workspace grant is decided by the caller before this query.
-func readableOutcomeProjects(ctx context.Context, tx pgx.Tx, where []string, args []any, check authz.ProjectCheck) ([]string, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT o.project_id::text FROM outcome_events o WHERE `+strings.Join(where, " AND "), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	allowed := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		if check("outcome.read", id) {
-			allowed = append(allowed, id)
-		}
-	}
-	return allowed, rows.Err()
 }
 
 func (m *Module) record(w http.ResponseWriter, r *http.Request) {

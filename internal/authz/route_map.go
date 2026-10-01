@@ -24,6 +24,7 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/journey/next-actions":                                           "journey.read",
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",

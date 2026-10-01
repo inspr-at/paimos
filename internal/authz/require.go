@@ -295,6 +295,31 @@ func (g grants) allows(permission, projectID string) bool {
 // project, capped by an agent key's creator and scopes.
 type ProjectCheck func(permission, projectID string) bool
 
+// GrantedProjectIDsTx resolves a bounded set from the caller's bindings,
+// including linked identities and key ceilings, rather than from resource logs.
+// Callers handle workspace authority before requesting this project-only set.
+func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) ([]string, error) {
+	own, err := readGrants(ctx, tx, p)
+	if errors.Is(err, ErrForbidden) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	check, err := ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for id := range own.projects {
+		if check(permission, id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 // ProjectsTx reads the caller's bindings (and its key creator's) once, inside
 // an existing db.InTenant transaction, for pages that decide per project for
 // many projects at once. An inactive caller or creator is denied everything.

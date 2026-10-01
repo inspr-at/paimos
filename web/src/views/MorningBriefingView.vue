@@ -13,7 +13,7 @@ import { formatDollars } from '../lib/planning'
 import { absoluteTime } from '../lib/work'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
-import { briefingCost, briefingJSON, briefingRange, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingPreference, outcomeFact, recommendedStep, saveBriefingPreference, validBriefingTime, type BriefingFact, type BriefingNeed, type BriefingPreference, type BriefingRange } from '../lib/morningBriefing'
+import { briefingCost, briefingJSON, loadBriefingWindow, sumBriefingUsage, personJourneyActions, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingPreference, outcomeFact, recommendedStep, saveBriefingPreference, validBriefingTime, type BriefingFact, type BriefingNeed, type BriefingPreference, type BriefingRange, type BriefingPage, type BriefingEvent, type BriefingUsage } from '../lib/morningBriefing'
 import AppIcon from '../components/AppIcon.vue'
 import PlanningCell from '../components/work/PlanningCell.vue'
 
@@ -24,11 +24,11 @@ const scope = createScope(owner), lane = scope.lane(), writes = scope.lane()
 const range = ref<BriefingRange | null>(null), preference = ref<BriefingPreference | null>(null)
 const time = ref('08:00'), loading = ref(false), saving = ref(false), error = ref(''), saveError = ref('')
 const delivered = ref<BriefingFact[]>([]), failures = ref<BriefingFact[]>([]), needs = ref<BriefingNeed[]>([])
-const usage = ref<UsageDashboard | null>(null), tickets = ref<ListItem[]>([]), notices = ref<string[]>([])
+const usage = ref<BriefingUsage | null>(null), tickets = ref<ListItem[]>([]), notices = ref<string[]>([])
 const showAll = ref(false)
 const next = computed(() => recommendedStep(needs.value, failures.value))
 const cost = computed(() => usage.value ? briefingCost(usage.value.totals) : null)
-const usageSource = computed(() => range.value ? `/api/usage/dashboard?${new URLSearchParams({ from: range.value.from, to: range.value.to })}` : '')
+const usageSources = ref<{ href: string; label: string }[]>([])
 const visibleTickets = computed(() => tickets.value.filter(t => t.planning?.cost && can('harness.read', t.project?.id ?? undefined)))
 const sections = computed(() => [
   { key: 'delivered', title: 'Finished and delivered', empty: 'No completion or delivery recorded in this window.', rows: delivered.value },
@@ -39,10 +39,9 @@ function accountUsage(account: AllowanceWindow) {
   if (account.unit === 'cost_micros') return `${formatDollars(account.used / 1_000_000)} of ${formatDollars(account.allowance / 1_000_000)} used`
   return `${account.used.toLocaleString()} of ${account.allowance.toLocaleString()} ${account.unit} used`
 }
-const humanActions = new Set(['confirm_brief', 'decide', 'approve_requirements', 'approve_candidate', 'approve_deploy', 'approve_permit'])
 function clear() {
   range.value = null; preference.value = null; delivered.value = []; failures.value = []; needs.value = []
-  usage.value = null; tickets.value = []; notices.value = []; error.value = ''; saveError.value = ''; loading.value = false; saving.value = false
+  usage.value = null; usageSources.value = []; tickets.value = []; notices.value = []; error.value = ''; saveError.value = ''; loading.value = false; saving.value = false
 }
 async function knownPermissions(projectId?: string) {
   if (await ensurePermissions(projectId) === 'known') return
@@ -57,52 +56,75 @@ function load() {
     if (projects.error) throw new Error('Projects could not be loaded. Try again before reading the briefing.')
     preference.value = pref ?? {}
     time.value = validBriefingTime(pref?.time) ? pref.time : '08:00'
-    // A refresh keeps the original window; opening the page again starts a new one.
-    range.value ??= briefingRange(pref)
-    const window = range.value
-    return after(read(window, signal), data => {
-      delivered.value = data.delivered; failures.value = data.failures; needs.value = data.needs
-      usage.value = data.usage; tickets.value = data.tickets; notices.value = data.notices
-      // Mark only a complete, successful visit. A failed/partial source never skips unseen work.
-      if (!data.complete) return
-      const value = { ...pref, time: time.value, last_visit: window.to }
-      return after(saveBriefingPreference(value, signal), () => { preference.value = value })
+    // Refresh keeps the original server window. Opening again captures a new snapshot.
+    const pending: Promise<{ range: BriefingRange; events: BriefingPage<BriefingEvent> | null }> = range.value ? Promise.resolve({ range: range.value, events: null }) : loadBriefingWindow(pref, signal)
+    return after(pending, snapshot => {
+      range.value = snapshot.range
+      const window = snapshot.range
+      return after(read(window, signal, snapshot.events), data => {
+        delivered.value = data.delivered; failures.value = data.failures; needs.value = data.needs
+        usage.value = data.usage; usageSources.value = data.usageSources; tickets.value = data.tickets; notices.value = data.notices
+        if (!data.complete) return
+        const value = { ...pref, time: time.value, last_visit: window.to }
+        return after(saveBriefingPreference(value, signal), () => { preference.value = value })
+      })
     })
   }), { failed: cause => { error.value = cause instanceof Error ? cause.message : 'Briefing could not be loaded.' }, settled: () => { loading.value = false } })
 }
-async function read(window: BriefingRange, signal: AbortSignal) {
+async function read(window: BriefingRange, signal: AbortSignal, initialEvents: BriefingPage<BriefingEvent> | null) {
   const notes: string[] = []; let complete = true
-  async function source<T>(label: string, pending: Promise<T>): Promise<T | null> {
+  async function source<T>(label: string, pending: Promise<T>, log = false): Promise<T | null> {
     try { return await pending } catch (cause) {
       if (signal.aborted || cause instanceof APIError && cause.status === 401) throw cause
+      if (log) complete = false
       if (cause instanceof APIError && cause.status === 403) notes.push(`${label} is unavailable with your current access.`)
-      else { complete = false; notes.push(`${label} could not be loaded. Retry to include it.`) }
+      else { notes.push(`${label} could not be loaded. Retry to include it.`) }
       return null
     }
   }
   const projectList = [...projects.projects]
   // Resolve the existing project permission cache before admitting project costs or person actions.
-  for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(p => source(`Access in ${p.routeKey}`, knownPermissions(p.id))))
-  const usageAllowed = can('harness.read') || projectList.some(p => can('harness.read', p.id))
-  const [outcomes, events, approvals, dashboard] = await Promise.all([
-    source('Outcome history', loadBriefingOutcomes(window, signal)),
-    source('Event history', loadBriefingEvents(window, signal, can('harness.read'))),
-    source('Approvals', briefingJSON<Approval[]>('/approvals?limit=200', signal)),
-    usageAllowed ? source('Usage', loadUsageDashboard(window, signal)) : Promise.resolve(null),
+  for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(p => source(`Access in ${p.routeKey}`, knownPermissions(p.id), true)))
+  const costProjects = projectList.filter(p => can('harness.read', p.id))
+  const emptyWindow = window.from === window.to
+  const [outcomes, baseEvents, approvals] = await Promise.all([
+    emptyWindow ? Promise.resolve({ items: [], truncated: false }) : source('Outcome history', loadBriefingOutcomes(window, signal), true),
+    initialEvents ? Promise.resolve(initialEvents) : source('Event history', loadBriefingEvents(window, signal), true),
+    source('Approvals', briefingJSON<Approval[]>('/approvals?pending=true&limit=200', signal)),
   ])
-  if (outcomes?.truncated || events?.truncated || dashboard?.truncated) { complete = false; notes.push('This window has more records than the briefing can show. Your previous visit has been kept.') }
+  const eventItems = [...baseEvents?.items ?? []]
+  if (outcomes?.truncated || baseEvents?.truncated) { complete = false; notes.push('This window has more records than the briefing can show. Your previous visit has been kept.') }
+  const usageReads: UsageDashboard[] = [], usageSources: { href: string; label: string }[] = []
+  const usageProjects = can('harness.read') ? [null] : costProjects
+  let usageComplete = !!usageProjects.length && !emptyWindow
+  for (let i = 0; i < usageProjects.length && !emptyWindow; i += 3) await Promise.all(usageProjects.slice(i, i + 3).map(async project => {
+    const params = { from: window.from, to: window.to, ...(project ? { project: project.id } : {}) }
+    const dashboard = await source('Usage', loadUsageDashboard(params, signal))
+    if (dashboard) { usageReads.push(dashboard); usageSources.push({ href: `/api/usage/dashboard?${new URLSearchParams(params)}`, label: project?.routeKey ?? '' }) }
+    else usageComplete = false
+  }))
+  const dashboard = usageComplete ? sumBriefingUsage(usageReads) : null
+  if (!dashboard) usageSources.splice(0)
+  if (dashboard?.truncated) notes.push('Usage is partial. Open its source for coverage details.')
+  const runProjects = can('harness.read') ? [true as const] : costProjects.map(p => p.id)
+  for (let i = 0; i < runProjects.length && !emptyWindow; i += 3) await Promise.all(runProjects.slice(i, i + 3).map(async project => {
+    const runs = await source('Merge history', loadBriefingEvents(window, signal, project), true)
+    if (runs) eventItems.push(...runs.items)
+    if (runs?.truncated) { complete = false; notes.push('Merge history is partial. Your previous visit has been kept.') }
+  }))
+  const events = { items: [...new Map(eventItems.map(e => [e.id, e])).values()] }
   if (window.capped) notes.push('Your last visit was more than 366 days ago. This briefing covers the latest 366 days.')
-  if (approvals?.length === 200) { complete = false; notes.push('Approvals show the latest 200 requests. Open Agents to check older requests.') }
+  if (approvals?.length === 200) notes.push('Approvals show the latest 200 pending requests. Open Agents to check older requests.')
   const ids = [...new Set([...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...(events?.items.filter(e => eventFact(e, 'p', 't')).map(e => e.node_id).filter((id): id is string => !!id) ?? []), ...(approvals?.filter(a => a.resource_kind === 'node').map(a => a.resource_id).filter((id): id is string => !!id) ?? [])])]
   const rows: ListItem[] = []
   for (let i = 0; i < ids.length; i += 200) {
-    const page = await source('Ticket details', listNodes({ ids: ids.slice(i, i + 200), limit: 200 }, { signal }))
+    const page = await source('Ticket details', listNodes({ ids: ids.slice(i, i + 200), limit: 200 }, { signal }), true)
     if (page) rows.push(...page.items)
   }
   // Run telemetry is attached to its work order. Its ticket parent supplies the item link.
   const parentIds = [...new Set(rows.filter(n => n.kind_slug === 'work_order' && n.parent?.kind_slug === 'ticket').map(n => n.parent!.id))].filter(id => !rows.some(n => n.id === id))
   for (let i = 0; i < parentIds.length; i += 200) {
-    const page = await source('Ticket details', listNodes({ ids: parentIds.slice(i, i + 200), limit: 200 }, { signal }))
+    const page = await source('Ticket details', listNodes({ ids: parentIds.slice(i, i + 200), limit: 200 }, { signal }), true)
     if (page) rows.push(...page.items)
   }
   const nodeById = new Map(rows.map(t => [t.id, t])), byProject = new Map(projectList.map(p => [p.id, p]))
@@ -128,21 +150,24 @@ async function read(window: BriefingRange, signal: AbortSignal) {
     const href = `/agents?needs=${encodeURIComponent(`a:${approval.id}`)}`
     waiting.push({ id: `a:${approval.id}`, title: scopeLabel(approval.scope), detail: approval.rationale, href, source: href })
   }
+  const actionProjects = projectList.filter(p => can('journey.act', p.id) && can('journey.read', p.id))
+  for (let i = 0; i < actionProjects.length; i += 100) {
+    const query = new URLSearchParams({ project_ids: actionProjects.slice(i, i + 100).map(p => p.id).join(',') })
+    const actions = await source('Project decisions', briefingJSON<{ items: { project_node_id: string; next_action: Journey['next_action'] }[] }>(`/journey/next-actions?${query}`, signal))
+    for (const item of actions?.items ?? []) {
+      const project = byProject.get(item.project_node_id), action = item.next_action
+      if (!project || !action.available || !personJourneyActions.has(action.key) || pending.some(a => a.id === action.approval_request_id)) continue
+      const href = `/p/${encodeURIComponent(project.routeKey)}/journey`
+      waiting.push({ id: `j:${project.id}`, title: `${project.routeKey} · ${action.label}`, detail: action.reason ?? '', href, source: href })
+    }
+  }
   for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(async project => {
-    const root = `/projects/${encodeURIComponent(project.id)}`
-    const [messages, journey] = await Promise.all([
-      can('inbox.manage', project.id) ? source(`Human requests in ${project.routeKey}`, briefingJSON<MessagePage>(`${root}/messages?pending=true&limit=200`, signal)) : Promise.resolve(null),
-      can('journey.act', project.id) ? source(`Decisions in ${project.routeKey}`, briefingJSON<Journey>(`${root}/journey`, signal)) : Promise.resolve(null),
-    ])
-    if (messages?.items.length === 200) { complete = false; notes.push(`Human requests in ${project.routeKey} may be incomplete. Open Agents for the full queue.`) }
+    if (!can('inbox.manage', project.id)) return
+    const messages = await source(`Human requests in ${project.routeKey}`, briefingJSON<MessagePage>(`/projects/${encodeURIComponent(project.id)}/messages?pending=true&limit=200`, signal))
+    if (messages?.items.length === 200) notes.push(`Human requests in ${project.routeKey} may be incomplete. Open Agents for the full queue.`)
     for (const message of heldRequests(messages?.items ?? [])) {
       const href = `/agents?needs=${encodeURIComponent(`m:${message.id}`)}`
       waiting.push({ id: `m:${message.id}`, title: `Human check · ${project.routeKey}`, detail: message.body, href, source: href })
-    }
-    const action = journey?.next_action
-    if (action?.available && humanActions.has(action.key) && !pending.some(a => a.id === action.approval_request_id)) {
-      const href = `/p/${encodeURIComponent(project.routeKey)}/journey`
-      waiting.push({ id: `j:${project.id}`, title: `${project.routeKey} · ${action.label}`, detail: action.reason ?? '', href, source: href })
     }
   }))
   facts.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)); failed.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
@@ -150,7 +175,7 @@ async function read(window: BriefingRange, signal: AbortSignal) {
   const approvalOrder = new Map(pending.map((a, i) => [`a:${a.id}`, i]))
   waiting.sort((a, b) => (approvalOrder.get(a.id) ?? Infinity) - (approvalOrder.get(b.id) ?? Infinity) || a.id.localeCompare(b.id))
   const factIds = new Set([...parentIds, ...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...(events?.items.filter(e => eventFact(e, 'p', 't')).map(e => e.node_id) ?? [])])
-  return { delivered: facts, failures: failed, needs: waiting, usage: dashboard, tickets: rows.filter(t => factIds.has(t.id)), notices: notes, complete }
+  return { delivered: facts, failures: failed, needs: waiting, usage: dashboard, usageSources, tickets: rows.filter(t => factIds.has(t.id)), notices: notes, complete }
 }
 function saveTime() {
   if (!validBriefingTime(time.value) || !preference.value || loading.value) return
@@ -196,9 +221,9 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose() })
           <ul v-else><li v-for="fact in (showAll ? section.rows : section.rows.slice(0, 8))" :key="fact.id"><RouterLink class="fact-title" :to="fact.href">{{ fact.title }}</RouterLink><p v-if="fact.detail">{{ fact.detail }}</p><div class="fact-meta"><time :datetime="fact.at">{{ absoluteTime(fact.at) }}</time><a v-if="fact.source.startsWith('/api/')" class="source" :href="fact.source" target="_blank" rel="noopener">{{ fact.source.startsWith('/api/outcomes?') ? 'Source outcome' : 'Source event' }}</a><RouterLink v-else class="source" :to="fact.source">Source outcome</RouterLink></div></li></ul>
         </section>
         <section class="glass-card briefing-section cost-section" aria-labelledby="briefing-cost">
-          <header><h2 id="briefing-cost">What it cost</h2><a class="source" :href="usageSource" target="_blank" rel="noopener">Usage source</a></header>
+          <header><h2 id="briefing-cost">What it cost</h2><a v-for="source in usageSources" :key="source.href" class="source" :href="source.href" target="_blank" rel="noopener">Usage source{{ source.label ? ` · ${source.label}` : '' }}</a></header>
           <template v-if="usage && cost">
-            <p class="cost-value"><AppIcon v-if="cost.measured" name="check" :size="16" aria-label="Measured reports" />{{ cost.value }}</p><p>{{ cost.detail }}</p>
+            <p class="cost-value"><AppIcon v-if="cost.measured" name="check" :size="16" />{{ cost.value }}</p><p>{{ cost.detail }}</p>
             <p class="muted">Lifetime usage of sessions started in this window. API list value is approximate; it is not an invoice or spend during the window.</p>
             <template v-if="usage.allowance.state === 'visible' && usage.allowance.windows.length"><h3>Accounts now</h3><ul><li v-for="account in usage.allowance.windows" :key="account.window_id"><RouterLink :to="'/agents'">{{ account.label }}</RouterLink><p>{{ accountUsage(account) }} · {{ account.provisional ? 'provisional' : 'reported' }}</p><time :datetime="account.ends_at">Window ends {{ absoluteTime(account.ends_at) }}</time></li></ul></template>
             <p v-else class="muted">{{ usage.allowance.state === 'withheld' ? 'Account budgets require account access.' : 'No account budget windows recorded.' }}</p>

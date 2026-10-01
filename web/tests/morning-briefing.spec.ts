@@ -34,10 +34,14 @@ async function setup(page: Page, options: { failure?: boolean; noCost?: boolean;
     ].filter(n => ids.includes(n.id)).map(n => ({ ...n, project: { id: 'p-aeon', key: 'PRJ-35', title: 'Aeon' }, fields: {}, title: n.key, state: 'done', created_at: AT, updated_at: AT }))
     return route.fulfill({ json: { items: rows, next_cursor: null } })
   })
-  await page.route('**/api/events?**', route => route.fulfill({ json: { items: options.empty ? [] : [{ id: 454, node_id: 'work-1', type: 'run.telemetry', before: null, after: { report: { kind: 'finished' }, run: { status: 'completed', outcome_detail: 'merged' } }, at: AT }], next_after: null } }))
+  await page.route('**/api/events?**', route => {
+    const query = new URL(route.request().url()).searchParams
+    const run = query.get('type')?.includes('run.telemetry')
+    return route.fulfill({ json: { items: options.empty || !run ? [] : [{ id: 454, node_id: 'work-1', type: 'run.telemetry', before: null, after: { report: { kind: 'finished' }, run: { status: 'completed', outcome_detail: 'merged' } }, at: AT }], next_after: null, next_cursor: null, ...(query.get('briefing') === 'true' ? { window: { from: START, to: new Date(NOW).toISOString(), first: false, capped: false } } : {}) } })
+  })
   await page.route('**/api/approvals?**', route => route.fulfill({ json: options.empty ? [] : [{ id: uuid, agent_principal_id: uuid, scope: 'nodes.write', resource_kind: 'node', resource_id: 'n-a1', rationale: 'Check the delivery evidence', proposed_at: AT, expires_at: new Date(NOW + 3600_000).toISOString(), decision: null, risk: 'low' }] }))
   await page.route('**/api/projects/*/messages?**', route => route.fulfill({ json: { items: [], next_after: 0 } }))
-  await page.route('**/api/projects/*/journey', route => route.fulfill({ json: { next_action: { key: 'wait_for_build', available: true, label: 'Wait for build' } } }))
+  await page.route('**/api/journey/next-actions?**', route => route.fulfill({ json: { items: [] } }))
   let permissionFailure = options.permissionFailure
   if (options.noCost || permissionFailure) {
     await page.route('**/api/me/permissions*', route => {

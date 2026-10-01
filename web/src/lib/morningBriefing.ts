@@ -3,7 +3,7 @@
 import { api, APIError } from './api.ts'
 import { outcomeLine, type OutcomeEvent } from './ticketOutcomes.ts'
 import { formatDollars } from './planning.ts'
-import type { UsageGroup } from './usageFormat.ts'
+import type { UsageGroup, UsageDashboard } from './usageFormat.ts'
 
 export const BRIEFING_KEY = 'morning-briefing'
 const DAY = 86_400_000
@@ -16,13 +16,13 @@ export interface BriefingNeed { id: string; title: string; detail: string; href:
 export interface BriefingPage<T> { items: T[]; truncated: boolean }
 
 export const validBriefingTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-export function briefingRange(pref: BriefingPreference | null, now = new Date()): BriefingRange {
+export function briefingRange(pref: BriefingPreference | null, now: Date): BriefingRange {
   const last = Date.parse(pref?.last_visit ?? '')
   const end = now.getTime()
-  const first = !Number.isFinite(last) || last >= end
+  const first = !Number.isFinite(last)
   const start = first ? end - DAY : last
   const floor = end - 366 * DAY
-  return { from: new Date(Math.max(start, floor)).toISOString(), to: now.toISOString(), first, capped: start < floor }
+  return { from: new Date(Math.max(start, floor)).toISOString(), to: new Date(Math.max(end, first ? end : last)).toISOString(), first, capped: start < floor }
 }
 export function briefingDue(pref: BriefingPreference | null, now = new Date()): boolean {
   const time = validBriefingTime(pref?.time) ? pref.time : '08:00'
@@ -60,19 +60,50 @@ export async function loadBriefingOutcomes(range: BriefingRange, signal?: AbortS
   }
   return { items: [...items.values()], truncated: true }
 }
-export async function loadBriefingEvents(range: BriefingRange, signal?: AbortSignal, includeRuns = false): Promise<BriefingPage<BriefingEvent>> {
-  const items: BriefingEvent[] = []; let after = 0
+interface EventPage { items: BriefingEvent[]; next_cursor?: string | null; window?: BriefingRange }
+async function eventPages(range: BriefingRange, signal?: AbortSignal, runs?: true | string, first?: EventPage): Promise<BriefingPage<BriefingEvent>> {
+  const items: BriefingEvent[] = [], cursors = new Set<string>()
+  let cursor: string | null = null
   for (let page = 0; page < 20; page++) {
-    const query: URLSearchParams = new URLSearchParams({ from: range.from, to: range.to, limit: '200', after: String(after), type: includeRuns ? 'node.updated,run.telemetry' : 'node.updated' })
-    const read = await briefingJSON<{ items: BriefingEvent[]; next_after: number | null }>(`/events?${query}`, signal)
+    const query = new URLSearchParams({ from: range.from, to: range.to, limit: '200', order: 'time', type: runs ? 'run.telemetry' : 'node.updated', ...(typeof runs === 'string' ? { project_id: runs } : {}), ...(cursor ? { cursor } : {}) })
+    const read: EventPage = page === 0 && first ? first : await briefingJSON<EventPage>(`/events?${query}`, signal)
     if (!Array.isArray(read.items)) throw new Error('The event log did not return a list.')
     items.push(...read.items)
-    if (read.next_after === null) return { items, truncated: false }
-    if (!Number.isSafeInteger(read.next_after) || read.next_after <= after) throw new Error('Event pagination did not advance.')
-    after = read.next_after
+    cursor = read.next_cursor ?? null
+    if (!cursor) return { items, truncated: false }
+    if (cursors.has(cursor)) throw new Error('Event pagination did not advance.')
+    cursors.add(cursor)
   }
   return { items, truncated: true }
 }
+export async function loadBriefingWindow(pref: BriefingPreference | null, signal?: AbortSignal): Promise<{ range: BriefingRange; events: BriefingPage<BriefingEvent> }> {
+  const query = new URLSearchParams({ briefing: 'true', limit: '200', type: 'node.updated' })
+  if (Number.isFinite(Date.parse(pref?.last_visit ?? ''))) query.set('since', pref!.last_visit!)
+  const first = await briefingJSON<EventPage>(`/events?${query}`, signal)
+  const range = first.window
+  if (!range || !Number.isFinite(Date.parse(range.from)) || !Number.isFinite(Date.parse(range.to)) || Date.parse(range.from) > Date.parse(range.to)) throw new Error('The event log did not return a server window.')
+  return { range, events: await eventPages(range, signal, undefined, first) }
+}
+export function loadBriefingEvents(range: BriefingRange, signal?: AbortSignal, runs?: true | string): Promise<BriefingPage<BriefingEvent>> {
+  return eventPages(range, signal, runs)
+}
+export type BriefingUsage = Pick<UsageDashboard, 'totals' | 'allowance' | 'truncated'>
+// Dashboard values remain exact fixed-point strings until presentation.
+export function sumBriefingUsage(dashboards: UsageDashboard[]): BriefingUsage {
+  const totals = { ...dashboards[0]!.totals, label: 'Permitted projects' }
+  for (const key of ['sessions', 'usage_rows', 'unreported_sessions', 'input_known_rows', 'input_unknown_rows', 'output_known_rows', 'output_unknown_rows', 'cached_input_known_rows', 'cached_input_unknown_rows', 'cost_known_rows', 'cost_unknown_rows', 'provisional_rows', 'provisional_sessions'] as const) totals[key] = dashboards.reduce((sum, d) => sum + d.totals[key], 0)
+  for (const key of ['input_tokens', 'output_tokens', 'cached_input_tokens', 'estimated_cost_usd'] as const) {
+    const values = dashboards.map(d => d.totals[key]).filter((v): v is string => v !== null)
+    const sum = values.reduce((n, v) => n + BigInt(v.replace('.', '')), 0n)
+    totals[key] = values.length ? key === 'estimated_cost_usd' ? `${sum / 1_000_000_000_000n}.${(sum % 1_000_000_000_000n).toString().padStart(12, '0')}` : String(sum) : null
+  }
+  totals.cost_state = !totals.cost_known_rows ? 'unknown' : totals.cost_unknown_rows || totals.unreported_sessions ? 'partial' : totals.provisional_rows ? 'provisional' : 'known'
+  totals.tokens_state = dashboards.every(d => d.totals.tokens_state === 'known') ? 'known' : dashboards.every(d => d.totals.tokens_state === 'unknown') ? 'unknown' : 'partial'
+  const windows = [...new Map(dashboards.flatMap(d => d.allowance.windows).map(w => [w.window_id, w])).values()]
+  const state = dashboards.some(d => d.allowance.state === 'visible') ? 'visible' : dashboards.some(d => d.allowance.state === 'withheld') ? 'withheld' : 'none'
+  return { totals, allowance: { state, windows }, truncated: dashboards.some(d => d.truncated) }
+}
+export const personJourneyActions = new Set(['continue_intake', 'confirm_brief', 'decide', 'reopen', 'approve_requirements', 'open_first_release', 'start_build', 'mark_candidate', 'approve_candidate', 'approve_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release', 'renew_candidate', 'renew_deploy'])
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function text(value: unknown): string { return typeof value === 'string' ? value : '' }
 export const ticketHref = (project: string, ticket: string) => `/p/${encodeURIComponent(project)}/${encodeURIComponent(ticket)}`
@@ -100,7 +131,7 @@ export function eventFact(item: BriefingEvent, projectKey: string, ticketKey: st
 export function briefingCost(group: UsageGroup): { value: string; detail: string; measured: boolean } {
   if (group.estimated_cost_usd === null || !group.cost_known_rows) return { value: 'Cost not measured yet', detail: `${group.sessions} sessions; no priced usage reported.`, measured: false }
   const qualifier = group.cost_state === 'partial' ? ' · partial' : group.cost_state === 'provisional' ? ' · provisional' : ''
-  return { value: `≈ ${formatDollars(group.estimated_cost_usd)}`, detail: `API list value${qualifier}; ${group.cost_known_rows} priced reports, ${group.unreported_sessions} sessions unreported.`, measured: group.cost_state === 'known' }
+  return { value: `≈ ${formatDollars(group.estimated_cost_usd)}${group.cost_state === 'known' ? ' · measured' : ''}`, detail: `API list value${qualifier}; ${group.cost_known_rows} priced reports, ${group.unreported_sessions} sessions unreported.`, measured: group.cost_state === 'known' }
 }
 export function recommendedStep(needs: BriefingNeed[], failures: BriefingFact[]): BriefingNeed | null {
   const first = needs[0]
