@@ -8,19 +8,22 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 const (
-	envDev            = "dev"
-	envOIDCIssuer     = "AEON_OIDC_ISSUER"
-	envOIDCClientID   = "AEON_OIDC_CLIENT_ID"
-	envPublicURL      = "AEON_PUBLIC_URL"
-	envSessionKeyFile = "AEON_SESSION_KEY_FILE"
-	envAppEnv         = "AEON_ENV"
-	envTenantSlug     = "AEON_BOOTSTRAP_TENANT_SLUG"
-	envAdminEmail     = "AEON_BOOTSTRAP_ADMIN_EMAIL"
-	defaultTenantSlug = "inspr"
-	minSessionKey     = 32
+	envDev             = "dev"
+	envOIDCIssuer      = "AEON_OIDC_ISSUER"
+	envOIDCClientID    = "AEON_OIDC_CLIENT_ID"
+	envOIDCDisplayName = "AEON_OIDC_DISPLAY_NAME"
+	envPublicURL       = "AEON_PUBLIC_URL"
+	envSessionKeyFile  = "AEON_SESSION_KEY_FILE"
+	envAppEnv          = "AEON_ENV"
+	envTenantSlug      = "AEON_BOOTSTRAP_TENANT_SLUG"
+	envAdminEmail      = "AEON_BOOTSTRAP_ADMIN_EMAIL"
+	defaultTenantSlug  = "inspr"
+	minSessionKey      = 32
+	maxOIDCDisplayName = 48
 )
 
 // Config is the process configuration for people (OIDC) and agents (API keys).
@@ -29,6 +32,7 @@ type Config struct {
 	PublicURL           string
 	OIDCIssuer          string
 	OIDCClientID        string
+	OIDCDisplayName     string
 	SessionKey          []byte
 	BootstrapTenantSlug string
 	BootstrapAdminEmail string
@@ -55,10 +59,30 @@ func FromEnv() (Config, error) {
 		PublicURL:           strings.TrimRight(strings.TrimSpace(os.Getenv(envPublicURL)), "/"),
 		OIDCIssuer:          strings.TrimRight(strings.TrimSpace(os.Getenv(envOIDCIssuer)), "/"),
 		OIDCClientID:        strings.TrimSpace(os.Getenv(envOIDCClientID)),
+		OIDCDisplayName:     oidcDisplayName(os.Getenv(envOIDCDisplayName)),
 		SessionKey:          key,
 		BootstrapTenantSlug: slug,
 		BootstrapAdminEmail: strings.TrimSpace(os.Getenv(envAdminEmail)),
 	}, nil
+}
+
+// oidcDisplayName keeps the public label short and free of invisible controls.
+// Whitespace controls become spaces so words remain separated.
+func oidcDisplayName(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(value))
+	runes := []rune(strings.Join(strings.Fields(value), " "))
+	if len(runes) > maxOIDCDisplayName {
+		runes = runes[:maxOIDCDisplayName]
+	}
+	return strings.TrimSpace(string(runes))
 }
 
 func sessionKey(env string) ([]byte, error) {

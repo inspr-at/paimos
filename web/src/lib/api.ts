@@ -87,7 +87,7 @@ export async function api(path: string, init: RequestInit = {}) {
 }
 
 // Keep the P0.3 auth wire contract here, separate from view components.
-export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean }> {
+export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean; oidcDisplayName?: string }> {
   const response = await api('/me')
   if (!response.ok && response.status !== 401) throw new Error('Session unavailable')
   // A 401 may have no JSON body; it still means sign-in is required.
@@ -96,12 +96,13 @@ export async function getSession(): Promise<{ identity: Identity | null; devMode
     throw new Error('Invalid session response')
   })
   const devMode = body.dev_mode === true
-  if (response.status === 401) return { identity: null, devMode }
+  const provider = typeof body.oidc_display_name === 'string' ? { oidcDisplayName: body.oidc_display_name.trim() } : {}
+  if (response.status === 401) return { identity: null, devMode, ...provider }
   if (typeof body.principal?.id !== 'string' || typeof body.principal?.name !== 'string'
     || typeof body.tenant?.id !== 'string' || typeof body.tenant?.name !== 'string') {
     throw new Error('Invalid session response')
   }
-  return { identity: body as Identity, devMode }
+  return { identity: body as Identity, devMode, ...provider }
 }
 
 // R1 wire types mirror api/openapi.yaml. All workspace HTTP calls stay here.
