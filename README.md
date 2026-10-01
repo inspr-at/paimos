@@ -15,7 +15,8 @@ images use explicit release versions; there is no `latest` tag.
 Workspace AI is off by default. A person with `settings.manage` can open
 **Settings → Workspace → In-app AI**, enter an OpenAI-compatible API base URL
 and chat model, and select the features allowed to send content to that server.
-For Ollama on the Aeon server, use `http://localhost:11434/v1` and the name of
+For [Ollama on the Aeon server](https://docs.ollama.com/api/openai-compatibility),
+use `http://localhost:11434/v1` and the name of
 an installed chat model. Save, then use **Test connection**: it sends only a
 small synthetic prompt, including while AI is off. Saving never contacts a model.
 The endpoint is resolved from the Aeon server; in Docker, `localhost` means the

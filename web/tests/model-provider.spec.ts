@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork } from '../tests/work-fixtures'
-import { businessData, mockBusiness } from '../tests/business-fixtures'
-import { mockSettings, settingsData } from '../tests/settings-fixtures'
+import { fixtures, mockWork } from './work-fixtures'
+import { businessData, mockBusiness } from './business-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
 
 async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
   await mockWork(page, fixtures(), { admin: role === 'admin' })

@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/linkvault"
+	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -91,6 +92,29 @@ func configOf(t *testing.T, w *httptest.ResponseRecorder) Config {
 	return c
 }
 
+func seedSearchNode(t *testing.T, f fixture, p tenant.Principal) string {
+	t.Helper()
+	var id string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,state)
+			SELECT $1,'MODEL-1',id,'Model search fixture','Index this local document.','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func queueState(t *testing.T, f fixture, p tenant.Principal) (int, int) {
+	t.Helper()
+	var jobs, attempts int
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(attempts),0) FROM node_embedding_jobs`).Scan(&jobs, &attempts)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return jobs, attempts
+}
+
 func TestSettingsOwnershipVaultAndRevision(t *testing.T) {
 	f := setup(t)
 	w := f.call(f.admin, "GET", "/api/settings/model-provider", nil)
@@ -161,6 +185,8 @@ func TestSettingsOwnershipVaultAndRevision(t *testing.T) {
 
 func TestDisabledFeaturesMakeNoRequestsAndConnectionTestIsExplicit(t *testing.T) {
 	f := setup(t)
+	seedSearchNode(t, f, f.admin)
+	search.NewWithResolver(f.d.App, f.s.Embeddings).Mount(f.mux)
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -207,10 +233,19 @@ func TestDisabledFeaturesMakeNoRequestsAndConnectionTestIsExplicit(t *testing.T)
 	if calls != 1 {
 		t.Fatal("feature gates contacted endpoint")
 	}
+	if jobs, attempts := queueState(t, f, f.admin); jobs != 1 || attempts != 0 {
+		t.Fatal("disabled feature touched queued work")
+	}
+	w = f.call(f.admin, "GET", "/api/search?q=Model", nil)
+	expect(t, w, 200)
+	if !strings.Contains(w.Body.String(), "Model search fixture") || calls != 1 {
+		t.Fatal("disabled provider did not stay lexical")
+	}
 }
 
 func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
 	f := setup(t)
+	seedSearchNode(t, f, f.admin)
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -250,5 +285,39 @@ func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
 	}
 	if p, err := f.s.Embeddings(t.Context(), f.other.TenantID); err != nil || p != nil {
 		t.Fatal("tenant provider leaked")
+	}
+}
+
+func TestFailedWorkspaceProviderDoesNotStarveOtherIndexQueues(t *testing.T) {
+	f := setup(t)
+	seedSearchNode(t, f, f.admin)
+	seedSearchNode(t, f, f.other)
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vec := make([]float32, embedding.Dimensions)
+		vec[0] = 1
+		json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"index": 0, "embedding": vec}}})
+	}))
+	defer good.Close()
+	s := Settings{Enabled: true, BaseURL: bad.URL + "/v1", ChatModel: "fixture-chat", EmbeddingModel: "fixture-embed", Features: Features{Embeddings: true}}
+	expect(t, f.call(f.admin, "PUT", "/api/settings/model-provider", writeSettings(s, 0, nil)), 200)
+	s.BaseURL = good.URL + "/v1"
+	expect(t, f.call(f.other, "PUT", "/api/settings/model-provider", writeSettings(s, 0, nil)), 200)
+	worker := embedding.NewWorker(f.d.App, nil, embedding.Options{Resolve: f.s.Embeddings})
+	if n, err := worker.ProcessOnce(t.Context()); err == nil || n != 1 {
+		t.Fatal("failed tenant starved a healthy tenant")
+	}
+	if jobs, attempts := queueState(t, f, f.admin); jobs != 1 || attempts != 1 {
+		t.Fatal("failed job lost retry state")
+	}
+	if jobs, _ := queueState(t, f, f.other); jobs != 0 {
+		t.Fatal("healthy job left queued")
+	}
+	search.NewWithResolver(f.d.App, f.s.Embeddings).Mount(f.mux)
+	w := f.call(f.other, "GET", "/api/search?q=neverlexicalmatch", nil)
+	expect(t, w, 200)
+	if !strings.Contains(w.Body.String(), "Model search fixture") {
+		t.Fatal("search did not share the indexing provider vector space")
 	}
 }

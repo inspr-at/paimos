@@ -243,6 +243,9 @@ jobs:
             exit 1
           fi
           npm run e2e --prefix web
+      - name: Test workspace model provider controls
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/model-provider.spec.ts --workers=1
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:

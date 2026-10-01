@@ -39,9 +39,8 @@ type Worker struct {
 	append    AppendFunc
 }
 
-// NewWorker binds the queue to pool and provider. Both are required.
-// The coordinator runs Worker.Run beside the search module; pass the same
-// Provider to search.New so query vectors use the stored model.
+// NewWorker requires a pool and either a provider or Options.Resolve. Share
+// that provider/resolver with search so query and indexed vectors match.
 func NewWorker(pool *pgxpool.Pool, provider Provider, opts Options) *Worker {
 	if pool == nil || (provider == nil && opts.Resolve == nil) {
 		panic("embedding.NewWorker: pool and provider are required")
@@ -99,14 +98,15 @@ func (w *Worker) ProcessOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	var n int
+	var first error
 	for _, id := range ids {
 		c, err := w.processTenant(ctx, id)
 		n += c
-		if err != nil {
-			return n, err
+		if err != nil && first == nil {
+			first = err
 		}
 	}
-	return n, nil
+	return n, first
 }
 
 // tenantIDs reads the tenant registry. That table is not tenant-scoped, so
