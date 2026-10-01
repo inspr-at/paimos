@@ -12109,7 +12109,7 @@ components:
             estimated: {type: integer, minimum: 0}
     TicketEstimateSnapshot:
       type: object
-      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into in_progress in a work episode. Later estimates do not overwrite it. Leaving in_progress closes the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the ticket project.'
+      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into in_progress in a work episode. Later estimates do not overwrite it. Leaving in_progress closes the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
       required: [id, started_at, source, estimate_hours, estimated_tokens, route, rate_basis]
       properties:
         id: {type: string, format: uuid}
@@ -12127,6 +12127,7 @@ components:
             tickets: {type: integer, minimum: 0}
             tokens_per_hour: {type: integer, minimum: 0}
             any_route: {type: boolean}
+            tokens_per_hour_exact: {type: string, description: Unrounded tokens per hour used for the snapshot calculation.}
             list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
             price_version: {type: [integer, 'null']}
             input_usd_per_million: {type: [string, 'null']}

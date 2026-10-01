@@ -15,14 +15,15 @@ import (
 
 type estimateRateBasis struct {
 	planningCalibration
-	ListPerHour  *string `json:"list_per_hour,omitempty"`
-	PriceVersion *int64  `json:"price_version,omitempty"`
-	Input        *string `json:"input_usd_per_million,omitempty"`
-	Output       *string `json:"output_usd_per_million,omitempty"`
-	Cached       *string `json:"cached_input_usd_per_million,omitempty"`
-	CachedMix    float64 `json:"cached_mix"`
-	InputMix     float64 `json:"input_mix"`
-	OutputMix    float64 `json:"output_mix"`
+	TokensPerHourExact string  `json:"tokens_per_hour_exact"`
+	ListPerHour        *string `json:"list_per_hour,omitempty"`
+	PriceVersion       *int64  `json:"price_version,omitempty"`
+	Input              *string `json:"input_usd_per_million,omitempty"`
+	Output             *string `json:"output_usd_per_million,omitempty"`
+	Cached             *string `json:"cached_input_usd_per_million,omitempty"`
+	CachedMix          float64 `json:"cached_mix"`
+	InputMix           float64 `json:"input_mix"`
+	OutputMix          float64 `json:"output_mix"`
 }
 
 type planningSnapshot struct {
@@ -76,13 +77,12 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	route := pl.route(row)
 	cal := pl.calibration(route)
 	snap := planningSnapshot{Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,
-		RateBasis: estimateRateBasis{planningCalibration: planningCalibration{Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
+		RateBasis: estimateRateBasis{planningCalibration: planningCalibration{Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
 	if route != nil {
 		snap.Route = route.view
-		err = tx.QueryRow(ctx, `SELECT version,input_usd_per_million::text,output_usd_per_million::text,cached_input_usd_per_million::text
-            FROM model_prices WHERE model=$1 ORDER BY version DESC LIMIT 1`, route.view.Model).Scan(&snap.RateBasis.PriceVersion, &snap.RateBasis.Input, &snap.RateBasis.Output, &snap.RateBasis.Cached)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		if price := route.price; price != nil {
+			snap.RateBasis.PriceVersion = price.Version
+			snap.RateBasis.Input, snap.RateBasis.Output, snap.RateBasis.Cached = price.Input, price.Output, price.Cached
 		}
 	}
 	if cal.listPerHour != nil {
