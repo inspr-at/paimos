@@ -44,26 +44,16 @@ const workingSessionSQL = `EXISTS(SELECT 1 FROM harness_sessions s
 
 // CompletionJoin is the worker that left the ticket last, when nobody is on it any more,
 // as a LEFT JOIN LATERAL named alias over the ticket id expression idExpr. A finished
-// worker's estimate is not kept (aeon_node_eta reads open sessions only), so completion
-// is read from the session itself, through the one aeon_session_finished.
+// worker's estimate is not kept, so completion is read through aeon_node_completion,
+// the same projection used by the recursive epic roll-up.
 func CompletionJoin(idExpr, alias string) string {
-	return `LEFT JOIN LATERAL (
-	SELECT s.stopped_at, pr.name AS by,
-		aeon_session_finished(s.stopped_at, s.stop_reason, s.progress_pct) AS finished
-	FROM harness_sessions s
-	JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id=s.ticket_node_id AND n.project_id=s.project_id
-	LEFT JOIN principals pr ON pr.tenant_id=s.tenant_id AND pr.id=s.agent_principal_id
-	WHERE s.ticket_node_id=` + idExpr + ` AND n.deleted_at IS NULL AND s.role='worker'
-	AND s.stopped_at IS NOT NULL AND s.archived_at IS NULL
-	AND NOT EXISTS(SELECT 1 FROM harness_sessions o WHERE o.tenant_id=s.tenant_id AND o.ticket_node_id=s.ticket_node_id
-		AND o.stopped_at IS NULL AND o.archived_at IS NULL)
-	ORDER BY s.stopped_at DESC, s.id DESC LIMIT 1) ` + alias + ` ON true`
+	return `LEFT JOIN LATERAL aeon_node_completion(` + idExpr + `) ` + alias + ` ON true`
 }
 
-// ProgressSQL is the one projection of a ticket's progress: the open sessions' percent
-// from aeon_node_eta (etaAlias), or 100 when the last worker finished (CompletionJoin
-// as completionAlias). The ticket list displays it and sorts by it, so the order is the
-// number on screen.
+// ProgressSQL is the one projection of a ticket's progress: the open sessions'
+// percent or recursive epic roll-up from aeon_node_eta_progress (etaAlias), or
+// 100 when the last worker finished (CompletionJoin as completionAlias). The
+// ticket list displays it and sorts by it, so the order is the number on screen.
 func ProgressSQL(etaAlias, completionAlias string) string {
 	return `CASE WHEN coalesce(` + completionAlias + `.finished, false) THEN 100 ELSE ` + etaAlias + `.progress_pct END`
 }
@@ -83,7 +73,7 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error)
 	}
 	rows, err := tx.Query(ctx, `SELECT u.id::text, `+estimateColumns+`
 		FROM unnest($1::uuid[]) AS u(id)
-		CROSS JOIN LATERAL aeon_node_eta(u.id) e `+lastWorkerSQL, ids)
+		CROSS JOIN LATERAL aeon_node_eta_progress(u.id) e `+lastWorkerSQL, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +94,7 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]View, error)
 // One reads a single node's estimate. A blank view means nothing is known.
 func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
 	rows, err := tx.Query(ctx, `SELECT $1::text, `+estimateColumns+`
-		FROM (SELECT $1::uuid AS id) u CROSS JOIN LATERAL aeon_node_eta(u.id) e `+lastWorkerSQL, id)
+		FROM (SELECT $1::uuid AS id) u CROSS JOIN LATERAL aeon_node_eta_progress(u.id) e `+lastWorkerSQL, id)
 	if err != nil {
 		return View{}, err
 	}

@@ -79,7 +79,7 @@ func (f *harnessFixture) nodeEta(t *testing.T, id string) etaRow {
 	t.Helper()
 	var row etaRow
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT eta_ready_at, eta_live_at, progress_pct, ready_by, live_by, ready_stale, live_stale FROM aeon_node_eta($1::uuid)`, id).
+		return tx.QueryRow(t.Context(), `SELECT eta_ready_at, eta_live_at, progress_pct, ready_by, live_by, ready_stale, live_stale FROM aeon_node_eta_progress($1::uuid)`, id).
 			Scan(&row.ready, &row.live, &row.progress, &row.readyBy, &row.liveBy, &row.readyStale, &row.liveStale)
 	})
 	return row
@@ -276,7 +276,7 @@ func TestEtaHeartbeatValidationStaleAndRollup(t *testing.T) {
 	var order []string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		rows, err := tx.Query(t.Context(), `SELECT f.id::text FROM unnest($1::uuid[]) WITH ORDINALITY AS f(id, ord)
-			LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true
+			LEFT JOIN LATERAL aeon_node_eta_progress(f.id) eta ON true
 			ORDER BY eta.eta_ready_at IS NULL ASC, eta.eta_ready_at ASC, f.ord`, []string{t2, t3, t1})
 		if err != nil {
 			return err
