@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+	"unsafe"
+
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"golang.org/x/sys/unix"
+)
+
+// The helper inherits its inbound listener and reaches the fixture Postgres
+// through a Unix socket proxy. Any IPv4/IPv6 socket creation (including DNS),
+// through any transport or goroutine, traps before a packet can leave.
+// TSYNC applies the filter to every Go runtime thread, not just this goroutine.
+func denyInternetSockets(t *testing.T) {
+	t.Helper()
+	var arch uint32
+	switch runtime.GOARCH {
+	case "amd64":
+		arch = unix.AUDIT_ARCH_X86_64
+	case "arm64":
+		arch = unix.AUDIT_ARCH_AARCH64
+	default:
+		t.Skip("network-denial fixture supports Linux amd64 and arm64")
+	}
+	filter := []unix.SockFilter{
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 4},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, K: arch, Jt: 1},
+		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_KILL_PROCESS},
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 0},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, K: unix.SYS_SOCKET, Jf: 4},
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 16},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, K: unix.AF_INET, Jt: 1},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, K: unix.AF_INET6, Jf: 1},
+		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_TRAP},
+		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW},
+	}
+	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	program := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
+	result, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&program)))
+	runtime.KeepAlive(filter)
+	if errno != 0 || result != 0 {
+		t.Fatalf("seccomp TSYNC failed: result=%d errno=%d", result, errno)
+	}
+}
+
+func TestNoOutboundServerHelper(t *testing.T) {
+	mode := os.Getenv("AEON_NO_OUTBOUND_TEST")
+	if mode == "" {
+		return
+	}
+	denyInternetSockets(t)
+	switch mode {
+	case "connect":
+		_, _ = net.DialTimeout("tcp", "192.0.2.1:443", time.Second)
+		t.Fatal("outbound connect escaped the denial filter")
+	case "dns":
+		_, _ = (&net.Resolver{PreferGo: true}).LookupHost(t.Context(), "aeon-outbound-guard.invalid")
+		t.Fatal("DNS escaped the denial filter")
+	case "server":
+		cfg, err := config.FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := os.NewFile(3, "inbound-listener")
+		ln, err := net.FileListener(file)
+		_ = file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		defer stop()
+		if err := serveListener(ctx, cfg, ln); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatal("unknown helper mode")
+	}
+}
+
+func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skip("network-denial fixture supports Linux amd64 and arm64")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Value-free negative controls prove that attempts are observable failures,
+	// including DNS, rather than silently refused calls the server can ignore.
+	for _, mode := range []string{"connect", "dns"} {
+		probe := exec.CommandContext(t.Context(), executable, "-test.run=^TestNoOutboundServerHelper$")
+		probe.Env = []string{"AEON_NO_OUTBOUND_TEST=" + mode, "GODEBUG=netdns=go", "GOMAXPROCS=2"}
+		out, err := probe.CombinedOutput()
+		if err == nil || !bytes.Contains(out, []byte("SIGSYS")) {
+			t.Fatalf("%s negative control did not trap: %v", mode, err)
+		}
+	}
+	fresh := dbtest.Open(t)
+	u, err := url.Parse(fresh.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDir := t.TempDir()
+	proxy, err := net.Listen("unix", filepath.Join(socketDir, ".s.PGSQL.5432"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Close() })
+	go func() {
+		for {
+			local, err := proxy.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer local.Close()
+				upstream, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+				if err != nil {
+					return
+				}
+				defer upstream.Close()
+				go func() { _, _ = io.Copy(upstream, local); _ = upstream.Close() }()
+				_, _ = io.Copy(local, upstream)
+			}()
+		}
+	}()
+	database := *u
+	database.Host = ""
+	query := database.Query()
+	query.Set("host", socketDir)
+	query.Set("port", "5432")
+	query.Set("sslmode", "disable")
+	database.RawQuery = query.Encode()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	file, err := ln.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	cmd := exec.Command(executable, "-test.run=^TestNoOutboundServerHelper$")
+	cmd.ExtraFiles = []*os.File{file}
+	cmd.Env = []string{
+		"AEON_NO_OUTBOUND_TEST=server", "GODEBUG=netdns=go", "GOMAXPROCS=2",
+		"AEON_ENV=dev", "AEON_PUBLIC_URL=http://127.0.0.1",
+		"AEON_DATABASE_URL=" + database.String(), "HOME=" + t.TempDir(),
+	}
+	var logs bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &logs, &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("server failed under network denial: %v", err)
+			}
+		case <-time.After(20 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+			t.Error("server did not shut down")
+		}
+	})
+	client := &http.Client{Timeout: time.Second}
+	base := "http://" + ln.Addr().String()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		resp, err := client.Get(base + "/api/ready")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not become ready under network denial")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Keep the full server and its scheduled workers running after startup;
+	// exercise both public guide surfaces and health while all egress is denied.
+	until := time.Now().Add(2 * time.Second)
+	for time.Now().Before(until) {
+		for _, path := range []string{"/api/health", "/api/agent-pairing/guide", "/agents/register-agent"} {
+			resp, err := client.Get(base + path)
+			if err != nil {
+				t.Fatal("server stopped serving under network denial")
+			}
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "homebrew_formula_current") {
+				t.Fatalf("unexpected response under denial: %s (%d)", path, resp.StatusCode)
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

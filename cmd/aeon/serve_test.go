@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -94,6 +95,29 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Observe and deny HTTP egress before DNS/connect; fixture probes use only
+	// the exact inbound loopback listener. DNS is independently denied. The
+	// Linux child-process test also denies Internet sockets for all transports.
+	var outboundDials, dnsDials atomic.Int64
+	oldTransport, oldResolver := http.DefaultTransport, net.DefaultResolver
+	transport := oldTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address != ln.Addr().String() {
+			outboundDials.Add(1)
+			return nil, errors.New("test denies outbound HTTP")
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+	http.DefaultTransport = transport
+	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(context.Context, string, string) (net.Conn, error) {
+		dnsDials.Add(1)
+		return nil, errors.New("test denies DNS")
+	}}
+	t.Cleanup(func() {
+		http.DefaultTransport, net.DefaultResolver = oldTransport, oldResolver
+		transport.CloseIdleConnections()
+	})
 	t.Setenv("AEON_DATABASE_URL", fresh.URL)
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", filepath.Join(t.TempDir(), "not-provisioned"))
 	loaded, err := config.FromEnv()
@@ -216,6 +240,9 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("shutdown timed out")
+	}
+	if outboundDials.Load() != 0 || dnsDials.Load() != 0 {
+		t.Fatalf("default server attempted outbound traffic: connect=%d DNS=%d", outboundDials.Load(), dnsDials.Load())
 	}
 }
 
