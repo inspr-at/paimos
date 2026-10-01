@@ -165,6 +165,10 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display, claims.EmailVerified, payload.Invite)
+	if errors.Is(err, errImportedNotMember) {
+		fail("imported_account", "tenant_membership")
+		return
+	}
 	if errors.Is(err, errNotMember) {
 		fail("not_member", "tenant_membership")
 		return

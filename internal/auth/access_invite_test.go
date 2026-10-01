@@ -5,6 +5,7 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ import (
 func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
-	var tid, ownerID, roleID string
+	var tid, ownerID, roleID, importedID, importedIdentity string
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('invite-oidc','Invite') RETURNING id::text`).Scan(&tid)
 	}); err != nil {
@@ -29,6 +30,12 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 	token := "verified-invite-token-0123456789abcd"
 	sum := sha256.Sum256([]byte(token))
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('paimos-classic','invite-person','person@example.com') RETURNING id::text`).Scan(&importedIdentity); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,email,roles) VALUES($1::uuid,'person',$2::uuid,'Classic Person','person@example.com',ARRAY['admin']) RETURNING id::text`, tid, importedIdentity).Scan(&importedID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&ownerID); err != nil {
 			return err
 		}
@@ -53,10 +60,13 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "mismatch", "someone.else@example.com", "Else", true, token); err != errNotMember {
 		t.Fatalf("mismatched email: %v", err)
 	}
+	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "wrong-token", "person@example.com", "Person", true, "different-token"); !errors.Is(err, errNotMember) {
+		t.Fatalf("wrong token: %v", err)
+	}
 	if _, err := d.Admin.Exec(ctx, `UPDATE invites SET created_at=now() - interval '2 days', expires_at=now() - interval '1 minute' WHERE tenant_id=$1::uuid`, tid); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "expired", "person@example.com", "Person", true, token); err != errNotMember {
+	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "expired", "person@example.com", "Person", true, token); !errors.Is(err, errNotMember) {
 		t.Fatalf("expired invite: %v", err)
 	}
 	if _, err := d.Admin.Exec(ctx, `UPDATE invites SET created_at=now(), expires_at=now() + interval '7 days' WHERE tenant_id=$1::uuid`, tid); err != nil {
@@ -74,12 +84,19 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 		t.Fatal(err)
 	}
 	setOwnerRole("viewer")
-	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "demoted", "person@example.com", "Person", true, token); err != errNotMember {
+	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "demoted", "person@example.com", "Person", true, token); !errors.Is(err, errNotMember) {
 		t.Fatalf("invite from a demoted inviter: %v", err)
 	}
 	setOwnerRole("owner")
 	if _, err := d.Admin.Exec(ctx, `ALTER TABLE role_bindings ENABLE TRIGGER role_bindings_last_owner`); err != nil {
 		t.Fatal(err)
+	}
+	var deniedLinks int
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM principals WHERE tenant_id=$1::uuid AND linked_to IS NOT NULL`, tid).Scan(&deniedLinks); err != nil {
+		t.Fatal(err)
+	}
+	if deniedLinks != 0 {
+		t.Fatal("a refused acceptance linked the imported account")
 	}
 	person, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "accepted", "person@example.com", "Accepted Person", true, token)
 	if err != nil {
@@ -99,6 +116,48 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+	var linked, identity string
+	if err := d.Admin.QueryRow(ctx, `SELECT linked_to::text,identity_id::text FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, tid, importedID).Scan(&linked, &identity); err != nil {
+		t.Fatal(err)
+	}
+	if linked != person.ID || identity != importedIdentity {
+		t.Fatalf("classic identity not preserved: linked=%s identity=%s", linked, identity)
+	}
+}
+
+func TestImportedSignInHintRequiresVerifiedTenantEmail(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := dbtest.Seed(t.Context())
+	var tid, foreign string
+	if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('hint','Hint') RETURNING id::text`).Scan(&tid); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('foreign-hint','Foreign') RETURNING id::text`).Scan(&foreign)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name,email) VALUES($1::uuid,'person','Imported','person@example.com')`, tid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := &Module{pool: d.App, inTenant: db.InTenant, cfg: Config{BootstrapTenantSlug: "other"}}
+	for _, tc := range []struct {
+		name, tenant, email string
+		verified, hint      bool
+	}{
+		{"verified", tid, "person@example.com", true, true},
+		{"unverified", tid, "person@example.com", false, false},
+		{"wrong mailbox", tid, "person+else@example.com", true, false},
+		{"foreign tenant", foreign, "person@example.com", true, false},
+	} {
+		_, _, err := m.resolveOIDCPerson(t.Context(), tc.tenant, "hint", "https://id.example", tc.name, tc.email, "Person", tc.verified, "")
+		if !errors.Is(err, errNotMember) || errors.Is(err, errImportedNotMember) != tc.hint {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
 	}
 }
 

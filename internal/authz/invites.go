@@ -383,6 +383,7 @@ func refuseActiveMember(ctx context.Context, tx pgx.Tx, tenantID, email string) 
 		SELECT 1 FROM principals p
 		LEFT JOIN identities i ON i.id=p.identity_id
 		JOIN principals canonical ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
+		JOIN identities signin ON signin.id=canonical.identity_id AND signin.issuer<>'paimos-classic'
 		WHERE p.tenant_id=$1::uuid AND p.kind='person' AND canonical.status='active'
 		  AND lower(coalesce(nullif(p.email,''), nullif(i.email,''), '')) = lower($2)
 	)`, tenantID, email).Scan(&exists)

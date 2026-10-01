@@ -26,11 +26,12 @@ import (
 )
 
 var (
-	errNotMember        = errors.New("not a member")
-	errNotFound         = errors.New("not found")
-	errNotAgent         = errors.New("not an agent")
-	errServicePrincipal = errors.New("agent keys cannot be issued for service principals")
-	errAgentDeactivated = errors.New("agent is deactivated")
+	errNotMember         = errors.New("not a member")
+	errImportedNotMember = fmt.Errorf("%w: imported account", errNotMember)
+	errNotFound          = errors.New("not found")
+	errNotAgent          = errors.New("not an agent")
+	errServicePrincipal  = errors.New("agent keys cannot be issued for service principals")
+	errAgentDeactivated  = errors.New("agent is deactivated")
 )
 
 func scanPrincipal(row pgx.Row) (tenant.Principal, error) {
@@ -119,6 +120,13 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 				}
 				if !errors.Is(accErr, authz.ErrNoInvite) {
 					return accErr
+				}
+				imported, err := authz.ImportedPeopleForEmail(ctx, tx, tenantID, email)
+				if err != nil {
+					return err
+				}
+				if len(imported) > 0 {
+					return errImportedNotMember
 				}
 			}
 			return errNotMember

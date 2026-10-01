@@ -2,6 +2,7 @@
 package activity
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -9,9 +10,54 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/principallink"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+func TestInvitedClassicHistoryUsesNewPerson(t *testing.T) {
+	f := setup(t)
+	var alias, identity, signin string
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner') WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='workspace'`, f.p.TenantID, f.p.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,email) VALUES('paimos-classic','invited:7','classic@example.com') RETURNING id::text`).Scan(&identity); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,identity_id,name,email,roles) VALUES($1,'person',$2,'old-classic','classic@example.com',ARRAY['admin']) RETURNING id::text`, f.p.TenantID, identity).Scan(&alias); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','new-person','classic@example.com') RETURNING id::text`).Scan(&signin)
+	})
+	f.event("import.user_created", time.Now(), nil, map[string]any{"principal": map[string]any{"id": alias}, "classic": map[string]any{"source_id": "invited", "username": "old-classic"}})
+	f.event("import.comment", time.Now(), nil, map[string]any{"classic_ref": "invited:import.comment:1", "record": map[string]any{"id": "1", "author_id": json.Number("7"), "body": "earlier comment"}})
+	f.event("import.comment", time.Now(), nil, map[string]any{"classic_ref": "invited:import.comment:2", "record": map[string]any{"id": "2", "author": "old-classic", "body": "earlier named comment"}})
+	var person tenant.Principal
+	f.tx(func(tx pgx.Tx) error {
+		hash := sha256.Sum256([]byte("timeline-invite"))
+		if _, err := tx.Exec(t.Context(), `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
+			SELECT $1,'classic@example.com',id,$2,now()+interval '7 days',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.p.TenantID, hash[:], f.p.ID); err != nil {
+			return err
+		}
+		var err error
+		person, err = authz.AcceptInvite(t.Context(), tx, f.p.TenantID, signin, "classic@example.com", "New Person", "timeline-invite")
+		return err
+	})
+	page, err := (&module{pool: f.d.App}).read(dbtest.Seed(t.Context()), person, f.node, 50, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("classic history: %+v", page.Items)
+	}
+	for _, item := range page.Items {
+		if item.Author.ID == nil || *item.Author.ID != person.ID || item.Author.Name != "New Person" {
+			t.Fatalf("classic author: %+v", item.Author)
+		}
+	}
+}
 
 func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {
 	f := setup(t)
