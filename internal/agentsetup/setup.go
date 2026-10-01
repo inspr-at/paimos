@@ -275,12 +275,12 @@ func validateOptions(o Options) error {
 		return ErrUnsafePath
 	}
 	if !safeLabel.MatchString(o.ComputerName) || len(o.Candidates) < 1 || len(o.Candidates) > 7 {
-		return errors.New("select one to seven ready harness accounts and a computer name")
+		return errors.New("select one to seven harness accounts and a computer name")
 	}
 	seen := map[string]bool{}
 	for _, c := range o.Candidates {
-		if seen[c.Harness] || !candidateReady(c) || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
-			return errors.New("one explicitly identified signed-in account is required per harness")
+		if seen[c.Harness] || !candidateEnrollable(c) || !safeLabel.MatchString(c.Label) || !filepath.IsAbs(c.Path) || !safeLabel.MatchString(c.Identity) {
+			return errors.New("one explicitly identified signed-in account or supported local profile is required per harness")
 		}
 		seen[c.Harness] = true
 		// Nix-owned vendor executables can be pinned and used without changing
@@ -856,4 +856,11 @@ func repositoryPathWithLstat(path string, lstat func(string) (os.FileInfo, error
 // Discovery must establish sign-in before a candidate can be ready.
 func candidateReady(c Candidate) bool {
 	return c.Login == "signed_in"
+}
+
+// Enrollment can bind an explicitly selected Gemini/OpenCode local profile
+// without claiming sign-in. The daemon's account probe still decides readiness.
+func candidateEnrollable(c Candidate) bool {
+	return candidateReady(c) ||
+		((c.Harness == "gemini" || c.Harness == "opencode") && c.Login == "unverified" && c.Identity == "local-profile")
 }

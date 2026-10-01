@@ -501,11 +501,11 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return e.progress(s), errors.New("Add harness requires a connected computer")
 	}
 	if len(candidates) == 0 || len(candidates) > 7 {
-		return e.progress(s), errors.New("select a signed-in harness account")
+		return e.progress(s), errors.New("select a harness account or explicit local profile")
 	}
 	selected := map[string]bool{}
 	for _, c := range candidates {
-		if selected[c.Harness] || !candidateReady(c) || !safeLabel.MatchString(c.Label) {
+		if selected[c.Harness] || !candidateEnrollable(c) || !safeLabel.MatchString(c.Label) {
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
