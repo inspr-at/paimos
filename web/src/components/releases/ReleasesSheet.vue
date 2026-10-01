@@ -604,14 +604,16 @@ const KINDS = [
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
 /* The title on frosted glass: eyebrow, the codename, one status line. */
 .titles {
+  /* The codename keeps its line; the search field gives way first. */
+  flex: 0 0 auto; max-width: 46%;
   display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 26px 14px 22px; border-radius: 22px;
-  --glass-a: rgba(255, 255, 255, .62); --glass-b: rgba(255, 255, 255, .34); --glass-hi: rgba(255, 255, 255, .95); --glass-ring: rgba(255, 255, 255, .55); --glass-glow: rgba(14, 111, 108, .45);
+  --glass-a: rgba(255, 255, 255, .62); --glass-b: rgba(255, 255, 255, .34); --glass-ring: rgba(255, 255, 255, .55); --glass-glow: rgba(14, 111, 108, .45);
   background: linear-gradient(135deg, var(--glass-a), var(--glass-b));
   -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
-  box-shadow: inset 0 1px 0 var(--glass-hi), inset 0 -1px 0 rgba(14, 111, 108, .06), 0 0 0 1px var(--glass-ring), 0 0 0 1.5px var(--line), 0 18px 40px -22px var(--glass-glow);
+  box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(32, 60, 61, .06), 0 0 0 1px var(--glass-ring), 0 0 0 1.5px var(--line), 0 18px 40px -22px var(--glass-glow);
 }
-:root[data-theme="dark"] .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-hi: rgba(255, 255, 255, .1); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-hi: rgba(255, 255, 255, .1); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); } }
+:root[data-theme="dark"] .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); } }
 .titles .eyebrow { margin: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; overflow-wrap: anywhere; }
 /* The codename leads. Its padding holds the sparkles; the margin keeps the text in line. */
 .hero { position: relative; align-self: flex-start; max-width: calc(100% + 32px); margin: -10px -18px -8px -14px; padding: 10px 18px 8px 14px; font: 800 clamp(28px, 2.9vw, 42px)/1.05 var(--font); color: var(--ink); --sparkle: 18px; }
@@ -627,7 +629,7 @@ const KINDS = [
 @media (prefers-reduced-motion: no-preference) { .status-dot.live { animation: breathe 2.4s ease-in-out infinite; } }
 @keyframes breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); } 50% { box-shadow: 0 0 0 6px rgba(47, 143, 91, .06); } }
 .spacer { flex: 1 1 0; }
-.search { width: min(360px, 32vw); }
+.search { flex: 0 1 360px; min-width: 180px; }
 .search .field { height: 36px; border-radius: 999px; padding-right: 34px; }
 .search .field::-webkit-search-cancel-button { display: none; }
 .slash { position: absolute; right: 10px; }
@@ -754,7 +756,7 @@ const KINDS = [
 /* ---------- Narrower screens ---------- */
 @media (max-width: 1100px) {
   .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
-  .search { width: min(280px, 30vw); }
+  .search { flex-basis: 280px; }
 }
 /* Too narrow for the title, switches and search in one line: the switches take the next one. */
 @media (max-width: 1180px) and (min-width: 761px) {
@@ -774,7 +776,7 @@ const KINDS = [
   .title-row { flex-wrap: wrap; gap: 10px; }
   /* The codename takes the row beside Close; the mark waits on wider screens. */
   .mark-backing { display: none; }
-  .titles { flex: 1; padding: 12px 16px; }
+  .titles { flex: 1; max-width: none; padding: 12px 16px; }
   .hero { font-size: clamp(24px, 7.4vw, 30px); --sparkle: 15px; }
   .hero:not(.named) { font-size: 21px; }
   .hero :deep(.rn-stamp) { font-size: 13px; }

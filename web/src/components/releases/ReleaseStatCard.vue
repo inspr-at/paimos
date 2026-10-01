@@ -138,6 +138,13 @@ const ICONS: Record<StatKey, string[]> = {
 .compact .nav { width: 44px; height: 44px; }
 .compact .value { font-size: 34px; }
 .compact .sub { white-space: normal; }
+/* Short screens keep the list in view: a tighter card. */
+@media (max-height: 800px) and (min-width: 761px) {
+  .stat-card { padding: 16px 20px 10px; }
+  .value { margin-top: 4px; font-size: 34px; }
+  .viz { margin-top: 8px; }
+  .foot { padding-top: 8px; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .slide-in { animation: stat-in .26s cubic-bezier(.2, .75, .25, 1) both; }
 }

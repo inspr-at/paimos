@@ -50,13 +50,6 @@ const liveLine = computed(() => {
   return `Live here since ${clockSince(live, props.now)} · ${props.release.published_at ? 'published' : 'tagged'} ${clockSince(Date.parse(at.value), props.now)}, ${relativeTime(at.value, { now: props.now, long: true })}`
 })
 const channel = computed(() => props.release.release_channel ? `${props.release.release_channel.charAt(0).toUpperCase()}${props.release.release_channel.slice(1)} release` : 'Release')
-// A short list of what it brings when no presentation names it: the first pills, then how many more.
-const pillsLine = computed(() => {
-  if (presented.value || reserved.value) return ''
-  const told = [...lines.value.features, ...lines.value.fixes].map(line => line.pill || line.benefit).filter(Boolean)
-  if (told.length < 3) return ''
-  return `${told.slice(0, 4).join(' · ')}${told.length > 4 ? ` · and ${told.length - 4} more` : ''}`
-})
 // Details: the numbers behind the name in one quiet line.
 const techLine = computed(() => [
   generationLabel.value, props.release.release_sequence > 0 ? `Release ${props.release.release_sequence}` : '', props.release.release_channel, props.release.version,
@@ -107,7 +100,6 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="pillsLine" class="pills-line" :lang="lang">{{ pillsLine }}</p>
     <div v-if="!reserved && (lines.features.length || lines.fixes.length || tickets.length)" class="counts">
       <span v-if="lines.features.length" class="count-chip"><strong>{{ lines.features.length }}</strong> {{ lines.features.length === 1 ? 'feature' : 'features' }}</span>
       <span v-if="lines.fixes.length" class="count-chip"><strong>{{ lines.fixes.length }}</strong> {{ lines.fixes.length === 1 ? 'fix' : 'fixes' }}</span>
@@ -215,7 +207,6 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .chip { height: 24px; font-size: 11.5px; letter-spacing: .02em; }
 .live-chip { height: 22px; gap: 6px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .live-chip .live-dot { width: 6px; height: 6px; box-shadow: none; }
-.pills-line { margin: 4px 0 0; font-size: 19px; line-height: 1.45; font-weight: 500; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .counts { display: flex; flex-wrap: wrap; gap: 8px; }
 .count-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; color: var(--ink); }
 .count-chip strong { font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -274,7 +265,6 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
   .ext { min-height: 44px; }
   .summary { padding: 12px; }
   .summary .headline { font-size: 17px; }
-  .pills-line { font-size: 16px; }
   .version.named { --sparkle: 15px; }
 }
 @media (prefers-reduced-motion: reduce) { .ev-chev { transition: none; } }

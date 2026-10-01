@@ -84,7 +84,7 @@ const count = (s: Slot) => `${s.n.toLocaleString('en-GB')} ${s.n === 1 ? 'releas
 const aria = (s: Slot) => s.before ? `${s.full}: before the first ${brand.value.short_name} release`
   : `${s.full}: ${count(s)}${s.first ? `, ${s.first}${s.last ? ` to ${s.last}` : ''}` : ''}`
 const showValue = (s: Slot, i: number) => s.n > 0 && (!dense.value || active.value === i || i === data.value.peak || s.current)
-const barHeight = (s: Slot) => s.n ? `max(2.5%, ${pct(s.n)})` : '0'
+const barHeight = (s: Slot) => s.before ? undefined : s.n ? `max(2.5%, ${pct(s.n)})` : '0'
 const tip = computed(() => active.value === null ? null : slots.value[active.value] ?? null)
 const tipStyle = computed(() => {
   const i = active.value ?? 0, s = tip.value
@@ -137,7 +137,7 @@ const tipStyle = computed(() => {
       <div v-if="tip && !tip.before" class="tip" :style="tipStyle" aria-hidden="true">
         <p class="tip-title">{{ tip.full }}</p>
         <p class="tip-count">{{ count(tip) }}</p>
-        <p v-if="tip.first" class="tip-range">{{ tip.first }}<template v-if="tip.last"><br>→ {{ tip.last }}</template></p>
+        <p v-if="tip.first" class="tip-range">{{ tip.first }}<template v-if="tip.last"><br><AppIcon name="arrow" :size="11" class="tip-arrow" />{{ tip.last }}</template></p>
       </div>
     </div>
     <div class="labels" :class="{ dense }" :style="cols" aria-hidden="true">
@@ -164,7 +164,7 @@ const tipStyle = computed(() => {
 .total { margin: 0; font: 650 30px/1.2 var(--font); letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: var(--ink); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .quiet-chip { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 12.5px/1 var(--font); white-space: nowrap; }
-.chart { position: relative; height: clamp(120px, 19vh, 176px); margin-top: 22px; }
+.chart { position: relative; height: clamp(104px, 17vh, 176px); margin-top: 22px; }
 .grid { position: absolute; left: var(--axis); right: 0; border-top: 1px solid var(--line); }
 .grid.zero { border-top-color: var(--line-2); }
 .tick { position: absolute; left: 0; width: 26px; text-align: right; font: 500 10px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-3); }
@@ -182,17 +182,19 @@ const tipStyle = computed(() => {
 /* Today, still filling: solid and ringed. */
 .current .column { background: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent); }
 .active .column { background: var(--teal-ink); box-shadow: none; }
-.before .column { width: 70%; height: 0; border-top: 2px dashed var(--line-2); border-radius: 0; background: none; }
+/* Before the first release: a dashed stroke on the baseline, never a zero. */
+.before .column { width: 70%; height: 2px; border-radius: 0; background: repeating-linear-gradient(90deg, var(--line-2) 0 4px, transparent 4px 7px); }
 .val { margin-bottom: 4px; font: 500 11.5px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-3); }
 .dense .val { font-size: 10px; }
 .peak .val { color: var(--ink); font-weight: 700; }
 .current .val, .active .val { color: var(--teal-ink); font-weight: 700; }
-.avg { position: absolute; left: var(--axis); right: 0; border-top: 1.5px dashed color-mix(in srgb, var(--gold-ink) 75%, transparent); pointer-events: none; }
+.avg { position: absolute; left: var(--axis); right: 0; height: 1.5px; margin-bottom: -.75px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--gold-ink) 75%, transparent) 0 5px, transparent 5px 9px); pointer-events: none; }
 .avg-label { position: absolute; right: 2px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 92%, transparent); font: 600 10.5px/1.4 var(--mono); color: var(--gold-ink); pointer-events: none; }
 .tip { position: absolute; z-index: 2; min-width: 180px; padding: 10px 12px; border-radius: 12px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: 0 8px 24px rgba(16, 35, 39, .25); pointer-events: none; }
 .tip-title { margin: 0; font: 600 13px/1.3 var(--font); color: var(--tip-ink); }
 .tip-count { margin: 2px 0 0; font: 700 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--tip-ink); }
 .tip-range { margin: 6px 0 0; font: 500 11.5px/1.45 var(--mono); color: color-mix(in srgb, var(--tip-ink) 80%, transparent); white-space: nowrap; }
+.tip-arrow { display: inline-block; margin-right: 5px; vertical-align: -1px; }
 .labels { display: grid; column-gap: 6px; margin: 8px 0 0 var(--axis); }
 .labels span { min-width: 0; overflow: visible; text-align: center; white-space: nowrap; font: 500 11px/1.2 var(--mono); color: var(--ink-3); }
 .labels .current { font-weight: 700; color: var(--teal-ink); }
@@ -204,5 +206,11 @@ const tipStyle = computed(() => {
 .compact .chart { height: 130px; margin-top: 16px; }
 .compact .labels span { font-size: 10px; }
 @media (hover: none), (pointer: coarse) { .step { width: 44px; height: 44px; } }
+/* Short screens keep the list in view: a tighter card. */
+@media (max-height: 800px) and (min-width: 761px) {
+  .cadence:not(.compact) { padding: 16px 20px 12px; }
+  .cadence:not(.compact) .total { font-size: 26px; }
+  .cadence:not(.compact) .chart { margin-top: 14px; }
+}
 @media (prefers-reduced-motion: no-preference) { .column { transition: background .15s ease, height .3s ease; } }
 </style>

@@ -508,22 +508,23 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-test('the last 14 days show each day’s count above its bar, named for screen readers', async ({ page }) => {
+test('the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const days = sheet(page).getByRole('list', { name: /releases in the last 14 days/ }).getByRole('listitem')
-  await expect(days).toHaveCount(14)
-  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.count')?.textContent ?? null, today: li.classList.contains('today') })))
-  // A day with releases carries its number; a day without keeps the flat dash and no number.
+  const days = sheet(page).getByRole('list', { name: /^\d+ releases? in the last 7 days$/ }).getByRole('listitem')
+  await expect(days).toHaveCount(7)
+  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.val')?.textContent ?? null, today: li.classList.contains('current'), before: li.classList.contains('before') })))
+  // A day with releases carries its number; an empty one has none; before the first release it says so.
   for (const day of all) {
-    const n = /^(\d+) releases? on \d{1,2} \w+/.exec(day.label)?.[1] ?? null
-    if (n) expect(day.count).toBe(n)
-    else { expect(day.label).toMatch(/^No releases on \d{1,2} \w+/); expect(day.count).toBeNull() }
+    if (day.before) { expect(day.label).toMatch(/^\w{3} \d{1,2} \w{3}: before the first AEON release$/); expect(day.count).toBeNull(); continue }
+    const n = /^(?:\w{3} \d{1,2} \w{3}|Today): (\d+) releases?/.exec(day.label)?.[1]
+    expect(n, day.label).toBeTruthy()
+    expect(day.count).toBe(n === '0' ? null : n)
   }
   expect(all.at(-1)!.today).toBe(true)
-  expect(all.at(-1)!.label).toMatch(/, today$/)
+  expect(all.at(-1)!.label).toMatch(/^Today: \d+ releases? so far/)
   expect(all.some(day => day.count !== null)).toBe(true)
 })
 
@@ -535,6 +536,8 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await page.goto('/')
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
+  // At rest: the pointer that clicked the footer pill would otherwise hover a row.
+  await page.mouse.move(1, 1)
   const rows = sheet(page).locator('.row .calendar-version')
   await expect(rows.first()).toBeVisible()
   const count = await rows.count()
