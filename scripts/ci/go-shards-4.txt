@@ -261,6 +261,7 @@
 2 0 github.com/inspr-at/paimos/internal/releasehistory/generate
 2 0 github.com/inspr-at/paimos/internal/releasehistory/packnotes
 2 58892 github.com/inspr-at/paimos/internal/rules/doctrine
+2 0 github.com/inspr-at/paimos/internal/scopecode
 2 42 github.com/inspr-at/paimos/internal/sessionusage
 2 0 github.com/inspr-at/paimos/internal/statusautopilot
 2 0 github.com/inspr-at/paimos/internal/systemactor

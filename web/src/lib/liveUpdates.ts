@@ -145,7 +145,7 @@ export function autoApplyDelay(guard: ApplyGuard, idleMs = IDLE_MS): number | nu
 const FIELD_WORDS: Record<string, string> = {
   title: 'title', body: 'description', state: 'status', parent_id: 'epic', project_id: 'project', key: 'key',
   'fields.priority': 'priority', 'fields.assignee': 'assignee', 'fields.acceptance_criteria': 'acceptance criteria',
-  'fields.notes': 'notes', 'fields.estimate': 'estimate', 'fields.eta': 'ETA', 'fields.release': 'release',
+  'human_check': 'human check', 'fields.human_check_completed': 'human check', 'fields.notes': 'notes', 'fields.estimate': 'estimate', 'fields.eta': 'ETA', 'fields.release': 'release',
 }
 // "status and priority" for a screen-reader announcement; other attributes
 // read as "details". Empty when nothing a person would name changed.

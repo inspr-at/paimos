@@ -14,13 +14,14 @@ import (
 )
 
 type step struct {
-	Name string
-	ID   string
-	Uses string
-	Run  string
-	If   string
-	With map[string]string
-	Env  map[string]string
+	Name            string
+	ID              string
+	Uses            string
+	Run             string
+	If              string
+	With            map[string]string
+	Env             map[string]string
+	ContinueOnError bool `yaml:"continue-on-error"`
 }
 
 type job struct {
@@ -441,9 +442,21 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
 	image := w.Jobs["image"]
 	verifyIndex, _ := named(t, image, "Verify pushed image attestation")
+	recordIndex, record := named(t, image, "Record pushed digest")
 	pinIndex, pin := named(t, image, "Propose verified nixcfg deployment pin")
-	if pinIndex != verifyIndex+1 || pin.If != "" || pin.ID != "pin" {
-		t.Fatal("pin proposal must follow successful index verification immediately")
+	if recordIndex != verifyIndex+1 || pinIndex != recordIndex+1 || pin.If != "" || pin.ID != "pin" {
+		t.Fatal("record the verified digest before the optional pin proposal")
+	}
+	if record.Env["DIGEST"] != "${{ steps.push.outputs.digest }}" || !strings.Contains(record.Run, "ghcr.io/inspr-at/aeon@${DIGEST}") {
+		t.Fatal("digest summary must bind the verified release index")
+	}
+	if !pin.ContinueOnError {
+		t.Fatal("a pin proposal failure must not fail image or skip assets")
+	}
+	for _, s := range image.Steps {
+		if s.ID != "pin" && s.ContinueOnError {
+			t.Fatal("only the optional pin proposal may ignore failures")
+		}
 	}
 	if image.Environment != "release-pinning" || image.Outputs["pin_evidence"] != "${{ steps.pin.outputs.pin_evidence }}" {
 		t.Fatal("pin credentials and release evidence must use the documented boundary")
@@ -461,9 +474,14 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 			t.Fatalf("pin proposal input %s is not bound to the approved release", key)
 		}
 	}
-	for _, fragment := range []string{`if [ "$AEON_PIN_BOT_ENABLED" = true ]`, "node scripts/release-pin-pr.mjs --write", "else", "node scripts/release-pin-pr.mjs\n"} {
+	for _, fragment := range []string{`args=(scripts/release-pin-pr.mjs)`, `if [ "$AEON_PIN_BOT_ENABLED" = true ]`, `args+=(--write)`, `if ! node "${args[@]}"; then`} {
 		if !strings.Contains(pin.Run, fragment) {
 			t.Fatalf("pin proposal lacks explicit read-only/write routing: %s", fragment)
+		}
+	}
+	for _, fragment := range []string{"::warning::Deployment pin proposal failed", "Deployment pin proposal failed; release assets will still be built.", `>> "$GITHUB_STEP_SUMMARY"`, "exit 1"} {
+		if !strings.Contains(pin.Run, fragment) {
+			t.Fatalf("pin failure must retain its outcome, annotation and summary: %s", fragment)
 		}
 	}
 	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")

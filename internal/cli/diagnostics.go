@@ -133,7 +133,8 @@ func (rt *runtime) cmdDoctor() *Command {
 		// Use the same identity request as auth whoami, including its client.
 		me, err := client.New(inst.URL, inst.APIKey).Me(context.Background())
 		if err != nil {
-			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: "API key rejected or auth unavailable"})
+			// Keep the server's scope id, label and code after redacting the credential.
+			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: redact(err.Error(), inst.APIKey)})
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "auth", Status: "ok", Detail: "user=" + me.Principal.Name})

@@ -22,6 +22,8 @@ func (rt *runtime) harnessRun() *Command {
 			fs.string(&o.Project, "project", 'p', "project key (defaults to the ticket prefix)")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name (defaults to the caller)")
 			fs.string(&o.Harness, "harness", 0, "adapter family (defaults to the command name)")
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Label, "label", 0, "public session label")
 			fs.string(&o.Ticket, "ticket", 0, "ticket key")
 			fs.string(&role, "role", 0, "reviewer, fixer, worker or coordinator")
