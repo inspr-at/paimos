@@ -65,12 +65,17 @@ test('a role change shows its effect first, applies, and can be undone', async (
 })
 
 test('no escalation: an admin cannot give Owner, and is told why', async ({ page }) => {
-  await open(page, '/settings/access/people', { role: 'admin' })
+  const world = await open(page, '/settings/access/people', { role: 'admin' })
   await row(page, 'Mira Holm').getByRole('button', { name: /Workspace role of Mira Holm/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Role of Mira Holm' })
   const owner = page.getByRole('radio', { name: /^Owner/ })
   await expect(owner).toContainText('Includes permissions you do not hold: Manage the workspace, Transfer ownership.')
-  await owner.click()
-  await expect(page.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
+  // Pointer auto-scroll can dismiss this scroll-closing popover on hosted CI.
+  // The picker keeps keyboard selection in its own list without scrolling the page.
+  await picker.getByRole('radio', { name: /^Admin/ }).press('ArrowUp')
+  await expect(owner).toHaveAttribute('aria-checked', 'true')
+  await expect(picker.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
+  expect(calls(world, 'PUT', /workspace-role/)).toHaveLength(0)
 })
 
 test('an invite offers only project roles the inviter holds in the workspace, as the server checks', async ({ page }) => {
