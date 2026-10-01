@@ -8,6 +8,7 @@ import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.t
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { compareModelSort, planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
+import { defaultStatusHelp } from '../src/lib/statusDefinitions.ts'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
@@ -281,6 +282,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    if (path === '/api/status/help' && method === 'GET') return route.fulfill({ json: defaultStatusHelp() })
     // ---------- Preferences ----------
     const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
     if (prefPath) {
