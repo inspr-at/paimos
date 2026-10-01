@@ -123,7 +123,7 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 		if err := authorize(st, c, cap, method == "POST"); err != nil {
 			return err
 		}
-		if method == "GET" {
+		if method == "GET" || method == "HEAD" {
 			body, err := s.read(ctx, tx, st, area, action, q)
 			out.Body = body
 			return err

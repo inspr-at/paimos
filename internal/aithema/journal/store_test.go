@@ -645,6 +645,16 @@ func TestHTTPRouteMatrixAndStableStatuses(t *testing.T) {
 	if err != nil || body["issued_at"] != "2026-09-30T08:15:00.000000Z" {
 		t.Fatal("authority lacks current host timestamp")
 	}
+	// ServeMux registers HEAD along with GET. It must retain read semantics.
+	for _, route := range []struct{ area, action, query string }{
+		{"journal", "records", ""}, {"journal", "cursor", ""},
+		{"journal", "authority", ""}, {"ledger", "holds", "?state=open"},
+	} {
+		got := send("HEAD", route.area, route.action, &token, nil, route.query)
+		if got.Code != 200 || got.Body.Len() != 0 {
+			t.Fatalf("HEAD %s/%s lost read semantics: %d", route.area, route.action, got.Code)
+		}
+	}
 	c := token
 	c.ProjectID = "foreign-project"
 	if got := send("GET", "journal", "authority", &c, nil, ""); got.Code != 200 {
