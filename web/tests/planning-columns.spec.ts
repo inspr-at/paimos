@@ -9,6 +9,9 @@ import type { TicketPlanning } from '../src/lib/planning'
 const shots = process.env.PLANNING_SHOTS ?? '../.agent-shots/planning'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const route = { label: 'Codex sol · xhigh', profile: 'codex-sol-xhigh', harness: 'codex', model: 'gpt-6-sol', effort: 'xhigh', revision: '3f9a1c2b' }
+// This whole response comes from TestPlanningListHoverFixture, including the
+// server's usage-less session flags. Serve its bytes without a client adapter.
+const serverListBody = readFileSync(new URL('./fixtures/planning-list.json', import.meta.url), 'utf8')
 function planning(spent: number | null, estimated: number | null, running = 0): TicketPlanning {
   return { route, tokens: { spent, estimated, running, input: spent ?? 0, output: 0, cached: Math.round((spent ?? 0) * .8), sessions: spent === null ? 0 : 1, unreported: 0 } }
 }
@@ -32,6 +35,38 @@ function world(): Fixtures {
 const display = (page: Page) => page.getByRole('button', { name: 'Display: Display' }).click()
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-10-01T12:00:00Z')) })
+
+test('server list response preserves exact usage-less and mixed-session hovers', async ({ page }) => {
+  const data = fixtures()
+  const project = JSON.parse(serverListBody).items[0].project
+  data.projects[0]!.id = project.id
+  data.projects[0]!.key = project.key
+  data.projects[0]!.title = project.title
+  data.preferences[`list:${project.id}`] = { visible: ['model', 'tokens', 'list_cost'] }
+  await mockWork(page, data)
+  await page.route('**/api/nodes?**', async route => {
+    if (new URL(route.request().url()).searchParams.get('kind') === 'project') return route.fallback()
+    await route.fulfill({ contentType: 'application/json', body: serverListBody })
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const assertTip = async (key: string, column: string, expected: string) => {
+    const cell = row(page, key).locator(`.${column} .plan-figure`)
+    await expect(cell).toHaveAccessibleDescription(expected)
+    await cell.hover()
+    await expect(page.locator('.tooltip')).toHaveText(expected)
+  }
+  await expect(row(page, 'HOVER-1').locator('.c-tokens .plan-figure')).toHaveText('—')
+  await assertTip('HOVER-1', 'c-tokens', 'Usage not reported yet\n1 session running on Cursor grok-4.7')
+  await assertTip('HOVER-2', 'c-tokens', 'Usage not reported yet')
+  await assertTip('HOVER-6', 'c-tokens', 'Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
+  for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-3', 'c-tokens', 'Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
+  for (const [key, spent, input, value] of [['HOVER-4', '1M', '1,000,000', '$2.00'], ['HOVER-5', '0', '0', '$0']] as const) {
+    await assertTip(key, 'c-tokens', `Measured so far ${spent} · Cursor grok-4.7\n1 session running · input ${input} (0 cached) · output 0\n1 session has no usage report yet`)
+    await assertTip(key, 'c-list-cost', `Measured so far ${value}\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record`)
+  }
+})
 
 test('approved cells show estimates, running figures, measured checks and session models', async ({ page }) => {
   await mockWork(page, world())
@@ -95,6 +130,9 @@ test('planning hovers match effort, running usage and pre-session calibration', 
   const unreported = planning(null, null, 1)
   unreported.route = null
   unreported.tokens.sessions = 1
+  unreported.tokens.unreported = 1
+  unreported.cost = cost(null, null)
+  unreported.cost.list_unpriced = true
   unreported.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 's-no-usage', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
   data.nodes.find(n => n.key === 'PHAROS-14')!.planning = unreported
   const empty = planning(null, null)

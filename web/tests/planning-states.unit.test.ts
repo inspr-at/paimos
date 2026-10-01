@@ -3,12 +3,51 @@ import { describe, expect, it } from 'vitest'
 import { listCostCell, modelCell, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning'
 import { normalizeColumnIds, pickerColumns, visibleColumns } from '../src/lib/columns'
 import { filtersFromQuery } from '../src/lib/ticketList'
+import serverList from './fixtures/planning-list.json'
 
 const route = { label: 'Codex sol · xhigh', harness: 'codex', model: 'gpt-6-sol', profile: 'codex-sol', effort: 'xhigh', revision: 'abc123' }
 function row(spent: number | null, estimated: number | null, running = 0): PlanningRow {
   return { kind_slug: 'ticket', fields: {}, planning: { route, tokens: { spent, estimated, running, sessions: spent === null ? 0 : 1, unreported: 0, input: spent ?? 0, cached: 0, output: 0 } } }
 }
 const cost = (extra: Partial<NonNullable<TicketPlanning['cost']>> = {}) => ({ list_spent: '3.10', list_estimated: '3.50', list_unpriced: false, paid_spent: '0', paid_estimated: '0', paid_unknown: false, plans: [], ...extra })
+
+// Captured from GET /api/nodes by TestPlanningListHoverFixture. Feed each
+// complete server row straight to the cells, without reshaping its planning.
+const serverRow = (key: string) => serverList.items.find(item => item.key === key)! as PlanningRow
+describe('server list payload planning hovers', () => {
+  it('ends the usage-less running hover at the model context', () => {
+    const r = serverRow('HOVER-1')
+    expect(r.planning!.tokens).toMatchObject({ spent: null, unreported: 1, sessions: 1, running: 1 })
+    expect(tokensCell(r).tip).toBe('Usage not reported yet\n1 session running on Cursor grok-4.7')
+    expect(tokensCell(serverRow('HOVER-2')).tip).toBe('Usage not reported yet')
+    expect(tokensCell(serverRow('HOVER-6')).tip).toBe('Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
+  })
+  it('has no cost lower bound until a list value is measured', () => {
+    for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) {
+      const r = serverRow(key)
+      expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: true })
+      expect(listCostCell(r)).toMatchObject({ state: 'none', tip: 'Billing not reported yet' })
+    }
+  })
+  it('counts only live sessions in the measured running line', () => {
+    const r = serverRow('HOVER-3')
+    expect(r.planning!.tokens).toMatchObject({ sessions: 2, running: 1, unreported: 0 })
+    expect(tokensCell(r).tip).toBe('Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
+  })
+  it('keeps partial-report and lower-bound warnings for measured usage, including zero', () => {
+    for (const key of ['HOVER-4', 'HOVER-5']) {
+      const r = serverRow(key)
+      expect(tokensCell(r).tip.split('\n').slice(1)).toEqual([
+        `1 session running · input ${key === 'HOVER-4' ? '1,000,000' : '0'} (0 cached) · output 0`,
+        '1 session has no usage report yet',
+      ])
+      expect(listCostCell(r).tip.split('\n').slice(-2)).toEqual([
+        'Part of this has no list price, so it is a lower bound',
+        'Part of this has no billing on record',
+      ])
+    }
+  })
+})
 
 describe('approved planning figure states', () => {
   it('maps missing, estimate, running and measured, including a real zero', () => {
@@ -69,6 +108,16 @@ describe('approved planning figure states', () => {
     expect(tokensCell(r).tip.split('\n')[0]).toBe('Measured so far 1.1M · Codex gpt-6.1-sol')
     expect(listCostCell(r).tip.split('\n')[0]).toBe('Measured so far $1.93')
   })
+  it('preserves plural, finished and legacy session counts', () => {
+    const r = row(1_100_000, null, 2)
+    r.planning!.tokens.sessions = 3
+    expect(tokensCell(r).tip.split('\n')[1]).toBe('2 sessions running · input 1,100,000 (0 cached) · output 0')
+    r.planning!.tokens.running = 0
+    expect(tokensCell(r).tip.split('\n')[1]).toBe('3 sessions · input 1,100,000 (0 cached) · output 0')
+    delete r.planning!.tokens.running
+    r.eta = { has_working_session: true }
+    expect(tokensCell(r).tip.split('\n')[1]).toBe('3 sessions running · input 1,100,000 (0 cached) · output 0')
+  })
   it('explains unreported usage and preserves permission-gated cost absence', () => {
     const r = row(null, null, 1)
     r.planning!.tokens.sessions = 1
@@ -79,6 +128,7 @@ describe('approved planning figure states', () => {
     const r = row(null, null, 1)
     r.planning!.route = null
     r.planning!.tokens.sessions = 1
+    r.planning!.tokens.unreported = 1
     r.planning!.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 'unreported', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
     expect(tokensCell(r)).toMatchObject({ state: 'none', tip: 'Usage not reported yet\n1 session running on Cursor grok-4.7' })
     r.planning!.tokens.estimated = 2_400_000

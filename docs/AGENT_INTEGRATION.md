@@ -275,7 +275,14 @@ so they do not imply that a run was a review. Running Tokens/Cost hovers put
 measured usage before the snapshot estimate and its percentage. A running token
 session line reads “1 session running”; the Model line retains “1 session, running”.
 Before usage is reported, Tokens names the running session count and the display
-model when a single model ran. Calibration appears only on the pre-session
+model when a single model ran, without a second unreported-usage warning. The
+running count excludes finished sessions, while measured totals include their
+usage. Cost shows a lower-bound warning only when a list value was measured;
+usage-less sessions keep “Billing not reported yet”. Partial-report and
+lower-bound warnings remain on measured values, including zero. The shared
+`web/tests/fixtures/planning-list.json` is a complete server list response;
+`TestPlanningListHoverFixture` checks its planning fields against the endpoint,
+and unit/browser regressions consume it directly. Calibration appears only on the pre-session
 estimate and names the short model without effort. Column fitting
 measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.

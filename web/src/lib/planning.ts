@@ -198,7 +198,8 @@ export function tokensCell(row: PlanningRow): FigureCell {
       ? [`Measured so far ${formatTokenCount(spent)}`, est !== null ? `estimated ~${formatTokenCount(est)}${delta(spent, est, true)}` : '']
       : [est !== null ? `Estimated ~${formatTokenCount(est)}` : '', `measured ${formatTokenCount(spent)}${delta(spent, est, false)}`]
     lines.push([...comparison, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.label : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
-    lines.push(`${tokens!.sessions} session${tokens!.sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
+    const sessions = live ? tokens!.running ?? tokens!.sessions : tokens!.sessions
+    lines.push(`${sessions} session${sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
     if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
   else lines.push(tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
@@ -207,7 +208,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
     const models = row.planning?.models ?? []
     lines.push(`${count} session${count === 1 ? '' : 's'} running${models.length === 1 ? ` on ${models[0]!.label}` : ''}`)
   }
-  if (tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
+  if (spent !== null && tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
   if (tokens && spent === null && !tokens.sessions && !live && est !== null) { const basis = basisLine(tokens, row); if (basis) lines.push(basis) }
   return figure(row, spent, est, formatTokenCount, lines.join('\n'), ' tokens')
 }
@@ -238,7 +239,7 @@ export function listCostCell(row: PlanningRow): FigureCell {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
-  if (cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
+  if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
   return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)
 }
