@@ -219,7 +219,7 @@ func TestACPHarnessQualification(t *testing.T) {
 					idle <- struct{}{}
 				}
 			}
-			if !adapter.Probe(t.Context(), "local") || adapter.Probe(t.Context(), "unknown") {
+			if adapter.Probe(t.Context(), "local") || adapter.Probe(t.Context(), "unknown") || adapter.ProbeStatus(t.Context(), "local").Failure != ProbeUnverified {
 				t.Fatal("probe binding")
 			}
 			if adapter.CanCaptureCapacity("local") || len(adapter.CaptureCapacity(t.Context(), "local")) != 0 {

@@ -1,5 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-452: widen existing authorities; retain every historical profile and RLS policy.
+-- The runner commits install, validate and replacement separately, with exact-byte
+-- phase checkpoints, so validation scans after installation's DDL locks release.
 SET LOCAL lock_timeout = '5s';
 
 -- Install supersets without scanning under ADD CONSTRAINT's exclusive lock.

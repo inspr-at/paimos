@@ -10,7 +10,7 @@
     },
     {
       "file": "1088_more_harnesses.sql",
-      "sha256": "3f3132a5553d871b9ed8f1c6d95178182d7d7e57d330b4f5601972f0b5b43c5e",
+      "sha256": "4df7de96434e3db84596146383cf3467d01174e2668e2f69cf1dbfaa105b0c21",
       "ticket": "AEON-452",
       "reason": "Only definition-selected drops of historical enum CHECKs need this one-file exception. Superset replacements are ADD CONSTRAINT CHECK NOT VALID followed by VALIDATE CONSTRAINT, both allowlisted. Every historical harness/family/adapter value, pi unknown-family policy and the review null-pairing predicate remain intact. No rows, columns, RLS policies or other constraints are removed. This exact-byte draft CI exception still requires coordinator acceptance before merge/release and previous-binary compatibility measurement; it grants no release authority."
     }
