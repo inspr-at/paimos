@@ -56,7 +56,6 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -66,6 +65,7 @@ import (
 )
 
 type Module struct {
+	planningStart  func(context.Context, pgx.Tx, string, string) error
 	pool           *pgxpool.Pool
 	controlText    controlRelay
 	ownershipClock func(context.Context, pgx.Tx) (time.Time, error)
@@ -73,7 +73,14 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
+// The server supplies its planning writer without coupling harness to node APIs.
+func New(pool *pgxpool.Pool, planningStart ...func(context.Context, pgx.Tx, string, string) error) httpapi.Module {
+	m := &Module{pool: pool}
+	if len(planningStart) > 0 {
+		m.planningStart = planningStart[0]
+	}
+	return m
+}
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/inbox/session-binding", m.resolveSessionBinding)
@@ -746,8 +753,8 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
-	if s.TicketNodeID != nil {
-		if err = nodes.CapturePlanningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+	if s.TicketNodeID != nil && m.planningStart != nil {
+		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
 			return nil, err
 		}
 	}
@@ -1014,8 +1021,8 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	if s.TicketNodeID != nil && !same(before.TicketNodeID, s.TicketNodeID) {
-		if err = nodes.CapturePlanningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
+	if s.TicketNodeID != nil && m.planningStart != nil && !same(before.TicketNodeID, s.TicketNodeID) {
+		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
 			return nil, err
 		}
 	}
