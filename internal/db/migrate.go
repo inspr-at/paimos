@@ -253,11 +253,51 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1076_ticket_human_check.sql" {
+		if err := backfillHumanCheckSchemas(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", name, err)
+	}
+	return nil
+}
+
+// FORCE RLS also applies to the migration owner. Existing strict work schemas
+// need the server's completion property before a later fields replacement.
+// Keep this backfill and the expansion in one migration transaction.
+func backfillHumanCheckSchemas(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(AllProjects(ctx, "AEON-521 human-check schema migration"), tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties}',
+		 coalesce(field_schema->'properties','{}'::jsonb) || aeon_human_check_properties())
+		 WHERE slug IN ('ticket','task') AND tenant_id=current_setting('aeon.tenant_id')::uuid`); err != nil {
+			return err
+		}
 	}
 	return nil
 }

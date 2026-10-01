@@ -288,12 +288,19 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('the original integration exception remains the unchanged merged 1054 contract migration', () => {
+test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1100_aithema_pending_content.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1100_aithema_pending_content.sql']);
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
+  const runKinds = manifest.exceptions[1];
+  assert.equal(runKinds.file, '1066_run_kinds.sql');
+  assert.equal(runKinds.ticket, 'AEON-501');
+  const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
+  assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
+  assert.match(runKinds.reason, /strict superset/);
+
   assert.equal(entry.ticket, 'AEON-397');
   assert.match(entry.reason, /contract|unconfirmed|person/i);
   const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
@@ -341,6 +348,6 @@ test('the current tree passes only with the explicit pinned contract exceptions'
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1100_aithema_pending_content.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1100_aithema_pending_content.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
