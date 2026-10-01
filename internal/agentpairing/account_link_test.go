@@ -151,6 +151,129 @@ func TestAccountLinkExpiryFreshnessAndPersonOnly(t *testing.T) {
 	}
 }
 
+func assertLinkTrail(t *testing.T, f *fixture, offer agentsetup.AccountLinkView, state, event string) {
+	t.Helper()
+	var stored string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state FROM account_person_link_requests WHERE id=$1`, offer.RequestID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != state || f.events(event) != 1 {
+		t.Fatalf("link trail: state=%s, %s events=%d; want %s and one event", stored, event, f.events(event), state)
+	}
+	var audit string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT "after"::text FROM events WHERE tenant_id=$1 AND type=$2`, f.tenantID, event).Scan(&audit); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(audit, offer.AccountID) || strings.Contains(audit, strings.ReplaceAll(offer.Code, " ", "")) || strings.Contains(audit, offer.Code) {
+		t.Fatal("link event omitted its account or exposed its code")
+	}
+}
+
+func TestAccountLinkExpiryAudit(t *testing.T) {
+	for _, operation := range []string{"poll", "offer", "lookup", "approve", "renew"} {
+		t.Run(operation, func(t *testing.T) {
+			f, p, v, key := linkFixture(t)
+			account := v.Enrollments[0].AccountID
+			offer := offerLink(t, f, p, key, account)
+			review := reviewLink(t, f, offer)
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE account_person_link_requests SET created_at=clock_timestamp()-interval '11 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`, offer.RequestID); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				switch operation {
+				case "lookup":
+					f.call("POST", accountLinkPath+"/lookup", map[string]string{"user_code": offer.Code}, true, "", 410)
+				case "approve":
+					f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 410)
+				default:
+					body := map[string]string{"operation": operation, "account_id": account, "device_proof": p.lifecycle}
+					if operation == "poll" {
+						body["request_id"] = offer.RequestID
+					}
+					var result agentsetup.AccountLinkView
+					decodeResult(t, f.call("POST", accountLinkPath, body, false, key, 200), &result)
+					if operation == "renew" {
+						if !result.ShowPrompt || result.Code == "" || result.RequestID == offer.RequestID {
+							t.Fatal("renew did not replace the expired request")
+						}
+						// Repeated observations must not expire the old request twice.
+						operation = "offer"
+					} else if result.Code != "" || result.ShowPrompt {
+						t.Fatal("observation repeated the clear code")
+					}
+				}
+				assertLinkTrail(t, f, offer, "expired", "account.link_expired")
+			}
+		})
+	}
+}
+
+func TestAccountLinkDisconnectAudit(t *testing.T) {
+	for _, scope := range []string{"computer", "enrollment"} {
+		for _, mode := range []string{"drain", "revoke_now"} {
+			t.Run(scope+"/"+mode, func(t *testing.T) {
+				f, p, v, key := linkFixture(t)
+				account := v.Enrollments[0].AccountID
+				offer := offerLink(t, f, p, key, account)
+				review := reviewLink(t, f, offer)
+				other := f.propose("codex")
+				f.approve(other, "connect_only")
+				otherView := f.redeem(other)
+				otherOffer := offerLink(t, f, other, "aeon_"+otherView.RuntimePrefix+"_"+other.runtime, otherView.Enrollments[0].AccountID)
+				path := "/api/agent-pairing/computers/" + *v.ComputerID
+				if scope == "enrollment" {
+					path += "/enrollments/" + account
+				}
+				for range 2 {
+					f.call("POST", path+"/disconnect", map[string]string{"mode": mode}, true, "", 200)
+					assertLinkTrail(t, f, offer, "revoked", "account.link_cancelled")
+				}
+				f.call("POST", accountLinkPath+"/lookup", map[string]string{"user_code": offer.Code}, true, "", 410)
+				f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 410)
+				assertLinkTrail(t, f, offer, "revoked", "account.link_cancelled")
+				if reviewLink(t, f, otherOffer).State != "pending" {
+					t.Fatal("disconnect cancelled another computer's link")
+				}
+			})
+		}
+	}
+}
+
+func TestAccountLinkCodeHashAtRest(t *testing.T) {
+	f, p, v, key := linkFixture(t)
+	account := v.Enrollments[0].AccountID
+	offer := offerLink(t, f, p, key, account)
+	var clearColumn bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='account_person_link_requests' AND column_name='user_code')`).Scan(&clearColumn); err != nil {
+		t.Fatal(err)
+	}
+	if clearColumn {
+		t.Fatal("account link codes still have a plaintext storage column")
+	}
+	var stored string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT user_code_hash FROM account_person_link_requests WHERE id=$1`, offer.RequestID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	code := strings.ReplaceAll(offer.Code, " ", "")
+	if stored != hash(code) || stored == code {
+		t.Fatal("account link did not store only the code digest")
+	}
+	if reviewLink(t, f, offer).RequestID != offer.RequestID {
+		t.Fatal("hash lookup lost the offered request")
+	}
+	for _, operation := range []string{"offer", "poll"} {
+		body := map[string]string{"operation": operation, "account_id": account, "device_proof": p.lifecycle}
+		if operation == "poll" {
+			body["request_id"] = offer.RequestID
+		}
+		var result agentsetup.AccountLinkView
+		decodeResult(t, f.call("POST", accountLinkPath, body, false, key, 200), &result)
+		if result.Code != "" || result.ShowPrompt {
+			t.Fatal("clear code returned after its first offer")
+		}
+	}
+}
+
 func TestAccountLinkRejectsAnotherInstallationAndRevokedPairing(t *testing.T) {
 	f, p, v, key := linkFixture(t)
 	other := f.propose("codex")
