@@ -236,6 +236,52 @@ func TestHarnessUsageSourcesReportMonotonicTotals(t *testing.T) {
 	}
 }
 
+func TestGrokSnapshotSkipsFallingUncachedInputWithoutBlockingLaterUsage(t *testing.T) {
+	dir := t.TempDir()
+	var calls []hbCall
+	srv := hbServer(t, &calls, func(r *http.Request, body map[string]any, w http.ResponseWriter) bool {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/usage") && numField(body, "input_tokens")-numField(body, "cached_input_tokens") < 15 {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"uncached input decreased"}`))
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	path := writeUsageFixture(t, filepath.Join(dir, "sessions", "work", "usage.json"),
+		`{"session":{"inputTokens":10,"outputTokens":4,"cachedReadTokens":2,"cacheCreationTokens":5,"primaryModelId":"grok-4"}}`)
+	o := heartbeatTestOptions(dir)
+	o.Harness, o.HarnessVersion, o.UsageFile = "grok", "fixture", path
+	session := openUsageSession(t, rt, o)
+	if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, o, session); err != nil {
+		t.Fatal(err)
+	}
+	// Inclusive input rises 17 -> 18 and cache rises 2 -> 4, but uncached
+	// input falls 15 -> 14. The server cannot accept this cumulative report.
+	writeUsageFixture(t, path, `{"session":{"inputTokens":9,"outputTokens":5,"cachedReadTokens":4,"cacheCreationTokens":5,"primaryModelId":"grok-4"}}`)
+	for i := 0; i < 2; i++ {
+		if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, o, session); err != nil {
+			t.Fatalf("invalid snapshot reached the server: %v", err)
+		}
+		if len(session.disk.PendingUsage) != 0 || len(usagePosts(calls)) != 1 {
+			t.Fatal("invalid snapshot queued or posted")
+		}
+	}
+	prev := usageByModel(session.disk.Usage, "grok-4")
+	if prev == nil || prev.Input != 17 || prev.Cached != 2 || prev.Sequence != 1 || !strings.Contains(stderr.String(), "not a valid cumulative report; skipped") {
+		t.Fatal("invalid snapshot changed the accepted baseline or lacked a diagnostic")
+	}
+	writeUsageFixture(t, path, `{"session":{"inputTokens":12,"outputTokens":6,"cachedReadTokens":4,"cacheCreationTokens":5,"primaryModelId":"grok-4"}}`)
+	if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, o, session); err != nil {
+		t.Fatal(err)
+	}
+	posted := usagePosts(calls)
+	if len(posted) != 2 || numField(posted[1], "input_tokens") != 21 || numField(posted[1], "cached_input_tokens") != 4 || numField(posted[1], "sequence") != 2 || len(session.disk.PendingUsage) != 0 {
+		t.Fatal("later valid snapshot was blocked or used the wrong sequence")
+	}
+}
+
 func TestUsageLocatorsSkipVendorAuth(t *testing.T) {
 	dir := t.TempDir()
 	id := "thread_01ab"

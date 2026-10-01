@@ -62,7 +62,7 @@ func TestGrokManagedUsageSeparatesCostAndCumulativeTokens(t *testing.T) {
 	}
 	raw = []byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":4,"cachedReadTokens":3,"reasoningTokens":2}}`)
 	ev, ok = s.event(raw, grokModel)
-	if !ok || ev.InputTokensDelta != 11 || ev.OutputTokensDelta != 4 || ev.CachedInputTokensDelta != 3 || ev.ReasoningTokensDelta != 2 {
+	if !ok || ev.InputTokensDelta != 14 || ev.OutputTokensDelta != 4 || ev.CachedInputTokensDelta != 3 || ev.ReasoningTokensDelta != 2 {
 		t.Fatalf("token deltas %+v", ev)
 	}
 	ev, ok = s.event(raw, grokModel)
@@ -75,7 +75,7 @@ func TestGrokManagedUsageSeparatesCostAndCumulativeTokens(t *testing.T) {
 	}
 	for _, raw := range []string{
 		`{"update":{"sessionUpdate":"usage_update","inputTokens":14,"outputTokens":7}}`,
-		`{"update":{"sessionUpdate":"usage_update","inputTokens":16,"outputTokens":8,"cachedReadTokens":17}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":16,"outputTokens":8,"cachedReadTokens":-1}}`,
 		`{"update":{"sessionUpdate":"usage_update","inputTokens":16,"outputTokens":8,"reasoningTokens":9}}`,
 		`{"update":{"sessionUpdate":"usage_update","inputTokens":1000000000001,"outputTokens":8}}`,
 	} {
@@ -86,6 +86,47 @@ func TestGrokManagedUsageSeparatesCostAndCumulativeTokens(t *testing.T) {
 	ev, ok = (&grokUsageTracker{}).event([]byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":2,"outputTokens":1}}`), grokModel)
 	if !ok || ev.SessionUsage.CachedInputTokens != nil || ev.SessionUsage.ReasoningTokens != nil {
 		t.Fatal("missing counters were invented")
+	}
+}
+
+func TestGrokManagedUsageIncludesCacheReadAndCreation(t *testing.T) {
+	s := &grokUsageTracker{}
+	first := []byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":2,"outputTokens":5,"cachedReadTokens":30,"cacheCreationTokens":4}}`)
+	ev, ok := s.event(first, grokModel)
+	if !ok || ev.SessionUsage == nil || *ev.SessionUsage.InputTokens != 36 || ev.InputTokensDelta != 36 || ev.CachedInputTokensDelta != 30 || ev.OutputTokensDelta != 5 {
+		t.Fatalf("cache-heavy update dropped or miscounted: %+v", ev)
+	}
+	if ev, ok := s.event(first, grokModel); !ok || ev.InputTokensDelta != 0 || ev.CachedInputTokensDelta != 0 || ev.OutputTokensDelta != 0 {
+		t.Fatal("inclusive totals were added again on replay")
+	}
+	ev, ok = s.event([]byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":5,"outputTokens":7,"cachedReadTokens":40,"cacheCreationTokens":6}}`), grokModel)
+	if !ok || *ev.SessionUsage.InputTokens != 51 || ev.InputTokensDelta != 15 || ev.CachedInputTokensDelta != 10 || ev.OutputTokensDelta != 2 {
+		t.Fatal("cache-inclusive cumulative increase was miscounted")
+	}
+	// Missing optional counters retain their last observed cumulative values
+	// in the inclusive input as well as in the cached subset.
+	ev, ok = s.event([]byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":7,"outputTokens":8}}`), grokModel)
+	if !ok || *ev.SessionUsage.InputTokens != 53 || ev.InputTokensDelta != 2 || *ev.SessionUsage.CachedInputTokens != 40 || ev.CachedInputTokensDelta != 0 {
+		t.Fatal("missing optional cache totals changed inclusive accounting")
+	}
+	for _, raw := range []string{
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":8,"outputTokens":9,"cachedReadTokens":-1}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":8,"outputTokens":9,"cacheCreationTokens":-1}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":8,"outputTokens":9,"cachedReadTokens":40,"cacheCreationTokens":5}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":999999999999,"outputTokens":9,"cachedReadTokens":1,"cacheCreationTokens":1}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":1,"outputTokens":9,"cachedReadTokens":9223372036854775807}}`,
+		`{"update":{"sessionUpdate":"usage_update","inputTokens":1,"outputTokens":9,"cacheCreationTokens":9223372036854775807}}`,
+	} {
+		if ev, ok := s.event([]byte(raw), grokModel); ok || ev.SessionUsage != nil {
+			t.Fatal("invalid or overflowing inclusive counters reported")
+		}
+	}
+	if *s.models[grokModel].InputTokens != 53 {
+		t.Fatal("rejected update changed the accepted totals")
+	}
+	ev, ok = s.event([]byte(`{"update":{"sessionUpdate":"usage_update","inputTokens":1,"outputTokens":2,"cachedReadTokens":20,"cacheCreationTokens":1,"model":"other-model"}}`), grokModel)
+	if !ok || ev.SessionUsage.Model != "other-model" || ev.InputTokensDelta != 22 || ev.CachedInputTokensDelta != 20 {
+		t.Fatal("inclusive cache accounting mixed models")
 	}
 }
 

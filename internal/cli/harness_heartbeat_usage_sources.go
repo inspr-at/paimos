@@ -175,7 +175,7 @@ func discoverCodexRollout(home, worktree string, started time.Time) string {
 	var found string
 	var newest time.Time
 	n := 0
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		n++
 		if n > usageWalkLimit {
 			return errors.New("usage walk limit")
@@ -197,9 +197,9 @@ func discoverCodexRollout(home, worktree string, started time.Time) string {
 			return nil
 		}
 		defer f.Close()
-		reader := bufio.NewReader(io.LimitReader(f, heartbeatTitleLineMax+1))
+		reader := bufio.NewReader(io.LimitReader(f, heartbeatUsageLineMax+1))
 		line, err := reader.ReadBytes('\n')
-		if err != nil || len(line) > heartbeatTitleLineMax {
+		if err != nil || len(line) > heartbeatUsageLineMax {
 			return nil
 		}
 		var meta struct {
@@ -217,6 +217,11 @@ func discoverCodexRollout(home, worktree string, started time.Time) string {
 		}
 		return nil
 	})
+	if err != nil {
+		// A bounded walk may not have reached the latest matching rollout.
+		// Leave discovery unpinned so a partial result cannot own its cursor.
+		return ""
+	}
 	return found
 }
 
@@ -595,6 +600,11 @@ func (rt *runtime) reportSnapshotUsage(ctx context.Context, projectID string, o 
 			continue
 		}
 		reasoning, reasoningKnown := holdReasoning(prev, sum.reasoning, sum.reasoningKnown)
+		var valid bool
+		if reasoning, reasoningKnown, valid = fitUsageReport(prev, sum.input, sum.output, sum.cached, reasoning, reasoningKnown); !valid {
+			fmt.Fprintf(rt.stderr, "heartbeat: usage for %s is not a valid cumulative report; skipped\n", model)
+			continue
+		}
 		if prev != nil && sum.input == prev.Input && sum.output == prev.Output && sum.cached == prev.Cached && sameReasoning(prev.Reasoning, reasoning, reasoningKnown) {
 			continue
 		}

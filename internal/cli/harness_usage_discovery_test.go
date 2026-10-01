@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,71 @@ func TestCodexUsageDiscoveryUsesMetadataAndFence(t *testing.T) {
 	o.UsageStartedAt, o.Worktree = start, ""
 	if target, err := resolveHeartbeatUsage(o); err != nil || target.Path != "" {
 		t.Fatal("discovered without a bound worktree")
+	}
+}
+
+func TestCodexUsageDiscoveryAcceptsLargeSessionMetadata(t *testing.T) {
+	home, work := t.TempDir(), "/work/exact"
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		size int
+		want bool
+	}{
+		{"above-title-limit", heartbeatTitleLineMax + 1, true},
+		{"above-usage-limit", heartbeatUsageLineMax + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			meta, err := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]any{
+				"cwd": work, "timestamp": start.Add(time.Second), "instructions": strings.Repeat("x", tc.size),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := writeUsageFixture(t, filepath.Join(home, tc.name, "sessions", "rollout-large.jsonl"), string(meta)+"\n")
+			got := discoverCodexRollout(filepath.Join(home, tc.name), work, start)
+			if tc.want && got != path || !tc.want && got != "" {
+				t.Fatalf("metadata bytes=%d discovery=%q want match=%t", len(meta)+1, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexUsageDiscoveryDoesNotPinIncompleteWalk(t *testing.T) {
+	dir := t.TempDir()
+	var calls []hbCall
+	srv := hbServer(t, &calls, nil)
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(dir)
+	o.Harness, o.HarnessVersion = "codex", "fixture"
+	o.Worktree, o.CodexHome = "/work/exact", filepath.Join(dir, "codex")
+	session := openUsageSession(t, rt, o)
+	start := session.disk.RegisteredAt
+	// The lexical walk sees this matching candidate before exhausting its
+	// budget on old directories; the latest candidate is beyond the cap.
+	codexDiscoveryFixture(t, o.CodexHome, "early", o.Worktree, start.Add(time.Second))
+	for i := 0; i < usageWalkLimit; i++ {
+		if err := os.MkdirAll(filepath.Join(o.CodexHome, "sessions", "2027", fmt.Sprintf("%04d", i)), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := writeUsageFixture(t, filepath.Join(o.CodexHome, "sessions", "2099", "rollout-latest.jsonl"),
+		fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{\"cwd\":%q,\"timestamp\":%q}}\n", o.Worktree, start.Add(time.Minute).Format(time.RFC3339Nano)))
+	target, err := resolveSessionHeartbeatUsage(o, session)
+	if err != nil || target.Path != "" || session.disk.UsagePath != "" || session.disk.UsageSource != "" {
+		t.Fatalf("incomplete walk pinned a log: target=%+v source=%q path=%q err=%v (latest %q)", target, session.disk.UsageSource, session.disk.UsagePath, err, want)
+	}
+	// A retry stays unpinned, including after restarting the helper.
+	if err := saveHeartbeatSession(session); err != nil {
+		t.Fatal(err)
+	}
+	restarted, ok, err := loadHeartbeatSession(&session.hold)
+	if err != nil || !ok {
+		t.Fatal("could not reload discovery state")
+	}
+	if target, err := resolveSessionHeartbeatUsage(o, &restarted); err != nil || target.Path != "" || restarted.disk.UsagePath != "" {
+		t.Fatal("retry pinned a partial discovery result")
 	}
 }
 

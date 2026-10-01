@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,8 @@ func TestHarnessVersionProbeIsBoundedAndOptional(t *testing.T) {
 	path := filepath.Join(dir, "codex")
 	for _, tc := range []struct{ output, want string }{
 		{"codex-cli 1.2.3", "1.2.3"}, {"1.2.3-beta.1", "1.2.3-beta.1"},
+		{"codex-cli 1.2.3-" + strings.Repeat("a", 74), "1.2.3-" + strings.Repeat("a", 74)},
+		{"codex-cli 1.2.3-" + strings.Repeat("a", 75), ""},
 		{"diagnostic text", ""}, {"codex-cli 1.2.3\nextra line", ""}, {strings.Repeat("x", 5000), ""},
 	} {
 		body := "#!/bin/sh\n[ \"$1\" = --version ] || exit 1\ncat <<'VERSION'\n" + tc.output + "\nVERSION\n"
@@ -33,6 +36,15 @@ func TestHarnessVersionProbeIsBoundedAndOptional(t *testing.T) {
 	}
 	if got := harnessVersionOrProbe(context.Background(), "codex", "supplied"); got != "supplied" {
 		t.Fatal("explicit version was lost")
+	}
+	for _, tc := range []struct{ supplied, want string }{
+		{strings.Repeat("a", 80), strings.Repeat("a", 80)},
+		{strings.Repeat("a", 81), ""},
+		{strings.Repeat("a", 128), ""},
+	} {
+		if got := harnessVersionOrProbe(context.Background(), "codex", tc.supplied); got != tc.want {
+			t.Fatalf("supplied version length=%d got=%q want=%q", len(tc.supplied), got, tc.want)
+		}
 	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec /bin/sleep 5\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -67,5 +79,36 @@ func TestHeartbeatRegistersHarnessVersion(t *testing.T) {
 	}
 	if got != "1.2.3" {
 		t.Fatalf("registered version = %v", got)
+	}
+}
+
+func TestHeartbeatOmitsOverlongHarnessVersion(t *testing.T) {
+	for _, supplied := range []bool{false, true} {
+		t.Run(map[bool]string{false: "probe", true: "supplied"}[supplied], func(t *testing.T) {
+			dir := t.TempDir()
+			var calls []hbCall
+			srv := hbServer(t, &calls, func(r *http.Request, body map[string]any, w http.ResponseWriter) bool {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/harness-sessions") && body["harness_version"] != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":"harness version is too long"}`))
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, _, _ := heartbeatRuntime(t, srv)
+			version := "1.2.3-" + strings.Repeat("a", 75)
+			path := filepath.Join(dir, "codex")
+			if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'codex-cli "+version+"\\n'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir)
+			o := heartbeatTestOptions(dir)
+			o.Harness = "codex"
+			if supplied {
+				o.HarnessVersion = version
+			}
+			openUsageSession(t, rt, o)
+		})
 	}
 }
