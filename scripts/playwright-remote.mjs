@@ -23,11 +23,11 @@ export PATH="$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
 [ ! -e "$HOME/.aeon-builder-on" ] || { echo 'remote refused: builder pool active' >&2; exit 3; }
 console_user=$(stat -f %Su /dev/console)
 idle=$(ioreg -c IOHIDSystem | awk '/HIDIdleTime/ && $NF ~ /^[0-9]+$/ {print int($NF/1000000000); exit}')
-load=$(sysctl -n vm.loadavg | awk '{print $2}')
+lane_load=$(sysctl -n vm.loadavg | awk '{print $2}')
 case "$console_user" in ''|mailina) echo 'remote refused: console presence' >&2; exit 3;; esac
 case "$idle" in ''|*[!0-9]*) echo 'remote refused: idle unknown' >&2; exit 3;; esac
 [ "$console_user" = ci ] || [ "$idle" -ge 600 ] || { echo 'remote refused: keyboard active' >&2; exit 3; }
-awk -v load="$load" 'BEGIN { exit !(load ~ /^[0-9]+([.][0-9]+)?$/ && (load + 0) <= 18) }' || { echo 'remote refused: load' >&2; exit 3; }
+awk -v lane_load="$lane_load" 'BEGIN { exit !(lane_load ~ /^[0-9]+([.][0-9]+)?$/ && (lane_load + 0) <= 18) }' || { echo 'remote refused: load' >&2; exit 3; }
 for marker in "$HOME"/.aeon-remote-test/*.pid; do
   [ -e "$marker" ] || continue
   echo 'remote refused: another heavy run reserved capacity' >&2; exit 3
