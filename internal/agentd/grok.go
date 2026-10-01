@@ -102,6 +102,12 @@ func (s *grokUsageTracker) event(raw json.RawMessage, model string) (AdapterEven
 	}
 	if report, created, ok := s.grokNativeUsage(raw, model); ok {
 		prev, exists := s.models[report.Model]
+		// Absolute reasoning snapshots can be revised down while other
+		// cumulative counters grow. Keep the known reasoning high-water mark
+		// without dropping the rest of the valid usage update.
+		if prev.ReasoningTokens != nil && (report.ReasoningTokens == nil || *report.ReasoningTokens < *prev.ReasoningTokens) {
+			report.ReasoningTokens = cloneCount(prev.ReasoningTokens)
+		}
 		if (!exists && len(s.models) < 128) || exists && created >= s.created[report.Model] && monotonicGrokUsage(prev, report) {
 			if s.models == nil {
 				s.models = map[string]sessionusage.UsageReport{}
@@ -110,9 +116,6 @@ func (s *grokUsageTracker) event(raw json.RawMessage, model string) (AdapterEven
 			// Missing optional counters retain the last known observation.
 			if report.CachedInputTokens == nil {
 				report.CachedInputTokens = cloneCount(prev.CachedInputTokens)
-			}
-			if report.ReasoningTokens == nil {
-				report.ReasoningTokens = cloneCount(prev.ReasoningTokens)
 			}
 			ev.InputTokensDelta = usageCount(report.InputTokens) - usageCount(prev.InputTokens)
 			ev.OutputTokensDelta = usageCount(report.OutputTokens) - usageCount(prev.OutputTokens)

@@ -134,9 +134,9 @@ func TestGrokManagedUsageRetainsFallingReasoning(t *testing.T) {
 	s := &grokUsageTracker{}
 	for _, tc := range []struct {
 		name, raw                            string
-		input, output, cached, reasoning      int64
-		inputDelta, outputDelta, cachedDelta  int64
-		reasoningDelta                        int64
+		input, output, cached, reasoning     int64
+		inputDelta, outputDelta, cachedDelta int64
+		reasoningDelta                       int64
 	}{
 		{"initial", `{"update":{"sessionUpdate":"usage_update","inputTokens":2,"outputTokens":8,"cachedReadTokens":30,"cacheCreationTokens":4,"reasoningTokens":6}}`, 36, 8, 30, 6, 36, 8, 30, 6},
 		{"reasoning-revised-down", `{"update":{"sessionUpdate":"usage_update","inputTokens":5,"outputTokens":10,"cachedReadTokens":40,"cacheCreationTokens":6,"reasoningTokens":3}}`, 51, 10, 40, 6, 15, 2, 10, 0},

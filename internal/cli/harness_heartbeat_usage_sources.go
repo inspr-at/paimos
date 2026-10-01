@@ -233,15 +233,14 @@ func discoverGrokUsage(home, worktree string, started time.Time) string {
 	// proves activity, not session creation: use summary.json's created_at.
 	root := filepath.Join(home, "sessions", encodeURIComponent(worktree))
 	entries, err := os.ReadDir(root)
-	if err != nil {
+	if err != nil || len(entries) > usageWalkLimit {
+		// A partial listing cannot prove which session is newest. Leave the
+		// generation unpinned, as with an incomplete Codex discovery walk.
 		return ""
 	}
 	var found string
 	var newest time.Time
-	for i, entry := range entries {
-		if i >= usageWalkLimit {
-			break
-		}
+	for _, entry := range entries {
 		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !usageID(entry.Name()) {
 			continue
 		}
@@ -352,33 +351,40 @@ func findCodexRollout(home, thread string) string {
 		return ""
 	}
 	suffix := "-" + thread + ".jsonl"
-	var found string
-	n := 0
-	stop := errors.New("usage walk limit")
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		n++
-		if n > usageWalkLimit {
-			return stop
+	// Codex's YYYY/MM/DD directories sort by date. Spend the bounded
+	// search on the newest dates first so old history cannot hide a recent
+	// explicit id. Stop at the first fenced suffix match.
+	n := 1 // Count the root, as in the metadata discovery walk.
+	var walk func(string) string
+	walk = func(dir string) string {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return ""
 		}
-		if err != nil || d == nil {
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			if d.IsDir() {
-				return fs.SkipDir
+		for i := len(entries) - 1; i >= 0; i-- {
+			n++
+			if n > usageWalkLimit {
+				return ""
 			}
-			return nil
+			entry := entries[i]
+			if entry.Type()&os.ModeSymlink != 0 || credentialUsageName(entry.Name()) {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			if entry.IsDir() {
+				if found := walk(path); found != "" {
+					return found
+				}
+				if n > usageWalkLimit {
+					return ""
+				}
+			} else if strings.HasPrefix(entry.Name(), "rollout-") && strings.HasSuffix(entry.Name(), suffix) && regularUsageFile("codex", path) && pathInsideRoot(root, path) {
+				return path
+			}
 		}
-		name := d.Name()
-		if !d.IsDir() && strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, suffix) && path > found {
-			found = path
-		}
-		return nil
-	})
-	if !regularUsageFile("codex", found) || !pathInsideRoot(root, found) {
 		return ""
 	}
-	return found
+	return walk(root)
 }
 
 func findGrokUsage(home, worktree, id string) string {

@@ -162,6 +162,30 @@ func TestCodexUsageIDLookupSearchesNewestDatesFirst(t *testing.T) {
 	}
 }
 
+func TestCodexUsageIDLookupKeepsFileFence(t *testing.T) {
+	home := t.TempDir()
+	id := "11111111-1111-4111-8111-111111111111"
+	want := writeUsageFixture(t, filepath.Join(home, "sessions", "2026", "10", "01", "rollout-valid-"+id+".jsonl"), "{}\n")
+	newer := filepath.Join(home, "sessions", "2099", "01", "01")
+	writeUsageFixture(t, filepath.Join(newer, "credentials", "rollout-secret-"+id+".jsonl"), "{}\n")
+	denied := writeUsageFixture(t, filepath.Join(newer, "rollout-hardlink-"+id+".jsonl"), "{}\n")
+	if err := os.Link(denied, filepath.Join(home, "hardlink")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(want), filepath.Join(newer, "linked-directory")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(want, filepath.Join(newer, "rollout-symlink-"+id+".jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if got := findCodexRollout(home, id); got != want {
+		t.Fatalf("invalid newer candidates hid the fenced rollout: %q", got)
+	}
+	if got := findCodexRollout(home, "../"+id); got != "" {
+		t.Fatal("invalid id escaped the session root")
+	}
+}
+
 func grokDiscoveryFixture(t *testing.T, home, id, work string, created time.Time) string {
 	t.Helper()
 	root := filepath.Join(home, "sessions", encodeURIComponent(work), id)
