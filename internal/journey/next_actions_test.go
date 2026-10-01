@@ -52,7 +52,11 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 		release := f.release(t, project, "BAT-"+strconv.Itoa(200+i), 1)
 		f.ticket(t, project, release, "BAT-"+strconv.Itoa(300+i), "1.25", false, false)
 		f.setTicketState(t, "BAT-"+strconv.Itoa(300+i), "done")
-		if state != "planning" {
+		if state == "released" {
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, release); err != nil {
+				t.Fatal(err)
+			}
+		} else if state != "planning" {
 			f.setReleaseState(t, release, state)
 		}
 		for _, scope := range []string{journey.ScopeBuild, journey.ScopeCandidate, journey.ScopeDeploy, journey.ScopeAccess} {
