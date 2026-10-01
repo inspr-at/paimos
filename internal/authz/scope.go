@@ -27,6 +27,8 @@ import (
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/journey/next-actions":               true,
+	"GET /api/me/host-labels":                     true,
+	"PUT /api/me/host-labels":                     true,
 	"GET /api/me/security/session-watching":       true,
 	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
@@ -52,6 +54,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/views":                              true,
 	"GET /api/views/{viewId}":                     true,
 	"GET /api/kinds":                              true,
+	"GET /api/status/help":                        true,
 	"GET /api/kinds/{kindId}":                     true,
 	"GET /api/me":                                 true,
 	"GET /api/brand/logo/{variant}":               true,
