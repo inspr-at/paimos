@@ -79,15 +79,15 @@ describe('actual models and saved picker choices', () => {
   it('summarizes session counts, efforts and tokens by model without session ids', () => {
     const r = row(2_800_000, 3_200_000)
     r.planning!.models = [
-      { label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's1', effort: 'high', role: 'reviewer', running: false, tokens: 2_300_000 }] },
+      { label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's1', effort: 'high', role: 'worker', running: false, tokens: 2_300_000 }] },
       { label: 'Codex gpt-6.1-sol', harness: 'codex', model: 'gpt-6.1-sol', sessions: [{ id: 's2', model_raw: 'gpt-6-sol-xhigh', effort: 'xhigh', role: 'worker', running: true, tokens: 400_000 }, { id: 's3', effort: 'xhigh', role: 'worker', running: false, tokens: 100_000 }] },
     ]
     expect(modelCell(r)).toMatchObject({ text: 'Claude opus', state: 'measured', more: 1 })
     expect(modelCell(r).tip.split('\n')).toEqual([
       'Used, per session:',
-      'Claude opus · high · 1 session · 2.3M (review)',
+      'Claude opus · high · 1 session · 2.3M',
       'Codex gpt-6.1-sol · xhigh · 2 sessions, running · 500k',
-      'Planned: Codex sol · xhigh (a different model ran)',
+      'Planned: Codex sol · xhigh',
     ])
     r.planning!.models.reverse()
     expect(modelCell(r).text).toBe('Codex sol')
@@ -102,10 +102,44 @@ describe('actual models and saved picker choices', () => {
     expect(modelCell(r).tip).toBe('Used: Codex gpt-6-sol · xhigh · 1 session, running\nPlanned: Codex sol · xhigh, as used')
     r.planning!.models[0]!.sessions.push({ id: 'another-private-id', effort: 'high', role: 'worker', running: false, tokens: 0 })
     expect(modelCell(r).tip).toBe('Used: Codex gpt-6-sol · xhigh · high · 2 sessions, running\nPlanned: Codex sol · xhigh, as used')
-    r.planning!.models.push({ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 'unreported-id', effort: 'high', role: 'reviewer', running: false, tokens: null }] })
+    r.planning!.models.push({ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 'unreported-id', effort: 'high', role: 'coordinator', running: false, tokens: null }] })
     expect(modelCell(r).tip).toContain('Codex gpt-6-sol · xhigh · high · 2 sessions, running · 0')
     expect(modelCell(r).tip).toContain('Claude opus · high · 1 session · usage not reported yet')
-    expect(modelCell(r).tip).toContain('Planned: Codex sol · xhigh (a different model ran)')
+    expect(modelCell(r).tip.split('\n').at(-1)).toBe('Planned: Codex sol · xhigh')
+  })
+  it.each(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])('compares Cursor Grok profile effort %s with the normalized used model', effort => {
+    const r = row(null, null, 1)
+    r.planning!.route = { ...route, label: `Cursor grok-4.7 · ${effort}`, harness: 'cursor', model: `grok-4.7-${effort}`, effort }
+    r.planning!.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 'grok-session', effort, role: 'worker', running: true, tokens: null }] }]
+    expect(modelCell(r).tip).toBe(`Used: Cursor grok-4.7 · ${effort} · 1 session, running\nPlanned: Cursor grok-4.7 · ${effort}, as used`)
+    // Normalize both sides, including a raw model fallback carrying effort.
+    r.planning!.route.model = 'grok-4.7'
+    r.planning!.models[0]!.model = `grok-4.7-${effort}`
+    expect(modelCell(r).tip.split('\n').at(-1)).toBe(`Planned: Cursor grok-4.7 · ${effort}, as used`)
+  })
+  it('keeps different used models, harnesses and non-effort suffixes distinct', () => {
+    const r = row(null, null, 1)
+    r.planning!.route = { ...route, label: 'Cursor grok-4.7 · xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
+    const used = { label: 'Cursor grok-4.6', harness: 'cursor', model: 'grok-4.6', sessions: [{ id: 'other-model', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }
+    r.planning!.models = [used]
+    expect(modelCell(r).tip.split('\n').at(-1)).toBe('Planned: Cursor grok-4.7 · xhigh (a different model ran)')
+    used.model = 'grok-4.7'
+    used.harness = 'grok'
+    expect(modelCell(r).tip.split('\n').at(-1)).toBe('Planned: Cursor grok-4.7 · xhigh (a different model ran)')
+    used.harness = 'cursor'
+    r.planning!.route.model = 'grok-4.7-xhigh-fast'
+    expect(modelCell(r).tip.split('\n').at(-1)).toBe('Planned: Cursor grok-4.7 · xhigh (a different model ran)')
+  })
+  it('explains a used model without a plan, including a missing work-start route', () => {
+    const r = row(null, null, 1)
+    r.planning!.route = null
+    r.planning!.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 'unplanned-session', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
+    const tip = 'Used: Cursor grok-4.7 · xhigh · 1 session, running\nNo model planned: no role set'
+    expect(modelCell(r)).toMatchObject({ state: 'measured', tip })
+    // A later live plan must not replace the absent plan at work start.
+    r.planning!.route = route
+    r.planning!.estimate_snapshot = { id: 'unplanned-start', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: null, estimated_tokens: null, route: null, rate_basis: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000 } }
+    expect(modelCell(r).tip).toBe(tip)
   })
   it('keeps empty saved ticks through width changes, reloads, views and phone cards', () => {
     const prefs = { order: ['model', 'paid', 'tokens'] as const, visible: ['model', 'paid', 'tokens'] as const }
