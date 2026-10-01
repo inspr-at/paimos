@@ -76,7 +76,7 @@ func (f *fixture) queueAccount(t *testing.T, allowance int64) string {
 	t.Helper()
 	id := uuid()
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2::uuid,$2::text,'codex','daemon-test',$3,'Queue test',1,clock_timestamp(),true,'generation-1')`, f.agent.TenantID, id, f.agent.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2::uuid,$2::text,'codex','daemon-test',$3,'Queue test',1,clock_timestamp(),true,'generation-1')`, f.agent.TenantID, id, f.agent.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',$3)`, f.agent.TenantID, id, allowance)
@@ -235,6 +235,9 @@ func TestTicketQueuePermissionsIsolationAuditAndConcurrentAdd(t *testing.T) {
 				return err
 			}
 		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='workspace'`, coordinator.ID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.person.TenantID, coordinator.ID, role)
 		return err
 	})
@@ -290,4 +293,61 @@ func TestTicketQueuePermissionsIsolationAuditAndConcurrentAdd(t *testing.T) {
 	if runs != 1 || events != 1 {
 		t.Fatalf("duplicate queue/audit: %d %d", runs, events)
 	}
+}
+
+func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
+	f := setup(t)
+	f.queueAccount(t, 1000000)
+	security := f.ticket(t, "open", "high", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Check tenant permissions' WHERE id=$1`, security); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build-hard',1,$2)
+ ON CONFLICT(tenant_id,role,priority) DO UPDATE SET profile_id=excluded.profile_id`, f.person.TenantID, f.profile)
+		return err
+	})
+	e := f.addQueue(t, security, nil)
+	if !e.Queued.SecurityReview || e.Queued.ExpectedAgentID != nil {
+		t.Fatalf("unrouted security work: %+v", e.Queued)
+	}
+	var picked struct{ Entry *qEntry }
+	f.call(t, f.person, "POST", "/api/queue/next", map[string]any{}, 200, &picked)
+	if picked.Entry == nil || picked.Entry.Run.AgentID != f.agent.ID || picked.Entry.Run.ProfileID == nil || *picked.Entry.Run.ProfileID != f.profile {
+		t.Fatalf("automatic build-hard selection: %+v", picked.Entry)
+	}
+	var securityFlags bool
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT fields->>'security_review_required'='true' AND fields->>'needs_review'='true' AND fields->>'review_route'='review-gate' FROM nodes WHERE id=$1`, security).Scan(&securityFlags)
+	})
+	if !securityFlags {
+		t.Fatal("security review flags missing")
+	}
+
+	guest := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	var project string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(id,tenant_id,kind,name) VALUES($1,$2,'person','Project member')`, guest.ID, guest.TenantID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'QVIS','Visible project','open' FROM node_kinds WHERE slug='project' RETURNING id::text`, guest.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, guest.TenantID, guest.ID, project)
+		return err
+	})
+	visible := f.ticket(t, "open", "low", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, visible, project)
+		return err
+	})
+	f.call(t, guest, "POST", "/api/queue", map[string]string{"node_id": visible}, 200, &e)
+	var page qPage
+	f.call(t, guest, "GET", "/api/queue", nil, 200, &page)
+	if page.Count != 1 || page.Items[0].NodeID != visible || page.Items[0].Queued.Position != 1 {
+		t.Fatalf("hidden project affected count or position: %+v", page)
+	}
+	f.call(t, guest, "POST", "/api/queue/"+security+"/move", map[string]int{"position": 1}, 404, nil)
+	f.call(t, guest, "DELETE", "/api/queue/"+security, nil, 404, nil)
+	f.call(t, guest, "POST", "/api/queue/"+visible+"/move", map[string]int{"position": 1}, 200, &page)
 }

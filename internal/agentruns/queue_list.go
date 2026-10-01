@@ -110,7 +110,7 @@ func (m *module) queueList(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	// Capacity is advisory. Pool fingerprints prevent counting two doors into
 	// one allowance twice. The actual router rechecks every grant and window.
 	err = tx.QueryRow(r.Context(), `SELECT coalesce(sum(slots),0)::int FROM (
- SELECT max(a.max_parallel) slots FROM agent_accounts a
+ SELECT max(a.max_parallel_runs) slots FROM agent_accounts a
  WHERE a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
  AND EXISTS(SELECT 1 FROM model_profiles m WHERE m.enabled AND m.harness=a.harness AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids)))
  GROUP BY a.harness,coalesce(nullif(a.quota_pool_fingerprint,''),a.id::text)) pools`).Scan(&out.Capacity.Parallel)
