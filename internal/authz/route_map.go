@@ -24,14 +24,14 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"GET /api/queue/{nodeId}/readiness":                                       AuthenticatedRoute,
-	"POST /api/queue/{nodeId}/estimate":                                       AuthenticatedRoute,
-	"GET /api/queue":                                                          AuthenticatedRoute,
-	"POST /api/queue":                                                         AuthenticatedRoute,
-	"DELETE /api/queue/{nodeId}":                                              AuthenticatedRoute,
-	"POST /api/queue/{nodeId}/move":                                           AuthenticatedRoute,
-	"POST /api/queue/reset":                                                   AuthenticatedRoute,
-	"POST /api/queue/next":                                                    AuthenticatedRoute,
+	"GET /api/queue/{nodeId}/readiness":                                       "nodes.read",
+	"POST /api/queue/{nodeId}/estimate":                                       "nodes.read",
+	"GET /api/queue":                                                          "nodes.read",
+	"POST /api/queue":                                                         "nodes.read",
+	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
+	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
+	"POST /api/queue/reset":                                                   "nodes.read",
+	"POST /api/queue/next":                                                    "nodes.read",
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",

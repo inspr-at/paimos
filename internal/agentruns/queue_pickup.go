@@ -65,7 +65,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 		}
 		if e.Run.QueueRoutedAt != nil {
-			if target.Agent != "" && target.Agent != e.Run.AgentID || target.Profile != "" && (e.Run.ProfileID == nil || target.Profile != *e.Run.ProfileID) {
+			if target.Agent != "" && target.Agent != e.Run.AgentID || target.Profile != "" && (e.Run.ProfileID == nil || target.Profile != *e.Run.ProfileID) || target.Account != nil && (e.Run.RequestedAccountID == nil || *target.Account != *e.Run.RequestedAccountID) {
 				continue
 			}
 			// A route is idempotent; reservation and launch stay on the daemon path.

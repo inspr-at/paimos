@@ -26,6 +26,7 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/queue":                              true,
 	"GET /api/me/security/session-watching":       true,
 	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
@@ -70,6 +71,9 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/queue":                                true,
+	"POST /api/queue/reset":                          true,
+	"POST /api/queue/next":                           true,
 	"GET /api/rules/layers":                          true,
 	"POST /api/rules/layers":                         true,
 	"GET /api/rules/sets":                            true,

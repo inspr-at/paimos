@@ -3,8 +3,10 @@ package agentruns
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -51,6 +53,21 @@ func (m *module) queueEntries(ctx context.Context, tx pgx.Tx) ([]queueEntry, err
 		items[i].Queued = queued[items[i].NodeID]
 		items[i].Run, err = load(ctx, tx, items[i].Run.ID, false)
 		if err != nil {
+			return nil, err
+		}
+		p, _ := tenant.PrincipalFrom(ctx)
+		project := ""
+		if items[i].ProjectID != nil {
+			project = *items[i].ProjectID
+		}
+		if p.Kind == tenant.Agent {
+			err = queuePermission(ctx, tx, p, items[i].ProjectID, false)
+		} else {
+			err = authz.RequireTx(ctx, tx, p, "run.read", authz.Scope{ProjectID: project})
+		}
+		if err == nil {
+			items[i].VisibleRun = &items[i].Run
+		} else if !errors.Is(err, authz.ErrForbidden) {
 			return nil, err
 		}
 	}

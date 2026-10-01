@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,11 +12,15 @@ import (
 )
 
 type cliQueueEntry struct {
-	NodeID string            `json:"node_id"`
-	Key    string            `json:"key"`
-	Title  string            `json:"title"`
-	State  string            `json:"state"`
-	Queued *workqueue.Queued `json:"queued"`
+	NodeID    string            `json:"node_id"`
+	ProjectID *string           `json:"project_id"`
+	Key       string            `json:"key"`
+	Title     string            `json:"title"`
+	State     string            `json:"state"`
+	Priority  string            `json:"priority"`
+	Hours     float64           `json:"estimate_hours"`
+	Queued    *workqueue.Queued `json:"queued"`
+	Run       json.RawMessage   `json:"run,omitempty"`
 }
 type cliQueuePage struct {
 	Items    []cliQueueEntry `json:"items"`

@@ -76,7 +76,7 @@ func (f *fixture) queueAccount(t *testing.T, allowance int64) string {
 	t.Helper()
 	id := uuid()
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2,$2,'codex','daemon-test',$3,'Queue test',1,clock_timestamp(),true,'generation-1')`, f.agent.TenantID, id, f.agent.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2::uuid,$2::text,'codex','daemon-test',$3,'Queue test',1,clock_timestamp(),true,'generation-1')`, f.agent.TenantID, id, f.agent.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',$3)`, f.agent.TenantID, id, allowance)
@@ -254,6 +254,13 @@ func TestTicketQueuePermissionsIsolationAuditAndConcurrentAdd(t *testing.T) {
 		return err
 	})
 	dbtest.BindRole(t, f.d, viewer.TenantID, viewer.ID, "viewer")
+	var visible map[string]any
+	f.call(t, viewer, "GET", "/api/queue", nil, 200, &visible)
+	rows := visible["items"].([]any)
+	if len(rows) != 1 || rows[0].(map[string]any)["run"] != nil || rows[0].(map[string]any)["queued"] == nil {
+		t.Fatalf("ticket viewer run disclosure: %+v", visible)
+	}
+	f.call(t, viewer, "DELETE", "/api/queue/"+id, nil, 403, nil)
 	capped := coordinator
 	capped.KeyCreatorID = viewer.ID
 	f.call(t, capped, "POST", "/api/queue/"+id+"/move", map[string]int{"position": 1}, 403, nil)

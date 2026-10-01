@@ -85,3 +85,22 @@ func TestQueueCLILocalValidationAndIssueProjection(t *testing.T) {
 		t.Fatalf("issue JSON lost queued projection %s", raw)
 	}
 }
+
+func TestQueueCLIJSONKeepsDispatchMetadata(t *testing.T) {
+	isolate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"node_id":"one","project_id":null,"key":"QUE-1","title":"Work","state":"open","priority":"high","estimate_hours":3,"queued":{"position":1},"run":{"id":"run-one","row_version":4}}],"count":1,"manual_order":false,"capacity":{"queued_hours":3,"parallel_runs":1,"work_hours":3,"warning":false}}`))
+	}))
+	defer server.Close()
+	t.Setenv("AEON_URL", server.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	code, out, err := runCLI([]string{"aeon", "--json", "queue", "list"}, "")
+	var got map[string]any
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+		t.Fatalf("code %d out %s error %s", code, out, err)
+	}
+	entry := got["items"].([]any)[0].(map[string]any)
+	if entry["estimate_hours"] != float64(3) || entry["priority"] != "high" || entry["run"].(map[string]any)["row_version"] != float64(4) {
+		t.Fatalf("lost dispatch metadata: %s", out)
+	}
+}

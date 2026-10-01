@@ -26,15 +26,16 @@ type queueTarget struct {
 	Account *string `json:"requested_account_id,omitempty"`
 }
 type queueEntry struct {
-	NodeID    string            `json:"node_id"`
-	ProjectID *string           `json:"project_id"`
-	Key       string            `json:"key"`
-	Title     string            `json:"title"`
-	State     string            `json:"state"`
-	Priority  string            `json:"priority"`
-	Hours     float64           `json:"estimate_hours"`
-	Queued    *workqueue.Queued `json:"queued"`
-	Run       Run               `json:"run"`
+	NodeID     string            `json:"node_id"`
+	ProjectID  *string           `json:"project_id"`
+	Key        string            `json:"key"`
+	Title      string            `json:"title"`
+	State      string            `json:"state"`
+	Priority   string            `json:"priority"`
+	Hours      float64           `json:"estimate_hours"`
+	Queued     *workqueue.Queued `json:"queued"`
+	Run        Run               `json:"-"`
+	VisibleRun *Run              `json:"run,omitempty"`
 }
 type queueCapacity struct {
 	QueuedHours float64  `json:"queued_hours"`

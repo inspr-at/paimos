@@ -12807,7 +12807,7 @@ components:
         priority: {type: string}
         estimate_hours: {type: number, exclusiveMinimum: 0}
         queued: {$ref: '#/components/schemas/QueuedTicket'}
-        run: {$ref: '#/components/schemas/AgentRun'}
+        run: {allOf: [{$ref: '#/components/schemas/AgentRun'}], description: Present only with run.read permission or coordinator queue authority.}
     WorkQueue:
       type: object
       required: [items, count, manual_order, capacity]
