@@ -30,7 +30,7 @@ func (rt *runtime) reportHeartbeatUsage(ctx context.Context, projectID string, o
 	if err := rt.replayPendingUsage(ctx, projectID, session); err != nil {
 		return err
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil {
 		return err
 	}

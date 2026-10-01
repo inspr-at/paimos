@@ -39,6 +39,8 @@ type heartbeatDisk struct {
 	SentCommits           []string                `json:"sent_commits,omitempty"`
 	StartRev              string                  `json:"start_rev,omitempty"`
 	Usage                 []heartbeatUsageDisk    `json:"usage,omitempty"`
+	UsagePath             string                  `json:"usage_path,omitempty"`
+	UsageSource           string                  `json:"usage_source,omitempty"`
 	PendingUsage          []heartbeatPendingUsage `json:"pending_usage,omitempty"`
 	UsageOffset           int64                   `json:"usage_offset,omitempty"`
 	UsageRecent           []string                `json:"usage_recent,omitempty"`
@@ -49,6 +51,7 @@ type heartbeatDisk struct {
 	BoundWorktree         string                  `json:"bound_worktree,omitempty"`
 	BoundBranch           string                  `json:"bound_branch,omitempty"`
 	BoundTicket           string                  `json:"bound_ticket,omitempty"`
+	RegisteredAt          time.Time               `json:"registered_at,omitempty"`
 	StartedUnix           int64                   `json:"started_unix,omitempty"`
 	CommitCursor          string                  `json:"commit_cursor,omitempty"`
 	Terminal              bool                    `json:"terminal,omitempty"`

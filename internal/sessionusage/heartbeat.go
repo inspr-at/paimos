@@ -164,7 +164,12 @@ func CursorPromptUsage(fields map[string]json.RawMessage, model string) (UsageRe
 	if err != nil || !snap.inputKnown || !snap.cachedKnown {
 		return UsageReport{}, false
 	}
-	return CountReport(model, snap.input, snap.output, snap.cached, true)
+	report, ok := CountReport(model, snap.input, snap.output, snap.cached, true)
+	if ok && snap.reasoningKnown {
+		reasoning := snap.reasoning
+		report.ReasoningTokens = &reasoning
+	}
+	return report, ok
 }
 
 // ParseGrokUsage reads a rewritten usage.json snapshot. Per-model counters win

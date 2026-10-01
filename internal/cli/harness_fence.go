@@ -26,6 +26,8 @@ const (
 	harnessCodexIndex
 	// harnessGrokUsage is <GROK_HOME>/sessions/<enc-cwd>/<session>/usage.json.
 	harnessGrokUsage
+	// harnessGrokSummary supplies only created_at for usage discovery.
+	harnessGrokSummary
 	// harnessCursorUsage is the launcher's stream-json copy <state>/cursor.jsonl.
 	harnessCursorUsage
 	// harnessAgentStatus is <worktree>/.agent-status.json.
@@ -97,6 +99,9 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 	case harnessGrokUsage:
 		depth, ok = depthBelow(parts, "sessions")
 		ok = ok && depth >= 1 && depth <= 4 && base == "usage.json"
+	case harnessGrokSummary:
+		depth, ok = depthBelow(parts, "sessions")
+		ok = ok && depth == 3 && base == "summary.json"
 	case harnessCodexIndex:
 		ok = base == "session_index.jsonl"
 	case harnessCursorUsage:

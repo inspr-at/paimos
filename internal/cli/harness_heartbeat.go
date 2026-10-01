@@ -91,6 +91,7 @@ type heartbeatOptions struct {
 	Model             string
 	Effort            string
 	AccountLabel      string
+	HarnessVersion    string
 	Brief             string
 	Worktree          string
 	Branch            string
@@ -110,6 +111,7 @@ type heartbeatOptions struct {
 	UsageSource       string
 	UsageFile         string
 	UsageID           string
+	UsageStartedAt    time.Time // Registered generation start; never a CLI assertion.
 	CodexHome         string
 	GrokHome          string
 	BillingMode       string
@@ -144,6 +146,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
 			fs.string(&o.Effort, "effort", 0, "reasoning effort, or AEON_EFFORT when omitted")
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
+			fs.string(&o.HarnessVersion, "harness-version", 0, "harness version (defaults to a bounded local --version probe)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
 			fs.string(&o.Worktree, "worktree", 0, "worktree path")
 			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
@@ -509,7 +512,7 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	if session.disk.Terminal && !owed && !session.disk.Closed {
 		return
 	}
-	target, targetErr := resolveHeartbeatUsage(o)
+	target, targetErr := resolveSessionHeartbeatUsage(o, session)
 	if targetErr != nil {
 		fmt.Fprintf(rt.stderr, "heartbeat: usage source rejected\n")
 		_ = saveHeartbeatSession(session)
@@ -567,11 +570,11 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 
 // heartbeatUsageDue is true when this beat can owe a usage post. A resolved
 // Grok, Codex, or Cursor log counts even when --transcript is empty.
-func heartbeatUsageDue(o heartbeatOptions) bool {
+func heartbeatUsageDue(o heartbeatOptions, session *heartbeatSession) bool {
 	if o.Transcript != "" {
 		return true
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	return err != nil || target.Path != ""
 }
 
@@ -815,6 +818,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
+	putText(body, "harness_version", harnessVersionOrProbe(ctx, o.Harness, o.HarnessVersion), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
@@ -1045,7 +1049,8 @@ func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartb
 		return
 	}
 	disk.BoundWorktree = filepath.Clean(o.Worktree)
-	disk.StartedUnix = time.Now().Unix()
+	disk.RegisteredAt = time.Now().UTC()
+	disk.StartedUnix = disk.RegisteredAt.Unix()
 	if head, err := gitHEAD(ctx, o.Worktree); err == nil {
 		disk.StartRev = head
 		disk.CommitCursor = head
@@ -1204,7 +1209,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
-	if heartbeatUsageDue(o) {
+	if heartbeatUsageDue(o, session) {
 		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

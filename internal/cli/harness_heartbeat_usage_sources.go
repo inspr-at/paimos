@@ -3,7 +3,9 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
@@ -112,18 +115,160 @@ func locateUsageFile(o heartbeatOptions, source string) string {
 		}
 		return ""
 	case "codex":
-		if id == "" || o.CodexHome == "" {
+		if o.CodexHome == "" {
 			return ""
+		}
+		if id == "" {
+			return discoverCodexRollout(o.CodexHome, o.Worktree, o.UsageStartedAt)
 		}
 		return findCodexRollout(o.CodexHome, id)
 	case "grok":
-		if id == "" || o.GrokHome == "" {
+		if o.GrokHome == "" {
 			return ""
+		}
+		if id == "" {
+			return discoverGrokUsage(o.GrokHome, o.Worktree, o.UsageStartedAt)
 		}
 		return findGrokUsage(o.GrokHome, o.Worktree, id)
 	default:
 		return ""
 	}
+}
+
+// Discovery belongs to the registered generation, including after a helper
+// restart. Pin its first match so another session cannot inherit its cursor.
+func resolveSessionHeartbeatUsage(o heartbeatOptions, session *heartbeatSession) (usageTarget, error) {
+	if session == nil || o.UsageFile != "" || o.Transcript != "" || o.UsageID != "" || validUUID(o.SourceSession) {
+		return resolveHeartbeatUsage(o)
+	}
+	o.Worktree = session.disk.BoundWorktree
+	o.UsageStartedAt = session.disk.RegisteredAt
+	if o.UsageStartedAt.IsZero() && session.disk.StartedUnix > 0 {
+		o.UsageStartedAt = time.Unix(session.disk.StartedUnix, 0)
+	}
+	source := usageSourceOf(o)
+	if source != "codex" && source != "grok" {
+		return resolveHeartbeatUsage(o)
+	}
+	if session.disk.UsagePath != "" {
+		if session.disk.UsageSource != source {
+			return usageTarget{}, usagef("usage source differs from the registered log")
+		}
+		o.UsageFile = session.disk.UsagePath
+		return resolveHeartbeatUsage(o)
+	}
+	target, err := resolveHeartbeatUsage(o)
+	if err == nil && target.Path != "" {
+		session.disk.UsageSource, session.disk.UsagePath = source, target.Path
+		if err = saveHeartbeatSession(session); err != nil {
+			return usageTarget{}, err
+		}
+	}
+	return target, err
+}
+
+func discoverCodexRollout(home, worktree string, started time.Time) string {
+	if worktree == "" || started.IsZero() {
+		return ""
+	}
+	root := filepath.Join(home, "sessions")
+	var found string
+	var newest time.Time
+	n := 0
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		n++
+		if n > usageWalkLimit {
+			return errors.New("usage walk limit")
+		}
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 || credentialUsageName(d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		f, err := openHarnessFile(harnessCodexRollout, path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		reader := bufio.NewReader(io.LimitReader(f, heartbeatTitleLineMax+1))
+		line, err := reader.ReadBytes('\n')
+		if err != nil || len(line) > heartbeatTitleLineMax {
+			return nil
+		}
+		var meta struct {
+			Type    string `json:"type"`
+			Payload struct {
+				CWD       string    `json:"cwd"`
+				Timestamp time.Time `json:"timestamp"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(line, &meta) != nil || meta.Type != "session_meta" || meta.Payload.CWD != worktree || !meta.Payload.Timestamp.After(started) {
+			return nil
+		}
+		if meta.Payload.Timestamp.After(newest) || meta.Payload.Timestamp.Equal(newest) && path > found {
+			found, newest = path, meta.Payload.Timestamp
+		}
+		return nil
+	})
+	return found
+}
+
+func discoverGrokUsage(home, worktree string, started time.Time) string {
+	if worktree == "" || started.IsZero() {
+		return ""
+	}
+	// Grok encodes the exact cwd in the parent name. updatedAt in usage.json
+	// proves activity, not session creation: use summary.json's created_at.
+	root := filepath.Join(home, "sessions", encodeURIComponent(worktree))
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	var found string
+	var newest time.Time
+	for i, entry := range entries {
+		if i >= usageWalkLimit {
+			break
+		}
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !usageID(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), "usage.json")
+		if !regularUsageFile("grok", path) {
+			continue
+		}
+		created := grokSessionCreated(filepath.Join(root, entry.Name(), "summary.json"))
+		if !created.After(started) {
+			continue
+		}
+		if created.After(newest) || created.Equal(newest) && path > found {
+			found, newest = path, created
+		}
+	}
+	return found
+}
+
+func grokSessionCreated(path string) time.Time {
+	f, err := openHarnessFile(harnessGrokSummary, path)
+	if err != nil {
+		return time.Time{}
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, heartbeatTitleScanMax+1))
+	var meta struct {
+		Created time.Time `json:"created_at"`
+	}
+	if err != nil || len(raw) > int(heartbeatTitleScanMax) || json.Unmarshal(raw, &meta) != nil {
+		return time.Time{}
+	}
+	return meta.Created
 }
 
 func usageID(id string) bool {
@@ -515,7 +660,7 @@ func snapshotCaughtUp(path, fallback string, session *heartbeatSession) bool {
 }
 
 func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil || target.Path == "" {
 		return err == nil
 	}
@@ -526,7 +671,7 @@ func usageCaughtUp(o heartbeatOptions, session *heartbeatSession) bool {
 }
 
 func usageOutstanding(o heartbeatOptions, session *heartbeatSession) bool {
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	if err != nil || session == nil || target.Path == "" {
 		return false
 	}
