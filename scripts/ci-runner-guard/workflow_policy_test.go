@@ -57,7 +57,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "cross-family", "gate/cross-family"} {
 		for _, identity := range []string{id, strings.ToUpper(id)} {
 			add("reserved-id/"+identity, "extra.yaml", "reserved to ci.yml", func(w map[string]any) {
 				w["jobs"] = map[string]any{identity: map[string]any{"runs-on": "ubuntu-latest"}}

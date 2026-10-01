@@ -9,6 +9,7 @@ import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
 import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
+import { stamp } from '../src/lib/position'
 import { filtersFromQuery, type ListFilters } from '../src/lib/ticketList'
 import { BATCH_MS, placeKey, RETRY_MS, useLiveList, type ListRead, type LiveList, type LiveListBlockers, type LiveListOptions, type LiveReadPurpose } from '../src/lib/useLiveList'
 
@@ -103,6 +104,91 @@ beforeEach(() => { clock = 0; vi.useFakeTimers() })
 afterEach(() => { scope?.stop(); scope = undefined; vi.useRealTimers() })
 
 describe('useLiveList: field changes', () => {
+  it('refreshes ETA and lead worker after a stop without changing the ticket revision', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Ended worker', key: 's:ended' } })])
+    const row = h.rows.value[0], revision = row.updated_at
+    const server = h.srv.nodes[0]
+    server.eta = { finished: true, progress_pct: 100 }
+    server.lead_worker = null
+    h.send({ id: 'n1', type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    await h.settle()
+    expect(row.updated_at).toBe(revision)
+    expect(row.eta).toEqual({ finished: true, progress_pct: 100 })
+    expect(row.lead_worker).toBeNull()
+    expect(h.rows.value[0]).toBe(row)
+  })
+
+  it('a heartbeat read overtaken by a stop reads the same-revision projections again', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Worker', key: 's:worker' } })])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    h.srv.fetchList.mockImplementationOnce(async query => { const page = await plain(query, 'matches'); await gate; return page })
+    h.send({ id: 'n1', type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+    await vi.advanceTimersByTimeAsync(BATCH_MS)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 100 }
+    h.srv.nodes[0].lead_worker = null
+    h.send({ id: 'n1', type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    release()
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    await h.settle()
+    expect(h.rows.value[0].eta).toEqual({ finished: true, progress_pct: 100 })
+    expect(h.rows.value[0].lead_worker).toBeNull()
+  })
+
+  it('applies stop and ETA progress under continuous heartbeats and keeps exactly one follow-up batch', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Ended worker', key: 's:ended' } })])
+    const row = h.rows.value[0], revision = row.updated_at
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let position = 1001, reads = 0
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 90 }
+    h.srv.nodes[0].lead_worker = null
+    h.srv.fetchList.mockImplementation(async (query, purpose) => {
+      const before = position
+      const page = stamp(await plain(query, purpose), new Response(null, { headers: { 'Aeon-Event-Position': String(before) } }))
+      if (++reads <= 10) {
+        h.srv.nodes[0].eta = { finished: true, progress_pct: 90 + reads }
+        h.send({ id: 'n1', eventId: ++position, type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+      }
+      return page
+    })
+    h.send({ id: 'n1', eventId: position, type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    for (let read = 1; read <= 11; read++) {
+      await vi.advanceTimersByTimeAsync(BATCH_MS)
+      expect(h.srv.fetchList).toHaveBeenCalledTimes(read)
+      expect(row.lead_worker).toBeNull()
+      expect(row.eta).toEqual({ finished: true, progress_pct: 89 + read })
+      expect(row.updated_at).toBe(revision)
+      expect(h.nodes.projectionsCurrent('n1')).toBe(read === 11)
+    }
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 10)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(11)
+    expect(h.rows.value[0]).toBe(row)
+  })
+
+  it('continues applying projections when the database counter rewinds during a busy read', async () => {
+    const initial = stamp(item('n1', { lead_worker: { name: 'Ended worker', key: 's:ended' } }), new Response(null, { headers: { 'Aeon-Event-Position': '5000' } }))
+    const h = setup([initial])
+    const row = h.rows.value[0]
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let position = 1, reads = 0
+    h.srv.nodes[0].lead_worker = null
+    h.srv.fetchList.mockImplementation(async (query, purpose) => {
+      const page = stamp(await plain(query, purpose), new Response(null, { headers: { 'Aeon-Event-Position': String(position) } }))
+      if (++reads <= 5) h.send({ id: 'n1', eventId: ++position, type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+      return page
+    })
+    h.send({ id: 'n1', eventId: 5001, type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    for (let read = 1; read <= 6; read++) {
+      await vi.advanceTimersByTimeAsync(BATCH_MS)
+      expect(h.srv.fetchList).toHaveBeenCalledTimes(read)
+      expect(row.lead_worker).toBeNull()
+    }
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 10)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(6)
+    expect(h.nodes.projectionsCurrent('n1')).toBe(true)
+  })
   it('patches the row object in place, tints it and says so politely', async () => {
     const h = setup([item('n1'), item('n2')])
     const row = h.rows.value![1]
@@ -550,6 +636,49 @@ describe('useLiveList: loads and gaps', () => {
     await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
     expect(h.rows.value![0].title).toBe('Remote')
     expect(h.live.message.value).toBe('K-1 was updated elsewhere.')
+  })
+
+  it('keeps freshness stale until every resync batch has finished and preserves the successful update time on failure', async () => {
+    const h = setup([item('n1'), item('n2')])
+    const oldAt = h.live.updatedAt.value
+    const plain = h.srv.fetchList.getMockImplementation()!
+    // Only the first row is in the first resync page, so the second needs a batch.
+    h.srv.fetchList.mockImplementationOnce(async query => {
+      const page = await plain(query, 'matches')
+      return { ...page, items: page.items.slice(0, 1) }
+    }).mockRejectedValueOnce(new Error('offline'))
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.live.dataStale.value).toBe(true)
+    await h.settle()
+    expect(h.live.updatedAt.value).toBe(oldAt)
+    expect(h.live.dataStale.value).toBe(true)
+    await h.settle()
+    expect(h.live.updatedAt.value).toBeGreaterThanOrEqual(oldAt!)
+    // A connected stream can declare freshness only after those batches land.
+    for (const listen of (h.store as unknown as { stateListeners: Set<(state: string) => void> }).stateListeners) listen('live')
+    expect(h.live.dataStale.value).toBe(false)
+  })
+
+  it('wake starts a full resync without waiting for a pre-sleep resync request', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Old worker', key: 's:old' } })])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => { release = resolve })
+    h.srv.fetchList.mockImplementationOnce(async query => { const page = await plain(query, 'matches'); await waiting; return page })
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 100 }
+    h.srv.nodes[0].lead_worker = null
+    h.gap()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(2)
+    expect(h.rows.value[0].eta?.finished).toBe(true)
+    expect(h.rows.value[0].lead_worker).toBeNull()
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.rows.value[0].eta?.finished).toBe(true)
+    expect(h.rows.value[0].lead_worker).toBeNull()
   })
 
   it('a resync that keeps failing is tried again after growing waits, then waits for a resumed stream', async () => {

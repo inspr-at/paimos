@@ -21,7 +21,11 @@ import (
 // and a write of its own, keeps the newest position per entity: an older
 // position never overwrites a newer one, whatever order the answers arrive in.
 //
-//   - A read names the exact snapshot it returns: the newest committed event
+//   - A node-list read names the newest event before its handler: a lower bound
+//     on the events its projections include. It runs once, even when newer events
+//     commit while it runs. Clients can apply a page covering the triggering hint
+//     while keeping a follow-up read for the newer hints (AEON-514).
+//   - Other reads name the exact snapshot they return: the newest committed event
 //     was the same before its first statement and after its last, so no event
 //     committed while it ran, and it includes every event up to that position
 //     and none after. A read that an event interrupted is run again (see
@@ -55,16 +59,18 @@ const readAttempts = 3
 // lists and details that /agents holds side by side and that its own writes
 // change. A read outside the set carries no header, so it costs nothing.
 var positionReads = map[string]bool{
+	"GET /api/nodes":                                             true,
+	"GET /api/harness-sessions/live":                             true,
 	"GET /api/harness-sessions":                                  true,
 	"GET /api/projects/{projectId}/harness-sessions":             true,
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}": true,
-	"GET /api/runs":                                 true,
-	"GET /api/runs/{runId}":                         true,
-	"GET /api/agent-accounts":                       true,
-	"GET /api/approvals":                            true,
-	"GET /api/models":                               true,
-	"GET /api/projects/{projectId}/messages":        true,
-	"GET /api/projects/{projectId}/message-targets": true,
+	"GET /api/runs":                                              true,
+	"GET /api/runs/{runId}":                                      true,
+	"GET /api/agent-accounts":                                    true,
+	"GET /api/approvals":                                         true,
+	"GET /api/models":                                            true,
+	"GET /api/projects/{projectId}/messages":                     true,
+	"GET /api/projects/{projectId}/message-targets":              true,
 }
 
 // PositionMiddleware sets PositionHeader on those reads and on every accepted
@@ -93,9 +99,9 @@ func PositionMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 	}
 }
 
-// serveSettled answers a listed read with the position of the snapshot it
-// returns. The handler answers into a buffer while the newest event is read
-// before and after it: equal means no event committed while it ran.
+// serveSettled buffers listed reads. The node list carries the before counter
+// as a lower bound without repeating the handler; other collections retain their
+// settled snapshot contract (equal counters before and after the handler).
 func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, pool *pgxpool.Pool, tenantID string) {
 	var answer *bufferedResponse
 	for attempt := 0; attempt < readAttempts; attempt++ {
@@ -106,6 +112,10 @@ func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, poo
 		answer = newBufferedResponse(w.Header())
 		next.ServeHTTP(answer, r)
 		if answer.status < 200 || answer.status >= 300 {
+			break
+		}
+		if r.Pattern == "GET /api/nodes" {
+			answer.header.Set(PositionHeader, strconv.FormatInt(before, 10))
 			break
 		}
 		if after, err := newestEvent(r.Context(), pool, tenantID); err != nil {

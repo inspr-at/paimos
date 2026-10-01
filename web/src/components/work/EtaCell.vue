@@ -4,17 +4,18 @@ import { computed } from 'vue'
 import { formatEta, type EtaInput, type EtaMode } from '../../lib/eta'
 import { usePreference } from '../../lib/preferences'
 import AppIcon from '../AppIcon.vue'
+import { STALE_LIST_TIP } from '../../lib/listFreshness'
 
 // One compact estimate: the headline time (ready, else live) flush to the column's
 // edge, percent done as a quiet figure before it, grey with a clock when
 // the report went stale, the warning tone once the time has passed. The tooltip
 // carries both forms, who estimated and when. Working sessions without a time
 // keep a quiet hint; other empty cells stay empty.
-const props = withDefaults(defineProps<{ eta: EtaInput | null; now: number; align?: 'end' | 'start'; labelled?: boolean; missing?: boolean }>(), { align: 'end', labelled: false, missing: false })
+const props = withDefaults(defineProps<{ eta: EtaInput | null; now: number; align?: 'end' | 'start'; labelled?: boolean; missing?: boolean; connectionStale?: boolean }>(), { align: 'end', labelled: false, missing: false, connectionStale: false })
 const pref = usePreference<{ mode?: EtaMode }>('eta-display')
 const mode = computed<EtaMode>(() => pref.value.value?.mode === 'clock' || pref.value.value?.mode === 'both' ? pref.value.value.mode : 'relative')
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-const view = computed(() => formatEta(props.eta, mode.value, props.now, zone))
+const view = computed(() => formatEta(props.eta, mode.value, props.now, zone, props.connectionStale))
 const hint = computed(() => props.missing && !view.value?.text && view.value?.pct !== 100)
 const tip = computed(() => [view.value?.tip, hint.value ? 'No ETA reported for this working session' : null].filter(Boolean).join('\n'))
 // The kind is named when asked for, or when the headline is the live time (a
@@ -37,7 +38,7 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
       <span v-else-if="hint" class="missing">no ETA</span>
     </span>
   </span>
-  <span v-else-if="missing" class="eta-cell missing" :class="align" data-tip="No ETA reported for this working session">no ETA</span>
+  <span v-else-if="missing" class="eta-cell missing" :class="[align, { stale: connectionStale }]" :data-tip="connectionStale ? STALE_LIST_TIP : 'No ETA reported for this working session'">{{ connectionStale ? 'last ETA unknown' : 'no ETA' }}</span>
 </template>
 
 <style scoped>
@@ -59,6 +60,7 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
 .eta-cell.start .pct { order: 3; }
 .eta-cell.overdue .when { color: var(--warn); font-weight: 550; }
 .eta-cell.stale, .eta-cell.stale .kind, .eta-cell.stale .pct { color: var(--ink-3); }
+.eta-cell.stale { opacity: .6; }
 .stale-icon { flex: none; color: var(--ink-3); }
 .eta-cell.done { color: var(--ink-2); }
 .done-icon { flex: none; color: var(--ok); }
