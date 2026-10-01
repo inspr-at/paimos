@@ -5,12 +5,13 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/workqueue"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a

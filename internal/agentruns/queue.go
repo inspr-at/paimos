@@ -152,7 +152,7 @@ func queuePermission(ctx context.Context, tx pgx.Tx, p tenant.Principal, project
 }
 func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queueTicket, error) {
 	q := `SELECT n.id::text,n.key,n.title,n.body,n.state,n.project_id::text,n.fields,k.slug,to_jsonb(n),
- EXISTS(SELECT 1 FROM relations r JOIN nodes b ON b.tenant_id=r.tenant_id AND b.id=r.source_node_id WHERE r.target_node_id=n.id AND r.type='blocks' AND b.deleted_at IS NULL)
+ EXISTS(SELECT 1 FROM node_relations r JOIN nodes b ON b.tenant_id=r.tenant_id AND b.id=r.source_node_id WHERE r.target_node_id=n.id AND r.type='blocks' AND b.deleted_at IS NULL)
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF n`

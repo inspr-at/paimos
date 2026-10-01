@@ -5,10 +5,10 @@ package workqueue
 
 import (
 	"context"
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/jackc/pgx/v5"
 )
 
