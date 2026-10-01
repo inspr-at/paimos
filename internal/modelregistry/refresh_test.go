@@ -32,7 +32,7 @@ func grantModelReporter(t *testing.T, p, agent tenant.Principal) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'model_reporter','Model reporter') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['models.read','models.report','models.refresh','models.manage'])`, p.TenantID, role); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['nodes.read','models.read','models.report','models.refresh','models.manage'])`, p.TenantID, role); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace') ON CONFLICT (tenant_id,principal_id) WHERE scope_type='workspace' DO UPDATE SET role_id=EXCLUDED.role_id`, p.TenantID, agent.ID, role)
