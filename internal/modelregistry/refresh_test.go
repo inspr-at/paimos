@@ -424,6 +424,7 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
 	grantModelReporter(t, p, worker)
 	worker.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
+	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	before := registryRoutes(t, p)
 	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
