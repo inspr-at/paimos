@@ -63,19 +63,23 @@ and expressions are not accepted as constant defaults. Replacing a function,
 dropping constraints/defaults/policies/indexes, changing types, setting an
 existing column `NOT NULL`, renaming, truncating and deleting require a marker.
 All `DO` blocks and dynamic `EXECUTE` function bodies require a marker, including
-SQL assigned to a variable before execution. The tokenizer keeps comments,
+SQL assigned to a variable before execution. The checker first splits SQL with
+an exact port of the runner in `internal/db/sqlsplit.go`, including its first-`*/`
+block-comment termination, comment removal and quote handling. A parity test
+compares their statement lists over comment/quote edge cases and every embedded
+migration; CI runs it explicitly with Node installed. The tokenizer keeps
 quoted identifiers and string/dollar literals separate from executable SQL.
 Every statement must be allowlisted; unknown forms fail closed.
 
-`scripts/migration-policy-baseline.json` explicitly grandfathers migration
-numbers through `1043`, the latest released number when this policy was added.
-Later releases advance that bound to their latest migration. The two existing,
-unreleased main migrations `1047` and `1048` are pinned by exact SHA-256 content
-and their source commit, so adoption does not rewrite historical SQL. Changing
-either pinned file fails. The static guard still classifies all files, checks
-duplicate numbers across the entire directory and enforces published-file
-immutability, including below the baseline. New SQL above that bound must meet
-the allowlist or supply verified contract evidence.
+`scripts/migration-policy-baseline.json` explicitly grandfathers a set of
+filenames, each pinned by exact SHA-256 content from the published release and
+the main commit this policy started from. These source commits are recorded,
+and a regression test verifies the complete manifest against their Git trees.
+Changing or removing a pinned file fails, so adoption preserves historical SQL.
+The current published release's exact filenames are also immutable. The static
+guard still classifies all files and checks duplicate numbers across the entire
+directory. Every other filename must meet the allowlist or supply verified
+contract evidence, even when its number fills a gap below the latest release.
 
 The `migration-compat` job in `.github/workflows/ci.yml` runs on pull requests,
 `merge_group`, main pushes and manual dispatch, always on GitHub-hosted Linux
@@ -96,6 +100,7 @@ Run the same checks locally (Go, Node, Python and Docker required):
 
 ```sh
 node --test scripts/check-migrations.test.mjs
+GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
 node scripts/check-migrations.mjs --base-ref v260930115354.0.0
 bash scripts/migration-compat.sh v260930115354.0.0 sha256:fceff43ddd6e11473b1fa17669dbf1fc720dfaa4828b3ab2ff2a67a5dbc3aa2d
 ```

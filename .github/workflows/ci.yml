@@ -281,6 +281,8 @@ jobs:
         with:
           go-version: "1.26"
           cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Checker and migration runner SQL splitter parity
+        run: GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1
       - name: Previous binary on the candidate schema
         env:
           PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}

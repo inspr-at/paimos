@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrations, contractMarker, destructive } from './check-migrations.mjs';
+import { checkMigrations, contractMarker, destructive, publishedMigrations } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
 
@@ -38,10 +38,22 @@ test('comments and data literals cannot masquerade as executable SQL', () => {
   for (const sql of [
     "INSERT INTO notes (body) VALUES ('DROP TABLE nodes;');",
     '-- ALTER TABLE nodes DROP COLUMN title;\n',
-    '/* DROP TABLE nodes; /* nested */ ALTER TABLE nodes RENAME TO x; */',
+    '/* DROP TABLE nodes; */',
     'CREATE TABLE "DROP TABLE nodes" (id text);',
-    "INSERT INTO notes(body) VALUES (E'escaped \\' DROP TABLE nodes;');",
   ]) assert.equal(destructive(sql), false, sql);
+});
+
+test('SQL exposed by the runner after nested-looking comments requires contract evidence', () => {
+  for (const sql of [
+    'ALTER TABLE nodes ADD COLUMN extra text; /* a /* b */ ALTER TABLE nodes ALTER COLUMN title TYPE text; -- */',
+    'ALTER TABLE nodes ADD COLUMN extra text; /* a /* b */ DROP TABLE nodes; -- */',
+    '/* DROP TABLE nodes; /* nested */ ALTER TABLE nodes RENAME TO x; */',
+    'DR/**/OP TABLE nodes;',
+    "INSERT INTO notes(body) VALUES (E'escaped \\' DROP TABLE nodes;');",
+  ]) {
+    assert.equal(destructive(sql), true, sql);
+    assert.match(checkMigrations(new Map([['1050_contract.sql', sql]])).join('\n'), /contract-phase/);
+  }
 });
 
 test('every non-allowlisted statement requires a contract marker', () => {
@@ -101,18 +113,42 @@ test('explicit expand-safe forms are accepted, including mixed ALTER actions', (
   assert.equal(destructive('CREATE TABLE IF NOT EXISTS nodes(id text); ALTER TABLE nodes FORCE ROW LEVEL SECURITY;'), true);
 });
 
-test('an explicit numeric baseline preserves legacy gaps but keeps published SQL immutable', () => {
+test('new filenames require contract evidence even below the highest published number', () => {
   const published = new Map([['1043_released.sql', 'DROP TABLE obsolete;']]);
-  assert.deepEqual(checkMigrations(new Map([...published, ['1042_legacy_gap.sql', 'DO $$ BEGIN END $$;']]), published), []);
-  assert.match(checkMigrations(new Map([...published, ['1044_new.sql', 'DO $$ BEGIN END $$;']]), published).join('\n'), /contract-phase/);
+  for (const name of ['0000_new.sql', '1040_new.sql', '1041_new.sql', '1042_new.sql', '1044_new.sql']) {
+    for (const sql of ['DO $$ BEGIN END $$;', 'DROP TABLE nodes;', 'DELETE FROM nodes;', 'ALTER TABLE nodes ALTER COLUMN title TYPE text;']) {
+      assert.match(checkMigrations(new Map([...published, [name, sql]]), published).join('\n'), /contract-phase/, name);
+      assert.deepEqual(checkMigrations(new Map([...published, [name, marker + sql]]), published), []);
+    }
+    assert.deepEqual(checkMigrations(new Map([...published, [name, 'CREATE TABLE extra(id text);']]), published), []);
+  }
 });
 
 test('pre-policy SQL is grandfathered by exact content, never by its name alone', () => {
   const name = '1047_existing.sql', sql = 'DO $$ BEGIN END $$;';
-  const baseline = {releasedThrough: 1043, legacyFiles: {[name]: createHash('sha256').update(sql).digest('hex')}};
+  const baseline = {grandfatheredFiles: {[name]: createHash('sha256').update(sql).digest('hex')}};
   assert.deepEqual(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline}), []);
   assert.match(checkMigrations(new Map([[name, sql + ' DROP TABLE nodes;']]), new Map(), null, {baseline}).join('\n'), /pre-policy migration changed/);
   assert.match(checkMigrations(new Map([['1048_new.sql', sql]]), new Map(), null, {baseline}).join('\n'), /contract-phase/);
+  assert.match(checkMigrations(new Map([[name, marker + 'DROP TABLE nodes;']]), new Map(), null, {baseline}).join('\n'), /pre-policy migration changed/);
+  assert.match(checkMigrations(new Map(), new Map(), null, {baseline}).join('\n'), /pre-policy migration removed/);
+});
+
+test('grandfathered low-numbered files are immutable and do not exempt adjacent gaps', () => {
+  const name = '0001_existing.sql', sql = 'DROP TABLE obsolete;';
+  const baseline = {grandfatheredFiles: {[name]: createHash('sha256').update(sql).digest('hex')}};
+  const options = {baseline};
+  assert.deepEqual(checkMigrations(new Map([[name, sql]]), new Map(), null, options), []);
+  assert.match(checkMigrations(new Map([[name, 'CREATE TABLE extra(id text);']]), new Map(), null, options).join('\n'), /pre-policy migration changed/);
+  assert.match(checkMigrations(new Map([[name, sql], ['0000_gap.sql', 'DROP TABLE nodes;']]), new Map(), null, options).join('\n'), /contract-phase/);
+});
+
+test('checked-in grandfathering pins exactly the release and pre-policy source filenames and bytes', () => {
+  const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
+  assert.equal(execFileSync('git', ['rev-parse', `refs/tags/${baseline.releasedTag}^{commit}`], {encoding: 'utf8'}).trim(), baseline.releasedSourceCommit);
+  const historical = new Map([...publishedMigrations(`refs/tags/${baseline.releasedTag}`), ...publishedMigrations(baseline.legacySourceCommit)]);
+  const hashes = Object.fromEntries([...historical].sort(([a], [b]) => a.localeCompare(b)).map(([name, sql]) => [name, createHash('sha256').update(sql).digest('hex')]));
+  assert.deepEqual(baseline.grandfatheredFiles, hashes);
 });
 
 test('contract evidence names an existing earlier tag containing the expansion migration', () => {
@@ -153,6 +189,7 @@ test('the static guard runs on PR and merge-group checkouts with full release-ta
   assert.match(workflow, /^  migration-compat:/m);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /node scripts\/check-migrations.mjs --base-ref/);
+  assert.match(workflow, /go test -p 2 \.\/internal\/db -run '\^TestMigrationCheckerSplitParity\$' -count=1/);
   assert.doesNotMatch(workflow, /if:.*pull_request/);
 });
 

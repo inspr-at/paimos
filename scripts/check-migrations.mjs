@@ -6,6 +6,61 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validCalendarVersion } from './verify-release.mjs';
 
+// Port internal/db/sqlsplit.go exactly: the runner removes comments (without
+// inserting whitespace), ends block comments at the first */, ignores backslash
+// escapes in quoted strings, and accepts digits in dollar tags. Classify what
+// pgx will execute rather than using the tokenizer to choose statement borders.
+// Go strings.TrimSpace uses Unicode White_Space, which differs from JS trim().
+export function splitSQL(sql) {
+  const statements = [];
+  let buffer = '';
+  const flush = () => {
+    const statement = buffer.replace(/^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g, '');
+    buffer = '';
+    if (statement !== '') statements.push(statement);
+  };
+  for (let i = 0; i < sql.length;) {
+    if (sql.startsWith('--', i)) {
+      i += 2;
+      while (i < sql.length && sql[i] !== '\n') i++;
+      continue;
+    }
+    if (sql.startsWith('/*', i)) {
+      i += 2;
+      while (i + 1 < sql.length && !sql.startsWith('*/', i)) i++;
+      i = i + 1 < sql.length ? i + 2 : sql.length;
+      continue;
+    }
+    if (sql[i] === "'" || sql[i] === '"') {
+      const quote = sql[i];
+      buffer += sql[i++];
+      while (i < sql.length) {
+        buffer += sql[i];
+        if (sql[i] === quote) {
+          if (i + 1 < sql.length && sql[i + 1] === quote) {
+            buffer += quote; i += 2; continue;
+          }
+          i++; break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (sql[i] === '$') {
+      const tag = /^\$[A-Za-z0-9_]*\$/.exec(sql.slice(i))?.[0];
+      if (tag) {
+        const end = sql.indexOf(tag, i + tag.length);
+        const next = end < 0 ? sql.length : end + tag.length;
+        buffer += sql.slice(i, next); i = next; continue;
+      }
+    }
+    if (sql[i] === ';') { flush(); i++; continue; }
+    buffer += sql[i++];
+  }
+  flush();
+  return statements;
+}
+
 // Tokenize without interpreting words or semicolons in comments, identifiers or
 // literals as SQL. Opaque DO bodies never enter the expand-safe allowlist.
 function tokens(sql) {
@@ -156,8 +211,11 @@ function expandSafe(statement, createdTables) {
 
 export function destructive(sql) {
   try {
+    // Keep malformed source fail-closed, but choose statement boundaries only
+    // with the runner's splitter. Nested-looking comments can expose real SQL.
+    tokens(sql);
     const createdTables = new Set();
-    return split(tokens(sql), ';').filter(statement => statement.length).some(statement => !expandSafe(statement, createdTables));
+    return splitSQL(sql).map(tokens).filter(statement => statement.length).some(statement => !expandSafe(statement, createdTables));
   } catch { return true; }
 }
 
@@ -191,8 +249,7 @@ function expansionReleased(evidence, previousTag, repository = '.') {
 
 export function checkMigrations(files, published = new Map(), previousVersion = null, options = {}) {
   const problems = [], numbers = new Map();
-  const releasedThrough = Math.max(0, ...[...published.keys()].map(name => Number(/^(\d{4})_/.exec(name)?.[1] ?? 0)));
-  const baseline = options.baseline ?? {releasedThrough, legacyFiles: {}};
+  const grandfathered = options.baseline?.grandfatheredFiles ?? {};
   const sha256 = sql => createHash('sha256').update(sql).digest('hex');
   for (const [name, sql] of files) {
     const match = /^(\d{4})_[a-z0-9_]+\.sql$/.exec(name);
@@ -201,17 +258,18 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
     if (numbers.has(number)) problems.push(`${name}: duplicate migration number ${match[1]} (also ${numbers.get(number)})`);
     numbers.set(number, name);
     if (published.has(name) && published.get(name) !== sql) problems.push(`${name}: published migration changed; add a new migration instead`);
-    const legacy = baseline.legacyFiles[name];
+    const legacy = grandfathered[name];
     if (legacy && legacy !== sha256(sql)) problems.push(`${name}: pre-policy migration changed; add a new migration instead`);
-    // Classify all SQL; grandfather explicit released numbers and exact legacy
+    // Classify all SQL; grandfather explicit published filenames and exact legacy
     // content, while still checking names, duplicates and immutability above.
     const requiresContract = destructive(sql);
-    if (requiresContract && number > Math.max(releasedThrough, baseline.releasedThrough) && !legacy) {
+    if (requiresContract && !published.has(name) && !legacy) {
       const evidence = markerEvidence(sql, previousVersion);
       if (!expansionReleased(evidence, options.previousTag ?? (previousVersion ? `v${previousVersion}` : evidence?.tag), options.repository)) problems.push(`${name}: non-allowlisted SQL requires -- aeon:contract-phase TICKET-N expanded-in=vYYMMDDhhmmss.0.0 expansion-migration=NNNN_name.sql (existing expansion release tag, at or before and ancestral to the previous release, containing the expansion migration)`);
     }
   }
   for (const name of published.keys()) if (!files.has(name)) problems.push(`${name}: published migration removed`);
+  for (const name of Object.keys(grandfathered)) if (!files.has(name)) problems.push(`${name}: pre-policy migration removed`);
   return problems;
 }
 
@@ -231,6 +289,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const published = publishedMigrations(`refs/tags/${args[1]}`);
     const problems = checkMigrations(files, published, args[1].slice(1), {baseline, previousTag: args[1]});
     if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
-    else console.log(`migration guard: ${files.size} unique numbers; published files unchanged; expand-safe allowlist enforced above released baseline ${Math.max(baseline.releasedThrough, ...[...published.keys()].map(name => Number(name.slice(0, 4))))}`);
+    else console.log(`migration guard: ${files.size} unique numbers; published and grandfathered files unchanged; expand-safe allowlist enforced for every new filename`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
