@@ -20,7 +20,7 @@ import HarnessMark from './HarnessMark.vue'
 const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean; refreshToken?: number }>()
 const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
 const agents = useAgents()
-const copy = attachCopy()
+const copy = computed(() => attachCopy(brand.value.short_name))
 
 const computers = ref<PairingView[]>([])
 const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')

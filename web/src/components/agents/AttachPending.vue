@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { attachOutcome, listPendingAttach, metadataOnlyAttach, type AttachOutcome, type AttachReview } from '../../lib/attachWatch'
 import { attachCopy } from '../../lib/attachCopy'
+import { brand } from '../../lib/brand'
 import { can, onAccessChange } from '../../lib/authz'
 import { duration } from '../../lib/agentState'
 import { HARNESS_NAME } from '../../lib/capacity'
@@ -19,7 +20,7 @@ const props = defineProps<{ now: number }>()
 const emit = defineEmits<{ review: [request: AttachReview] }>()
 
 const session = useSession()
-const copy = attachCopy()
+const copy = computed(() => attachCopy(brand.value.short_name))
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 // Whose list this is. Every read runs in the identity scope (one person, one
 // workspace, one generation): an answer for anyone else is dropped, never shown.

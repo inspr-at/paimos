@@ -14,7 +14,7 @@ import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
 const agents = useAgents()
-const copy = attachCopy()
+const copy = computed(() => attachCopy(brand.value.short_name))
 // A decision changes what /agents lists as waiting; the page refreshes it.
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
@@ -90,7 +90,7 @@ function show(result: AttachReview) {
 defineExpose({ show })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
-  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = copy.invalidCode; return Promise.resolve() }
+  if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = copy.value.invalidCode; return Promise.resolve() }
   return lookups.run(({ after, signal }) => {
     busy.value = true; error.value = ''
     return after(attachAction('/lookup', { user_code: normalized }, signal), present)
