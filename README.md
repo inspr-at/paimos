@@ -6,6 +6,10 @@ Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
+Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
+and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
+images use explicit release versions; there is no `latest` tag.
+
 ## Develop
 
 ```sh
