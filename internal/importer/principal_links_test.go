@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/principallink"
@@ -102,6 +103,138 @@ func TestClassicImportWaitsForInviteLinkLock(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("import did not create classic identity after lock release: %d", count)
+	}
+}
+
+func TestPrincipalBackfillWaitsForInviteLinkLock(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
+	defer cancel()
+	tid, err := tenantbootstrap.Create(ctx, d.App, "backfill-lock", "Backfill lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Snapshot{SourceID: "backfill-race", Users: []Record{
+		{"id": 1, "username": "first", "email": "person@example.test", "role": "admin"},
+		{"id": 2, "username": "second", "email": "person@example.test", "role": "super_admin"},
+	}}
+	if _, err := (PostgresWriter{Pool: d.App}).Write(ctx, s, "backfill-lock"); err != nil {
+		t.Fatal(err)
+	}
+	// The second email exists only in its stored import event until backfill.
+	if _, err := d.Admin.Exec(ctx, `UPDATE principals SET email=NULL WHERE tenant_id=$1 AND name='second'`, tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `UPDATE identities SET email=NULL WHERE issuer='paimos-classic' AND subject='backfill-race:2'`); err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	if _, err := blocker.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),
+		set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`, tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tid); err != nil {
+		t.Fatal(err)
+	}
+	var blockerPID int
+	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	checkCandidates := func(tx pgx.Tx, want int) error {
+		ids, err := authz.ImportedPeopleForEmail(ctx, tx, tid, "person@example.test")
+		if err == nil && len(ids) != want {
+			return fmt.Errorf("candidates=%d want=%d", len(ids), want)
+		}
+		return err
+	}
+	if err := checkCandidates(blocker, 1); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		report Report
+		err    error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		report, err := BackfillPrincipals(ctx, d.App, tid)
+		result <- outcome{report, err}
+		close(result)
+	}()
+	defer func() {
+		_ = blocker.Rollback(context.Background())
+		cancel()
+		<-result
+	}()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		if err := d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks
+			WHERE locktype='advisory' AND NOT granted AND $1=ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case out := <-result:
+			t.Fatalf("backfill did not wait for invite/link lock: %v", out.err)
+		case <-ctx.Done():
+			t.Fatal("backfill never waited for invite/link lock")
+		case <-ticker.C:
+		}
+	}
+	if err := checkCandidates(blocker, 1); err != nil {
+		t.Fatalf("backfill changed candidate set under invite/link lock: %v", err)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case out := <-result:
+		if out.err != nil || out.report.Counts["emails"] != 1 {
+			t.Fatalf("backfill after release: %+v %v", out.report, out.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("backfill did not resume after invite/link lock release")
+	}
+	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		if err := checkCandidates(tx, 2); err != nil {
+			return err
+		}
+		var owner, identityID string
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles)
+			VALUES($1,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&owner); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(ctx, tx, tid, owner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
+			SELECT $1,'person@example.test',id,$2,now()+interval '7 days',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, tid, make([]byte, 32), owner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email)
+			VALUES('https://id.example.test','accepted','person@example.test') RETURNING id::text`).Scan(&identityID); err != nil {
+			return err
+		}
+		if _, err := authz.AcceptInvite(ctx, tx, tid, identityID, "person@example.test", "Invited", ""); err != nil {
+			return err
+		}
+		var links int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM principals WHERE tenant_id=$1 AND linked_to IS NOT NULL`, tid).Scan(&links); err != nil {
+			return err
+		}
+		if links != 0 {
+			return fmt.Errorf("ambiguous backfilled people auto-linked: %d", links)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

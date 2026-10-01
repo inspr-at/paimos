@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -261,7 +262,7 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, errorJSON{Error: notMemberSentence})
 			return
 		}
-		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, strings.ToLower(email), email, email)
+		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, identity.FoldEmailASCII(email), email, email)
 		if err != nil {
 			writeInternal(w)
 			return

@@ -117,6 +117,42 @@ func TestLinkUnlinkReplayAndSuggestions(t *testing.T) {
 		return err
 	})
 }
+
+func TestSuggestionsRequireASCIIMailboxMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, classicEmail, realEmail, reason string
+	}{
+		{"unrelated", "admİn@example.test", "admin@example.test", ""},
+		{"unrelated", "marK@example.test", "mark@example.test", ""},
+		{"unrelated", "ſam@example.test", "sam@example.test", ""},
+		{"unrelated", "MARK@example.test", "mark@example.test", "same_email"},
+		{"unrelated", "ADMİN@example.test", "admİn@example.test", "same_email"},
+		{"admİn", "", "admin@example.test", ""},
+		{"marK", "", "mark@example.test", ""},
+		{"MARK", "", "mark@example.test", "username_email_local_part"},
+	} {
+		t.Run(tc.name+"/"+tc.classicEmail+"/"+tc.realEmail, func(t *testing.T) {
+			f := setup(t)
+			from := f.person(tc.name, "paimos-classic", tc.classicEmail)
+			to := f.person("Real person", "https://id.example.test", tc.realEmail)
+			before := f.count()
+			suggestions, err := f.s.Suggest(t.Context(), "links")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.reason == "" {
+				if len(suggestions) != 0 {
+					t.Fatalf("different Unicode mailbox suggested: %+v", suggestions)
+				}
+			} else if len(suggestions) != 1 || suggestions[0].From.ID != from || suggestions[0].To.ID != to || suggestions[0].Reason != tc.reason {
+				t.Fatalf("matching suggestion missing: %+v", suggestions)
+			}
+			if f.count() != before {
+				t.Fatal("suggestions changed events")
+			}
+		})
+	}
+}
 func TestInvalidLinksAndDatabaseConstraints(t *testing.T) {
 	f := setup(t)
 	a := f.person("alias", "", "")

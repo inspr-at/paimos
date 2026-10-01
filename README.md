@@ -1044,6 +1044,10 @@ Login navigates to
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use
 same-origin credentials, a ten-second timeout, and no browser response cache.
 The backend owns authentication cookies and the configured OIDC authentication redirect.
+Email comparisons fold only ASCII A-Z; Unicode characters remain distinct in
+bootstrap admin checks, development sign-in, invitation provisioning, imported
+profile matching and link suggestions. Classic principal backfills take the
+same tenant lock as invitation acceptance before repairing emails.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty

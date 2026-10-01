@@ -2674,7 +2674,7 @@ paths:
     post:
       operationId: authDevLogin
       summary: Sign in by email when AEON_ENV=dev
-      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email.
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email. Bootstrap admin matching, email lookup and dev identity subjects fold only ASCII letter case; Unicode characters remain distinct.
       security: []
       requestBody:
         required: true

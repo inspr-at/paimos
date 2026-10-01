@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/identity"
 	"github.com/inspr-at/paimos/internal/operatoractor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -234,7 +235,7 @@ func adminEmail(got, want string) bool {
 	if want == "" {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(got), want)
+	return identity.FoldEmailASCII(strings.TrimSpace(got)) == identity.FoldEmailASCII(want)
 }
 
 // personByEmail resolves dev-login email to its canonical person in the tenant.
@@ -253,7 +254,8 @@ func (m *Module) personByEmail(ctx context.Context, tenantID, email string) (ten
 			JOIN principals canonical ON canonical.tenant_id=p.tenant_id
 			    AND canonical.id=COALESCE(p.linked_to,p.id)
 			WHERE p.tenant_id=$2::uuid AND p.kind='person'
-			    AND lower(COALESCE(NULLIF(p.email,''),i.email))=lower($1)
+			    AND translate(COALESCE(NULLIF(p.email,''),i.email),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+			        =translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
 			    AND COALESCE(canonical.identity_id,p.identity_id) IS NOT NULL
 			ORDER BY (EXISTS (SELECT 1 FROM principals source
 			    WHERE source.tenant_id=p.tenant_id AND source.linked_to=canonical.id)) DESC,
