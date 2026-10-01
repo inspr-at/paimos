@@ -5,10 +5,12 @@ import { getNode } from '../../lib/api'
 import { brand } from '../../lib/brand'
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
+const agents = useAgents()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 const dialog = ref<HTMLDialogElement>()
 const codeInput = ref<HTMLInputElement>()
@@ -47,6 +49,8 @@ async function decide(revoke = false) {
   operation?.abort(); const controller = new AbortController(); operation = controller; busy.value = true; error.value = ''
   try {
     const result = await attachAction(`/${encodeURIComponent(review.value.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: review.value.request_digest, ...(review.value.consent_digest ? { consent_digest: review.value.consent_digest } : {}) }, controller.signal)
+    // Approving attaches the session, revoking detaches it: both change the session list, even if this dialog closed meanwhile.
+    void agents.afterWrite()
     if (operation === controller && !controller.signal.aborted) review.value = result
   } catch (e) { if (!controller.signal.aborted) error.value = e instanceof Error ? e.message : 'Could not update this watch.' }
   finally { if (operation === controller) busy.value = false }

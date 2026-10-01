@@ -3,6 +3,7 @@
 // then when the session started, then its id: a heartbeat can change a row's
 // state, never its place. A person may order by a column instead; that choice
 // is remembered per viewer in this browser until they restore the default.
+import { parseJson } from '../../lib/json.ts'
 import { GROUPS, HEARTBEAT_STALE_MS, byStart as sessionsByStart, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import type { SessionView } from '../../stores/agents'
 import { intendedResult, sessionExecution } from './sessionRow'
@@ -103,7 +104,7 @@ function browserStorage(): SortStorage | undefined {
 export function readSort(viewer: string, storage: SortStorage | undefined = browserStorage()): SessionSort | null {
   if (!viewer || !storage) return null
   try {
-    const raw = JSON.parse(storage.getItem(sortStorageKey(viewer)) ?? 'null') as Partial<SessionSort> | null
+    const raw = parseJson(storage.getItem(sortStorageKey(viewer)) ?? 'null') as Partial<SessionSort> | null
     if (!raw || !SORT_KEYS.includes(raw.key as SortKey) || (raw.dir !== 'asc' && raw.dir !== 'desc')) return null
     return raw.key === DEFAULT_SORT.key && raw.dir === DEFAULT_SORT.dir ? null : { key: raw.key as SortKey, dir: raw.dir }
   } catch { return null }

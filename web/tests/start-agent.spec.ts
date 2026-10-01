@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { sessionListReads } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
@@ -65,6 +66,17 @@ test('ticket panel preselects its ticket and retry reuses the created work order
   await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
   await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
   expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
+})
+
+test('a queue that fails after the work order was written still reads the lists again', async ({ page }) => {
+  const mock = await mockStartAgent(page, { failQueue: true })
+  await open(page)
+  await ready(page)
+  const before = sessionListReads(mock.calls)
+  await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(dialog(page).getByRole('alert')).toContainText('Temporary queue failure')
+  expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
+  await expect.poll(() => sessionListReads(mock.calls)).toBeGreaterThan(before)
 })
 
 for (const scenario of [

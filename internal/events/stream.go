@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -21,15 +20,7 @@ const maxLiveReplay = 1000
 
 // newest is the tenant's latest committed event ID (0 before the first).
 func (m *module) newest(ctx context.Context, p tenant.Principal) (int64, error) {
-	var id int64
-	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, p.TenantID).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return err
-	})
-	return id, err
+	return newestEvent(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID)
 }
 
 func (m *module) stream(w http.ResponseWriter, r *http.Request) {
