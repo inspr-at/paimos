@@ -73,6 +73,11 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
 			grouped[root] = map[routeKey]*planningModel{}
 		}
 		key := routeKey{harness: harness, model: model}
+		// AEON-503b canonicalises Anthropic IDs to aliases. Keep their declared
+		// model versions distinct; an unversioned alias remains unknown.
+		if modelregistry.ModelKey(model) == model && (model == "opus" || model == "sonnet" || model == "haiku" || model == "fable") {
+			key.effort = display.ModelVersion
+		}
 		m := grouped[root][key]
 		if m == nil {
 			m = &planningModel{Display: display, Harness: harness, Model: model, Label: (modelregistry.Profile{Harness: harness, Model: model}).Label()}
@@ -115,7 +120,10 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
 			if a.Harness != b.Harness {
 				return a.Harness < b.Harness
 			}
-			return a.Model < b.Model
+			if a.Model != b.Model {
+				return a.Model < b.Model
+			}
+			return a.ModelVersion < b.ModelVersion
 		})
 	}
 	return out, running, nil

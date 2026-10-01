@@ -34,7 +34,8 @@ func modelNameSortSQL(namesArg string) (string, string) {
 	cte := `, ` + planningStatesCTE() + `, model_sessions AS (
   SELECT t.root,s.id,s.harness,
    coalesce(nullif(pk.model,''),nullif(s.model,''),nullif(s.model_raw,''),usage.model,'') AS model,
-   p.model_display,usage.tokens
+   p.model_display,usage.tokens,
+   CASE WHEN pk.model IN ('opus','sonnet','haiku','fable') THEN coalesce(p.model_display->>'model_version','') ELSE '' END AS version_key
   FROM (` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task')`) + `) t
   JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
    AND ((SELECT aeon_visible_all()) OR s.project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
@@ -50,8 +51,8 @@ func modelNameSortSQL(namesArg string) (string, string) {
    coalesce((array_agg(nullif(btrim((model_display->>'display_name')||' '||(model_display->>'model_version')), '') ORDER BY id) FILTER (WHERE model_display IS NOT NULL))[1],
     initcap(harness)||' '||CASE WHEN harness='codex' THEN regexp_replace(model,'^gpt-6-','')
      WHEN harness='pi' THEN regexp_replace(model,'^anthropic/claude-','') ELSE model END) AS name
-  FROM model_sessions WHERE model<>'' GROUP BY root,harness,model
-  ORDER BY root,sum(coalesce(tokens,0)) DESC,harness,model
+  FROM model_sessions WHERE model<>'' GROUP BY root,harness,model,version_key
+  ORDER BY root,sum(coalesce(tokens,0)) DESC,harness,model,version_key
  )`
 	join := ` LEFT JOIN LATERAL (
   SELECT lower(coalesce(used.name,

@@ -124,6 +124,7 @@ test('planning fragment implementation in light and dark; phones retain the card
     const plannedMeter = row(page, 'PHAROS-11').locator('.effort rect.on').first()
     expect(await plannedMeter.evaluate(el => getComputedStyle(el).fill)).toBe(theme === 'light' ? 'rgba(32, 60, 61, 0.42)' : 'rgba(237, 244, 240, 0.42)')
     await display(page)
+    await page.getByRole('radiogroup', { name: 'Effort meter', exact: true }).scrollIntoViewIfNeeded()
     await page.screenshot({ path: join(shots, `display-${theme}.png`) })
     await page.keyboard.press('Escape')
     for (const cls of ['c-tokens', 'c-list-cost']) {
