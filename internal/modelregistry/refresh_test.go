@@ -25,6 +25,17 @@ func inRegistry(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	}
 }
 
+func registryRoutes(t *testing.T, p tenant.Principal) []Route {
+	t.Helper()
+	var out []Route
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var err error
+		out, err = listRoutes(t.Context(), tx)
+		return err
+	})
+	return out
+}
+
 func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Owner", []string{"admin"})
@@ -279,7 +290,7 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
 	other := makePrincipal(t, "vault-other", "person", "Other", []string{"admin"})
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	before := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	before := registryRoutes(t, p)
 	var account string
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,'fixture','codex','fixture',$2,'Fixture') RETURNING id::text`, p.TenantID, worker.ID).Scan(&account)
@@ -368,7 +379,7 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	if result.Added != 0 || result.Sources[0].State != "stale" {
 		t.Fatal("outage did not retain last good catalog")
 	}
-	after := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	after := registryRoutes(t, p)
 	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(current, decode[[]Profile](t, &p, "GET", "/api/models", "", 200)) {
 		t.Fatal("discovery changed immutable pins or ladders")
 	}
@@ -395,7 +406,7 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "proposal-policy", "person", "Owner", []string{"admin"})
 	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
-	before := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	before := registryRoutes(t, p)
 	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
 	o := Observation{EvidenceID("pending-grok"), "grok", "grok-next", "xhigh", "advertised"}
@@ -414,7 +425,7 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	if first.ID != second.ID || eventCount(t, p, "model.proposal_accepted") != 1 {
 		t.Fatal("acceptance not idempotent")
 	}
-	if !reflect.DeepEqual(before, decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)) {
+	if !reflect.DeepEqual(before, registryRoutes(t, p)) {
 		t.Fatal("proposal changed role order")
 	}
 	status, _ = call(t, &p, "POST", "/api/models/reports", "null")
