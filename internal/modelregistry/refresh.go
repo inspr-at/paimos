@@ -463,7 +463,7 @@ func (m *Module) sweep(ctx context.Context) {
 	rows.Close()
 	for _, id := range ids {
 		work, cancel := context.WithTimeout(ctx, 90*time.Second)
-		err := db.InTenant(work, m.pool, id, func(tx pgx.Tx) error {
+		err := db.InTenant(db.NoProjects(work, "model catalog scheduler"), m.pool, id, func(tx pgx.Tx) error {
 			var actor string
 			if err := tx.QueryRow(work, `SELECT aeon_authz_system_actor($1::uuid)::text`, id).Scan(&actor); err != nil {
 				return err

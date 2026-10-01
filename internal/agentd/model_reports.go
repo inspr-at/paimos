@@ -53,15 +53,39 @@ func (s *Supervisor) reportModels(entry *owned, observations []modelreport.Obser
 	}
 	entry.mu.Lock()
 	session := entry.harness
+	if session.ID == "" || entry.harnessArchived {
+		entry.mu.Unlock()
+		return
+	}
+	pending := make([]modelreport.Observation, 0, len(observations))
+	for _, o := range observations {
+		if !entry.modelReports[o.ReportID] {
+			pending = append(pending, o)
+		}
+	}
 	entry.mu.Unlock()
-	if session.ID == "" {
+	if len(pending) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// Discovery must never prevent owned run servicing. Retryable current model
-	// sightings also flow in heartbeats; invalid evidence carries stable run ids.
-	_ = reporter.ReportHarnessModels(ctx, session, observations)
+	// Discovery must never prevent run servicing. Failed requests can retry
+	// with the same evidence; acknowledged token-stream sightings are coalesced.
+	if reporter.ReportHarnessModels(ctx, session, pending) != nil {
+		return
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if len(entry.modelReports)+len(pending) > 4096 {
+		entry.modelReports = nil
+	}
+	if entry.modelReports == nil {
+		entry.modelReports = map[string]bool{}
+	}
+	for _, o := range pending {
+		entry.modelReports[o.ReportID] = true
+	}
+
 }
 
 func (s *Supervisor) reportModelState(entry *owned, status string, requested ...string) {

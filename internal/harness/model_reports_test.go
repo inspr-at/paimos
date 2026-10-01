@@ -2,9 +2,10 @@
 package harness_test
 
 import (
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/jackc/pgx/v5"
-	"testing"
 )
 
 func TestModelReportsRequireWorkerLeaseAndStayInHarness(t *testing.T) {

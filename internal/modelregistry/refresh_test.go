@@ -13,13 +13,14 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 func inRegistry(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, fn); err != nil {
+	if err := db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, fn); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -269,5 +270,164 @@ func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
 	})}
 	if _, err := listVendorModels(t.Context(), bad, "xai", "fixture-key"); err == nil {
 		t.Fatal("unsafe identifier")
+	}
+}
+
+func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "vault-refresh", "person", "Owner", []string{"admin"})
+	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
+	other := makePrincipal(t, "vault-other", "person", "Other", []string{"admin"})
+	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	before := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	var account string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,'fixture','codex','fixture',$2,'Fixture') RETURNING id::text`, p.TenantID, worker.ID).Scan(&account)
+	})
+	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	send := func(actor tenant.Principal, method, path, body string, want int) []byte {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), actor))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s status %d, want %d", method, path, w.Code, want)
+		}
+		return w.Body.Bytes()
+	}
+	key := "synthetic-model-discovery-credential"
+	body, _ := json.Marshal(map[string]string{"vendor": "openai", "api_key": key})
+	credentialPath := "/api/models/refresh/credentials/" + account
+	send(other, "PUT", credentialPath, string(body), 404)
+	send(worker, "PUT", credentialPath, string(body), 403)
+	response := send(p, "PUT", credentialPath, string(body), 200)
+	if strings.Contains(string(response), key) {
+		t.Fatal("credential returned")
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var cipher []byte
+		if err := tx.QueryRow(t.Context(), `SELECT ciphertext FROM model_discovery_credentials WHERE account_id=$1`, account).Scan(&cipher); err != nil {
+			return err
+		}
+		if strings.Contains(string(cipher), key) {
+			t.Fatal("plaintext credential stored")
+		}
+		plain, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+account+"/openai", cipher)
+		if err != nil || plain != key {
+			t.Fatal("vault round trip")
+		}
+		if _, err := linkvault.Decrypt(m.vaultKey, other.TenantID, "models/"+account+"/openai", cipher); err == nil {
+			t.Fatal("tenant binding missing")
+		}
+		if _, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/other/openai", cipher); err == nil {
+			t.Fatal("account binding missing")
+		}
+		return nil
+	})
+	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":true,"api_enabled":true,"interval_minutes":60}`
+	send(worker, "PUT", "/api/models/refresh/settings", cfg, 403)
+	send(p, "PUT", "/api/models/refresh/settings", cfg, 200)
+	send(p, "PUT", "/api/models/refresh/settings", cfg, 200)
+	if eventCount(t, p, "model.refresh_settings_changed") != 1 {
+		t.Fatal("settings replay wrote an event")
+	}
+	outage := false
+	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] || r.Header.Get("Authorization") != "Bearer "+key {
+			t.Fatal("unexpected discovery destination")
+		}
+		status, raw := 200, `{"data":[{"id":"gpt-6.1-sol"},{"id":"gpt-future"}]}`
+		if outage {
+			status, raw = 503, key
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(raw)), Header: http.Header{}}, nil
+	})}
+	var result RefreshResult
+	if err := json.Unmarshal(send(p, "POST", "/api/models/refresh", "{}", 200), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Added != 1 || len(result.Sources) != 1 || result.Sources[0].State != "fresh" || result.LadderChanged {
+		t.Fatalf("refresh result %+v", result)
+	}
+	current := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	if len(current) != len(profiles)+1 {
+		t.Fatal("advertised API profiles missing")
+	}
+	send(p, "POST", "/api/models/refresh", "{}", 429)
+	outage = true
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=now()-interval '61 minutes'`)
+		return err
+	})
+	if err := json.Unmarshal(send(p, "POST", "/api/models/refresh", "{}", 200), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Added != 0 || result.Sources[0].State != "stale" {
+		t.Fatal("outage did not retain last good catalog")
+	}
+	after := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(current, decode[[]Profile](t, &p, "GET", "/api/models", "", 200)) {
+		t.Fatal("discovery changed immutable pins or ladders")
+	}
+	status := send(p, "GET", "/api/models/refresh", "", 200)
+	if strings.Contains(string(status), key) {
+		t.Fatal("status exposed credential")
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var leaked bool
+		if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE after::text LIKE '%'||$1||'%')`, key).Scan(&leaked); err != nil {
+			return err
+		}
+		if leaked {
+			t.Fatal("audit exposed credential")
+		}
+		return nil
+	})
+	if eventCount(t, p, "model.catalog_refreshed") != 2 {
+		t.Fatal("refresh audit not once per run")
+	}
+}
+
+func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "proposal-policy", "person", "Owner", []string{"admin"})
+	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
+	before := decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)
+	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
+	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
+	o := Observation{EvidenceID("pending-grok"), "grok", "grok-next", "xhigh", "advertised"}
+	raw, _ := json.Marshal([]Observation{o})
+	result := decode[ReportResult](t, &worker, "POST", "/api/models/reports", string(raw), 200)
+	if result.Added != 0 || result.Proposed != 1 {
+		t.Fatal("auto-accept off ignored")
+	}
+	accept := `{"harness":"grok","model":"grok-next","effort":"xhigh"}`
+	status, _ := call(t, &worker, "POST", "/api/models/proposals/accept", accept)
+	if status != 403 {
+		t.Fatal("agent accepted a proposal")
+	}
+	first := decode[Profile](t, &p, "POST", "/api/models/proposals/accept", accept, 200)
+	second := decode[Profile](t, &p, "POST", "/api/models/proposals/accept", accept, 200)
+	if first.ID != second.ID || eventCount(t, p, "model.proposal_accepted") != 1 {
+		t.Fatal("acceptance not idempotent")
+	}
+	if !reflect.DeepEqual(before, decode[[]Route](t, &p, "GET", "/api/models/routes", "", 200)) {
+		t.Fatal("proposal changed role order")
+	}
+	status, _ = call(t, &p, "POST", "/api/models/reports", "null")
+	if status != 400 {
+		t.Fatal("null report array accepted")
+	}
+	cfg = `{"agent_reports_enabled":false,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
+	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
+	o.ReportID = EvidenceID("disabled-report")
+	o.Model = "grok-other"
+	raw, _ = json.Marshal([]Observation{o})
+	result = decode[ReportResult](t, &worker, "POST", "/api/models/reports", string(raw), 200)
+	if result.Recorded != 0 {
+		t.Fatal("disabled agent reports recorded")
 	}
 }
