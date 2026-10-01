@@ -3641,6 +3641,47 @@
           "group": "features"
         }
       ]
+    },
+    "261001130110.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 115,
+      "snapshot_sha256": "c77b8ebf6d2cb6bf2987e1b242a0f4ff680c996f9c5df4a8c0c58b8033629239",
+      "captured_at": "2026-10-01T13:01:19Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-486",
+          "pill_en": "Grant scopes directly",
+          "pill_de": "Rechte direkt vergeben",
+          "benefit_en": "Owners can give an agent key a permission in one step, and the screen says clearly why something is unavailable.",
+          "benefit_de": "Inhaber geben einem Agenten-Schlüssel eine Berechtigung in einem Schritt, und die Ansicht erklärt klar, warum etwas nicht verfügbar ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-487",
+          "pill_en": "Mac agent starts again",
+          "pill_de": "Mac-Agent startet wieder",
+          "benefit_en": "After updating, the Mac agent starts reliably and keeps its pairing.",
+          "benefit_de": "Nach dem Update startet der Mac-Agent zuverlässig und behält seine Kopplung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-489",
+          "pill_en": "Your sign-in provider",
+          "pill_de": "Ihr eigener Anmeldedienst",
+          "benefit_en": "The sign-in page names your own identity provider.",
+          "benefit_de": "Die Anmeldeseite nennt Ihren eigenen Identitätsanbieter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-494",
+          "pill_en": "Self-hosting guide",
+          "pill_de": "Anleitung zum Selbstbetrieb",
+          "benefit_en": "You can run Aeon on your own server by following one guide.",
+          "benefit_de": "Sie können Aeon mit einer Anleitung auf Ihrem eigenen Server betreiben.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
