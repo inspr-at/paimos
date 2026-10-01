@@ -9,7 +9,7 @@ const AT = new Date(NOW - 3600_000).toISOString()
 const uuid = '45400000-0000-4000-8000-000000000001'
 const outcome = (id: string, kind: string, payload: Record<string, unknown>) => ({ id, kind, ticket_node_id: 'n-a1', ticket_key: 'AEON-1', project_id: 'p-aeon', session_id: null, rules_version: null, release_title: null, payload, recorded_at: AT })
 test.use({ timezoneId: 'Europe/Vienna' })
-async function setup(page: Page, options: { failure?: boolean; noCost?: boolean; dark?: boolean; empty?: boolean; slow?: boolean } = {}) {
+async function setup(page: Page, options: { failure?: boolean; noCost?: boolean; dark?: boolean; empty?: boolean; slow?: boolean; permissionFailure?: 'workspace' | 'project' } = {}) {
   await setupUsage(page, { variant: 'reported', theme: options.dark ? 'dark' : 'light' })
   const writes: Record<string, unknown>[] = []
   let preference: Record<string, unknown> = { time: '08:00', last_visit: START }
@@ -38,16 +38,21 @@ async function setup(page: Page, options: { failure?: boolean; noCost?: boolean;
   await page.route('**/api/approvals?**', route => route.fulfill({ json: options.empty ? [] : [{ id: uuid, agent_principal_id: uuid, scope: 'nodes.write', resource_kind: 'node', resource_id: 'n-a1', rationale: 'Check the delivery evidence', proposed_at: AT, expires_at: new Date(NOW + 3600_000).toISOString(), decision: null, risk: 'low' }] }))
   await page.route('**/api/projects/*/messages?**', route => route.fulfill({ json: { items: [], next_after: 0 } }))
   await page.route('**/api/projects/*/journey', route => route.fulfill({ json: { next_action: { key: 'wait_for_build', available: true, label: 'Wait for build' } } }))
-  if (options.noCost) {
+  let permissionFailure = options.permissionFailure
+  if (options.noCost || permissionFailure) {
     await page.route('**/api/me/permissions*', route => {
-      const result = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
-      result.workspace.permissions = result.workspace.permissions.filter(p => p !== 'harness.read')
-      if (result.project) result.project.permissions = result.project.permissions.filter(p => p !== 'harness.read')
+      const projectId = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
+      if (permissionFailure === 'workspace' && !projectId || permissionFailure === 'project' && projectId) return route.fulfill({ status: 500, json: { error: 'unavailable' } })
+      const result = mockEffectivePermissions('admin', projectId)
+      if (options.noCost) {
+        result.workspace.permissions = result.workspace.permissions.filter(p => p !== 'harness.read')
+        if (result.project) result.project.permissions = result.project.permissions.filter(p => p !== 'harness.read')
+      }
       return route.fulfill({ json: result })
     })
     // Even an overbroad mocked source may never paint a merge or money without cost access.
   }
-  return { writes, reads, preference: () => preference }
+  return { writes, reads, preference: () => preference, recoverPermissions: () => { permissionFailure = undefined } }
 }
 
 test('person briefing cites existing facts, includes the second log page and advances only on success', async ({ page }) => {
@@ -80,6 +85,19 @@ test('source failure is visible and keeps the person’s earlier cutoff', async 
   await expect(page.getByRole('button', { name: 'Refresh' })).toBeEnabled()
   expect(data.writes).toEqual([])
   expect(data.preference().last_visit).toBe(START)
+})
+
+for (const permissionFailure of ['workspace', 'project'] as const) test(`${permissionFailure} permission read failure keeps the cutoff and can be retried`, async ({ page }) => {
+  const data = await setup(page, { permissionFailure })
+  await page.goto('/briefing')
+  if (permissionFailure === 'workspace') await expect(page.getByText('Permissions could not be loaded. Try again before reading the briefing.')).toBeVisible()
+  else await expect(page.getByLabel('Briefing coverage')).toContainText('Access in')
+  expect(data.writes).toEqual([])
+  expect(data.preference().last_visit).toBe(START)
+  data.recoverPermissions()
+  await page.getByRole('button', { name: permissionFailure === 'workspace' ? 'Try again' : 'Refresh', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'AEON-1 · Marked delivered' })).toBeVisible()
+  await expect.poll(() => data.writes.length).toBe(1)
 })
 
 test('without harness.read no usage request, money or merged run evidence is shown', async ({ page }) => {

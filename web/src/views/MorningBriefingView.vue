@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem, APIError } from '../lib/api'
-import { can, ensurePermissions, onAccessChange } from '../lib/authz'
+import { can, ensurePermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { createScope, scopeOwner } from '../lib/identityScope'
 import { pendingApprovals, heldRequests, scopeLabel, canDecideApproval } from '../lib/agentState'
 import type { Approval, MessagePage } from '../lib/agents'
@@ -44,10 +44,16 @@ function clear() {
   range.value = null; preference.value = null; delivered.value = []; failures.value = []; needs.value = []
   usage.value = null; tickets.value = []; notices.value = []; error.value = ''; saveError.value = ''; loading.value = false; saving.value = false
 }
+async function knownPermissions(projectId?: string) {
+  if (await ensurePermissions(projectId) === 'known') return
+  // A failed cached read is not a denial. Retry it, including on an explicit refresh.
+  await refreshPermissions(projectId)
+  if (await ensurePermissions(projectId) !== 'known') throw new Error('Permissions could not be loaded. Try again before reading the briefing.')
+}
 function load() {
   if (!owner()) return
   loading.value = true; error.value = ''
-  void lane.run(({ after, signal }) => after(Promise.all([loadBriefingPreference(signal), projects.load(), ensurePermissions()]), ([pref]) => {
+  void lane.run(({ after, signal }) => after(Promise.all([loadBriefingPreference(signal), projects.load(), knownPermissions()]), ([pref]) => {
     if (projects.error) throw new Error('Projects could not be loaded. Try again before reading the briefing.')
     preference.value = pref ?? {}
     time.value = validBriefingTime(pref?.time) ? pref.time : '08:00'
@@ -76,7 +82,7 @@ async function read(window: BriefingRange, signal: AbortSignal) {
   }
   const projectList = [...projects.projects]
   // Resolve the existing project permission cache before admitting project costs or person actions.
-  for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(p => ensurePermissions(p.id)))
+  for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(p => source(`Access in ${p.routeKey}`, knownPermissions(p.id))))
   const usageAllowed = can('harness.read') || projectList.some(p => can('harness.read', p.id))
   const [outcomes, events, approvals, dashboard] = await Promise.all([
     source('Outcome history', loadBriefingOutcomes(window, signal)),
