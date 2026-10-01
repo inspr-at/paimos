@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,9 @@ type Pin struct {
 	Version string          `json:"version"`
 	SHA256  string          `json:"sha256"`
 	Shape   json.RawMessage `json:"shape"`
+	// JSON pointers to expanded components also referenced by request bodies.
+	// This provenance is separate from the structural response hash.
+	RequestPaths []string `json:"request_paths,omitempty"`
 }
 
 type operation struct{ path, method, status string }
@@ -70,6 +74,10 @@ func Current(openAPI []byte) (map[string]Pin, error) {
 	if err != nil {
 		return nil, err
 	}
+	requests, err := requestComponents(doc)
+	if err != nil {
+		return nil, err
+	}
 	out := make(map[string]Pin, len(surfaces))
 	for name, s := range surfaces {
 		h, err := child(headers, s.header, "schema")
@@ -81,6 +89,7 @@ func Current(openAPI []byte) (map[string]Pin, error) {
 			return nil, fmt.Errorf("%s: OpenAPI header version must be %s", name, s.version)
 		}
 		shape := make(map[string]any, len(s.ops))
+		requestPaths := map[string]bool{}
 		for _, op := range s.ops {
 			response, err := child(paths, op.path, op.method, "responses", op.status)
 			if err != nil {
@@ -97,18 +106,25 @@ func Current(openAPI []byte) (map[string]Pin, error) {
 			if err != nil {
 				return nil, err
 			}
-			resolved, err := expand(body, schemas, map[string]bool{})
+			label := strings.ToUpper(op.method) + " " + op.path + " " + op.status
+			expander := schemaExpander{schemas: schemas, seen: map[string]bool{}, requests: requests, requestPaths: requestPaths}
+			resolved, err := expander.expand(body, pointerChild("", label))
 			if err != nil {
 				return nil, err
 			}
-			shape[strings.ToUpper(op.method)+" "+op.path+" "+op.status] = resolved
+			shape[label] = resolved
 		}
 		encoded, err := json.Marshal(shape)
 		if err != nil {
 			return nil, err
 		}
 		sum := sha256.Sum256(encoded)
-		out[name] = Pin{Version: s.version, SHA256: hex.EncodeToString(sum[:]), Shape: encoded}
+		pin := Pin{Version: s.version, SHA256: hex.EncodeToString(sum[:]), Shape: encoded}
+		for path := range requestPaths {
+			pin.RequestPaths = append(pin.RequestPaths, path)
+		}
+		sort.Strings(pin.RequestPaths)
+		out[name] = pin
 	}
 	return out, nil
 }
@@ -132,21 +148,106 @@ func child(root map[string]any, keys ...string) (map[string]any, error) {
 	return m, nil
 }
 
+// Follow request-body references transitively, including reusable request bodies.
+// A visited set permits recursive request schemas without losing their identity.
+func requestComponents(doc map[string]any) (map[string]bool, error) {
+	names, seen := map[string]bool{}, map[string]bool{}
+	var collect func(any) error
+	collect = func(v any) error {
+		switch value := v.(type) {
+		case map[string]any:
+			// External documents have their own component namespace; response
+			// pins only expand components in this document.
+			if ref, ok := value["$ref"].(string); ok && strings.HasPrefix(ref, "#/components/") && !seen[ref] {
+				keys := strings.Split(strings.TrimPrefix(ref, "#/"), "/")
+				for i, key := range keys {
+					keys[i] = strings.NewReplacer("~1", "/", "~0", "~").Replace(key)
+				}
+				target, err := child(doc, keys...)
+				if err != nil {
+					return err
+				}
+				seen[ref] = true
+				if len(keys) == 3 && keys[1] == "schemas" {
+					names[keys[2]] = true
+				}
+				if err := collect(target); err != nil {
+					return err
+				}
+			}
+			for key, item := range value {
+				if key == "example" || key == "examples" {
+					continue
+				}
+				if err := collect(item); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, item := range value {
+				if err := collect(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	var findBodies func(any) error
+	findBodies = func(v any) error {
+		switch value := v.(type) {
+		case map[string]any:
+			for key, item := range value {
+				if key == "example" || key == "examples" {
+					continue
+				}
+				visit := findBodies
+				if key == "requestBody" || key == "requestBodies" {
+					visit = collect
+				}
+				if err := visit(item); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, item := range value {
+				if err := findBodies(item); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return names, findBodies(doc)
+}
+
+type schemaExpander struct {
+	schemas                      map[string]any
+	seen, requests, requestPaths map[string]bool
+}
+
 func expand(v any, schemas map[string]any, seen map[string]bool) (any, error) {
+	expander := schemaExpander{schemas: schemas, seen: seen}
+	return expander.expand(v, "")
+}
+
+func (e *schemaExpander) expand(v any, path string) (any, error) {
 	switch value := v.(type) {
 	case map[string]any:
 		if ref, ok := value["$ref"].(string); ok {
 			name := strings.TrimPrefix(ref, "#/components/schemas/")
-			if name == ref || seen[name] {
+			if name == ref || e.seen[name] {
 				return nil, fmt.Errorf("invalid or recursive response schema %s", ref)
 			}
-			target, ok := schemas[name]
+			target, ok := e.schemas[name]
 			if !ok {
 				return nil, fmt.Errorf("missing response schema %s", ref)
 			}
-			seen[name] = true
-			result, err := expand(target, schemas, seen)
-			delete(seen, name)
+			if e.requests[name] {
+				e.requestPaths[path] = true
+			}
+			e.seen[name] = true
+			result, err := e.expand(target, path)
+			delete(e.seen, name)
 			return result, err
 		}
 		out := make(map[string]any)
@@ -154,7 +255,7 @@ func expand(v any, schemas map[string]any, seen map[string]bool) (any, error) {
 			if key == "description" || key == "summary" || key == "example" || key == "examples" || key == "title" {
 				continue
 			}
-			resolved, err := expand(item, schemas, seen)
+			resolved, err := e.expand(item, pointerChild(path, key))
 			if err != nil {
 				return nil, err
 			}
@@ -164,7 +265,7 @@ func expand(v any, schemas map[string]any, seen map[string]bool) (any, error) {
 	case []any:
 		out := make([]any, len(value))
 		for i, item := range value {
-			resolved, err := expand(item, schemas, seen)
+			resolved, err := e.expand(item, pointerChild(path, strconv.Itoa(i)))
 			if err != nil {
 				return nil, err
 			}
@@ -176,11 +277,16 @@ func expand(v any, schemas map[string]any, seen map[string]bool) (any, error) {
 	}
 }
 
+func pointerChild(path, key string) string {
+	return path + "/" + strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
+}
+
 // RequiredBump classifies differences conservatively. New optional properties
 // and operations are additive. A new required property is also additive in a
 // response: the server guarantees it, and existing readers tolerate extra fields.
-// This exception applies only to response operation keys emitted by Current;
-// request and unlabelled schemas still require a major bump. Existing properties
+// This exception applies only to response operation keys emitted by Current,
+// outside any component also used by a request body. Request and unlabelled
+// schemas still require a major bump. Existing properties
 // and constraints must remain unchanged. It returns "none" when shapes match.
 func RequiredBump(previous, current Pin) (string, error) {
 	if previous.SHA256 == current.SHA256 {
@@ -193,13 +299,22 @@ func RequiredBump(previous, current Pin) (string, error) {
 	if err := json.Unmarshal(current.Shape, &newShape); err != nil {
 		return "", err
 	}
-	if additive(oldShape, newShape, "", false) {
+	requests := map[string]bool{}
+	for _, pin := range []Pin{previous, current} {
+		for _, path := range pin.RequestPaths {
+			requests[path] = true
+		}
+	}
+	if additive(oldShape, newShape, "", false, "", requests) {
 		return "minor", nil
 	}
 	return "major", nil
 }
 
-func additive(old, next any, parent string, response bool) bool {
+func additive(old, next any, parent string, response bool, path string, requests map[string]bool) bool {
+	if requests[path] {
+		response = false
+	}
 	oldMap, oldOK := old.(map[string]any)
 	newMap, newOK := next.(map[string]any)
 	if oldOK || newOK {
@@ -218,7 +333,7 @@ func additive(old, next any, parent string, response bool) bool {
 				continue
 			}
 			isResponse := response || parent == "" && responseOperation(key)
-			if !additive(value, other, key, isResponse) {
+			if !additive(value, other, key, isResponse, pointerChild(path, key), requests) {
 				return false
 			}
 		}
@@ -251,7 +366,8 @@ func additive(old, next any, parent string, response bool) bool {
 			return false
 		}
 		for i := range oldArray {
-			if !additive(oldArray[i], newArray[i], strconv.Itoa(i), response) {
+			key := strconv.Itoa(i)
+			if !additive(oldArray[i], newArray[i], key, response, pointerChild(path, key), requests) {
 				return false
 			}
 		}

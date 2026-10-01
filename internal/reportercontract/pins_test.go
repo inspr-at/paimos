@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,9 @@ func TestResponseSchemaPins(t *testing.T) {
 		}
 		if previous.Version != now.Version {
 			t.Errorf("%s: pinned version %s differs from declared %s; update pins.json", name, previous.Version, now.Version)
+		}
+		if !slices.Equal(previous.RequestPaths, now.RequestPaths) {
+			t.Errorf("%s: request-use provenance changed; update pins.json metadata", name)
 		}
 	}
 }

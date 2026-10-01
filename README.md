@@ -165,8 +165,11 @@ Harness status and heartbeat declare `Aeon-Contract: harness-session/1.7`. The w
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
 the server supplies it, and existing harness clients ignore extra response fields.
-New required request properties still require a major bump. Changed existing
-properties, newly requiring an existing optional property, and adding a required
+Components also referenced by any request body, including through nested schema
+or reusable request-body references, retain request rules throughout their
+expanded subtree. Pins store this provenance separately from the response hash.
+New required properties on these shared components still require a major bump.
+Changed existing properties, newly requiring an existing optional property, and adding a required
 property to a previously closed response schema also remain major changes.
 
 Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
