@@ -39,7 +39,8 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	err := tx.QueryRow(ctx, `SELECT i.id::text, i.workspace_role_id::text, i.created_by::text
 		FROM invites i
 		WHERE i.tenant_id=$1::uuid
-		  AND lower(i.email)=lower($2)
+		  AND translate(i.email,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+		      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
 		  AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
 		  AND ($3::bytea IS NULL OR i.token_hash=$3::bytea)
 		ORDER BY i.created_at DESC, i.id
@@ -130,7 +131,7 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 		}
 	}
 	if len(imported) == 1 && imported[0].canLink {
-		out, err := apply.Apply(ctx, tx, tenantID, imported[0].id, person.ID)
+		out, err := apply.Apply(ctx, tx, tenantID, imported[0].id, person.ID, person.ID)
 		if err != nil {
 			return tenant.Principal{}, err
 		}
@@ -161,6 +162,7 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 // Callers must verify the email before using these IDs for account linking or
 // revealing that an earlier account exists. Matching does not fold aliases,
 // strip plus tags, or infer relationships from a name.
+// Only ASCII case is folded; Unicode case mappings can identify other mailboxes.
 func ImportedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string) ([]string, error) {
 	people, err := importedPeopleForEmail(ctx, tx, tenantID, email, false)
 	ids := make([]string, len(people))
@@ -189,7 +191,8 @@ func importedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email stri
 		LEFT JOIN identities i ON i.id=p.identity_id
 		WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.linked_to IS NULL
 		  AND (p.identity_id IS NULL OR i.issuer='paimos-classic')
-		  AND lower(coalesce(nullif(p.email,''),i.email,''))=lower($2)
+		  AND translate(coalesce(nullif(p.email,''),i.email,''),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+		      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
 		ORDER BY p.id LIMIT 2`
 	if lock {
 		query += ` FOR UPDATE OF p`

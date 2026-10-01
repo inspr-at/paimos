@@ -245,6 +245,11 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 }
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {
+	// Share the invite/link lock before reading or inserting people. Row locks
+	// alone cannot stop a new matching email from making a candidate ambiguous.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
+		return "", nil, err
+	}
 	users, err := storedUserRefs(ctx, tx, tenantID, s.SourceID)
 	if err != nil {
 		return "", nil, err

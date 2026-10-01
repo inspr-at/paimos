@@ -2,8 +2,10 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -12,6 +14,92 @@ import (
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
+
+func TestClassicImportWaitsForInviteLinkLock(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 10*time.Second)
+	defer cancel()
+	tid, err := tenantbootstrap.Create(ctx, d.App, "import-lock", "Import lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tid); err != nil {
+		t.Fatal(err)
+	}
+	importTx, err := d.App.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer importTx.Rollback(context.Background())
+	var pid int
+	if err := importTx.QueryRow(ctx, `SELECT pg_backend_pid() FROM set_config('aeon.tenant_id',$1,true)`, tid).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		var conflicts []ImportConflict
+		_, _, err := importUsers(ctx, importTx, tid, Snapshot{SourceID: "race", Users: []Record{{"id": 7, "username": "classic", "email": "person@example.test", "role": "admin"}}}, &conflicts)
+		if err == nil {
+			err = importTx.Commit(ctx)
+		}
+		result <- err
+		close(result)
+	}()
+	defer func() {
+		_ = blocker.Rollback(context.Background())
+		cancel()
+		<-result
+	}()
+	// Observe the actual advisory lock wait, rather than assuming a goroutine
+	// has started or relying on a sleep. Import must write nothing while held.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		if err := d.Admin.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-result:
+			t.Fatalf("import did not wait for invite/link lock: %v", err)
+		case <-ctx.Done():
+			t.Fatal("import never waited for invite/link lock")
+		case <-ticker.C:
+		}
+	}
+	var count int
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM identities WHERE issuer='paimos-classic' AND subject='race:7'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("import changed identities before acquiring invite/link lock")
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("import did not resume after invite/link transaction committed")
+	}
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM identities WHERE issuer='paimos-classic' AND subject='race:7'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("import did not create classic identity after lock release: %d", count)
+	}
+}
 
 func TestClassicUsernameEmailAndCanonicalAssignments(t *testing.T) {
 	d := dbtest.Open(t)

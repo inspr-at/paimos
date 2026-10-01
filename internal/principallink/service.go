@@ -57,7 +57,7 @@ func (s *Service) Unlink(ctx context.Context, slug, from string) (Result, error)
 // the event; eventLinked and eventUnlinked select the event type. Linking
 // deletes the source's role bindings.
 func LinkTx(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID, eventLinked, eventUnlinked string) (Result, error) {
-	out, err := apply.Apply(ctx, tx, tenantID, from, to)
+	out, err := apply.Apply(ctx, tx, tenantID, from, to, actorID)
 	if err != nil {
 		return Result{}, err
 	}
