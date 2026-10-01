@@ -30,8 +30,10 @@ type Outcome struct {
 
 // Apply links from to to. An empty to unlinks. Linking deletes the source's
 // role bindings; an alias never keeps its own. Unlink may restore a classic
-// workspace binding. The caller writes the event.
-func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to string) (Outcome, error) {
+// workspace binding. Every deleted binding is audited as actorID in this
+// transaction; the caller writes the principal link event. Legacy role labels
+// are retained as import metadata, not access grants.
+func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID string) (Outcome, error) {
 	var out Outcome
 	if strings.TrimSpace(from) == "" {
 		return out, errors.New("from is required")
@@ -68,15 +70,52 @@ func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to string) (Outcome, 
 		return Outcome{}, err
 	}
 	if target != nil {
-		if _, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid`, tenantID, source.ID); err != nil {
+		if err := removeBindings(ctx, tx, tenantID, source.ID, actorID); err != nil {
 			return Outcome{}, err
 		}
-	} else if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, source.ID); err != nil {
+	} else if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_uninvited($1::uuid,$2::uuid)`, tenantID, source.ID); err != nil {
 		return Outcome{}, err
 	}
 	out.Person.LinkedTo = target
 	out.Changed = true
 	return out, nil
+}
+
+func removeBindings(ctx context.Context, tx pgx.Tx, tenantID, principalID, actorID string) error {
+	rows, err := tx.Query(ctx, `DELETE FROM role_bindings b USING roles r
+		WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
+		  AND r.tenant_id=b.tenant_id AND r.id=b.role_id
+		RETURNING jsonb_build_object(
+		  'id',b.id,'principal_id',b.principal_id,'scope_type',b.scope_type,
+		  'project_id',b.scope_id,'role',jsonb_build_object('id',r.id,'key',r.key,'name',r.name),
+		  'reason','principal_alias_linked')`, tenantID, principalID)
+	if err != nil {
+		return err
+	}
+	var removed []json.RawMessage
+	for rows.Next() {
+		var before json.RawMessage
+		if err := rows.Scan(&before); err != nil {
+			rows.Close()
+			return err
+		}
+		removed = append(removed, before)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Access audit is workspace activity, as for invite binding.set. The event
+	// trigger records project_id from each snapshot in node_refs, preserving
+	// project visibility even for the operator's workspace-only transaction.
+	for _, before := range removed {
+		if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,before,at)
+			VALUES($1::uuid,$2::uuid,'binding.removed',$3::jsonb,clock_timestamp())`,
+			tenantID, actorID, before); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func lookup(ctx context.Context, tx pgx.Tx, tenantID, ref string) (Person, error) {

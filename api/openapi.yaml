@@ -2421,7 +2421,7 @@ paths:
     post:
       operationId: createMemberInvite
       summary: Create an invite and return its join link once
-      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance.
+      description: Aeon sends no email. With provision_account, the configured identity provider sends a sign-in setup email after the Aeon invite commits. The join URL contains a token stored only as a hash. The invited email must be verified by the identity provider before acceptance. Imported people without a sign-in identity can be invited. Acceptance links a unique active, unlinked imported person with the same email in this tenant to the new person, preserving the imported identity and history. Email matching is exact apart from ASCII letter case; Unicode characters remain distinct. Multiple unlinked matches require manual linking, including inactive records or records that already have aliases. Inactive records and existing link targets are never auto-linked. The invited roles determine access; imported roles are not inherited.
       requestBody:
         required: true
         content:
@@ -2441,7 +2441,7 @@ paths:
                   account: {$ref: '#/components/schemas/InviteAccountResult'}
         '400': {description: 'Invalid email, expiry, role or project, or provisioning requested without a configured provisioner'}
         '403': {description: Permission denied or the role exceeds the inviter}
-        '409': {description: Email already belongs to an active member}
+        '409': {description: Email already belongs to an active member with a sign-in identity}
   /members/invites/{id}:
     delete:
       operationId: revokeMemberInvite
@@ -2749,7 +2749,7 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         "302":
-          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member; provider availability failures use unavailable; other failures use failed.
+          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed.
           headers:
             Location:
               schema: {type: string}
@@ -2767,7 +2767,7 @@ paths:
     post:
       operationId: authDevLogin
       summary: Sign in by email when AEON_ENV=dev
-      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email.
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email. Bootstrap admin matching, email lookup and dev identity subjects fold only ASCII letter case; Unicode characters remain distinct.
       security: []
       requestBody:
         required: true
