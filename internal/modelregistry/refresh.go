@@ -211,10 +211,18 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 	}
 	for _, input := range inputs {
 		result := discoveredSource{input: input}
-		key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
-		if err == nil && fetchCtx.Err() == nil {
-			result.ids, err = listVendorModels(fetchCtx, client, input.Vendor, key)
-			result.fresh = err == nil
+		var allowed bool
+		// A person may disable discovery or revoke a key while a preceding
+		// vendor is responding. Recheck before starting the next vendor.
+		err := m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
+		})
+		if err == nil && allowed && fetchCtx.Err() == nil {
+			key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
+			if err == nil {
+				result.ids, err = listVendorModels(fetchCtx, client, input.Vendor, key)
+				result.fresh = err == nil
+			}
 		}
 		fetched = append(fetched, result)
 	}

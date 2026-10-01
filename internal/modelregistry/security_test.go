@@ -434,3 +434,57 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 		t.Fatal("disabled discovery called vendor or discovery rewrote policy")
 	}
 }
+
+func TestRefreshVendorsShareDeadlineAndStopWhenDiscoveryDisabled(t *testing.T) {
+	reset(t)
+	owner := makePrincipal(t, "multi-vendor-refresh", "person", "Owner", []string{"admin"})
+	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
+	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
+	decode[[]Profile](t, &owner, "GET", "/api/models", "", 200)
+	for vendor, harness := range map[string]string{"openai": "codex", "xai": "grok"} {
+		account := enrollEvidenceHarness(t, owner, agent, harness)
+		cipher, err := linkvault.Encrypt(m.vaultKey, owner.TenantID, "models/"+account+"/"+vendor, "fixture-key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		inRegistry(t, owner, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,$3,$4)`, owner.TenantID, account, vendor, cipher)
+			return err
+		})
+	}
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET api_enabled=true`)
+		return err
+	})
+	calls := 0
+	disable := false
+	var deadline time.Time
+	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		current, ok := r.Context().Deadline()
+		if !ok || (!deadline.IsZero() && !current.Equal(deadline)) {
+			t.Error("vendor calls did not share one deadline")
+		}
+		deadline = current
+		if disable {
+			inRegistry(t, owner, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET api_enabled=false`)
+				return err
+			})
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`))}, nil
+	})}
+	ctx := tenant.WithPrincipal(t.Context(), owner)
+	if _, err := m.runRefresh(ctx, owner, false); err != nil || calls != 2 {
+		t.Fatalf("multi-vendor refresh: %d calls, %v", calls, err)
+	}
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		return err
+	})
+	deadline = time.Time{}
+	disable = true
+	if _, err := m.runRefresh(ctx, owner, false); err != nil || calls != 3 {
+		t.Fatalf("disabled refresh contacted another vendor: %d calls, %v", calls, err)
+	}
+}
