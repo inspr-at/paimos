@@ -23,7 +23,7 @@ describe('shared effort meter', () => {
     expect(effortLevel('high')).toBeNull()
     expect(effortLevel(0)).toBe(0)
     expect(effortTip(0)).toBe('Effort minimal · 0 of 5')
-    expect(effortTip(null)).toBe('')
+    for (const level of [null, undefined, 'xhigh', -1, 6, 1.5]) expect(effortTip(level)).toBe('Effort not reported')
   })
   it('uses the registered provider mark for models hosted by another harness', async () => {
     const mark = await renderToString(createSSRApp(HarnessMark, { harness: 'pi', provider: 'anthropic', size: 12 }))
@@ -55,6 +55,42 @@ describe('registry model names and versions', () => {
     expect(cell.tip).not.toContain('s1')
     row.planning!.route!.model_version = '5.5'
     expect(modelCell(row).tip).toContain('Planned: Claude Opus 5.5 · high, as used')
+  })
+  it.each([
+    [undefined, undefined, true], ['', '', true], [undefined, '', true], ['', undefined, true],
+    [undefined, '5.5', false], ['', '5.5', false], ['5.5', undefined, false], ['5.5', '', false],
+    ['5.5', '5.5', true], ['5', '5.5', false],
+  ] as const)('compares planned version %s and used version %s without a wildcard', (plannedVersion, usedVersion, same) => {
+    const planned = { ...opus, profile: 'opus', model: 'opus', model_version: plannedVersion, effort: 'high', revision: '2' }
+    const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route: planned, tokens: { spent: 1, estimated: null, input: 1, output: 0, cached: 0, sessions: 1, unreported: 0 }, models: [{ ...opus, model: 'opus', model_version: usedVersion, sessions: [{ id: 's1', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1 }] }] } }
+    // Hidden versions still participate in identity; omitted and empty are equivalent.
+    const tip = modelCell(row, { ...DEFAULT_MODEL_DISPLAY, modelVersion: 'hide' }).tip
+    expect(tip.split('\n').at(-1)).toBe(`Planned: ${fullModelName(planned)} · high${same ? ', as used' : ' (a different model ran)'}`)
+    expect(tip).not.toContain('s1')
+  })
+  it.each(['default', 'ultra', 'xhigh', ''])('reports unknown effort for raw setting %s without guessing a level', effort => {
+    for (const level of [undefined, null]) for (const effortMeter of [true, false]) {
+      const route = { label: 'Cursor Composer', display_name: 'Cursor Composer', short_name: 'Composer', harness: 'cursor', model: 'composer', profile: 'composer', effort, effort_level: level, revision: '2' }
+      const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route, tokens: { spent: null, estimated: null, input: 0, output: 0, cached: 0, sessions: 0, unreported: 0 } } }
+      const prefs = { ...DEFAULT_MODEL_DISPLAY, effortMeter }
+      expect(modelCell(row, prefs)).toMatchObject({ state: 'planned', effort: null })
+      expect(modelCell(row, prefs).tip).toContain('Effort not reported')
+      expect(modelCell(row, prefs).label).toContain('Effort not reported')
+      row.planning!.models = [{ ...route, sessions: [{ id: 'private-id', effort, effort_level: level, role: 'worker', running: true, tokens: null }] }]
+      expect(modelCell(row, prefs)).toMatchObject({ state: 'measured', effort: null })
+      expect(modelCell(row, prefs).tip).toContain('Effort not reported')
+      expect(modelCell(row, prefs).label).toContain('Effort not reported')
+      expect(modelCell(row, prefs).tip).not.toMatch(/of 5|private-id/)
+    }
+  })
+  it('retains unknown effort alongside known effort in grouped used-model hovers', () => {
+    const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route: null, tokens: { spent: 1, estimated: null, input: 1, output: 0, cached: 0, sessions: 2, unreported: 1 }, models: [{ ...opus, model: 'opus', sessions: [
+      { id: 'known', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1 },
+      { id: 'unknown', effort: 'ultra', role: 'worker', running: false, tokens: null },
+    ] }] } }
+    const cell = modelCell(row)
+    expect(cell.effort).toBe(3)
+    expect(cell.tip).toContain('Effort high · 3 of 5 · Effort not reported')
   })
   it('keeps full hover/screen-reader identities and effort when the drawing is off', () => {
     const row: PlanningRow = { kind_slug: 'ticket', fields: {}, planning: { route: null, tokens: { spent: 1, estimated: null, input: 1, output: 0, cached: 0, sessions: 1, unreported: 0 }, models: [{ ...opus, model: 'opus', sessions: [{ id: 's1', effort: 'max', effort_level: 5, role: 'builder', running: false, tokens: 1 }] }] } }

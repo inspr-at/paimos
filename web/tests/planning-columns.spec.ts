@@ -23,7 +23,6 @@ function world(): Fixtures {
   live.models = [{ display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-live', effort: 'xhigh', effort_level: 4, role: 'worker', running: true, tokens: 1_100_000 }] }]; set('PHAROS-12', live)
   const done = planning(1_900_000, 99_000_000); done.cost = cost('3.33', '999')
   done.models = [{ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-done', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1_900_000 }] }, { display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-other', effort: 'xhigh', effort_level: 4, role: 'worker', running: false, tokens: 0 }] }]
-
   done.estimate_snapshot = { id: 'snapshot', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 3, estimated_tokens: 2_400_000, estimated_cost_usd: '4.20', route, rate_basis: { basis: 'median', tickets: 12, tokens_per_hour: 800_000 } }; set('PHAROS-13', done)
   const over = planning(2_160_000, 1_600_000); over.models = [{ display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-over', effort: 'xhigh', effort_level: 4, role: 'worker', running: false, tokens: 2_160_000 }] }]; over.cost = cost('3.78', '2.80'); set('PHAROS-14', over)
   const plan = planning(1_770_000, 2_000_000); plan.models = [{ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-plan', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1_770_000 }] }]; plan.cost = cost('3.10', '3.50', true); set('PHAROS-15', plan)
@@ -55,7 +54,6 @@ test('approved cells show estimates, running figures, measured checks and sessio
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Estimated ~2.4M · measured 1.9M \(−21%\)/)
   await expect(measured.locator('.plan-model')).toHaveText('Opus 5.5+1')
   await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude Opus 5.5 · high · Effort high · 3 of 5 · 1 session · 1.9M\nCodex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session · 0\nPlanned: Codex Sol 6.1 · xhigh')
-
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).not.toHaveClass(/over/)
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /\(\+35%\)/)
   await expect(row(page, 'PHAROS-15').locator('.c-list-cost .plan-figure')).toHaveText('plan$3.10')
@@ -84,6 +82,63 @@ test('Cursor Grok hovers match profile keys and explain runs without a planned r
   await expect(noPlan).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
   await noPlan.hover()
   await expect(page.locator('.tooltip')).toHaveText('Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
+})
+
+test('unknown planned and used effort stays undrawn and is explained to hover and screen readers', async ({ page }) => {
+  const data = world()
+  const planned = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  planned.route = { ...route, label: 'Cursor Composer · default', display_name: 'Cursor Composer', short_name: 'Composer', model_version: '', harness: 'cursor', model: 'composer', effort: 'default', effort_level: null }
+  const used = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!.models![0]!
+  used.sessions[0]!.effort = 'ultra'
+  delete used.sessions[0]!.effort_level
+  const grouped = data.nodes.find(n => n.key === 'PHAROS-13')!.planning!.models!
+  delete grouped[1]!.sessions[0]!.effort_level
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  for (const key of ['PHAROS-11', 'PHAROS-12']) {
+    const model = row(page, key).locator('.plan-model')
+    await expect(model.locator('.effort')).toHaveCount(0)
+    await expect(model).toHaveAccessibleName(/Effort not reported/)
+    await expect(model).toHaveAccessibleDescription(/Effort not reported/)
+    await model.hover()
+    await expect(page.locator('.tooltip')).toHaveText(/Effort not reported/)
+  }
+  await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveText('~Composer')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', /ultra · Effort not reported/)
+  const mixed = row(page, 'PHAROS-13').locator('.plan-model')
+  await expect(mixed.locator('.effort rect.on')).toHaveCount(3)
+  await expect(mixed).toHaveAccessibleDescription(/Codex Sol 6.1 · xhigh · Effort not reported/)
+  await display(page)
+  await page.getByRole('radiogroup', { name: 'Effort meter', exact: true }).getByRole('radio', { name: 'Off', exact: true }).click()
+  await page.keyboard.press('Escape')
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key).locator('.plan-model')).toHaveAccessibleName(/Effort not reported/)
+  await expect(mixed.locator('.effort')).toHaveCount(0)
+  await expect(mixed).toHaveAccessibleName(/Effort high · 3 of 5/)
+})
+
+test('omitted model versions do not match explicit versions even when version display is hidden', async ({ page }) => {
+  const data = world()
+  const cases = [
+    ['PHAROS-11', undefined, '5.5', false], ['PHAROS-12', '5.5', undefined, false],
+    ['PHAROS-14', undefined, undefined, true], ['PHAROS-15', '', '', true],
+  ] as const
+  for (const [key, plannedVersion, usedVersion] of cases) {
+    const planning = data.nodes.find(n => n.key === key)!.planning!
+    planning.route = { ...route, label: 'Claude Opus · high', display_name: 'Claude Opus', short_name: 'Opus', harness: 'claude', model: 'opus', model_version: plannedVersion, effort: 'high', effort_level: 3 }
+    planning.models = [{ label: 'Claude Opus', display_name: 'Claude Opus', short_name: 'Opus', harness: 'claude', model: 'opus', model_version: usedVersion, sessions: [{ id: `session-${key}`, effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1 }] }]
+  }
+  data.preferences['list:display'] = { modelVersion: 'hide' }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  for (const [key, plannedVersion, , same] of cases) {
+    const model = row(page, key).locator('.plan-model')
+    await expect(model).toHaveText('Opus')
+    const plannedName = ['Claude Opus', plannedVersion].filter(Boolean).join(' ')
+    await expect(model).toHaveAttribute('data-tip', new RegExp(`Planned: ${plannedName.replaceAll('.', '\\.')} · high${same ? ', as used' : ' \\(a different model ran\\)'}$`))
+    await expect(model).toHaveAccessibleDescription(same ? /as used/ : /a different model ran/)
+  }
 })
 
 test('empty saved ticks persist after toggles, narrow desktop layout and reload', async ({ page }) => {

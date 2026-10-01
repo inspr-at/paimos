@@ -281,7 +281,9 @@ The Model column defaults to 176px. Registry `display_name`, `short_name` and
 stay unknown unless a new immutable profile explicitly supplies that metadata.
 Hovers, accessible names and model sorting retain the full name and model version.
 Registered aliases with different declared model versions remain separate used
-models. Sorting follows the leading actual model, then the work-start route or
+models. The planned/used comparison requires equal model versions when either
+side declares one; two omitted or empty versions retain legacy identity matching.
+Sorting follows the leading actual model, then the work-start route or
 live route when no actual model is known.
 Migration 1074 stores model display metadata and effort levels in the immutable,
 tenant-isolated `model_profile_display` table without rewriting profile pins.
@@ -293,7 +295,9 @@ Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through
 Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
 1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
 registered profile only when reported effort matches; unregistered, missing or
-unsupported effort stays null. The largest measured session supplies the leading
+unsupported effort stays null, hides the meter, and says “Effort not reported” in
+the hover and accessible name, including when the meter setting is Off. Raw
+effort words never imply a level. The largest measured session supplies the leading
 model's meter (session ID breaks ties); the hover describes every session.
 
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.

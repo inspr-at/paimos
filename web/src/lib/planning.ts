@@ -8,7 +8,7 @@ export interface ModelDisplayPrefs { effortMeter: boolean; modelNames: 'full' | 
 export const DEFAULT_MODEL_DISPLAY: ModelDisplayPrefs = { effortMeter: true, modelNames: 'short', modelVersion: 'show' }
 export const EFFORT_NAMES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 export function effortLevel(value: unknown): number | null { return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5 ? value : null }
-export function effortTip(value: unknown): string { const level = effortLevel(value); return level === null ? '' : `Effort ${EFFORT_NAMES[level]} · ${level} of 5` }
+export function effortTip(value: unknown): string { const level = effortLevel(value); return level === null ? 'Effort not reported' : `Effort ${EFFORT_NAMES[level]} · ${level} of 5` }
 // Identity strings are complete fallbacks. Version removal uses registry metadata only.
 export function fullModelName(model: ModelDisplay & { label: string }): string { return model.display_name ? [model.display_name, model.model_version].filter(Boolean).join(' ') : model.label.split(' · ')[0]! }
 export function shownModelName(model: ModelDisplay & { label: string; harness: string }, prefs = DEFAULT_MODEL_DISPLAY): string {
@@ -118,7 +118,7 @@ function planLine(row: PlanningRow, models: PlanningModel[] = []): string {
   if (!route) return models.length ? 'No model planned: no role set' : 'No model planned: set a role and area'
   const used = models.length === 1 ? models[0] : undefined
   const asUsed = used && used.harness === route.harness && sessionModelKey(used.model) === sessionModelKey(route.model) &&
-    (used.model_version === undefined || route.model_version === undefined || used.model_version === route.model_version)
+    (used.model_version ?? '') === (route.model_version ?? '')
   const suffix = used ? asUsed ? ', as used' : ' (a different model ran)' : models.length ? '' : ` (${route.model})`
   return `Planned: ${fullModelName(route)}${route.effort ? ` · ${route.effort}` : ''}${suffix}`
 }
