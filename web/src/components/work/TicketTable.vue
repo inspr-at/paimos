@@ -250,8 +250,11 @@ function autofit(id: ColumnId) {
   const def = COLUMN_BY_ID.get(id)!
   let widest = 0
   for (const cell of grid.value?.querySelectorAll<HTMLElement>(`.${CLS[id]} .cell, th.${CLS[id]} .th-sort, th.${CLS[id]} .th-label`) ?? []) {
-    const children = [...cell.children] as HTMLElement[]
-    const gap = parseFloat(getComputedStyle(cell).columnGap) || 0
+    // Planning descriptions are hidden siblings whose nowrap scrollWidth is
+    // the whole hover. Fit only the visible model or figure's own children.
+    const content = cell.querySelector<HTMLElement>('.plan-figure, .plan-model') ?? cell
+    const children = ([...content.children] as HTMLElement[]).filter(child => !child.classList.contains('sr-only'))
+    const gap = parseFloat(getComputedStyle(content).columnGap) || 0
     const inner = children.reduce((sum, child) => sum + Math.max(child.scrollWidth, child.getBoundingClientRect().width), 0) + gap * Math.max(0, children.length - 1)
     widest = Math.max(widest, inner)
   }

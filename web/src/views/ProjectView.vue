@@ -96,7 +96,12 @@ const tablePrefs = computed<ListPrefs | null>(() => {
 const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
 // Cost is offered only to people who may see usage (harness.read).
 const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
-const toolbarColumns = computed(() => ({ ...pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value), notes: planningPresent([...rowsById.value.values()]).list_cost ? {} : { list_cost: 'Nothing reported in this list yet; cells show —' } }))
+const toolbarColumns = computed(() => {
+  const columns = pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value)
+  const notes = columns.visible.includes('list_cost') && !planningPresent([...rowsById.value.values()]).list_cost
+    ? { list_cost: 'Nothing reported in this list yet; cells show —' } : {}
+  return { ...columns, notes }
+})
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
