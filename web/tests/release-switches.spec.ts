@@ -287,7 +287,7 @@ test('a choice that moves a filtered selection lands in the address with it, and
   // The other way round: a release and a choice in the same moment both land.
   await openRelease(page, V105)
   await sheet(page).evaluate(dialog => {
-    dialog.querySelectorAll<HTMLElement>('[role="option"]')[1]!.click()
+    dialog.querySelectorAll<HTMLElement>('[role="row"]')[1]!.click()
     ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(b => b.textContent?.trim() === 'Details')!.click()
   })
   await expect(page).toHaveURL(new RegExp(`/releases/${esc(V102)}\\?release_view=details$`))

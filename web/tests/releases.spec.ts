@@ -478,13 +478,13 @@ test('nothing is clipped at 390: stat card and chart stacked, the count on its o
     return out
   })
   expect(await clipped()).toEqual([])
-  await options(page).nth(1).click()
+  await options(page).nth(1).locator('.row-name').click()
   await expect(sheet(page).locator('.detail')).toBeVisible()
   await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
   expect(await clipped()).toEqual([])
   await sheet(page).getByRole('button', { name: 'All releases' }).click()
   await sheet(page).getByRole('button', { name: 'Compare' }).click()
-  await options(page).nth(3).click()
+  await options(page).nth(3).locator('.row-name').click()
   await expect(sheet(page).locator('.detail-pane > .compare')).toBeVisible()
   expect(await clipped()).toEqual([])
   void history
@@ -538,7 +538,7 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await expect(sheet(page)).toBeVisible()
   // At rest: the pointer that clicked the footer pill would otherwise hover a row.
   await page.mouse.move(1, 1)
-  const rows = sheet(page).locator('.row .calendar-version')
+  const rows = sheet(page).locator('.row .version-pretty')
   await expect(rows.first()).toBeVisible()
   const count = await rows.count()
   expect(count).toBe(history.releases.length)

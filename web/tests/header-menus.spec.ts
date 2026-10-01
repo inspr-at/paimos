@@ -111,7 +111,7 @@ test.describe('release history before the version has loaded', () => {
       await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
       const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       await expect(history).toBeVisible()
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      await expect(history.getByRole('row', { selected: true })).toHaveCount(0)
       // The list stays up until the running release is known. A phone must not
       // cover it with an empty detail while the history is still on its way.
       if (width < 600) {
@@ -122,8 +122,8 @@ test.describe('release history before the version has loaded', () => {
       await page.waitForLoadState('networkidle')
       const version = state.history.current
       await expect(page).toHaveURL(new RegExp(`[?&]releases=${version.replace(/\./g, '\\.')}(?:&|#|$)`))
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
+      await expect(history.getByRole('row', { selected: true })).toHaveCount(1)
+      await expect(history.getByRole('row', { selected: true })).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
       // The running release's heading is its marketing name (AEON-430).
       const name = state.history.releases.find(r => r.version === version)!.codename!
       await expect(history.getByRole('heading', { level: 2, name })).toBeVisible()
