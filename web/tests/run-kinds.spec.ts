@@ -33,6 +33,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     } else await route.fulfill({ json: [...names].map(([host, label]) => ({ host, label })) })
   })
   await page.goto('/agents')
+  const accounts = page.getByRole('button', { name: /^Accounts and computers/ })
+  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
   await expect(page.locator(`[data-row="s:${ai.id}"]`)).toBeVisible()
   const table = page.getByRole('table', { name: 'Agent sessions' })
   if (!before) {
@@ -73,5 +75,6 @@ test('execution kinds and person-specific host names on the real agents table', 
   }
   const root = process.env.AEON_501_SHOTS
   if (root) mkdirSync(root, { recursive: true })
-  await page.screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}.png`) : info.outputPath(`${before ? 'before' : 'after'}.png`), fullPage: true })
+  await page.screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}.png`) : info.outputPath(`${before ? 'before' : 'after'}.png`), fullPage: true, animations: 'disabled' })
+  await page.locator('.sessions').screenshot({ path: root ? join(root, `${before ? 'before' : 'after'}-sessions.png`) : info.outputPath(`${before ? 'before' : 'after'}-sessions.png`), animations: 'disabled' })
 })

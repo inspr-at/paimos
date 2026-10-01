@@ -285,12 +285,19 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('the only integration exception is the unchanged merged 1054 contract migration', () => {
+test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.equal(manifest.exceptions.length, 1);
+  assert.equal(manifest.exceptions.length, 2);
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
+  const runKinds = manifest.exceptions[1];
+  assert.equal(runKinds.file, '1063_run_kinds.sql');
+  assert.equal(runKinds.ticket, 'AEON-501');
+  const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
+  assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
+  assert.match(runKinds.reason, /strict superset/);
+
   assert.equal(entry.ticket, 'AEON-397');
   assert.match(entry.reason, /contract|unconfirmed|person/i);
   const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
@@ -300,7 +307,7 @@ test('the only integration exception is the unchanged merged 1054 contract migra
   assert.equal(destructive(source), true);
 });
 
-test('the current tree passes only with the explicit 1054 contract exception', () => {
+test('the current tree requires both exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -308,6 +315,7 @@ test('the current tree passes only with the explicit 1054 contract exception', (
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.equal(withoutException.length, 1);
+  assert.equal(withoutException.length, 2);
   assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
+  assert.match(withoutException[1], /^1063_run_kinds.sql: non-allowlisted/);
 });

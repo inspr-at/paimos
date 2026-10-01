@@ -133,19 +133,19 @@ const grant = computed<ControlGrant>(() => ({ person: identity.identity?.princip
 // The chosen order is remembered per viewer in this browser; the page works without storage.
 const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
 watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
-const hostLabels = ref<Record<string, string>>({})
+const hostLabels = ref(new Map<string, string>())
 let hostRead = 0
 watch(viewer, async () => {
   const read = ++hostRead
-  hostLabels.value = {}
+  hostLabels.value = new Map()
   if (!grant.value.person) return
   try {
     const labels = await listHostLabels()
-    if (read === hostRead) hostLabels.value = { ...Object.fromEntries(labels.map(item => [item.host, item.label])), ...hostLabels.value }
+    if (read === hostRead) hostLabels.value = new Map([...labels.map(item => [item.host, item.label] as const), ...hostLabels.value])
   } catch { /* The registered host remains the default; the editor retries its read. */ }
 }, { immediate: true })
 function renamedHost(host: string, label: string) {
-  hostLabels.value = { ...hostLabels.value, [host]: label }
+  hostLabels.value = new Map([...hostLabels.value, [host, label]])
 }
 const COLUMNS: { key: SortKey; label: string; cls?: string }[] = [
   { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'ticket', label: 'Ticket' },
@@ -418,7 +418,7 @@ function rowClick(event: MouseEvent, id: string) {
             </span>
           </span>
           <span role="cell" class="c-host">
-            <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels[view.session.host]" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
+            <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels.get(view.session.host)" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
           </span>
           <span role="cell" class="right c-beat">
             <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>

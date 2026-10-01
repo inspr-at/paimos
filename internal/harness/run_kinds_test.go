@@ -43,7 +43,7 @@ func TestRunKindsRegisterBeatAndAggregate(t *testing.T) {
 			t.Fatalf("wrong beat: %#v", beat)
 		}
 		if tc.harness != "codex" {
-			expect(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "model": "claude-fiction"}, lease), 400)
+			expect(t, f.call(f.agent, "POST", base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 2, "model": "claude-fiction"}, lease), 400)
 		}
 	}
 	f.beat(t, lead, leadLease, 1, map[string]any{"eta_live_at": time.Now().Add(20 * time.Minute).UTC().Format(time.RFC3339)})
@@ -78,7 +78,7 @@ func TestRunKindsRegisterBeatAndAggregate(t *testing.T) {
 		if field == "eta_ready_at" {
 			value = time.Now().UTC().Format(time.RFC3339)
 		}
-		w := f.call(f.agent, "POST", base+"/"+lead+"/heartbeat", map[string]any{"phase": "working", field: value}, leadLease)
+		w := f.call(f.agent, "POST", base+"/"+lead+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 2, field: value}, leadLease)
 		expect(t, w, 400)
 		if !strings.Contains(w.Body.String(), "--progress") || !strings.Contains(w.Body.String(), "--eta-ready") || !strings.Contains(w.Body.String(), "derived") {
 			t.Fatal("imprecise coordinator error")
@@ -122,10 +122,7 @@ func TestCoordinatorProgressCountsMissingAndFinishedWorkers(t *testing.T) {
 			expect(t, f.call(f.agent, "POST", base+"/"+child+"/stop", map[string]any{"reason": "process_exited"}, lease), 200)
 		}
 		if tc.removed {
-			f.tx(t, f.person, func(tx pgx.Tx) error {
-				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET archived_at=clock_timestamp() WHERE id=$1`, child)
-				return err
-			})
+			expect(t, f.call(f.person, "POST", base+"/"+child+"/remove", map[string]any{"reason": "test removal"}, ""), 200)
 		}
 	}
 	detail := decode(t, f.call(f.person, "GET", base+"/"+lead, nil, ""))

@@ -11,9 +11,6 @@ on:
       - '.github/workflows/agents-run-kinds.yml'
 permissions:
   contents: read
-concurrency:
-  group: agents-execution-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 jobs:
   execution-column:
     runs-on: ubuntu-latest

@@ -28,7 +28,7 @@ async function open(event: MouseEvent) {
     draft.value = label
     emit('renamed', label)
   } catch (err) { if (current === operation) error.value = message(err) }
-  finally { if (current === operation) { busy.value = false; await nextTick(); input.value?.focus() } }
+  finally { if (current === operation) { busy.value = false; await nextTick(); input.value?.focus({ preventScroll: true }) } }
 }
 function close(restore = false) {
   const target = anchor.value
