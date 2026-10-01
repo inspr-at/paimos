@@ -130,6 +130,36 @@ func TestGrokManagedUsageIncludesCacheReadAndCreation(t *testing.T) {
 	}
 }
 
+func TestGrokManagedUsageRetainsFallingReasoning(t *testing.T) {
+	s := &grokUsageTracker{}
+	for _, tc := range []struct {
+		name, raw                            string
+		input, output, cached, reasoning      int64
+		inputDelta, outputDelta, cachedDelta  int64
+		reasoningDelta                        int64
+	}{
+		{"initial", `{"update":{"sessionUpdate":"usage_update","inputTokens":2,"outputTokens":8,"cachedReadTokens":30,"cacheCreationTokens":4,"reasoningTokens":6}}`, 36, 8, 30, 6, 36, 8, 30, 6},
+		{"reasoning-revised-down", `{"update":{"sessionUpdate":"usage_update","inputTokens":5,"outputTokens":10,"cachedReadTokens":40,"cacheCreationTokens":6,"reasoningTokens":3}}`, 51, 10, 40, 6, 15, 2, 10, 0},
+		{"replay", `{"update":{"sessionUpdate":"usage_update","inputTokens":5,"outputTokens":10,"cachedReadTokens":40,"cacheCreationTokens":6,"reasoningTokens":3}}`, 51, 10, 40, 6, 0, 0, 0, 0},
+		{"missing-reasoning", `{"update":{"sessionUpdate":"usage_update","inputTokens":7,"outputTokens":11}}`, 53, 11, 40, 6, 2, 1, 0, 0},
+		{"reasoning-grows-again", `{"update":{"sessionUpdate":"usage_update","inputTokens":9,"outputTokens":13,"cachedReadTokens":41,"cacheCreationTokens":7,"reasoningTokens":9}}`, 57, 13, 41, 9, 4, 2, 1, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ev, ok := s.event([]byte(tc.raw), grokModel)
+			if !ok || ev.SessionUsage == nil {
+				t.Fatal("valid usage update was dropped")
+			}
+			report := ev.SessionUsage
+			if usageCount(report.InputTokens) != tc.input || usageCount(report.OutputTokens) != tc.output || usageCount(report.CachedInputTokens) != tc.cached || report.ReasoningTokens == nil || *report.ReasoningTokens != tc.reasoning {
+				t.Fatalf("wrong cumulative usage: %+v", report)
+			}
+			if ev.InputTokensDelta != tc.inputDelta || ev.OutputTokensDelta != tc.outputDelta || ev.CachedInputTokensDelta != tc.cachedDelta || ev.ReasoningTokensDelta != tc.reasoningDelta {
+				t.Fatalf("wrong telemetry deltas: %+v", ev)
+			}
+		})
+	}
+}
+
 func TestPiAdapterPublishesUsageFromOwnedWire(t *testing.T) {
 	r := adapterRequest(t)
 	r.Profile.Harness, r.Profile.Model = Pi, "anthropic/test-model"

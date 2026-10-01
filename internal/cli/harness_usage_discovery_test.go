@@ -132,6 +132,36 @@ func TestCodexUsageDiscoveryDoesNotPinIncompleteWalk(t *testing.T) {
 	}
 }
 
+func TestCodexUsageIDLookupSearchesNewestDatesFirst(t *testing.T) {
+	home := t.TempDir()
+	id := "11111111-1111-4111-8111-111111111111"
+	// More than the entire walk budget in an old date must not hide a
+	// matching recent rollout, even when the same id exists in an older date.
+	old := filepath.Join(home, "sessions", "2025", "01", "01")
+	for i := 0; i < usageWalkLimit; i++ {
+		writeUsageFixture(t, filepath.Join(old, fmt.Sprintf("rollout-%04d-other.jsonl", i)), "{}\n")
+	}
+	writeUsageFixture(t, filepath.Join(old, "rollout-old-"+id+".jsonl"), "{}\n")
+	writeUsageFixture(t, filepath.Join(home, "sessions", "2026", "09", "30", "rollout-older-"+id+".jsonl"), "{}\n")
+	want := writeUsageFixture(t, filepath.Join(home, "sessions", "2026", "10", "01", "rollout-newest-"+id+".jsonl"), "{}\n")
+	target, err := resolveHeartbeatUsage(heartbeatOptions{Harness: "codex", CodexHome: home, UsageID: id})
+	if err != nil || target.Path != want {
+		t.Fatalf("recent explicit id was hidden by old sessions: target=%+v err=%v", target, err)
+	}
+	// The id lookup remains bounded for missing ids and ids found only
+	// beyond the budget. An explicit file remains the deterministic fallback.
+	beyond := writeUsageFixture(t, filepath.Join(old, "rollout-0000-22222222-2222-4222-8222-222222222222.jsonl"), "{}\n")
+	for _, absent := range []string{"33333333-3333-4333-8333-333333333333", "22222222-2222-4222-8222-222222222222"} {
+		if got := findCodexRollout(home, absent); got != "" {
+			t.Fatalf("lookup exceeded its entry budget for %q: %q", absent, got)
+		}
+	}
+	target, err = resolveHeartbeatUsage(heartbeatOptions{Harness: "codex", UsageFile: beyond})
+	if err != nil || target.Path != beyond {
+		t.Fatal("explicit file did not bypass the discovery cap")
+	}
+}
+
 func grokDiscoveryFixture(t *testing.T, home, id, work string, created time.Time) string {
 	t.Helper()
 	root := filepath.Join(home, "sessions", encodeURIComponent(work), id)
@@ -161,6 +191,51 @@ func TestGrokUsageDiscoveryRequiresCreationAndExactWorktree(t *testing.T) {
 	}
 	if allowedUsagePath("grok", filepath.Join(filepath.Dir(want), "summary.json")) {
 		t.Fatal("summary became an allowed usage file")
+	}
+}
+
+func TestGrokUsageDiscoveryDoesNotPinIncompleteListing(t *testing.T) {
+	dir := t.TempDir()
+	var calls []hbCall
+	srv := hbServer(t, &calls, nil)
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(dir)
+	o.Harness, o.HarnessVersion = "grok", "fixture"
+	o.Worktree, o.GrokHome = "/work/exact", filepath.Join(dir, "grok")
+	session := openUsageSession(t, rt, o)
+	start := session.disk.RegisteredAt
+	grokDiscoveryFixture(t, o.GrokHome, "aaa-early-session", o.Worktree, start.Add(time.Second))
+	root := filepath.Join(o.GrokHome, "sessions", encodeURIComponent(o.Worktree))
+	for i := 0; i < usageWalkLimit-2; i++ {
+		if err := os.MkdirAll(filepath.Join(root, fmt.Sprintf("padding-%04d", i)), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := grokDiscoveryFixture(t, o.GrokHome, "zzz-latest-session", o.Worktree, start.Add(time.Minute))
+	if got := discoverGrokUsage(o.GrokHome, o.Worktree, start); got != want {
+		t.Fatalf("complete listing at the cap did not find the newest session: %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "padding-over-cap"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	target, err := resolveSessionHeartbeatUsage(o, session)
+	if err != nil || target.Path != "" || session.disk.UsagePath != "" || session.disk.UsageSource != "" {
+		t.Fatalf("incomplete listing pinned an older session: target=%+v source=%q path=%q err=%v", target, session.disk.UsageSource, session.disk.UsagePath, err)
+	}
+	if err := saveHeartbeatSession(session); err != nil {
+		t.Fatal(err)
+	}
+	restarted, ok, err := loadHeartbeatSession(&session.hold)
+	if err != nil || !ok {
+		t.Fatal("could not reload discovery state")
+	}
+	if target, err := resolveSessionHeartbeatUsage(o, &restarted); err != nil || target.Path != "" || restarted.disk.UsagePath != "" || restarted.disk.UsageSource != "" {
+		t.Fatal("restart pinned an incomplete discovery result")
+	}
+	o.UsageID = "zzz-latest-session"
+	if target, err := resolveSessionHeartbeatUsage(o, &restarted); err != nil || target.Path != want {
+		t.Fatal("explicit Grok id did not bypass the discovery cap")
 	}
 }
 
