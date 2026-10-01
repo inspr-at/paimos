@@ -110,12 +110,24 @@ export interface ModelCell { text: string; tip: string; state: 'none' | 'planned
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
 }
-function planLine(row: PlanningRow): string {
+function planLine(row: PlanningRow, models: PlanningModel[] = []): string {
   const route = plannedRoute(row)
-  return route ? `Planned: ${fullModelName(route)}${route.effort ? ` · ${route.effort}` : ''} (${route.model})` : 'No model planned: set a role and area'
+  if (!route) return 'No model planned: set a role and area'
+  const asUsed = models.every(model => model.harness === route.harness && model.model === route.model &&
+    (model.model_version === undefined || route.model_version === undefined || model.model_version === route.model_version))
+  const suffix = models.length ? asUsed ? ', as used' : ' (a different model ran)' : ` (${route.model})`
+  return `Planned: ${fullModelName(route)}${route.effort ? ` · ${route.effort}` : ''}${suffix}`
 }
 function usedLines(models: PlanningModel[]): string[] {
-  return models.flatMap(m => m.sessions.map(s => `${fullModelName(m)} (${m.model})${s.effort ? ` · ${s.effort}` : ''} · session ${s.id}${s.role ? ` (${s.role})` : ''}${s.running ? ', running' : ''}${s.tokens !== null ? ` · ${formatTokenCount(s.tokens)} tokens` : ' · usage not reported yet'}${s.model_raw && s.model_raw !== m.model ? ` · reported: ${s.model_raw}` : ''}${effortTip(s.effort_level) ? ` · ${effortTip(s.effort_level)}` : ''}`))
+  return models.map(model => {
+    const efforts = [...new Set(model.sessions.map(session => session.effort).filter(Boolean))]
+    const levels = [...new Set(model.sessions.map(session => effortTip(session.effort_level)).filter(Boolean))]
+    const reported = model.sessions.filter(session => session.tokens !== null)
+    const total = reported.reduce((sum, session) => sum + session.tokens!, 0)
+    const review = model.sessions.length > 0 && model.sessions.every(session => session.role === 'reviewer')
+    return [fullModelName(model), ...efforts, ...levels, `${model.sessions.length} session${model.sessions.length === 1 ? '' : 's'}${model.sessions.some(session => session.running) ? ', running' : ''}`,
+      ...(models.length > 1 ? [reported.length ? `${formatTokenCount(total)}${review ? ' (review)' : ''}` : 'usage not reported yet'] : [])].join(' · ')
+  })
 }
 export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): ModelCell {
   const models = row.kind_slug === 'epic' ? [] : row.planning?.models ?? []
@@ -124,7 +136,7 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
     const level = effortLevel(first.sessions[0]?.effort_level), fullName = fullModelName(first), effort = effortTip(level)
     return { text: shownModelName(first, prefs), effort: level, fullName, provider: first.provider ?? '', harness: first.harness, state: 'measured', more,
       label: `${fullName}, measured${effort ? `, ${effort}` : ''}${more ? `, and ${more} more model${more === 1 ? '' : 's'}` : ''}`,
-      tip: ['Used, per session:', ...usedLines(models), planLine(row)].join('\n') }
+      tip: [...(more ? ['Used, per session:', ...usedLines(models)] : [`Used: ${usedLines(models)[0]}`]), planLine(row, models)].join('\n') }
   }
   const route = plannedRoute(row)
   if (row.kind_slug !== 'epic' && route) {
@@ -193,7 +205,10 @@ export function tokensCell(row: PlanningRow): FigureCell {
   const live = running(row)
   const lines: string[] = []
   if (spent !== null) {
-    lines.push([est !== null ? `Estimated ~${formatTokenCount(est)}` : '', `${live ? 'Measured so far' : 'measured'} ${formatTokenCount(spent)}${delta(spent, est, live)}`, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.model : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
+    const comparison = live
+      ? [`Measured so far ${formatTokenCount(spent)}`, est !== null ? `estimated ~${formatTokenCount(est)}${delta(spent, est, true)}` : '']
+      : [est !== null ? `Estimated ~${formatTokenCount(est)}` : '', `measured ${formatTokenCount(spent)}${delta(spent, est, false)}`]
+    lines.push([...comparison, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.label : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
     lines.push(`${tokens!.sessions} session${tokens!.sessions === 1 ? '' : 's'}${live ? ', running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
     if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
@@ -209,20 +224,29 @@ export function listCostCell(row: PlanningRow): FigureCell {
   const spent = num(cost?.list_spent), est = snap ? num(snap.estimated_cost_usd) : num(cost?.list_estimated)
   const modes = cost?.billing_modes ?? (cost?.plans.length && row.planning?.tokens.sessions ? ['subscription'] : cost && !cost.paid_unknown && row.planning?.tokens.sessions ? ['api'] : [])
   const subscription = modes.includes('subscription'), api = modes.includes('api'), unknown = modes.includes('unknown')
+  const subscriptionOnly = modes.length === 1 && subscription
+  const live = running(row)
   const lines: string[] = []
   if (spent !== null) {
-    if (subscription && !api && !unknown) lines.push(`Included in your plan · list value ${formatDollars(spent)}`, 'Subscription: not charged per use')
-    else if (api && !subscription && !unknown) lines.push(`API-billed · measured ${formatDollars(spent)} at list prices`)
-    else lines.push(`Measured ${formatDollars(spent)} at list prices`, [api ? 'API-billed' : '', subscription ? 'Subscription portion included in your plan' : '', unknown || !modes.length ? 'Billing not reported yet' : ''].filter(Boolean).join(' · '))
+    if (live) {
+      lines.push([`Measured so far ${formatDollars(spent)}`, est !== null ? `estimated ~${formatDollars(est)}${delta(spent, est, true)}` : ''].filter(Boolean).join(' · '))
+      if (subscriptionOnly) lines.push('Included in your plan · at list prices', 'Subscription: not charged per use')
+      else lines.push([api ? 'API-billed' : '', subscription ? 'Subscription portion included in your plan' : '', unknown || !modes.length ? 'Billing not reported yet' : '', 'at list prices'].filter(Boolean).join(' · '))
+    } else {
+      if (subscriptionOnly) lines.push(`Included in your plan · list value ${formatDollars(spent)}`, 'Subscription: not charged per use')
+      else if (api && !subscription && !unknown) lines.push(`API-billed · measured ${formatDollars(spent)} at list prices`)
+      else lines.push(`Measured ${formatDollars(spent)} at list prices`, [api ? 'API-billed' : '', subscription ? 'Subscription portion included in your plan' : '', unknown || !modes.length ? 'Billing not reported yet' : ''].filter(Boolean).join(' · '))
+      if (est !== null) lines.push(`Estimated ~${formatDollars(est)}${delta(spent, est, false)}`)
+    }
     if (cost?.plans.length && subscription) lines.push(cost.plans.join(', '))
-    if (est !== null) lines.push(`Estimated ~${formatDollars(est)}${delta(spent, est, running(row))}`, snapshotLine(row))
+    if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
   if (cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
-  return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscription)
+  return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)
 }
 
 // ---------- Columns and sorting ----------

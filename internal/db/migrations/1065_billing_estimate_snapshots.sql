@@ -1,5 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-511: additive, unknown until explicitly declared by a person.
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE agent_accounts ADD COLUMN IF NOT EXISTS billing_mode text NOT NULL DEFAULT 'unknown'
     CHECK (billing_mode IN ('unknown', 'api', 'subscription'));
 
@@ -23,6 +25,11 @@ ALTER TABLE ticket_estimate_snapshots FORCE ROW LEVEL SECURITY;
 CREATE POLICY ticket_estimate_snapshots_tenant ON ticket_estimate_snapshots
     USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+CREATE POLICY ticket_estimate_snapshots_project_visibility ON ticket_estimate_snapshots AS RESTRICTIVE
+    USING ((SELECT aeon_visible_all()) OR EXISTS (
+        SELECT 1 FROM nodes n WHERE n.tenant_id = ticket_estimate_snapshots.tenant_id AND n.id = ticket_estimate_snapshots.ticket_node_id))
+    WITH CHECK ((SELECT aeon_visible_all()) OR EXISTS (
+        SELECT 1 FROM nodes n WHERE n.tenant_id = ticket_estimate_snapshots.tenant_id AND n.id = ticket_estimate_snapshots.ticket_node_id));
 
 -- Only closing the episode may update a row; the baseline is immutable.
 CREATE TRIGGER ticket_estimate_snapshots_immutable

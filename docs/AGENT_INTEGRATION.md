@@ -169,7 +169,7 @@ Bind each launched harness to its **Aeon generation**, using exactly one of:
 - `AEON_SESSION_FILE`: an owned, regular, non-symlink file containing that UUID and an optional newline.
 - `AEON_SESSION_STATE_DIR`: the existing `harness run-heartbeat --state-dir` directory; the hook reads only its `session.id`, never the lease. This lets a hook observe a newly registered generation without changing the environment.
 
-The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook reads `session_id` from the hook JSON and resolves a UUID through `~/.aeon/sessions/index/<session-uuid>`. That file is mode 0600, owner-only, and not a symlink. Its text is three lines: the absolute `harness run-heartbeat --state-dir`, the owner pid, and that process's start time. Publish and removal take a lock file in the index directory. The helper writes the entry when it starts with `--source-session` and refuses startup, naming that source UUID, when another live state directory already holds it. It removes the entry on every shutdown path, including owner exit, SIGTERM, and a failed `/stop`, and only when the entry still names its own state directory. The hook uses the directory's `session.id` only while `state.json` is that same live generation and the recorded owner is still that process. A stopped generation, a dead or reused owner pid, a symlink, or any other unreadable index entry is a quiet no-op and does not fall through. A UUID `session_id` with no live index entry is a quiet no-op: no `POST /api/inbox/session-binding` and no stderr. A non-UUID harness session id still posts to that endpoint and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
+The explicit ID wins over the file, and the explicit file wins over the state directory. An invalid explicit binding fails open with a content-free diagnostic and does not fall through. When none of those is set, the hook reads `session_id` from the hook JSON and resolves a UUID through `~/.aeon/sessions/index/<session-uuid>`. That file is mode 0600, owner-only, and not a symlink. Its text is three lines: the absolute `harness run-heartbeat --state-dir`, the owner pid, and that process's start time. Publish and removal take a lock file in the index directory. The helper writes the entry when it starts with `--source-session` and refuses startup, naming that source UUID, when another live state directory already holds it. It removes the entry on every shutdown path, including owner exit, SIGTERM, and a failed `/stop`, and only when the entry still names its own state directory. The hook uses the directory's `session.id` only while `state.json` is that same live generation and the recorded owner is still that process. A stopped generation, a dead or reused owner pid, a symlink, or any other unreadable index entry is a quiet no-op and does not fall through. A UUID `session_id` with no live index entry is a quiet no-op: no `POST /api/inbox/session-binding` and no stderr. A non-UUID harness session id still posts to that endpoint and pulls with the returned Aeon generation. The vendor id is not an Aeon UUID and is never used as one. No unique active match is a quiet no-op. `aeon harness register` and `harness run-heartbeat` send `vendor_session_ref` when the harness provides one: `CLAUDE_CODE_SESSION_ID` for `--harness claude`, and `CODEX_SESSION_ID` or else `CODEX_THREAD_ID` for `--harness codex`. For Claude registrations with `--parent-session`, the ambient value is ignored because it may belong to the coordinator. `harness run-heartbeat --parent-session ... --source-session CHILD_UUID` records the explicitly selected child native ID instead; manual registration can use the child native ID as its private session ref. Codex, Grok and Cursor child registration keep their existing source behavior. Vendor references are unique among active generations per tenant and agent across all harnesses. The value is recorded only when it differs from the private session ref and the worker lease. A registration whose private ref is already that vendor id matches the same lookup. Do not set one global Aeon session ID for unrelated sessions. Hook credentials need `inbox.read` and `inbox.send`; acknowledgement and this lookup both use `inbox.send`.
 
 Install from the operator's shell with the released binary and the intended instance/configuration:
 
@@ -217,7 +217,9 @@ omitting billing preserves the person's setting, including when agentd republish
 metadata. Agents cannot change this setting. Account and plan names never imply
 billing. Managed usage carries the actual routed account automatically. Agentd
 uses a successful harness auth-kind probe when exposed (Codex ChatGPT login,
-Claude `claude.ai` or `api_key`), then the routed account declaration, then unknown.
+Claude `claude.ai`), then the routed account declaration, then unknown.
+An email-fenced Claude `api_key` login fails authentication and reports no billing;
+its billing can come only from the person-set account declaration, never that probe.
 No credential file is opened to discover billing. Existing identity fences still
 apply. Unknown or subscription usage has no API charge estimate; subscription
 usage may name the saved plan. This remains list-price accounting, never invoices.
@@ -230,10 +232,12 @@ known billing mode. A missing account binding remains unknown. Retries replay th
 same request even if account settings change later.
 
 Planning stores a stable `estimate_snapshot` at work start: the first harness
-session binding or entry into `in_progress`, whichever happens first. Concurrent
-starts share one row, captured in the same transaction. A change away from
-`in_progress` closes that work episode (completion/cancellation also closes a
-session-first episode); the next start adds history. Edits to hours, routes, prices
+session binding or entry into the in-progress work bucket, whichever happens first.
+Kind state categories win, then the same fixed spellings as project work counts
+(`in_progress`, `inprogress`, `active` and `qa`). Concurrent starts share one row,
+captured in the same transaction. QA, blocked and open transitions keep that episode
+open. Only done, cancelled or archived work buckets close it, including custom
+states and session-first episodes; the next start adds history. Edits to hours, routes, prices
 or calibration after start update live planning but preserve the baseline, including
 nulls when the original estimate or route was unknown. No historical start is
 backfilled from today's values. The snapshot records hours, estimated tokens and
@@ -248,7 +252,8 @@ source project, including after project moves (AEON-370).
 The ticket list uses that snapshot for Tokens/Cost comparison hovers, preserving
 unknown baselines. Estimates carry `~`; running cells show measured / estimate;
 measured cells show one value with a muted check. Cost is list value, never an
-invoice; reported subscription usage carries a `plan` marker. The former Paid
+invoice; only subscription-only usage carries a `plan` marker. Mixed billing
+totals remain unmarked, and their hovers identify the subscription portion. The former Paid
 column maps to Cost in saved preferences and views. Saved ticks always draw,
 including empty cells with hover reasons; only Automatic hides empty planning
 columns. Phones retain their existing card layout.
@@ -258,7 +263,11 @@ Profile identity takes precedence over normalized model, raw metadata and usage
 fallbacks. Models are ordered by measured session tokens, with deterministic ties;
 each includes session identity, effort, role, running state and reported tokens.
 The Model cell shows the leading used model plus a count of other models, with
-planned versus used per-session details in its hover. Cost and actual billing
+planned versus used details grouped by model in its hover: effort, session count,
+running state and token totals, without session IDs. The planned comparison uses
+the work-start route. Running Tokens/Cost hovers put measured usage before the
+snapshot estimate and its percentage. Column fitting measures visible values,
+and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 
 The Display panel saves Effort meter On/Off (default On), Model names Full/Short

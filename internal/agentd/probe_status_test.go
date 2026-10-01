@@ -59,6 +59,32 @@ func privateHome(t *testing.T) string {
 	return home
 }
 
+func TestClaudeBillingProbeRespectsEmailFence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		emails map[string]string
+		answer string
+		code   int
+		want   ProbeStatus
+	}{
+		{"fenced API key with matching email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
+		{"fenced API key without email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
+		{"fenced subscription", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0, ProbeStatus{OK: true, BillingMode: "subscription"}},
+		{"fenced unknown auth kind", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"new_kind"}`, 0, ProbeStatus{OK: true}},
+		{"unfenced API key", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{OK: true, BillingMode: "api"}},
+		{"unfenced failed command", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 1, ProbeStatus{Failure: ProbeUnavailable}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := fakeStatus(t, tc.answer, tc.code)
+			node, sdk := claudeAdapterDependencies(t, path)
+			a := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path, Homes: map[string]string{"k": privateHome(t)}, Emails: tc.emails}
+			if got := a.ProbeStatus(t.Context(), "k"); got != tc.want {
+				t.Fatalf("auth/billing result = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // AEON-299 review: only a confirmed sign-out is a sign-in problem; a probe that
 // cannot run or cannot be read is "unavailable".
 func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {

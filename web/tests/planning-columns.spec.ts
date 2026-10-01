@@ -43,14 +43,17 @@ test('approved cells show estimates, running figures, measured checks and sessio
   await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveText('~Sol 6.1')
   await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveAttribute('aria-label', /estimated/)
   await expect(row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')).toHaveText('1.1M/~2.4M')
+  await expect(row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Measured so far 1.1M · estimated ~2.4M \(46%\) · Codex sol/)
   await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveText('$1.93/~$4.20')
+  await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveAccessibleDescription(/Measured so far \$1.93 · estimated ~\$4.20 \(46%\)\s+API-billed · at list prices/)
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Codex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Codex Sol 6.1 · xhigh, as used')
   const measured = row(page, 'PHAROS-13')
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveText('1.9M')
   await expect(measured.locator('.c-tokens .measured')).toHaveCount(1)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleName(/measured/)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Estimated ~2.4M · measured 1.9M \(−21%\)/)
   await expect(measured.locator('.plan-model')).toHaveText('Opus 5.5+1')
-  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', /session s-done.*session s-review.*Planned: Codex Sol 6.1/s)
+  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude Opus 5.5 · high · Effort high · 3 of 5 · 1 session · 1.9M\nCodex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session · 0 (review)\nPlanned: Codex Sol 6.1 · xhigh (a different model ran)')
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).not.toHaveClass(/over/)
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /\(\+35%\)/)
   await expect(row(page, 'PHAROS-15').locator('.c-list-cost .plan-figure')).toHaveText('plan$3.10')
@@ -68,6 +71,8 @@ test('empty saved ticks persist after toggles, narrow desktop layout and reload'
   await page.goto('/p/PHAROS?sort=key')
   await display(page)
   const picker = page.getByRole('dialog', { name: 'Display options' })
+  await expect(picker.getByRole('checkbox', { name: 'Cost', exact: true })).not.toBeChecked()
+  await expect(picker.locator('.col-note')).toHaveCount(0)
   for (const name of ['Model', 'Tokens', 'Cost']) await picker.getByRole('checkbox', { name, exact: true }).check()
   for (const name of ['Model', 'Tokens', 'Cost']) await expect(picker.getByRole('checkbox', { name, exact: true })).toBeChecked()
   await expect(picker.locator('.col-note')).toHaveText('Nothing reported in this list yet; cells show —')
@@ -81,10 +86,48 @@ test('empty saved ticks persist after toggles, narrow desktop layout and reload'
   await display(page)
   for (const name of ['Model', 'Tokens', 'Cost']) await expect(picker.getByRole('checkbox', { name, exact: true })).toBeChecked()
   await picker.getByRole('checkbox', { name: 'Cost', exact: true }).uncheck()
+  await expect(picker.locator('.col-note')).toHaveCount(0)
   await picker.getByRole('checkbox', { name: 'Cost', exact: true }).check()
+  await expect(picker.locator('.col-note')).toHaveText('Nothing reported in this list yet; cells show —')
   await picker.getByRole('button', { name: 'Automatic', exact: true }).click()
+  await expect(picker.locator('.col-note')).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('columnheader', { name: 'Tokens', exact: true })).toHaveCount(0)
+})
+
+test('mixed billing totals carry no plan chip', async ({ page }) => {
+  const data = world()
+  data.nodes.find(n => n.key === 'PHAROS-13')!.planning!.cost!.billing_modes = ['api', 'subscription']
+  data.nodes.find(n => n.key === 'PHAROS-14')!.planning!.cost!.billing_modes = ['subscription', 'unknown']
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  for (const key of ['PHAROS-13', 'PHAROS-14']) {
+    const figure = row(page, key).locator('.c-list-cost .plan-figure')
+    await expect(figure.locator('.plan-tag')).toHaveCount(0)
+    await expect(figure).toHaveAccessibleDescription(/Subscription portion included in your plan/)
+  }
+  await expect(row(page, 'PHAROS-15').locator('.plan-tag')).toHaveText('plan')
+})
+
+test('double-click fits visible planning values without measuring hidden descriptions', async ({ page }) => {
+  const data = world()
+  data.preferences['list:p-pharos']!.widths = { model: 260, tokens: 180, list_cost: 170 }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  await expect(row(page, 'PHAROS-13')).toBeVisible()
+  // Long accessible hovers must not change the fit of these same visible values.
+  await page.locator('.cell > .sr-only').evaluateAll(elements => {
+    for (const element of elements) element.textContent += ' Full planning description'.repeat(100)
+  })
+  for (const [id, cls, max] of [['model', 'c-model', 260], ['tokens', 'c-tokens', 180], ['list_cost', 'c-list-cost', 170]] as const) {
+    await page.locator(`th.${cls} .col-resize`).dblclick()
+    await expect.poll(() => data.preferences['list:p-pharos']?.widths?.[id]).toBeLessThan(max)
+    for (const cell of await page.locator(`td.${cls} .plan-figure, td.${cls} .model-name`).all()) {
+      expect(await cell.evaluate(el => el.scrollWidth <= el.clientWidth + 1), id).toBe(true)
+    }
+  }
 })
 
 test('legacy Paid preferences and view links map to Cost once', async ({ page }) => {

@@ -42,8 +42,30 @@ describe('approved planning figure states', () => {
     expect(listCostCell(r).plan).toBe(false)
     expect(listCostCell(r).tip).toContain('API-billed')
     r.planning!.cost = cost({ billing_modes: ['api', 'subscription', 'unknown'], paid_unknown: true })
+    expect(listCostCell(r).plan).toBe(false)
     expect(listCostCell(r).tip).toContain('Subscription portion included in your plan')
     expect(listCostCell(r).tip).toContain('Billing not reported yet')
+  })
+  it.each([
+    ['api', 'subscription'], ['subscription', 'unknown'], ['api', 'subscription', 'unknown'], ['unknown'], [],
+  ].map(modes => ({ modes: modes as NonNullable<NonNullable<TicketPlanning['cost']>['billing_modes']> })))('leaves totals unmarked for billing modes $modes', ({ modes }) => {
+    const r = row(1_770_000, 2_000_000)
+    r.planning!.cost = cost({ billing_modes: modes, plans: ['Pro'] })
+    expect(listCostCell(r).plan).toBe(false)
+    expect(listCostCell(r).label).not.toContain('included in your plan')
+  })
+  it('uses measured-first running hovers, display labels and the work-start baseline', () => {
+    const r = row(1_100_000, 99_000_000, 1)
+    r.planning!.cost = cost({ list_spent: '1.93', list_estimated: '999', billing_modes: ['api'] })
+    r.planning!.models = [{ label: 'Codex gpt-6.1-sol', harness: 'codex', model: 'gpt-6.1-sol', sessions: [{ id: 's-running', effort: 'xhigh', role: 'worker', running: true, tokens: 1_100_000 }] }]
+    r.planning!.estimate_snapshot = { id: 'snapshot', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 3, estimated_tokens: 2_400_000, estimated_cost_usd: '4.20', route, rate_basis: { basis: 'median', tickets: 12, tokens_per_hour: 800_000 } }
+    expect(tokensCell(r).tip.split('\n')[0]).toBe('Measured so far 1.1M · estimated ~2.4M (46%) · Codex gpt-6.1-sol')
+    expect(listCostCell(r).tip.split('\n').slice(0, 2)).toEqual(['Measured so far $1.93 · estimated ~$4.20 (46%)', 'API-billed · at list prices'])
+    expect(listCostCell(r).tip).toContain('Estimate taken when work started')
+    r.planning!.estimate_snapshot.estimated_tokens = null
+    delete r.planning!.estimate_snapshot.estimated_cost_usd
+    expect(tokensCell(r).tip.split('\n')[0]).toBe('Measured so far 1.1M · Codex gpt-6.1-sol')
+    expect(listCostCell(r).tip.split('\n')[0]).toBe('Measured so far $1.93')
   })
   it('explains unreported usage and preserves permission-gated cost absence', () => {
     const r = row(null, null, 1)
@@ -54,20 +76,36 @@ describe('approved planning figure states', () => {
 })
 
 describe('actual models and saved picker choices', () => {
-  it('shows what ran, keeps effort in hovers and explains all sessions', () => {
+  it('summarizes session counts, efforts and tokens by model without session ids', () => {
     const r = row(2_800_000, 3_200_000)
     r.planning!.models = [
       { label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's1', effort: 'high', role: 'reviewer', running: false, tokens: 2_300_000 }] },
-      { label: 'Codex gpt-6.1-sol', harness: 'codex', model: 'gpt-6.1-sol', sessions: [{ id: 's2', model_raw: 'gpt-6-sol-xhigh', effort: 'xhigh', role: 'worker', running: true, tokens: 500_000 }] },
+      { label: 'Codex gpt-6.1-sol', harness: 'codex', model: 'gpt-6.1-sol', sessions: [{ id: 's2', model_raw: 'gpt-6-sol-xhigh', effort: 'xhigh', role: 'worker', running: true, tokens: 400_000 }, { id: 's3', effort: 'xhigh', role: 'worker', running: false, tokens: 100_000 }] },
     ]
     expect(modelCell(r)).toMatchObject({ text: 'opus', state: 'measured', more: 1 })
-    expect(modelCell(r).tip).toContain('session s1 (reviewer)')
-    expect(modelCell(r).tip).toContain('reported: gpt-6-sol-xhigh')
-    expect(modelCell(r).tip).toContain('Planned: Codex sol · xhigh')
+    expect(modelCell(r).tip.split('\n')).toEqual([
+      'Used, per session:',
+      'Claude opus · high · 1 session · 2.3M (review)',
+      'Codex gpt-6.1-sol · xhigh · 2 sessions, running · 500k',
+      'Planned: Codex sol · xhigh (a different model ran)',
+    ])
     r.planning!.models.reverse()
     expect(modelCell(r).text).toBe('gpt-6.1-sol')
     delete r.planning!.models
     expect(modelCell(r)).toMatchObject({ text: 'sol', state: 'planned', more: 0 })
+  })
+  it('compares actual models against the work-start route, not the live plan', () => {
+    const r = row(null, null, 1)
+    r.planning!.route = { ...route, label: 'Claude opus · high', harness: 'claude', model: 'opus', effort: 'high' }
+    r.planning!.estimate_snapshot = { id: 'snapshot', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 3, estimated_tokens: 2_400_000, route, rate_basis: { basis: 'median', tickets: 12, tokens_per_hour: 800_000 } }
+    r.planning!.models = [{ label: 'Codex gpt-6-sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 'private-session-id', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
+    expect(modelCell(r).tip).toBe('Used: Codex gpt-6-sol · xhigh · 1 session, running\nPlanned: Codex sol · xhigh, as used')
+    r.planning!.models[0]!.sessions.push({ id: 'another-private-id', effort: 'high', role: 'worker', running: false, tokens: 0 })
+    expect(modelCell(r).tip).toBe('Used: Codex gpt-6-sol · xhigh · high · 2 sessions, running\nPlanned: Codex sol · xhigh, as used')
+    r.planning!.models.push({ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 'unreported-id', effort: 'high', role: 'reviewer', running: false, tokens: null }] })
+    expect(modelCell(r).tip).toContain('Codex gpt-6-sol · xhigh · high · 2 sessions, running · 0')
+    expect(modelCell(r).tip).toContain('Claude opus · high · 1 session · usage not reported yet')
+    expect(modelCell(r).tip).toContain('Planned: Codex sol · xhigh (a different model ran)')
   })
   it('keeps empty saved ticks through width changes, reloads, views and phone cards', () => {
     const prefs = { order: ['model', 'paid', 'tokens'] as const, visible: ['model', 'paid', 'tokens'] as const }

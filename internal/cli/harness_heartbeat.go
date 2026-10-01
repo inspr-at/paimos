@@ -793,7 +793,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, err
 	}
 	if me.Principal.Name != o.Agent {
-		return heartbeatSession{}, false, usagef("--agent must name the authenticated agent")
+		return heartbeatSession{}, false, harnessAgentMismatch(me.Principal.Name)
 	}
 	lease, err := readOrCreateStateSecret(&session.hold, "lease.key", 32)
 	if err != nil {
@@ -832,7 +832,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
-	attachVendorSessionRef(body, o.Harness, ref, lease)
+	attachVendorSessionRef(body, o.Harness, ref, lease, o.Parent, o.SourceSession)
 	var boundTicket string
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
@@ -878,7 +878,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		// A crashed coordinator can still count as healthy until its last
 		// heartbeat expires. Retry only that registration conflict, keeping
 		// the same body and state lock until the server can adopt its children.
-		if o.Role != "coordinator" || o.SourceSession == "" || err.Error() != "api 409: active generation conflicts with registration" {
+		if o.Role != "coordinator" || o.SourceSession == "" || (err.Error() != "api 409: active generation conflicts with registration" && err.Error() != "api 409: "+harness.RegistrationLeaseConflict) {
 			return heartbeatSession{}, false, err
 		}
 		if err = ownerCtx.Err(); err != nil {
