@@ -277,6 +277,14 @@ or a report, and keeps it in memory only until the Agents page fills the lookup 
 with it (exactly nine digits, else ignored). A session that ended drops it, and opening
 the link looks up and approves nothing.
 
+Attach reads and decisions stay with the tenant, person and authentication
+generation that started them. Each continuation checks that scope in the same
+synchronous turn as applying its answer. Starting sign-in or sign-out also
+invalidates other tabs through a random authentication-change marker (no code,
+cookie or identity in browser storage). Those tabs drop attach codes, reviews,
+permissions and outstanding answers while retaining drafts; sign in explicitly
+to resume there, even when the same person signs out and back in elsewhere.
+
 `GET /api/agent-pairing/attach/pending` lets the signed-in computer owner list
 their requests that are not a session yet, waiting ones first: every pending or
 approved request until it expires, however many newer ones ended after it, then up to four ended in the last fifteen minutes, detached (declined or

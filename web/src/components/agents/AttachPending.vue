@@ -32,11 +32,11 @@ function reset() {
   scope.reset()
   held.value = { owner: '', list: [] }; dismissed.value = new Set()
 }
-async function refresh() {
+function refresh() {
   if (!owner.value) { reset(); return }
-  await reads.run(async ({ step, signal }) => {
+  return reads.run(({ after, signal }) => {
     const asked = owner.value
-    held.value = { owner: asked, list: await step(listPendingAttach(signal)) }
+    return after(listPendingAttach(signal), list => { held.value = { owner: asked, list } })
   }, { failed: () => { /* a missed read keeps what is shown; the next tick asks again */ } })
 }
 const poller = usePoller(refresh, 5_000, { enabled: () => allowed.value })

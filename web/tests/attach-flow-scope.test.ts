@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs'
 
 // AEON-440: one structural rule for the attach flow. Every async path answers to the
 // identity scope (lib/identityScope.ts): it re-checks the person, the workspace and the
-// generation after each await, so a continuation of one person's request can never act
+// generation in the same turn as each callback, so one person's request can never act
 // for the next. A component that awaits on its own would quietly break that, so the
-// flow's sources may not: every await is a scope step or a scope run, nothing chains
+// flow's sources may not await: every async stage uses after(), nothing chains
 // promises, and no timer or controller lives outside the scope.
 const FLOW = ['AttachPending.vue', 'AttachApproval.vue'].map(name => `../src/components/agents/${name}`)
 const script = (path: string) => {
@@ -18,13 +18,11 @@ const code = (text: string) => text.split('\n').map(line => line.replace(/(^|\s)
 
 for (const path of FLOW) {
   const name = path.split('/').pop()
-  test(`${name} awaits only through its identity scope`, () => {
+  test(`${name} continues only through synchronous identity callbacks`, () => {
     const text = code(script(path))
     assert.match(text, /useIdentityScope\(/, 'the component runs in an identity scope')
-    const awaits = [...text.matchAll(/\bawait\b(.*)/g)].map(match => match[1].trim())
-    assert.ok(awaits.length > 0, 'the component has async paths to guard')
-    for (const after of awaits) assert.match(after, /^(step\(|[A-Za-z_$][\w$.]*\.run\()/, `a bare await: await ${after}`)
-    for (const forbidden of [/\.then\(/, /\.catch\(/, /\.finally\(/, /new AbortController/, /\bsetTimeout\(/, /\bsetInterval\(/, /\bqueueMicrotask\(/]) {
+    assert.match(text, /\bafter\(/, 'async stages use guarded callbacks')
+    for (const forbidden of [/\bawait\b/, /\basync\b/, /\bstep\(/, /\.then\(/, /\.catch\(/, /\.finally\(/, /new AbortController/, /\bsetTimeout\(/, /\bsetInterval\(/, /\bqueueMicrotask\(/]) {
       assert.doesNotMatch(text, forbidden, `outside the identity scope: ${forbidden}`)
     }
   })
@@ -35,5 +33,5 @@ test('the router holds an attach code for the person it arrived for, and permiss
   assert.match(router, /holdAttachCode\(code, scopeOwner\(/)
   const approval = code(script('../src/components/agents/AttachApproval.vue'))
   assert.match(approval, /takeAttachCode\(link\.owner\.value\)/, 'a link is taken for the current owner')
-  assert.match(approval, /await step\(ensurePermissions\(\)\)/, 'the permission wait is a scope step')
+  assert.match(approval, /after\(ensurePermissions\(\),/, 'permissions resume in a guarded callback')
 })

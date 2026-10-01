@@ -24,7 +24,7 @@ const returnPath = computed(() => {
   const value = route.query.return
   return typeof value === 'string' ? safeReturnPath(value) : pendingSignInReturn()
 })
-function startOIDC() { rememberSignInReturn(returnPath.value) }
+function startOIDC() { rememberSignInReturn(returnPath.value); session.beginSignIn() }
 
 // Codes the sign-in flow can send back as ?error=.
 const FLOW_ERRORS: Record<string, { title: string; body: string }> = {

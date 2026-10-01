@@ -12,7 +12,7 @@ import { useSession } from '../stores/session'
 export function useIdentityScope(requires: () => boolean = () => true): Scope & { owner: ComputedRef<string> } {
   const session = useSession()
   const owner = computed(() => requires() ? scopeOwner(session.identity) : '')
-  const scope = createScope(() => owner.value)
+  const scope = createScope(() => session.authenticationCurrent() ? owner.value : '')
   const stopOwner = watch(owner, () => scope.reset(), { flush: 'sync' })
   const stopAccess = onAccessChange(change => { if (change === 'reset') scope.reset() })
   onScopeDispose(() => { stopOwner(); stopAccess(); scope.dispose() })

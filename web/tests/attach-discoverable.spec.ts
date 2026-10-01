@@ -272,6 +272,131 @@ const ADMIN_PERMISSIONS = (project?: string) => {
   return value
 }
 
+test('a reset queued between the scope check and continuation cannot open A’s code for B', async ({ page }) => {
+  await setup(page)
+  // Instrument the real scope at precisely the r3 gap: after permissions, the
+  // last nextTick check queues an identity switch before the caller can open.
+  // No production hook or altered component is needed.
+  await page.route('**/src/lib/identityScope.ts*', async route => {
+    const response = await route.fetch()
+    const source = await response.text()
+    const checked = /if \(!live\(\)\) throw new StaleScopeError\(\);?/g
+    expect(source).toMatch(checked)
+    await route.fulfill({ response, body: source.replace(checked, '$&\nglobalThis.__attachPermissionProbe?.(value);') })
+  })
+  await page.goto('/agents')
+  await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
+  await page.evaluate(async ola => {
+    // @ts-expect-error Vite serves this module in the browser execution context.
+    const { useSession } = await import('/src/stores/session.ts')
+    const session = useSession()
+    const state = window as typeof window & { __attachPermissionProbe?: (value: unknown) => void; __attachOpenedFor?: string[] }
+    state.__attachOpenedFor = []
+    const original = HTMLDialogElement.prototype.showModal
+    HTMLDialogElement.prototype.showModal = function () { state.__attachOpenedFor!.push(session.identity?.principal.id ?? ''); original.call(this) }
+    let permissionsChecked = false
+    state.__attachPermissionProbe = value => {
+      if (value === 'known') permissionsChecked = true
+      else if (permissionsChecked && value === undefined) {
+        delete state.__attachPermissionProbe
+        queueMicrotask(() => { session.identity = ola })
+      }
+    }
+  }, OLA)
+  await page.evaluate(() => { location.hash = '#attach=123456789' })
+  await expect.poll(() => new URL(page.url()).hash).toBe('')
+  await expect.poll(() => page.evaluate(() => '__attachPermissionProbe' in window)).toBe(false)
+  const opened = await page.evaluate(() => (window as typeof window & { __attachOpenedFor: string[] }).__attachOpenedFor)
+  expect(opened).not.toContain(OLA.principal.id)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByLabel('Attach code')).toHaveValue('')
+})
+
+test('signing in as another person in a second tab invalidates the old tab before accepting lists', async ({ page, context }) => {
+  await setup(page)
+  let active = false, reads = 0
+  await page.route(PENDING, route => { reads++; return route.fulfill({ json: { requests: [request(active ? 'r-ola' : 'r-markus', 'pending', { host: active ? 'Ola’s Mac' : 'Markus’s old Mac' })] } }) })
+  await page.goto('/agents')
+  await expect(strip(page)).toContainText('Markus’s old Mac')
+  await page.getByRole('button', { name: 'Attach session' }).click()
+  await page.getByLabel('Attach code').fill('123456789')
+  // Two independent browser execution contexts share this origin's cookies and
+  // storage, as real tabs do. Separate BrowserContexts would isolate both.
+  const other = await context.newPage()
+  await setup(other)
+  await other.route('**/api/me', route => active ? route.fulfill({ json: OLA }) : route.fulfill({ status: 401, json: { dev_mode: true } }))
+  await other.route('**/api/auth/dev-login', route => { active = true; return route.fulfill({ status: 204 }) })
+  await page.route('**/api/me', route => route.fulfill({ json: OLA }))
+  await list(other, [request('r-ola', 'pending', { host: 'Ola’s Mac' })])
+  await other.goto('/signin')
+  await other.getByLabel('Email address').fill('ola@example.test')
+  await other.getByRole('button', { name: 'Continue with email' }).click()
+  await other.goto('/agents')
+  await expect(strip(other)).toContainText('Ola’s Mac')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(strip(page)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Attach session' })).toHaveCount(0)
+  await expect(page.getByText('Your session has ended.', { exact: false })).toBeVisible()
+  const stopped = reads
+  await page.clock.fastForward(15_000)
+  expect(reads).toBe(stopped)
+  await expect(page.getByText('Ola’s Mac')).toHaveCount(0)
+  // Only a nonce is shared: the code, identity and auth cookie are never stored.
+  const stored = await page.evaluate(() => localStorage.getItem('aeon.auth.generation'))
+  expect(stored).toMatch(/^[0-9a-f-]{36}$/)
+  expect(stored).not.toContain('123456789')
+  await other.close()
+})
+
+test('signing out and back in as A in a second tab never revives A’s old link continuation', async ({ page, context }) => {
+  await setup(page)
+  const slow = gate()
+  let asked = 0
+  await page.route('**/api/me/permissions*', async route => { asked++; await slow.passed; await route.fulfill({ json: ADMIN_PERMISSIONS() }).catch(() => undefined) })
+  await page.goto('/agents#attach=123456789')
+  await expect.poll(() => asked).toBeGreaterThan(0)
+  const other = await context.newPage()
+  await setup(other)
+  await other.route('**/api/auth/logout', route => route.fulfill({ status: 204 }))
+  await other.route('**/api/auth/dev-login', route => route.fulfill({ status: 204 }))
+  await other.goto('/agents')
+  await expect(other.getByRole('button', { name: 'Attach session' })).toBeVisible()
+  await other.evaluate(async () => {
+    // @ts-expect-error Vite serves this module in the browser execution context.
+    const { useSession } = await import('/src/stores/session.ts')
+    const session = useSession()
+    await session.signOut()
+    session.devMode = true
+    await session.devLogin('markus@barta.com')
+    await session.refresh()
+  })
+  slow.open()
+  await expect(page.getByText('Your session has ended.', { exact: false })).toBeVisible()
+  await page.clock.fastForward(10_000)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Attach session' })).toHaveCount(0)
+  await other.close()
+})
+
+test('an OIDC round trip in another tab invalidates the old review and records the returned session', async ({ page, context }) => {
+  await setup(page)
+  await page.goto('/agents#attach=123456789')
+  await expect(page.getByLabel('Attach code')).toHaveValue('123 456 789')
+  const other = await context.newPage()
+  await setup(other)
+  let returned = false
+  await other.route('**/api/me', route => returned ? route.fulfill({ json: OLA }) : route.fulfill({ status: 401, json: { dev_mode: false } }))
+  await other.route('**/api/auth/login', route => { returned = true; return route.fulfill({ status: 302, headers: { location: '/agents' } }) })
+  await list(other, [request('r-ola', 'pending', { host: 'Ola’s Mac' })])
+  await other.goto('/signin')
+  await other.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await expect(strip(other)).toContainText('Ola’s Mac')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Attach session' })).toHaveCount(0)
+  expect(await other.evaluate(() => sessionStorage.getItem('aeon.auth.pending'))).toBeNull()
+  await other.close()
+})
+
 // Every async path of the attach flow answers to the person who started it (AEON-440).
 test('a link code waiting for slow permissions never opens for the next person', async ({ page }) => {
   await setup(page)

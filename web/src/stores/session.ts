@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { api, getSession, sessionEnded, type Identity } from '../lib/api'
 import { restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
+import { dropAttachCode } from '../lib/attachLink'
+import { followAuthentication, OIDC_PENDING_KEY } from '../lib/authTabs'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -17,12 +19,29 @@ export const useSession = defineStore('session', () => {
   const error = ref('')
   const requiresSignIn = ref(false)
   let epoch = 0
+  const tabs = followAuthentication(() => {
+    // Keep drafts in a revoked tab, as with a 401. Another tab signing in does
+    // not authorize this page's old view as the newly signed-in person.
+    sessionEnded.blocked = true
+    invalidate()
+  })
+  onScopeDispose(tabs.stop)
+
+  function authenticationCurrent() { return tabs.current() }
+
+  function beginSignIn() {
+    invalidate()
+    const generation = tabs.publish()
+    // The OIDC round trip returns to a fresh document in this same tab.
+    try { sessionStorage.setItem(OIDC_PENDING_KEY, generation) } catch { /* storage may be disabled */ }
+  }
 
   function invalidate() {
     epoch++
     identity.value = null
     requiresSignIn.value = true
     error.value = ''
+    dropAttachCode()
     revokePermissions()
   }
 
@@ -31,11 +50,19 @@ export const useSession = defineStore('session', () => {
     error.value = ''
     try {
       const session = await getSession()
+      // An initial 401 invalidates this tab inside api() before it returns. Its
+      // public dev-mode flag is still needed to render development sign-in.
+      if (requiresSignIn.value && !session.identity && tabs.current()) devMode.value = session.devMode
       // A late /me answer cannot restore a session after a 401 or sign-out.
-      if (started !== epoch && session.identity) return
+      if (started !== epoch || !tabs.current()) return
       if (requiresSignIn.value) { devMode.value = session.devMode; return }
       const before = identity.value
       identity.value = session.identity
+      if (session.identity) {
+        let pending = false
+        try { pending = tabs.owns(sessionStorage.getItem(OIDC_PENDING_KEY)); sessionStorage.removeItem(OIDC_PENDING_KEY) } catch { /* storage may be disabled */ }
+        if (pending) tabs.publish()
+      }
       // Every navigation refreshes the session. The same person keeps the answers
       // on screen while they are asked again (a failed answer still grants
       // nothing); a different person or workspace starts from nothing.
@@ -48,7 +75,7 @@ export const useSession = defineStore('session', () => {
       devMode.value = session.devMode
       if (session.identity) void restoreTheme()
     } catch {
-      if (started !== epoch) return
+      if (started !== epoch || !tabs.current()) return
       identity.value = null
       clearPermissions()
       devMode.value = false
@@ -57,9 +84,22 @@ export const useSession = defineStore('session', () => {
   }
 
   async function signOut() {
-    const response = await api('/auth/logout', { method: 'POST' })
-    if (!response.ok) throw new Error('Sign out failed')
+    // End outstanding work before the cookie can change. Keep the account menu
+    // until the server answers, so a failed sign-out still offers its retry.
+    const started = ++epoch
+    dropAttachCode()
+    revokePermissions()
+    tabs.publish()
+    try {
+      const response = await api('/auth/logout', { method: 'POST' })
+      if (!response.ok) throw new Error('Sign out failed')
+    } catch (error) {
+      if (started === epoch && tabs.current() && identity.value) { clearPermissions(); void refreshPermissions() }
+      throw error
+    }
     invalidate()
+    sessionEnded.blocked = true
+    tabs.publish()
     clearPermissions()
     clearSignInReturn()
   }
@@ -67,6 +107,8 @@ export const useSession = defineStore('session', () => {
   // Errors carry a reason the sign-in page can explain: not_member, disabled, invalid, network, failed.
   async function devLogin(email: string) {
     if (!devMode.value) throw new SignInError('disabled')
+    invalidate()
+    tabs.publish()
     let response: Response
     try {
       response = await api('/auth/dev-login', {
@@ -79,9 +121,10 @@ export const useSession = defineStore('session', () => {
     if (response.status === 404) throw new SignInError('disabled')
     if (response.status === 400) throw new SignInError('invalid')
     if (!response.ok) throw new SignInError('failed')
+    tabs.publish()
     sessionEnded.blocked = false
     requiresSignIn.value = false
   }
 
-  return { identity, devMode, error, requiresSignIn, refresh, invalidate, signOut, devLogin }
+  return { identity, devMode, error, requiresSignIn, refresh, invalidate, signOut, devLogin, beginSignIn, authenticationCurrent }
 })

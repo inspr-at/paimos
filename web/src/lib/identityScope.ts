@@ -3,16 +3,19 @@
 // The one rule for every async path that belongs to a signed-in person: an answer
 // is used only while the person, the workspace and the generation it was asked in
 // are still the current ones. A run captures them when it starts and checks them
-// again after EVERY await; once any of them moved on, the continuation is dropped
+// in the SAME synchronous turn as each continuation; once any of them moved on, it is dropped
 // and nothing of it ever reaches the screen (AEON-440: one person's attach code
 // opened for the next person because a continuation only checked before its await).
 //
 // Components never await a bare promise in an attach path. They run the path as
 //
-//   await scope.run(async ({ step, signal }) => {
-//     const answer = await step(ask(signal))      // resumes only while still current
-//     show(answer)                                // so this is never reached when stale
-//   }, { failed: error => …, settled: () => … })  // called only while still current
+//   scope.run(({ after, signal }) => after(ask(signal), answer => {
+//     show(answer)                               // checked immediately before this callback
+//   }), { failed: error => …, settled: () => … }) // called only while still current
+//
+// Callbacks are synchronous. Another async stage returns another after(promise,
+// callback), never an await followed by a mutation: resolving a checked promise
+// alone leaves a microtask gap before the caller resumes (AEON-440 fix4).
 //
 // The core has no Vue in it: `owner` names who the scope belongs to ('' = nobody, so
 // nothing starts), and `reset()` moves the generation on (a person or workspace
@@ -25,9 +28,9 @@ export class StaleScopeError extends Error {
   constructor() { super('The person or workspace changed.'); this.name = 'StaleScopeError' }
 }
 
-/** Awaits a promise (or value) and throws StaleScopeError instead of resuming when the scope moved on meanwhile. */
-export type Step = <V>(pending: PromiseLike<V> | V) => Promise<V>
-export interface Run { step: Step; signal: AbortSignal }
+/** Checks liveness and invokes the continuation in one turn. Chain stages through after again. */
+export type After = <V, T>(pending: PromiseLike<V> | V, apply: (value: V) => T | PromiseLike<T>) => Promise<T>
+export interface Run { after: After; signal: AbortSignal }
 export interface Handlers {
   /** The run threw. Called only while the run is still current; without it the error is thrown to the caller. */
   failed?: (error: unknown) => void
@@ -64,18 +67,18 @@ export function createScope(owner: () => string): Scope {
     controllers.add(controller)
     if (slot) slot.current = controller
     const live = () => !disposed && !controller.signal.aborted && generation === started.generation && owner() === started.owner
-    const step: Step = async <V>(pending: PromiseLike<V> | V): Promise<V> => {
+    const after: After = async <V, T>(pending: PromiseLike<V> | V, apply: (value: V) => T | PromiseLike<T>): Promise<T> => {
       let value: V
       try { value = await pending } catch (error) {
         if (!live()) throw new StaleScopeError()
         throw error
       }
       if (!live()) throw new StaleScopeError()
-      return value
+      return apply(value)
     }
     return (async () => {
       try {
-        const value = await work({ step, signal: controller.signal })
+        const value = await work({ after, signal: controller.signal })
         if (!live()) return undefined
         handlers.settled?.()
         return value
@@ -83,7 +86,7 @@ export function createScope(owner: () => string): Scope {
         if (!live()) return undefined
         if (!handlers.failed) throw error
         handlers.failed(error)
-        handlers.settled?.()
+        if (live()) handlers.settled?.()
         return undefined
       } finally {
         controllers.delete(controller)

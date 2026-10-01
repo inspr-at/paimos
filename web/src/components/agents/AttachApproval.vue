@@ -42,7 +42,10 @@ function close() {
   dialogScope.reset()
   dialog.value?.close(); code.value = ''; review.value = null; error.value = ''; busy.value = false; project.value = ''; ticket.value = ''; labelsReady.value = false
 }
-function open() { close(); dialog.value?.showModal(); nextTick(() => codeInput.value?.focus()) }
+function open() {
+  close(); dialog.value?.showModal()
+  void dialogScope.run(({ after }) => after(nextTick(), () => { codeInput.value?.focus() }))
+}
 // The link `aeon-agentd attach` prints only fills the code in; the person still
 // reviews and approves. The router took it off the address bar and holds it in memory
 // for the person it arrived for; waiting for permissions is part of the same scope, so
@@ -51,11 +54,10 @@ function followLink() {
   if (!identity.identity) return Promise.resolve()
   const linked = takeAttachCode(link.owner.value)
   if (!linked) return Promise.resolve()
-  return link.run(async ({ step }) => {
-    if (await step(ensurePermissions()) !== 'known' || !allowed.value) return
-    await step(nextTick())
-    open(); code.value = formatAttachCode(linked)
-  })
+  return link.run(({ after }) => after(ensurePermissions(), permissions => {
+    if (permissions !== 'known' || !allowed.value) return
+    return after(nextTick(), () => { open(); code.value = formatAttachCode(linked) })
+  }))
 }
 onMounted(followLink)
 const stopLink = onAttachCode(followLink)
@@ -70,7 +72,7 @@ function loadLabels(result: AttachReview) {
     ticket.value = names[1].status === 'fulfilled' ? `${names[1].value.key} · ${names[1].value.title}` : result.snapshot.ticket_id
     labelsReady.value = true
   }
-  void labelReads.run(async ({ step }) => named(await step(Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)]))), {
+  void labelReads.run(({ after }) => after(Promise.allSettled([getNode(result.snapshot.project_id), getNode(result.snapshot.ticket_id)]), named), {
     failed: () => named([{ status: 'rejected', reason: undefined }, { status: 'rejected', reason: undefined }]),
   })
 }
@@ -85,9 +87,9 @@ defineExpose({ show })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
   if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = 'Enter the nine-digit code from your terminal.'; return Promise.resolve() }
-  return lookups.run(async ({ step, signal }) => {
+  return lookups.run(({ after, signal }) => {
     busy.value = true; error.value = ''
-    present(await step(attachAction('/lookup', { user_code: normalized }, signal)))
+    return after(attachAction('/lookup', { user_code: normalized }, signal), present)
   }, {
     failed: e => { error.value = e instanceof Error ? e.message : 'Attach unavailable.' },
     settled: () => { busy.value = false },
@@ -96,10 +98,11 @@ function lookup() {
 function decide(revoke = false) {
   if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return Promise.resolve()
   const current = review.value
-  return decisions.run(async ({ step, signal }) => {
+  return decisions.run(({ after, signal }) => {
     busy.value = true; error.value = ''
-    const result = await step(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal))
-    review.value = result; emit('changed')
+    return after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
+      review.value = result; emit('changed')
+    })
   }, {
     failed: e => { error.value = e instanceof Error ? e.message : 'Could not update this watch.' },
     settled: () => { busy.value = false },
