@@ -25,6 +25,12 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+Ticket lists refresh worker names, progress and ETA on session registration,
+heartbeat, rebinding and stop events. The shared live feed also refreshes after
+reconnecting; the periodic read remains a fallback. List projections use the
+additive `Aeon-Event-Position` response header to reject older snapshots even
+when the ticket's own `updated_at` has not changed.
+
 The flow UI is hidden by default. People working on Paimos itself can enable
 **Show the flow controls (not yet tested end to end)** under **Settings →
 Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace

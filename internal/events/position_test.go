@@ -41,6 +41,8 @@ func positionServer(t *testing.T, d *dbtest.DB, p tenant.Principal, during func(
 	mux.HandleFunc("GET /api/runs", reply)
 	mux.HandleFunc("GET /api/agent-accounts", reply)
 	mux.HandleFunc("GET /api/nodes", reply)
+	mux.HandleFunc("GET /api/harness-sessions/live", reply)
+	mux.HandleFunc("GET /api/health", reply)
 	mux.HandleFunc("HEAD /api/runs", reply)
 	mux.HandleFunc("POST /api/runs/{runId}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		err := db.InTenant(dbtest.Seed(r.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
@@ -109,7 +111,7 @@ func TestPositionNamesTheNewestEventOfTheTenantBeforeAListedRead(t *testing.T) {
 	}
 	appendEvents(t, d, a, 3)
 	appendEvents(t, d, b, 5) // another tenant's log never counts
-	for _, path := range []string{"/api/runs", "/api/agent-accounts"} {
+	for _, path := range []string{"/api/runs", "/api/agent-accounts", "/api/nodes", "/api/harness-sessions/live"} {
 		if n, ok := position(t, do(t, srv, "GET", path, false)); !ok || n != 3 {
 			t.Fatalf("%s: position %d, present %v; want the tenant's 3", path, n, ok)
 		}
@@ -196,7 +198,7 @@ func TestPositionIsAbsentWhereItWouldMislead(t *testing.T) {
 		name, method, path string
 		anonymous          bool
 	}{
-		{"a read outside the list", "GET", "/api/nodes", false},
+		{"a read outside the list", "GET", "/api/health", false},
 		{"a refused write", "POST", "/api/runs/r1/refuse", false},
 		{"a HEAD", "HEAD", "/api/runs", false},
 		{"an unauthenticated read", "GET", "/api/runs", true},

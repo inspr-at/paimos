@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import type { ListItem, WorkNode } from '../src/lib/api'
 import { compareRevision } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
+import { stampAt } from '../src/lib/position'
 
 const PROJECT = { id: 'p-1', key: 'PRJ', title: 'Project' }
 const at = (n: number) => new Date(Date.parse('2026-09-29T10:00:00Z') + n * 1000).toISOString()
@@ -17,6 +18,47 @@ function item(id: string, revision: number, over: Partial<ListItem> = {}): ListI
 }
 
 describe('RowStore: revisions only move forward', () => {
+  it('a late list snapshot cannot restore an ended worker or overdue ETA at the same node revision', () => {
+    const rows = new RowStore()
+    const old = rows.mark()
+    const row = rows.adopt(stampAt(item('n1', 1, { eta: { finished: true }, lead_worker: null }), { position: 52 }), rows.mark(), { show: true })!
+    rows.adopt(stampAt(item('n1', 1, { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Ended worker', key: 's:ended' } }), { position: 51 }), old, { show: true })
+    expect(row.eta).toEqual({ finished: true })
+    expect(row.lead_worker).toBeNull()
+  })
+  it('prefers server position over request order and still recovers after a database restore', () => {
+    const rows = new RowStore()
+    const first = rows.mark(), second = rows.mark()
+    const row = rows.adopt(stampAt(item('n1', 1, { lead_worker: null }), { position: 52 }), first, { show: true })!
+    // A later-started request processed earlier is still an older snapshot.
+    rows.adopt(stampAt(item('n1', 1, { lead_worker: { name: 'Ended worker', key: 's:ended' } }), { position: 51 }), second, { show: true })
+    expect(row.lead_worker).toBeNull()
+    // Asked after the current answer landed: a lower position means the log reset.
+    rows.adopt(stampAt(item('n1', 1, { lead_worker: { name: 'Restored worker', key: 's:restored' } }), { position: 1 }), rows.mark(), { show: true })
+    expect(row.lead_worker?.name).toBe('Restored worker')
+  })
+  it('falls back to request order without a position and drops a read sent before a session hint', () => {
+    const rows = new RowStore()
+    const old = rows.mark()
+    const row = rows.adopt(item('n1', 1, { lead_worker: null }), rows.mark(), { show: true })!
+    rows.adopt(item('n1', 1, { lead_worker: { name: 'Ended worker', key: 's:ended' } }), old, { show: true })
+    expect(row.lead_worker).toBeNull()
+    const pending = rows.mark()
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['eta', 'lead_worker'] })
+    rows.adopt(item('n1', 1, { lead_worker: { name: 'Old snapshot', key: 's:old' } }), pending, { show: true })
+    expect(row.lead_worker).toBeNull()
+    rows.adopt(item('n1', 1, { lead_worker: { name: 'New worker', key: 's:new' } }), rows.mark(), { show: true })
+    expect(row.lead_worker?.name).toBe('New worker')
+  })
+  it('accepts a late-processed read when its server snapshot includes the stop event', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(item('n1', 1, { lead_worker: { name: 'Worker', key: 's:worker' } }), rows.mark(), { show: true })!
+    const sent = rows.mark()
+    rows.note({ id: 'n1', change: 'updated', revision: null, fields: ['eta', 'lead_worker'], eventId: 52 })
+    rows.adopt(stampAt(item('n1', 1, { lead_worker: null }), { position: 52 }), sent, { show: true })
+    expect(row.lead_worker).toBeNull()
+    expect(rows.projectionsCurrent('n1')).toBe(true)
+  })
   it('a list page that lands after a save and its event is dropped: the row keeps the save', () => {
     const rows = new RowStore()
     const row = rows.adopt(item('n1', 1), rows.mark(), { show: true })!

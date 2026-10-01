@@ -103,6 +103,38 @@ beforeEach(() => { clock = 0; vi.useFakeTimers() })
 afterEach(() => { scope?.stop(); scope = undefined; vi.useRealTimers() })
 
 describe('useLiveList: field changes', () => {
+  it('refreshes ETA and lead worker after a stop without changing the ticket revision', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Ended worker', key: 's:ended' } })])
+    const row = h.rows.value[0], revision = row.updated_at
+    const server = h.srv.nodes[0]
+    server.eta = { finished: true, progress_pct: 100 }
+    server.lead_worker = null
+    h.send({ id: 'n1', type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    await h.settle()
+    expect(row.updated_at).toBe(revision)
+    expect(row.eta).toEqual({ finished: true, progress_pct: 100 })
+    expect(row.lead_worker).toBeNull()
+    expect(h.rows.value[0]).toBe(row)
+  })
+
+  it('a heartbeat read overtaken by a stop reads the same-revision projections again', async () => {
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Worker', key: 's:worker' } })])
+    const plain = h.srv.fetchList.getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    h.srv.fetchList.mockImplementationOnce(async query => { const page = await plain(query, 'matches'); await gate; return page })
+    h.send({ id: 'n1', type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+    await vi.advanceTimersByTimeAsync(BATCH_MS)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    h.srv.nodes[0].eta = { finished: true, progress_pct: 100 }
+    h.srv.nodes[0].lead_worker = null
+    h.send({ id: 'n1', type: 'harness.stopped', fields: ['eta', 'lead_worker'] })
+    release()
+    await vi.advanceTimersByTimeAsync(BATCH_MS * 3)
+    await h.settle()
+    expect(h.rows.value[0].eta).toEqual({ finished: true, progress_pct: 100 })
+    expect(h.rows.value[0].lead_worker).toBeNull()
+  })
   it('patches the row object in place, tints it and says so politely', async () => {
     const h = setup([item('n1'), item('n2')])
     const row = h.rows.value![1]

@@ -7,6 +7,22 @@ import {
   autoApplyDelay, canAutoApply, classifyChange, compareRevision, describeFields, PendingUpdates, PENDING_CAP, pillText, type ApplyGuard,
 } from '../src/lib/liveUpdates'
 
+it('session lifecycle and telemetry hints invalidate both old and new bound ticket projections', () => {
+  const changes = parseNodeChanges(JSON.stringify({
+    id: 51, type: 'harness.bound', actor_principal_id: 'agent',
+    before: { ticket_node_id: 'old', project_id: 'p1' },
+    after: { ticket_node_id: 'new', project_id: 'p1', row_version: 7 },
+  }))
+  expect(changes.map(change => [change.id, change.revision, change.fields])).toEqual([
+    ['old', null, ['eta', 'lead_worker']], ['new', null, ['eta', 'lead_worker']],
+  ])
+  for (const type of ['harness.registered', 'harness.stopped', 'harness.heartbeat', 'harness.metadata_changed']) {
+    expect(parseNodeChanges(JSON.stringify({ id: 52, type, after: { ticket_node_id: 'new', project_id: 'p1' } }))).toHaveLength(1)
+  }
+  expect(parseNodeChanges(JSON.stringify({ id: 53, type: 'harness.control_requested', after: { ticket_node_id: 'new' } }))).toEqual([])
+  expect(parseNodeChanges('{')).toEqual([])
+})
+
 describe('compareRevision', () => {
   it('orders microseconds that Date.parse would merge', () => {
     expect(compareRevision('2026-09-29T10:00:00.000001Z', '2026-09-29T10:00:00.000002Z')).toBeLessThan(0)
@@ -251,6 +267,15 @@ describe('LiveNodeStore', () => {
     fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
     rows = new RowStore()
     store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, graceMs: 1000, retryMs: [100, 200], refetchMs: [10, 20], rows })
+  })
+
+  it('forwards a streamed session stop to the list without inventing a node revision', () => {
+    const list = view([])
+    store.subscribe(list.v)
+    latest().ready(40, false)
+    latest().emit('harness.stopped', { id: 41, type: 'harness.stopped', after: { ticket_node_id: 'n1', project_id: 'A' } }, 41)
+    expect(list.calls).toEqual([{ id: 'n1', node: undefined, change: expect.objectContaining({ fields: ['eta', 'lead_worker'], revision: null }) }])
+    expect(fetchNode).not.toHaveBeenCalled()
   })
   afterEach(() => vi.useRealTimers())
 

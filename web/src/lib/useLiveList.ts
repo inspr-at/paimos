@@ -302,7 +302,7 @@ export function useLiveList(options: LiveListOptions) {
         if (copy) nodes.adopt(copy, sent)
         // A copy the store holds off (a deletion it learned after the read
         // was sent, without knowing when) cannot tell either: read again.
-        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id)))) { requeue(id, queued); continue }
+        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id) || !nodes.projectionsCurrent(id)))) { requeue(id, queued); continue }
         const newer = queue.get(id)
         if (newer) {
           queue.delete(id)

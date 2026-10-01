@@ -10,6 +10,7 @@
 import { APIError, getNode, type WorkNode } from './api'
 import { compareRevision, type ChangeKind } from './liveUpdates'
 import { rowStore, type RowStore } from './rowStore'
+import { TICKET_SESSION_EVENTS } from './liveAgents'
 
 export interface NodeChange {
   eventId: number; type: string; actorId: string
@@ -43,10 +44,24 @@ const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.
 export function parseNodeChanges(data: string): NodeChange[] {
-  let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown }
+  let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown; before?: unknown; after?: unknown }
   try { event = JSON.parse(data) } catch { return [] }
-  if (typeof event.id !== 'number' || !Array.isArray(event.node_changes)) return []
+  if (!event || typeof event.id !== 'number') return []
   const out: NodeChange[] = []
+  if (typeof event.type === 'string' && TICKET_SESSION_EVENTS.includes(event.type)) {
+    for (const value of [event.before, event.after]) {
+      if (!value || typeof value !== 'object') continue
+      const snapshot = value as Record<string, unknown>
+      const session = snapshot.session && typeof snapshot.session === 'object' ? snapshot.session as Record<string, unknown> : snapshot
+      const id = session.ticket_node_id
+      if (typeof id !== 'string' || !id || out.some(change => change.id === id)) continue
+      out.push({ eventId: event.id, type: event.type, actorId: String(event.actor_principal_id ?? ''), id,
+        projectId: typeof session.project_id === 'string' ? session.project_id : null,
+        change: 'updated', fields: ['eta', 'lead_worker'], revision: null })
+    }
+    return out
+  }
+  if (!Array.isArray(event.node_changes)) return []
   for (const raw of event.node_changes as Record<string, unknown>[]) {
     if (!raw || typeof raw.id !== 'string' || !['created', 'updated', 'deleted'].includes(raw.change as string)) continue
     out.push({
@@ -160,7 +175,7 @@ export class LiveNodeStore {
     this.source = source
     this.setState(this.connectedOnce ? 'reconnecting' : 'connecting')
     source.addEventListener('stream.ready', event => this.ready(event))
-    for (const name of NODE_EVENTS) source.addEventListener(name, event => this.receive(event))
+    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS]) source.addEventListener(name, event => this.receive(event))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including

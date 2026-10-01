@@ -5444,6 +5444,8 @@ paths:
       responses:
         '200':
           description: Live agents, freshest heartbeat first
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
           content:
             application/json:
               schema:
@@ -14317,6 +14319,8 @@ components:
             $ref: '#/components/schemas/Node'
     Nodes:
       description: Node page
+      headers:
+        Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
       content:
         application/json:
           schema:
