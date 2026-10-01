@@ -23,4 +23,13 @@ ALTER TABLE harness_current_activity FORCE ROW LEVEL SECURITY;
 CREATE POLICY harness_current_activity_tenant ON harness_current_activity
     USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
+CREATE POLICY harness_current_activity_project_visibility ON harness_current_activity AS RESTRICTIVE
+    USING ((SELECT aeon_visible_all()) OR EXISTS (
+        SELECT 1 FROM harness_sessions s
+        WHERE s.tenant_id = harness_current_activity.tenant_id
+          AND s.id = harness_current_activity.session_id))
+    WITH CHECK ((SELECT aeon_visible_all()) OR EXISTS (
+        SELECT 1 FROM harness_sessions s
+        WHERE s.tenant_id = harness_current_activity.tenant_id
+          AND s.id = harness_current_activity.session_id));
 CREATE INDEX harness_current_activity_session ON harness_current_activity (tenant_id,session_id,id DESC);

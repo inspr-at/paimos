@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestToolObservationsNeverForwardArguments(t *testing.T) {
@@ -50,6 +51,58 @@ func TestSummaryBoundaries(t *testing.T) {
 		if _, valid := CleanSummary(text); valid {
 			t.Fatalf("accepted unsafe summary %q", text)
 		}
+	}
+	for _, word := range []string{"secret", "token", "credential", "password", "id_", "private", "_rsa", "_ed25519"} {
+		if _, valid := CleanSummary("Reading " + strings.ToUpper(word)); valid {
+			t.Fatalf("accepted credential word %q without a colon", word)
+		}
+	}
+	// Synthetic short examples exercise prefix detection below the opaque limit.
+	for _, prefix := range []string{"AKIA", "ASIA", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-", "xoxe-", "xapp-", "AIza", "ya29.", "glpat-", "npm_", "pypi-", "hf_"} {
+		if _, valid := CleanSummary("Key " + prefix + "EXAMPLE"); valid {
+			t.Fatalf("accepted short key prefix %q", prefix)
+		}
+	}
+	for _, text := range []string{"Key AKIAIOSFODNN7EXAMPLE", "Key s\u200bk-EXAMPLE", "abcdefghijkl\u200bmnopqrstuvwx", "Running\u00ad tests", "Working\u2060", "\ufeffWorking", "Working\u202e"} {
+		if _, valid := CleanSummary(text); valid {
+			t.Fatalf("accepted unsafe or format-character summary %q", text)
+		}
+	}
+}
+
+func TestCurrentRevalidatesStoredActivity(t *testing.T) {
+	now := time.Date(2026, time.October, 2, 0, 0, 0, 0, time.UTC)
+	fresh := now.Add(-time.Minute)
+	stale := now.Add(-Fresh)
+	for _, tc := range []struct {
+		name, doing, tool, mode, want, source string
+		at                                    time.Time
+	}{
+		{"valid summary", "Implementing activity", "Running Go tests", Summary, "Implementing activity", "agent", fresh},
+		{"normalized summary", "  Implementing activity  ", "Running Go tests", Summary, "Implementing activity", "agent", fresh},
+		{"credential word fallback", "Reading secret", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"short key fallback", "Key AKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"format character fallback", "Key s\u200bk-EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"unsafe summary hidden", "Reading token", "Editing secret.go", Summary, "", "", fresh},
+		{"invalid tool hidden", "", "Running Go tests with arguments", Tool, "", "", fresh},
+		{"unsafe basename hidden", "", "Editing ../api.go", Tool, "", "", fresh},
+		{"valid basename", "", "Editing api.go", Tool, "Editing api.go", "auto", fresh},
+		{"stale summary fallback", "Implementing activity", "Running Go tests", Summary, "Running Go tests", "auto", stale},
+		{"tool mode", "Implementing activity", "Running Go tests", Tool, "Running Go tests", "auto", fresh},
+		{"off", "Implementing activity", "Running Go tests", Off, "", "", fresh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Current(&tc.doing, &tc.at, &tc.tool, &fresh, tc.mode, now)
+			if tc.want == "" {
+				if got != nil {
+					t.Fatalf("unsafe or disabled activity displayed: %+v", got)
+				}
+				return
+			}
+			if got == nil || got.Text != tc.want || got.Source != tc.source || got.At != fresh {
+				t.Fatalf("got %+v; want %q from %s at %s", got, tc.want, tc.source, fresh)
+			}
+		})
 	}
 }
 

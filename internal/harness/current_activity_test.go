@@ -2,11 +2,16 @@
 package harness_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestCurrentActivityPolicyFreshnessHistoryAndIsolation(t *testing.T) {
@@ -116,4 +121,109 @@ func TestCurrentActivityPolicyFreshnessHistoryAndIsolation(t *testing.T) {
 		}
 		return err
 	})
+}
+
+func TestCurrentActivityProjectIsolation(t *testing.T) {
+	f := fixture(t)
+	lease := "project-activity-lease-" + uid()
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.agent, "POST", base, map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "activity-test",
+		"harness_session_ref": "project-activity-ref-" + uid(), "worker_lease": lease,
+		"management_mode": "unmanaged", "role": "worker",
+	}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	path := base + "/" + id
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{
+		"phase": "working", "activity_sequence": 1, "doing": "Implementing activity",
+	}, lease), 200)
+
+	hidden := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	reader := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	otherProject := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title)
+			SELECT $1,$2,'ACT-3',kind_id,'Other project' FROM nodes WHERE id=$3`, f.person.TenantID, otherProject, f.project); err != nil {
+			return err
+		}
+		for _, binding := range []struct {
+			principal tenant.Principal
+			project   string
+		}{{hidden, otherProject}, {reader, f.project}} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Activity reader')`, binding.principal.TenantID, binding.principal.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+				SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, binding.principal.TenantID, binding.principal.ID, binding.project); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	// Use principal visibility, not the fixture's all-project service context.
+	ctx := tenant.WithPrincipal(t.Context(), hidden)
+	if err := db.InTenant(ctx, f.db.App, hidden.TenantID, func(tx pgx.Tx) error {
+		var sessions, activities int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM harness_sessions WHERE id=$1`, id).Scan(&sessions); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM harness_current_activity WHERE session_id=$1`, id).Scan(&activities); err != nil {
+			return err
+		}
+		if sessions != 0 || activities != 0 {
+			t.Fatalf("same-tenant principal saw hidden project: sessions=%d activities=%d", sessions, activities)
+		}
+		for _, query := range []string{
+			`UPDATE harness_current_activity SET text='Working' WHERE session_id=$1`,
+			`DELETE FROM harness_current_activity WHERE session_id=$1`,
+		} {
+			tag, err := tx.Exec(ctx, query, id)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 0 {
+				t.Fatalf("same-tenant principal modified %d hidden activity rows", tag.RowsAffected())
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := db.InTenant(ctx, f.db.App, hidden.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO harness_current_activity(tenant_id,session_id,text,source,at)
+			VALUES($1,$2,'Working','auto',clock_timestamp())`, hidden.TenantID, id)
+		return err
+	})
+	var denied *pgconn.PgError
+	if !errors.As(err, &denied) || denied.Code != "42501" {
+		t.Fatalf("same-tenant insert was not rejected by RLS: %v", err)
+	}
+	expect(t, f.call(hidden, "GET", path, nil, ""), 404)
+	expect(t, f.call(reader, "GET", path, nil, ""), 200)
+
+	ctx = tenant.WithPrincipal(t.Context(), reader)
+	if err := db.InTenant(ctx, f.db.App, reader.TenantID, func(tx pgx.Tx) error {
+		var count int
+		var text string
+		if err := tx.QueryRow(ctx, `SELECT count(*), min(text) FROM harness_current_activity WHERE session_id=$1`, id).Scan(&count, &text); err != nil {
+			return err
+		}
+		if count != 1 || text != "Implementing activity" {
+			t.Fatalf("visible activity changed by denied writes: count=%d text=%q", count, text)
+		}
+		tag, err := tx.Exec(ctx, `UPDATE harness_current_activity SET text='Working' WHERE session_id=$1`, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			t.Fatal("project reader could not write visible activity")
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO harness_current_activity(tenant_id,session_id,text,source,at)
+			VALUES($1,$2,'Running Go tests','auto',clock_timestamp())`, reader.TenantID, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -31,9 +31,11 @@ func Current(doing *string, doingAt *time.Time, tool *string, toolAt *time.Time,
 		return nil
 	}
 	if mode == Summary && doing != nil && doingAt != nil && now.Sub(*doingAt) < Fresh {
-		return &Activity{Text: *doing, Source: "agent", At: *doingAt}
+		if clean, valid := CleanSummary(*doing); valid {
+			return &Activity{Text: clean, Source: "agent", At: *doingAt}
+		}
 	}
-	if tool != nil && toolAt != nil {
+	if tool != nil && toolAt != nil && ValidAuto(*tool) {
 		return &Activity{Text: *tool, Source: "auto", At: *toolAt}
 	}
 	return nil
@@ -112,11 +114,13 @@ func ValidAuto(text string) bool {
 
 func CleanSummary(raw string) (string, bool) {
 	text := strings.TrimSpace(raw)
-	if text == "" || opaque.MatchString(text) || !utf8.ValidString(raw) || utf8.RuneCountInString(text) > 60 || strings.ContainsFunc(raw, unicode.IsControl) || strings.ContainsAny(text, "=\\/@$`") {
+	if text == "" || opaque.MatchString(text) || !utf8.ValidString(raw) || utf8.RuneCountInString(text) > 60 || strings.ContainsFunc(raw, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}) || strings.ContainsAny(text, "=\\/@$`") {
 		return "", false
 	}
 	lower := strings.ToLower(text)
-	for _, word := range []string{"bearer", "password", "api_key", "api-key", "sk-", "ghp_", "github_pat_", "token:", "secret:"} {
+	for _, word := range []string{"secret", "token", "credential", "password", "id_", "private", "_rsa", "_ed25519", "bearer", "api_key", "api-key", "akia", "asia", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xox", "xapp-", "aiza", "ya29.", "glpat-", "npm_", "pypi-", "hf_"} {
 		if strings.Contains(lower, word) {
 			return "", false
 		}
