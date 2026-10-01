@@ -355,9 +355,12 @@ func findCodexRollout(home, thread string) string {
 	// search on the newest dates first so old history cannot hide a recent
 	// explicit id. Stop at the first fenced suffix match.
 	n := 1 // Count the root, as in the metadata discovery walk.
+	sessionsRoot := root
 	var walk func(string) string
-	walk = func(dir string) string {
-		entries, err := os.ReadDir(dir)
+	walk = func(root string) string {
+		// Each recursion lists a directory root only. File reads still use
+		// the harness fence, and matches must remain inside sessionsRoot.
+		entries, err := os.ReadDir(root)
 		if err != nil {
 			return ""
 		}
@@ -370,7 +373,7 @@ func findCodexRollout(home, thread string) string {
 			if entry.Type()&os.ModeSymlink != 0 || credentialUsageName(entry.Name()) {
 				continue
 			}
-			path := filepath.Join(dir, entry.Name())
+			path := filepath.Join(root, entry.Name())
 			if entry.IsDir() {
 				if found := walk(path); found != "" {
 					return found
@@ -378,7 +381,7 @@ func findCodexRollout(home, thread string) string {
 				if n > usageWalkLimit {
 					return ""
 				}
-			} else if strings.HasPrefix(entry.Name(), "rollout-") && strings.HasSuffix(entry.Name(), suffix) && regularUsageFile("codex", path) && pathInsideRoot(root, path) {
+			} else if strings.HasPrefix(entry.Name(), "rollout-") && strings.HasSuffix(entry.Name(), suffix) && regularUsageFile("codex", path) && pathInsideRoot(sessionsRoot, path) {
 				return path
 			}
 		}
