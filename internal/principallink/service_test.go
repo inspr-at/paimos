@@ -280,7 +280,7 @@ func TestLinkAuditsEveryBindingRemovalAndRollsBackOnAuditFailure(t *testing.T) {
 		var workspace, projectRemoved int
 		if err := tx.QueryRow(t.Context(), `SELECT
 			count(*) FILTER (WHERE node_id IS NULL AND before->>'scope_type'='workspace' AND before->'role'->>'key'='admin'),
-			count(*) FILTER (WHERE node_id=$3::uuid AND before->>'project_id'=$3 AND before->>'scope_type'='project' AND before->'role'->>'key'='guest')
+			count(*) FILTER (WHERE node_id IS NULL AND $3::uuid=ANY(node_refs) AND before->>'project_id'=$3::text AND before->>'scope_type'='project' AND before->'role'->>'key'='guest')
 			FROM events WHERE tenant_id=$1 AND type='binding.removed' AND before->>'principal_id'=$2
 			  AND before->>'id' IS NOT NULL AND after IS NULL
 			  AND actor_principal_id=(SELECT id FROM principals WHERE tenant_id=$1 AND name='Principal link operator')`, f.tid, a, project).Scan(&workspace, &projectRemoved); err != nil {

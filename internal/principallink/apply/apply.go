@@ -85,34 +85,33 @@ func removeBindings(ctx context.Context, tx pgx.Tx, tenantID, principalID, actor
 	rows, err := tx.Query(ctx, `DELETE FROM role_bindings b USING roles r
 		WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
 		  AND r.tenant_id=b.tenant_id AND r.id=b.role_id
-		RETURNING b.scope_id::text,jsonb_build_object(
+		RETURNING jsonb_build_object(
 		  'id',b.id,'principal_id',b.principal_id,'scope_type',b.scope_type,
 		  'project_id',b.scope_id,'role',jsonb_build_object('id',r.id,'key',r.key,'name',r.name),
 		  'reason','principal_alias_linked')`, tenantID, principalID)
 	if err != nil {
 		return err
 	}
-	type removedBinding struct {
-		projectID *string
-		before    json.RawMessage
-	}
-	var removed []removedBinding
+	var removed []json.RawMessage
 	for rows.Next() {
-		var binding removedBinding
-		if err := rows.Scan(&binding.projectID, &binding.before); err != nil {
+		var before json.RawMessage
+		if err := rows.Scan(&before); err != nil {
 			rows.Close()
 			return err
 		}
-		removed = append(removed, binding)
+		removed = append(removed, before)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for _, binding := range removed {
-		if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,at)
-			VALUES($1::uuid,$2::uuid,$3::uuid,'binding.removed',$4::jsonb,clock_timestamp())`,
-			tenantID, actorID, binding.projectID, binding.before); err != nil {
+	// Access audit is workspace activity, as for invite binding.set. The event
+	// trigger records project_id from each snapshot in node_refs, preserving
+	// project visibility even for the operator's workspace-only transaction.
+	for _, before := range removed {
+		if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,before,at)
+			VALUES($1::uuid,$2::uuid,'binding.removed',$3::jsonb,clock_timestamp())`,
+			tenantID, actorID, before); err != nil {
 			return err
 		}
 	}

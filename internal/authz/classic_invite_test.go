@@ -69,7 +69,7 @@ func TestClassicInviteLinking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ownerID, err := tenantbootstrap.BindOIDC(ctx, d.App, "classic-invite", "https://id.example", "owner", "Owner", "admin")
+			ownerID, err := tenantbootstrap.BindOIDC(ctx, d.App, "classic-invite", "https://id.example", "owner", "Owner", "super_admin")
 			if err != nil {
 				t.Fatal(err)
 			}

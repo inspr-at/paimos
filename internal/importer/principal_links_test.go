@@ -36,8 +36,12 @@ func TestClassicImportWaitsForInviteLinkLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer importTx.Rollback(context.Background())
+	if _, err := importTx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),
+		set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`, tid); err != nil {
+		t.Fatal(err)
+	}
 	var pid int
-	if err := importTx.QueryRow(ctx, `SELECT pg_backend_pid() FROM set_config('aeon.tenant_id',$1,true)`, tid).Scan(&pid); err != nil {
+	if err := importTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
 		t.Fatal(err)
 	}
 	result := make(chan error, 1)
