@@ -16,7 +16,7 @@ function versionLabel(version: string, copy = true): string {
 }
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
@@ -144,7 +144,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.goto('/releases')
   await historyReady
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   // The first selection's address has landed. Later ones wait until Compare is open.
   await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.current)}(?:$|\\?)`))
   navigationGate = new Promise(resolve => { releaseNavigations = resolve })
@@ -171,7 +171,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.keyboard.press('Escape')
   await expect(options(page)).toHaveCount(history.releases.length)
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
 
   // Compare from the selected release; j and k move the other end.
   await page.keyboard.press('c')
@@ -227,21 +227,21 @@ test('compare follows Back, Forward and an in-app release link', async ({ page }
   await openRelease(3)
   await expect(page).toHaveURL(path(3))
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goBack()
   await expect(page).toHaveURL(path(0))
   await expect(compare).toHaveCount(0)
   await selected(0)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goForward()
   await expect(page).toHaveURL(path(3))
   await expect(compare).toHaveCount(0)
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await openRelease(1)
@@ -272,7 +272,7 @@ test('a cancelled selection does not swallow the next visit to that release', as
   })
   await page.goto(path(0))
   await selected(0)
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   armed = true
   await page.keyboard.press('j')
   await selected(1)
@@ -427,7 +427,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.getByRole('option', { name: /Release history/ }).click()
   await expect(sheet(page)).toBeVisible()
   // Keys wait until the sheet has taken focus.
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()

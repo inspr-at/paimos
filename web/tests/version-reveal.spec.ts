@@ -11,7 +11,7 @@ import { mockReleases, releaseHistory } from './releases-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 const pill = (page: Page) => page.getByRole('button', { name: /^Release history, version / })
 
 // A release with a marketing name shows the name and reveals its stamp (AEON-430,
@@ -76,7 +76,7 @@ test('unnamed release rows: only the version copy control reveals; the row still
   await away(page)
   await expectRest(row)
   // The listbox keeps focus; j selects while the independent copy stays Pretty.
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('j')
   await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true')
   await expectRest(options(page).nth(1))

@@ -23,14 +23,14 @@ async function open(page: Page, options: { motion?: boolean; running?: (h: Retur
   await mockWork(page, fixtures())
   await mockReleases(page, history, { running: options.running?.(history) })
   await page.goto('/releases')
-  await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   await expect(slide(page, 1, 'Releases per week')).toBeVisible()
   return history
 }
 // Off the card: the pointer elsewhere and focus back on the list.
 async function leave(page: Page) {
   await page.mouse.move(700, 900)
-  await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await sheet(page).getByRole('grid', { name: 'Releases, newest first' }).focus()
 }
 
 test('the stat card moves on every 7 s, the current dot filling, and is silent while it moves', async ({ page }) => {
@@ -137,7 +137,7 @@ for (const width of [761, 800, 900]) {
     const bounds = await pane.boundingBox()
     expect(bounds!.height).toBeGreaterThan(80)
     await pane.evaluate(el => { el.scrollTop = el.scrollHeight })
-    const row = sheet(page).getByRole('option').last()
+    const row = sheet(page).getByRole('row').last()
     await expect(row).toBeInViewport()
     const statBounds = await card(page).boundingBox()
     expect(statBounds!.y + statBounds!.height).toBeLessThanOrEqual(bounds!.y)
@@ -392,9 +392,9 @@ test('the bars are one keyboard stop; arrows walk them and the tooltip names the
   await page.keyboard.press('End')
   await expect(bars.last()).toBeFocused()
   // Home and End stay in the chart: the list keeps its row.
-  const selected = await sheet(page).getByRole('option', { selected: true }).getAttribute('id')
+  const selected = await sheet(page).getByRole('row', { selected: true }).getAttribute('id')
   await page.keyboard.press('Home')
-  expect(await sheet(page).getByRole('option', { selected: true }).getAttribute('id')).toBe(selected)
+  expect(await sheet(page).getByRole('row', { selected: true }).getAttribute('id')).toBe(selected)
   await expect(chart(page).locator('.tip')).toBeVisible()
 })
 

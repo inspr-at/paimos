@@ -502,23 +502,23 @@ const KINDS = [
           </div>
 
           <div
-            v-show="visible.length" ref="listbox" class="listbox" role="listbox" tabindex="0" aria-label="Releases, newest first"
+            v-show="visible.length" ref="listbox" class="listbox" role="grid" tabindex="0" aria-label="Releases, newest first"
             :aria-activedescendant="cursor && indexOf.has(cursor) ? optionId(cursor) : undefined"
           >
-            <div v-for="day in days" :key="day.key" class="day" role="group" :aria-labelledby="`day-${day.key}`">
+            <div v-for="day in days" :key="day.key" class="day" role="rowgroup" :aria-labelledby="`day-${day.key}`">
               <p :id="`day-${day.key}`" class="day-h"><span>{{ day.label }}</span><span class="day-count">{{ day.releases.length }}</span></p>
               <div
-                v-for="r in day.releases" :id="optionId(r.version)" :key="r.version" role="option" class="row"
+                v-for="r in day.releases" :id="optionId(r.version)" :key="r.version" role="row" class="row"
                 :aria-selected="cursor === r.version"
                 :class="{ reserved: r.state === 'reserved', current: r.version === current, fresh: store.highlight.has(r.version), from: mode === 'compare' && r.version === compareFrom, to: r.version === compareTo }"
                 :style="{ '--i': Math.min(indexOf.get(r.version) ?? 0, 16) }"
                 @click="choose(r.version)"
               >
-                <span class="time">
+                <span class="time" role="gridcell">
                   <span class="mono clock">{{ timeOf(r) }}</span>
                   <span class="age">{{ ageOf(r) }}</span>
                 </span>
-                <span class="main">
+                <span class="main" role="gridcell">
                   <span class="line1">
                     <span class="row-identity">
                       <ReleaseName plain :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
@@ -542,7 +542,7 @@ const KINDS = [
                     <span v-if="countsOf(r).tickets.length" class="count keys mono">{{ countsOf(r).tickets.slice(0, 2).join(' ') }}<template v-if="countsOf(r).tickets.length > 2"> +{{ countsOf(r).tickets.length - 2 }}</template></span>
                   </span>
                 </span>
-                <AppIcon name="chevron-right" :size="14" class="row-chev" />
+                <span role="gridcell" class="row-chev"><AppIcon name="chevron-right" :size="14" /></span>
               </div>
             </div>
           </div>

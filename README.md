@@ -1037,7 +1037,9 @@ Release list rows keep the codename and its badges visible while a separate
 Pretty version sits at the right of the heading. That version uses the same
 crossfade and canonical copy feedback as the dock; copying keeps the current
 selection and address. When the heading is too narrow, the version wraps below
-the codename and stays right-aligned.
+the codename and stays right-aligned. The history uses interactive grid rows so
+the copy button is available to assistive technology; j/k and arrow keys retain
+the selected-row navigation.
 
 The connect screen keeps Connect available when a selection mixes verifiable
 and unverifiable harnesses. Clicking it offers **Connect without verification**

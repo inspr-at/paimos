@@ -160,11 +160,14 @@ jobs:
         run: npm run lint
       # AEON-488: the dock adapter, list, version/header and release-entry regressions
       # run on hosted CI, keeping browser suites off the operator workstation.
+      - name: Install shells for command round-trip unit tests
+        run: sudo apt-get update && sudo apt-get install -y fish zsh
       - working-directory: web
         run: npm run test:unit
       - working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Capture the round-6 release list for comparison
+        id: release-list-before
         working-directory: web
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
@@ -182,7 +185,7 @@ jobs:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
         run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
       - name: Upload release list comparison screenshots
-        if: always()
+        if: always() && steps.release-list-before.outcome != 'skipped'
         uses: actions/upload-artifact@v7
         with:
           name: aeon-488-release-list-comparison

@@ -31,7 +31,7 @@ async function openHistory(page: Page, history: History, running: string, target
   await mockReleases(page, history, { running })
   await page.goto(target === 'all' ? '/releases' : `/releases/${target}`)
   await expect(sheet(page)).toBeVisible()
-  await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
 }
 
 function outdatedHistory() {
@@ -51,7 +51,7 @@ test('an outdated page shows one newer-version notice when the server version is
   await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
   await expect(outdated(page).getByRole('button', { name: 'Reload' })).toBeVisible()
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
-  await expect(sheet(page).getByRole('option').first()).toHaveAttribute('aria-selected', 'true')
+  await expect(sheet(page).getByRole('row').first()).toHaveAttribute('aria-selected', 'true')
 })
 
 test('an outdated page opened on the history still shows only the newer-version notice', async ({ page }) => {
@@ -151,7 +151,7 @@ test('what’s new with the history cached before the deploy never shows the mis
     releaseRefetch()
   }
   await expect.poll(() => opened).toBe(true)
-  await expect(sheet(page).getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   await expect(notices(page)).toHaveCount(1)
   await expect(outdated(page)).toContainText('this page still runs')
   await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))

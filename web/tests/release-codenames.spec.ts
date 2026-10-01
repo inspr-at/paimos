@@ -6,11 +6,12 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { CODENAMES, mockReleases, presentedHistory } from './releases-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, version?: string, now?: number) {
   await mockWork(page, fixtures())
@@ -30,8 +31,8 @@ test('release list screenshot', async ({ page }) => {
   await open(page, undefined, now)
   await mkdir(process.env.RELEASE_LIST_SHOTS!, { recursive: true })
   await page.mouse.move(1, 1)
-  await sheet(page).getByRole('listbox').focus()
-  await expect(options(page).first()).toBeInViewport()
+  await sheet(page).locator('.listbox').focus()
+  await expect(sheet(page).locator('.row').first()).toBeInViewport()
   await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS!, `${process.env.RELEASE_LIST_SHOT_LABEL ?? 'after'}-desktop.png`) })
 })
 
@@ -72,6 +73,8 @@ test('the list version uses the dock crossfade without hiding the codename or sh
   const pretty = version.locator('[data-version-character="pretty"]')
   await sheet(page).locator('.shell').evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
   await row.evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
+  // Playwright may scroll the 44 px target into view before hovering it.
+  await version.scrollIntoViewIfNeeded()
   const bounds = await version.boundingBox()
   await version.hover()
   await expect(version).toHaveAttribute('data-version-view', 'revealed')
@@ -87,7 +90,7 @@ test('the list version uses the dock crossfade without hiding the codename or sh
   expect(transitions[0]).toEqual(['0.42s', '0s', 'ease-in-out'])
   expect(transitions.at(-1)).toEqual(['0.42s', '0.58s', 'ease-in-out'])
   await page.mouse.move(1, 1)
-  await sheet(page).getByRole('listbox').focus()
+  await sheet(page).getByRole('grid').focus()
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await expect(canonical.last()).toHaveCSS('opacity', '0')
   await expect(pretty.last()).toHaveCSS('opacity', '1')
@@ -116,9 +119,15 @@ test('focus reveals the list version; click, Enter and Space copy without select
   await row.locator('.rn-name').click()
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(page).toHaveURL(`/releases/${history.releases[3]!.version}`)
-  await sheet(page).getByRole('listbox').focus()
+  await sheet(page).getByRole('grid').focus()
   await page.keyboard.press('k')
   await expect(options(page).nth(2)).toHaveAttribute('aria-selected', 'true')
+})
+
+test('release list copy controls have accessible interactive row semantics', async ({ page }) => {
+  await open(page)
+  const results = await new AxeBuilder({ page }).include('.releases .list-pane').withRules(['nested-interactive', 'aria-required-children', 'aria-required-parent']).analyze()
+  expect(results.violations.map(violation => ({ id: violation.id, targets: violation.nodes.map(node => node.target) }))).toEqual([])
 })
 
 for (const width of [320, 390, 600, 1600]) {
@@ -136,7 +145,7 @@ for (const width of [320, 390, 600, 1600]) {
     if (width <= 390) expect(versionBounds!.y).toBeGreaterThanOrEqual(nameBounds!.y + nameBounds!.height)
     else expect(Math.abs(versionBounds!.y + versionBounds!.height / 2 - nameBounds!.y - nameBounds!.height / 2)).toBeLessThanOrEqual(1)
     const button = version.getByRole('button')
-    await sheet(page).getByRole('listbox').focus()
+    await sheet(page).getByRole('grid').focus()
     await page.keyboard.press('Tab')
     await expect(button).toBeFocused()
     await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
