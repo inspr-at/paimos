@@ -101,6 +101,10 @@ test('revoking a watch reads the lists again', async ({ page }) => {
   await page.getByRole('button', { name: 'Revoke watch for everyone' }).click()
   await expect(page.getByRole('button', { name: 'Revoke watch for everyone' })).toHaveCount(0)
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
+  // The refresh returns another row for the same consent. It cannot reopen a
+  // watch the owner just revoked, even if its projection still says active.
+  await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Revoke watch for everyone' })).toHaveCount(0)
 })
 
 test('approving an attach request reads the lists again', async ({ page }) => {

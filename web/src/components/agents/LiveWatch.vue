@@ -57,7 +57,8 @@ async function revoke() {
   catch { if (props.session.watch?.request_id === requestID) error.value = 'Could not revoke the watch. Try again.' }
   finally { revoking.value = false }
 }
-watch(() => [props.session.id, identity.identity?.tenant.id, identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
+// A fresh canonical row for the same consent must not clear a local revocation.
+watch([() => props.session.id, () => props.session.watch?.request_id, () => identity.identity?.tenant.id, () => identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
 watch([allowed, available], () => { if (!allowed.value || !available.value) stop(true) })
 const stopAccess = onAccessChange(() => stop(true))
 function hidden() { if (document.hidden) stop() }
