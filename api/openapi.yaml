@@ -7981,7 +7981,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.8']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.9']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12064,6 +12064,8 @@ components:
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
+        model_raw: {type: [string, 'null'], maxLength: 128, readOnly: true, description: Original cleaned model string before separating an effort suffix; retained for audit.}
+        model_profile_id: {type: [string, 'null'], format: uuid, readOnly: true, description: "Unique tenant registry match for harness, normalised model and effort. Unknown or ambiguous matches are omitted."}
         reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
         account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
         harness_version: {$ref: '#/components/schemas/HarnessVersion'}
@@ -13734,7 +13736,7 @@ components:
           description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set fields.estimate_hours. The warning does not name a client flag."
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
         parent_id:
@@ -13790,16 +13792,28 @@ components:
     TicketRouteFields:
       type: object
       additionalProperties: true
-      description: Classification of who should build a ticket or task. route_role is scout, mechanical, build, build-hard, or review-gate. area is backend, frontend, full-stack, infra, design, or docs. The server derives source from the authenticated principal (person or agent) and sets by and at. A supplied source must match the caller. by and at cannot impersonate another principal. Null clears one field and its provenance; an unchanged value keeps its provenance. Model names are not stored. Display resolves the pair through the model registry, and a missing route is null.
+      description: >-
+        Classification of tickets and tasks. Setting estimate_hours fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend.
+        Server suggestions have source suggested and confirmed false; by is the acting principal and at is UTC. Explicit values are stamped person or agent; only a person confirms classifications.
+        To confirm an unchanged suggestion or an unconfirmed agent classification, a person resubmits its value without source/by/at. Other unchanged values retain stored provenance. Clients cannot forge confirmation or attribution.
+        Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
+        Null clears a classification and provenance, but a valid estimate causes missing classifications to be suggested again. Existing tickets are not backfilled.
       properties:
         route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, null]}
-        route_role_source: {type: [string, 'null'], enum: [agent, person, null]}
+        route_role_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
         route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        route_role_confirmed: {type: boolean, readOnly: true}
         area: {type: [string, 'null'], enum: [backend, frontend, full-stack, infra, design, docs, null]}
-        area_source: {type: [string, 'null'], enum: [agent, person, null]}
+        area_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         area_by: {type: [string, 'null'], format: uuid, readOnly: true}
         area_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        area_confirmed: {type: boolean, readOnly: true}
+        complexity: {type: [string, 'null'], enum: [S, M, L, null]}
+        complexity_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
+        complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        complexity_confirmed: {type: boolean, readOnly: true}
     NodeCreate:
       type: object
       required: [kind_id, title]
@@ -13821,7 +13835,7 @@ components:
           default: ''
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
           default: {}
         state:
           type: string
@@ -13849,7 +13863,7 @@ components:
           type: string
         fields:
           type: object
-          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields is the route_role and area classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
         state:
           type: string
         kind_id:

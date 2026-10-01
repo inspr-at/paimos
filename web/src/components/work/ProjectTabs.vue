@@ -22,7 +22,7 @@ function move(event: KeyboardEvent) {
   <div class="project-tabs" :class="{ sections }" role="tablist" :aria-label="label" @keydown.stop="move">
     <button v-for="item in items" :key="item.id" type="button" role="tab" :aria-selected="selected === item.id"
       :aria-label="item.label" :data-tip="tips ? item.label : undefined"
-      :tabindex="selected === item.id ? 0 : -1" @click="emit('select', item.id)">
+      :tabindex="selected === item.id || (!items.some(tab => tab.id === selected) && item.id === items[0]?.id) ? 0 : -1" @click="emit('select', item.id)">
       <AppIcon :name="item.icon" :size="15" /><span class="tab-label">{{ item.label }}</span>
     </button>
   </div>
