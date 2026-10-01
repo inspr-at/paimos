@@ -5112,7 +5112,7 @@ paths:
       - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
     post:
       operationId: reportHarnessModels
-      description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. No extra key grant is needed. Evidence is validated, idempotent and content-free; no profile metadata or ladder writes accepted.
+      description: Existing harness.worker authority plus the exact live worker lease reports only this session's harness. Health evidence must match a model and effort attempted by this exact session or its managed run pin. No extra key grant is needed. Failures must be five minutes apart to suppress routing, and receipt retention and rate limits also apply here. Evidence is validated, idempotent and content-free; discovered pins remain disabled until person acceptance, and no profile metadata or ladder writes are accepted.
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
       responses:
@@ -5779,6 +5779,7 @@ paths:
       responses:
         '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /models/reports:
     post:

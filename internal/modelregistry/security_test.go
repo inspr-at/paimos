@@ -85,6 +85,7 @@ func TestAgentEvidenceCannotSuppressUnattemptedOrForeignModels(t *testing.T) {
 	foreignOwner := makePrincipal(t, "foreign-evidence", "person", "Owner", []string{"admin"})
 	foreignAgent := addPrincipal(t, foreignOwner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, foreignOwner, foreignAgent)
+	foreignAgent.Scopes = []string{"models.read", "models.report", "models.refresh"}
 	enrollEvidenceHarness(t, foreignOwner, foreignAgent, "codex")
 	reportEvidence(t, foreignAgent, []Observation{o}, 403)
 	inRegistry(t, owner, func(tx pgx.Tx) error {
