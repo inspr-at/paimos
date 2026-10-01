@@ -30,14 +30,44 @@ type AttachConfig struct {
 	Exchange                            func(context.Context, attachwatch.DeviceRequest) (attachwatch.View, error)
 }
 type AttachManager struct {
-	mu        sync.Mutex
-	cfg       AttachConfig
-	observe   func(int) (attachObservation, error)
-	ancestry  func(int) (attachObservation, error)
-	signature func(context.Context, string) (attachSignature, error)
-	sessions  map[string]*localAttach
-	closed    bool
+	mu          sync.Mutex
+	cfg         AttachConfig
+	observe     func(int) (attachObservation, error)
+	ancestry    func(int) (attachObservation, error)
+	signature   func(context.Context, string) (attachSignature, error)
+	sessions    map[string]*localAttach
+	closed      bool
+	unavailable error
 }
+
+// Retain a refusal on the existing owner-only socket when registration failed.
+// The auth and kernel-peer checks in serve still run before it can be read.
+func DisabledAttachManager(err error) *AttachManager {
+	refusal := attachRefusal(err)
+	var status *client.StatusError
+	// Older strict servers predate the diagnostic field. Match only their
+	// known registration refusals, never an arbitrary 400/409 or raw body.
+	if errors.As(err, &status) {
+		legacyVersion := status.Status == http.StatusBadRequest && status.Message == "invalid attach request"
+		if status.Status == http.StatusConflict {
+			switch status.Message {
+			case "update agentd to attach protocol 2", "upgrade paimos-agentd to local consent proof v2",
+				"update agentd to attach protocol 2; fresh approval required",
+				"upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required":
+				legacyVersion = true
+			}
+		}
+		if legacyVersion {
+			refusal = attachRefusal(&client.StatusError{Status: http.StatusConflict, AttachRefusal: attachwatch.RefusalVersion})
+		}
+	}
+	var local *AttachLocalError
+	if errors.As(err, &local) && local.Code == "attach_version_mismatch" {
+		refusal = local
+	}
+	return &AttachManager{closed: true, unavailable: refusal, sessions: make(map[string]*localAttach)}
+}
+
 type localAttach struct {
 	peer               attachwatch.Process
 	snapshot           attachwatch.Snapshot
@@ -151,6 +181,9 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	reject := errors.New("attach rejected; inspect the process and approved folder")
+	if m.unavailable != nil {
+		return AttachLocalView{}, m.unavailable
+	}
 	if m.closed {
 		return AttachLocalView{}, reject
 	}
@@ -325,6 +358,11 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	req.Text = ""
 	if err != nil {
 		m.end(ctx, in.ID, s)
+		refusal := attachRefusal(err)
+		var detail *AttachLocalError
+		if errors.As(refusal, &detail) {
+			return AttachLocalView{}, refusal
+		}
 		return AttachLocalView{}, errors.New("watch unreachable or revoked; attach again")
 	}
 	if view.Digest != s.snapshot.Digest() || view.RequestID != in.ID || view.Snapshot != s.snapshot {
@@ -375,12 +413,23 @@ func (m *AttachManager) handle(ctx context.Context, peer attachObservation, in A
 	return m.localView(in.ID, s), nil
 }
 
-// A full waiting list is something the person can fix in the browser, so the
-// helper names it; every other refusal stays generic and leaks nothing.
+// Only the authenticated kernel-checked local helper gets these fixed next
+// steps. Never reflect arbitrary server messages or identifiers into a terminal.
 func attachRefusal(err error) error {
 	var status *client.StatusError
-	if errors.As(err, &status) && status.Status == http.StatusTooManyRequests && status.Message == attachwatch.LiveLimitMessage {
-		return fmt.Errorf("%d attach requests already wait for approval in Aeon; approve or decline one there or let one expire, then run attach again", attachwatch.LiveMax)
+	if errors.As(err, &status) {
+		switch {
+		case status.Status == http.StatusTooManyRequests && status.Message == attachwatch.LiveLimitMessage:
+			return &AttachLocalError{Code: "attach_live_limit", Hint: fmt.Sprintf("%d attach requests already wait for approval in Aeon; approve or decline one there or let one expire, then run attach again", attachwatch.LiveMax)}
+		case status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden && status.AttachRefusal == attachwatch.RefusalPairing:
+			return &AttachLocalError{Code: "attach_pairing_revoked", Hint: "This computer's pairing no longer authenticates. Check paired computers in Aeon; if revoked, pair this computer again, then run attach again."}
+		case status.Status == http.StatusConflict && status.AttachRefusal == attachwatch.RefusalVersion:
+			return &AttachLocalError{Code: "attach_version_mismatch", Hint: "Aeon and agentd use incompatible attach versions. Update Aeon and paimos-agentd, restart agentd, then run attach again; existing pairing keys remain valid."}
+		case (status.Status == http.StatusForbidden || status.Status == http.StatusConflict) && status.AttachRefusal == attachwatch.RefusalTicket:
+			return &AttachLocalError{Code: "attach_ticket_not_visible", Hint: "The ticket or its project is unavailable to the pairing owner. Check the ticket belongs to the selected project and the owner has project access, then run attach again."}
+		case status.Status == http.StatusGone && status.AttachRefusal == attachwatch.RefusalExpired:
+			return &AttachLocalError{Code: "attach_code_expired", Hint: "The attach code expired before activation. Run attach again and approve the new code in Aeon."}
+		}
 	}
 	return errors.New("paired instance refused attach")
 }
