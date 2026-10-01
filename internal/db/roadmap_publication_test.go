@@ -86,10 +86,10 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 		if err := json.Unmarshal(schema, &parsed); err != nil {
 			return err
 		}
-		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 15 {
+		if parsed.Type != "object" || parsed.Additional == nil || *parsed.Additional || len(parsed.Required) != 1 || parsed.Required[0] != "custom" || len(parsed.Properties) != 16 {
 			t.Fatalf("custom schema lost: %s", schema)
 		}
-		for _, key := range []string{"custom", "legacy_score", "roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at"} {
+		for _, key := range []string{"custom", "legacy_score", "roadmap_public", "roadmap_public_source", "roadmap_public_by", "roadmap_public_at", "human_check_completed"} {
 			if _, ok := parsed.Properties[key]; !ok {
 				t.Fatalf("missing %s in %s", key, schema)
 			}
