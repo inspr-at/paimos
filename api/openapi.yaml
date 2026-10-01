@@ -8156,7 +8156,7 @@ components:
       type: object
       required: [code, error]
       properties:
-        code: {type: string, description: Existing error code, retained for older clients}
+        code: {type: string, description: "Existing error code, retained for older clients"}
         error: {type: string}
         attach_refusal:
           type: string
