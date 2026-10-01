@@ -180,7 +180,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 	var title, typ, status, priority, parent, assignee, project string
 	var description, descriptionFile, ac, acFile, notes, notesFile string
 	var closeNote, closeNoteFile string
-	var role, area string
+	var role, area, complexity string
 	var addTag, removeTag []string
 	var dryRun bool
 	var benefits benefitFlags
@@ -198,6 +198,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
 			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
+			fs.string(&complexity, "complexity", 0, "work complexity: S, M, or L")
 			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
 			fs.string(&priority, "priority", 0, "new priority")
@@ -241,14 +242,14 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			if err != nil {
 				return err
 			}
-			if err := validateRouteFlags(role, area); err != nil {
+			if err := validateRouteFlags(role, area, complexity); err != nil {
 				return err
 			}
 			if err := rt.noteKindUpdate(args[0], typ); err != nil {
 				return err
 			}
 			askedKind := strings.TrimSpace(typ) != ""
-			changed := strings.TrimSpace(title+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile+role+area) != "" ||
+			changed := strings.TrimSpace(title+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile+role+area+complexity) != "" ||
 				len(addTag) > 0 || len(removeTag) > 0 || benefits.changed() || estimate != ""
 			if estimate != "" {
 				if _, err := parseEstimate(estimate); err != nil {
@@ -269,7 +270,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 				Estimate: estimate, Benefits: benefits, Ref: args[0], Title: title, Status: status, Priority: priority,
 				Parent: parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
-				RouteRole: role, Area: area,
+				RouteRole: role, Area: area, Complexity: complexity,
 			})
 		},
 	}

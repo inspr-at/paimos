@@ -169,7 +169,7 @@ const PLUGINS = [
 ]
 
 // Registered after mockWork, so its routes win; anything else falls through.
-export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
+export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean; flowControls?: boolean } = {}) {
   const calls: Call[] = []
   const bump = () => { world.journey.revision++ }
   await page.route('**/api/**', async route => {
@@ -177,6 +177,9 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     let body: Record<string, unknown> = {}
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     const record = () => calls.push({ path, method, query, body, headers: request.headers() })
+    // Existing journey specs explicitly exercise the opt-in experience. Default
+    // and persistence specs pass false to use mockWork's per-person preferences.
+    if (path === '/api/preferences/developer-ui' && options.flowControls !== false && method === 'GET') return route.fulfill({ json: { key: 'developer-ui', value: { show_flow_controls: true } } })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.kind ?? 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions('admin', query.get('project_id') ?? undefined) })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project', 'release'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })

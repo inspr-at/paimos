@@ -6,6 +6,7 @@ import { brand } from '../lib/brand'
 import { releaseAria } from '../lib/codenames'
 import { flowNameBudget, placeFlowPill } from '../lib/flowPill'
 import { flowPillContext } from '../lib/flowPillContext'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
 import { useVersion } from '../stores/version'
@@ -24,7 +25,8 @@ defineProps<{ hidden?: boolean }>()
 const emit = defineEmits<{ releases: []; pill: [shown: boolean] }>()
 const route = useRoute()
 const onProject = computed(() => typeof route.params.projectKey === 'string' && route.params.projectKey !== '')
-const pill = computed(() => onProject.value ? flowPillContext.value : null)
+const { showFlowControls } = useDeveloperSettings()
+const pill = computed(() => showFlowControls.value && onProject.value ? flowPillContext.value : null)
 const root = ref<HTMLElement>()
 const slotEl = ref<HTMLElement>()
 const pillOn = ref(false)
