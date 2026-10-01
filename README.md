@@ -996,11 +996,21 @@ npx playwright install chromium
 npm test
 ```
 
-The Playwright suite starts Vite on port 5175, intercepts all `/api/*` calls,
+The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
+
+The PR `web` check uses `--only-changed=origin/main` with a full-history checkout,
+two workers and zero retries. Its job summary lists the selected tests; a change
+with no affected specs passes with zero tests. Selection follows Playwright's
+test import graph, so browser-loaded Vue components are not automatically mapped
+to their specs. This is preliminary feedback, not evidence of a green full tree.
+Other CI events retain the session linking, approval and security regressions.
+The full sharded main/nightly suite and quarantine remain owned by AEON-410
+(draft PR #29); until that dependency lands, this change does not establish
+nightly full-suite coverage or reusable tree-green evidence (AEON-423).
 
 Licence: AGPL-3.0-only.
 
