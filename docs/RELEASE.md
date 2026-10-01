@@ -517,7 +517,81 @@ gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
 
 The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the platform and index jobs. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. Both image jobs retain the existing `contents: write` permission so their immutability lookups can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
 
-### Dry runs and timing evidence
+### Deployment pin proposals (AEON-413)
+
+Immediately after the multi-arch index attestation passes, the `image` job
+runs `scripts/release-pin-pr.mjs`. The only foreign-repository write path this
+bot may use is a **draft PR** against `markus-barta/nixcfg` `main`, changing
+exactly the Aeon image line in `hosts/csb1/docker/compose-spec.nix`. It preserves
+the rest of the file, including comments. This implements AEON-413 as a proposal;
+the worker brief supersedes the older ticket's `--auto` request. The bot never
+enables auto-merge, merges, approves, pushes to main, publishes or deploys.
+PMA and other deploy repositories have no bot write path here; their owning
+coordinator receives a proposed diff and follows their own tracker and gates.
+
+Before target authentication or branch creation, the bot requires the exact
+repository/tag-push invocation, an annotated tag resolving directly to the
+workflow's source commit, and that commit's ancestry on current source main.
+It independently runs `gh attestation verify` for the index digest, binding
+`inspr-at/paimos/.github/workflows/release.yml`, the exact source tag and commit,
+the exact tag-scoped certificate identity and signer commit, and
+`--deny-self-hosted-runners`. Missing attestations, lightweight/off-main
+tags and failed or ambiguous API reads fail closed before any target write.
+It rejects older versions and conflicting digests for an existing coordinate.
+
+Default mode is read-only. With App credentials it requests a contents-read
+installation token and prints the one-line diff. Without those credentials it
+records a held proposal explicitly; the lead must provide a read-only snapshot
+of the pin file to obtain the diff. A local snapshot can be used with
+`node scripts/release-pin-pr.mjs --pin-file SNAPSHOT.nix`, retaining the same
+live source/attestation checks; it can never be combined with write mode.
+Set the ordinary release inputs `VERSION`, `DIGEST`, `GITHUB_SHA`,
+`GITHUB_REPOSITORY`, `GITHUB_EVENT_NAME=push`, `GITHUB_REF=refs/tags/v<version>`
+and a process-only `GH_TOKEN`; never pass credentials on the command line.
+
+Coordinator activation requires the release-only `release-pinning` environment,
+its `AEON_PIN_APP_ID` / `AEON_PIN_APP_KEY` secrets, and repository variable
+`AEON_PIN_BOT_ENABLED=true`. Protect this environment and tag creation so only
+the approved release coordinator/App can cut trusted release tags. The pin App
+must be non-admin, installed only on nixcfg, with contents and pull-request
+access; token minting further narrows it to `nixcfg` and exactly contents/write
+plus pull_requests/write. It receives no settings, review bypass or production
+credentials. Tokens are revoked on success and failure. No credentials,
+environment, App permissions or repository settings are provisioned by this
+change. Before cutting the tag, the coordinator records the pin automation's
+canonical worker marker and release scope in the designated owning tracker;
+the App receives no tracker credential (D7). Missing write credentials fail
+rather than silently claiming a PR.
+
+Write mode requires both `--write` and the enable flag. The branch
+`aeon-pin-v<version>` starts at an exact observed nixcfg main SHA. The bot
+checks the committed comparison before proposing: one commit with that sole
+parent, one modified file, one added/deleted line and the exact intended blob.
+Retries reuse only the same verified draft PR; they never overwrite an existing
+branch, reopen a closed PR or change a coordinator's ready-for-review state.
+Main advancing during a retry may require coordinator resolution instead of
+silently rebasing or sweeping in other changes. API failures can leave an
+unmerged proposal branch; only its owner may clean it up after inspection.
+
+The PR records the source commit, digest and verification, exact base SHA/file
+(the immutable pre-change backup reference) and previous image pin for rollback.
+The same evidence goes to the image job summary and, when the independent assets
+job assembles it, the existing draft paimos release's notes. There is no GitHub
+release yet during the image job, so the bot does not race its creation or
+rewrite an existing release. Before any pin merge or rollout, the coordinator
+must complete the owning nixcfg checks/review and record the validated database
+backup required by the release procedure. Rollback remains a separately
+reviewed change to the recorded previous immutable image; the bot never performs
+it. Disable proposal writes by clearing the enable variable.
+
+Fixtures run in `release-check` and the existing hosted image dry run; they make
+no foreign writes. The target of PR-open within 30 seconds after index push
+requires a coordinator-authorized release run with timestamps, a provisioned App
+and the nixcfg gates. The workflow records UTC immediately after successful
+index push and the bot records GitHub's PR creation time and elapsed seconds in
+the evidence. Fixture timings are not live acceptance evidence.
+
+### Image dry runs and timing evidence
 
 `.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
 
@@ -990,3 +1064,26 @@ Write for the reader, not the repository: the theme names what the release is
 about in a few words, the headline says what changes for them in one sentence, the
 intro adds context in two or three. No ticket keys, package names or commit
 jargon; those stay in the rows and the commits.
+
+Status autopilot (AEON-521) is the final post-release check: release publication
+through the journey calls the deterministic hook in the publication transaction.
+Only linked tickets already Done at publication become Delivered; tickets awaiting
+a human check get a skip comment. The hook applies at most 50 tickets, queues the
+rest durably, and the worker drains committed batches every minute. A ticket
+failure is isolated from release settlement; disappeared releases are skipped.
+Verify their Activity reasons and `/api/status-autopilot/changes`; a flagged ticket
+gets a comment and is retried after its check is cleared. Historical releases
+are discovered once; queued work and the daily ticket cursor survive restarts.
+Workspace admins configure the seven limits in Settings → Workspace → Autopilot,
+with Inherit / On / Off per project. The daily UTC job lists triage and cancellation
+suggestions, reminds blocked work, reopens stalled work and accepts deliveries
+after the saved period (30 days by default). Any person comment after delivery
+is conservatively treated as an objection. Automatic changes use the existing
+`POST /api/events/{eventId}/undo`; later edits cause a conflict rather than
+overwriting the ticket. Settings lists all current triage, cancellation, blocked
+and missed-release flags through `/api/status-autopilot/changes?suggestions=true`,
+independent of the latest 50 changes. Project Off runs no rules; workspace Off
+keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
+Progress inactivity uses actual harness/session-branch and review-PR timestamps,
+so a title edit or comment does not keep stalled work in progress. Triage
+autopilot's judgement modes are a separate phase.
