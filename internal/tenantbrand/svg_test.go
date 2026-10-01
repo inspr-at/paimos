@@ -10,9 +10,12 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+var svgEventHandlerName = regexp.MustCompile(`(?i)^on[a-z]+$`)
 
 // Unsupported active features reject the whole upload, without saving a rewrite.
 func TestSanitizeSVGNeutralizesXSS(t *testing.T) {
@@ -82,7 +85,9 @@ func assertInert(t *testing.T, out []byte) {
 		}
 		for _, a := range start.Attr {
 			v := strings.ToLower(a.Value)
-			if strings.HasPrefix(strings.ToLower(a.Name.Local), "on") || a.Name.Space != "" && !(a.Name.Space == "" && a.Name.Local == "xmlns") {
+			isHandler := svgEventHandlerName.MatchString(a.Name.Local) &&
+				!svgAttributes[a.Name.Local] && !presentation[a.Name.Local]
+			if isHandler || a.Name.Space != "" && !(a.Name.Space == "" && a.Name.Local == "xmlns") {
 				t.Fatalf("attribute %v survived: %s", a.Name, out)
 			}
 			if a.Name.Local == "xmlns" {
