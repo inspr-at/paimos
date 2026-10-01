@@ -9,6 +9,9 @@ import type { TicketPlanning } from '../src/lib/planning'
 const shots = process.env.PLANNING_SHOTS ?? '../.agent-shots/planning'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const route = { display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', effort_level: 4, label: 'Codex sol · xhigh', profile: 'codex-sol-xhigh', harness: 'codex', model: 'gpt-6-sol', effort: 'xhigh', revision: '3f9a1c2b' }
+// This whole response comes from TestPlanningListHoverFixture, including the
+// server's usage-less session flags. Serve its bytes without a client adapter.
+const serverListBody = readFileSync(new URL('./fixtures/planning-list.json', import.meta.url), 'utf8')
 function planning(spent: number | null, estimated: number | null, running = 0): TicketPlanning {
   return { route, tokens: { spent, estimated, running, input: spent ?? 0, output: 0, cached: Math.round((spent ?? 0) * .8), sessions: spent === null ? 0 : 1, unreported: 0 } }
 }
@@ -32,6 +35,41 @@ function world(): Fixtures {
 const display = (page: Page) => page.getByRole('button', { name: 'Display: Display' }).click()
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-10-01T12:00:00Z')) })
+
+test('server list response preserves exact usage-less and mixed-session hovers', async ({ page }) => {
+  const data = fixtures()
+  const project = JSON.parse(serverListBody).items[0].project
+  data.projects[0]!.id = project.id
+  data.projects[0]!.key = project.key
+  data.projects[0]!.title = project.title
+  data.preferences[`list:${project.id}`] = { visible: ['model', 'tokens', 'list_cost'] }
+  await mockWork(page, data)
+  await page.route('**/api/nodes?**', async route => {
+    if (new URL(route.request().url()).searchParams.get('kind') === 'project') return route.fallback()
+    await route.fulfill({ contentType: 'application/json', body: serverListBody })
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const assertTip = async (key: string, column: string, expected: string) => {
+    const cell = row(page, key).locator(`.${column} .plan-figure`)
+    await expect(cell).toHaveAccessibleDescription(expected)
+    await cell.hover()
+    await expect(page.locator('.tooltip')).toHaveText(expected)
+  }
+  await expect(row(page, 'HOVER-1').locator('.c-tokens .plan-figure')).toHaveText('—')
+  await assertTip('HOVER-1', 'c-tokens', 'Usage not reported yet\n1 session running on Cursor grok-4.7')
+  await assertTip('HOVER-2', 'c-tokens', 'Usage not reported yet')
+  await assertTip('HOVER-6', 'c-tokens', 'Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
+  for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-3', 'c-tokens', 'Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
+  for (const [key, spent, input, value] of [['HOVER-4', '1M', '1,000,000', '$2.00'], ['HOVER-5', '0', '0', '$0']] as const) {
+    await assertTip(key, 'c-tokens', `Measured so far ${spent} · Cursor grok-4.7\n1 session running · input ${input} (0 cached) · output 0\n1 session has no usage report yet`)
+    await assertTip(key, 'c-list-cost', `Measured so far ${value}\nAPI-billed · at list prices`)
+  }
+  await assertTip('HOVER-7', 'c-list-cost', 'Measured so far $2.00\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record')
+  await assertTip('HOVER-8', 'c-list-cost', 'Included in your plan · list value $2.00\nSubscription: not charged per use\nPro')
+  await expect(row(page, 'HOVER-8').locator('.c-list-cost .plan-tag')).toHaveText('plan')
+})
 
 test('approved cells show estimates, running figures, measured checks and session models', async ({ page }) => {
   await mockWork(page, world())
@@ -139,6 +177,55 @@ test('omitted model versions do not match explicit versions even when version di
     await expect(model).toHaveAttribute('data-tip', new RegExp(`Planned: ${plannedName.replaceAll('.', '\\.')} · high${same ? ', as used' : ' \\(a different model ran\\)'}$`))
     await expect(model).toHaveAccessibleDescription(same ? /as used/ : /a different model ran/)
   }
+})
+
+test('planning hovers match effort, running usage and pre-session calibration', async ({ page }) => {
+  const data = world()
+  const estimate = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  estimate.tokens.calibration = { basis: 'median', tickets: 12, tokens_per_hour: 800_000 }
+  const live = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
+  live.route = { ...route, display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
+  live.models = [{ display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7-high', sessions: [{ id: 's-high', effort: 'high', effort_level: 3, role: 'worker', running: true, tokens: 1_100_000 }] }]
+  live.tokens.calibration = estimate.tokens.calibration
+  const unreported = planning(null, null, 1)
+  unreported.route = null
+  unreported.tokens.sessions = 1
+  unreported.tokens.unreported = 1
+  unreported.cost = cost(null, null)
+  unreported.cost.list_unpriced = true
+  unreported.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 's-no-usage', effort: 'xhigh', role: 'worker', running: true, tokens: null }] }]
+  data.nodes.find(n => n.key === 'PHAROS-14')!.planning = unreported
+  const empty = planning(null, null)
+  empty.route = null
+  data.nodes.find(n => n.key === 'PHAROS-15')!.planning = empty
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  const estimated = row(page, 'PHAROS-11').locator('.c-tokens .plan-figure')
+  const estimateTip = 'Estimated ~2.4M tokens · no agent session yet\n3h at 800k/h: median of the last 12 finished tickets on Codex sol'
+  await expect(estimated).toHaveAttribute('data-tip', estimateTip)
+  await estimated.hover()
+  await expect(page.locator('.tooltip')).toHaveText(estimateTip)
+  const model = row(page, 'PHAROS-12').locator('.plan-model')
+  const modelTip = 'Used: Cursor Grok 4.7 · high · Effort high · 3 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh'
+  await expect(model).toHaveAttribute('data-tip', modelTip)
+  await model.hover()
+  await expect(page.locator('.tooltip')).toHaveText(modelTip)
+  const running = row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')
+  await expect(running).toHaveAttribute('data-tip', /\n1 session running · input 1,100,000 \(880,000 cached\) · output 0/)
+  await expect(running).not.toHaveAttribute('data-tip', /median of|default .*until/)
+  await expect(row(page, 'PHAROS-13').locator('.c-tokens .plan-figure')).not.toHaveAttribute('data-tip', /median of|default .*until/)
+  const missingUsage = row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')
+  const usageTip = 'Usage not reported yet\n1 session running on Cursor grok-4.7'
+  await expect(missingUsage).toHaveText('—')
+  await expect(missingUsage).toHaveAccessibleDescription(usageTip)
+  await missingUsage.hover()
+  await expect(page.locator('.tooltip')).toHaveText(usageTip)
+  const noModel = row(page, 'PHAROS-15').locator('.plan-model')
+  const emptyTip = 'No agent session yet\nNo model planned: set a role and area'
+  await expect(noModel).toHaveAttribute('data-tip', emptyTip)
+  await noModel.hover()
+  await expect(page.locator('.tooltip')).toHaveText(emptyTip)
 })
 
 test('empty saved ticks persist after toggles, narrow desktop layout and reload', async ({ page }) => {

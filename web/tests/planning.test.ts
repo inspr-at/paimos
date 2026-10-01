@@ -32,7 +32,7 @@ test('planning cells distinguish a planned model and measured figures', () => {
   assert.equal(modelCell(row({ route })).text, 'astra')
   assert.equal(modelCell(row({ route })).state, 'planned')
   assert.match(modelCell(row({ route })).tip, /Model registry, revision 3f9a1c2b/)
-  assert.match(modelCell(row(undefined, {})).tip, /Set a role and area/)
+  assert.equal(modelCell(row(undefined, {})).tip, 'No agent session yet\nNo model planned: set a role and area')
   assert.match(modelCell(row({ route_gap: 'area' }, { route_role: 'build' })).tip, /Set an area/)
   assert.match(modelCell(row({ route_gap: 'review_gate' }, { route_role: 'review-gate', area: 'backend' })).tip, /family other than the author's/)
   assert.match(modelCell(row({ route_gap: 'registry' }, { route_role: 'mechanical', area: 'docs' })).tip, /no available route/)

@@ -99,7 +99,7 @@ type planningCalibration struct {
 type planningCost struct {
 	ListSpent     *string `json:"list_spent"`
 	ListEstimated *string `json:"list_estimated"`
-	// ListUnpriced: some usage, or the route's model, has no list price.
+	// ListUnpriced: some reported usage, or the route's model, has no list price.
 	ListUnpriced  bool    `json:"list_unpriced"`
 	PaidSpent     *string `json:"paid_spent"`
 	PaidEstimated *string `json:"paid_estimated"`
@@ -302,17 +302,17 @@ func (l usageLine) listCost() *big.Rat {
 
 func (u *planUsage) add(l usageLine) {
 	u.sessions[l.session] = true
+	if l.model == nil {
+		// The LEFT JOIN found a session, but no usage row. This says nothing
+		// about list prices or billing of the usage that has been reported.
+		u.unreported[l.session] = true
+		return
+	}
 	mode := "unknown"
 	if l.billing != nil {
 		mode = *l.billing
 	}
 	u.billingModes[mode] = true
-	if l.model == nil {
-		// A session without any usage report.
-		u.unreported[l.session] = true
-		u.listUnpriced, u.paidUnknown = true, true
-		return
-	}
 	if !l.complete() {
 		u.unreported[l.session] = true
 	} else {

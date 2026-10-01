@@ -10,6 +10,8 @@
 import { APIError, getNode, type WorkNode } from './api'
 import { compareRevision, type ChangeKind } from './liveUpdates'
 import { rowStore, type RowStore } from './rowStore'
+import { TICKET_SESSION_EVENTS } from './liveAgents'
+import { watchStreamHealth } from './streamHealth'
 
 export interface NodeChange {
   eventId: number; type: string; actorId: string
@@ -43,10 +45,24 @@ const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.
 export function parseNodeChanges(data: string): NodeChange[] {
-  let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown }
+  let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown; before?: unknown; after?: unknown }
   try { event = JSON.parse(data) } catch { return [] }
-  if (typeof event.id !== 'number' || !Array.isArray(event.node_changes)) return []
+  if (!event || typeof event.id !== 'number') return []
   const out: NodeChange[] = []
+  if (typeof event.type === 'string' && TICKET_SESSION_EVENTS.includes(event.type)) {
+    for (const value of [event.before, event.after]) {
+      if (!value || typeof value !== 'object') continue
+      const snapshot = value as Record<string, unknown>
+      const session = snapshot.session && typeof snapshot.session === 'object' ? snapshot.session as Record<string, unknown> : snapshot
+      const id = session.ticket_node_id
+      if (typeof id !== 'string' || !id || out.some(change => change.id === id)) continue
+      out.push({ eventId: event.id, type: event.type, actorId: String(event.actor_principal_id ?? ''), id,
+        projectId: typeof session.project_id === 'string' ? session.project_id : null,
+        change: 'updated', fields: ['eta', 'lead_worker'], revision: null })
+    }
+    return out
+  }
+  if (!Array.isArray(event.node_changes)) return []
   for (const raw of event.node_changes as Record<string, unknown>[]) {
     if (!raw || typeof raw.id !== 'string' || !['created', 'updated', 'deleted'].includes(raw.change as string)) continue
     out.push({
@@ -111,6 +127,7 @@ export class LiveNodeStore {
   private dirty = new Map<string, { change: NodeChange; attempts: number }>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateListeners = new Set<(state: LiveState) => void>()
+  private health: ReturnType<typeof watchStreamHealth> | undefined
   private readonly options: Required<Omit<LiveOptions, 'rows'>>
 
   constructor(options: LiveOptions = {}) {
@@ -158,9 +175,16 @@ export class LiveNodeStore {
     catch { this.scheduleRetry(); return }
     if (!source) return
     this.source = source
+    this.health ??= watchStreamHealth(() => this.recover())
     this.setState(this.connectedOnce ? 'reconnecting' : 'connecting')
-    source.addEventListener('stream.ready', event => this.ready(event))
-    for (const name of NODE_EVENTS) source.addEventListener(name, event => this.receive(event))
+    const current = (run: (event: MessageEvent) => void) => (event: MessageEvent) => {
+      if (this.source !== source) return
+      this.health?.heard()
+      run(event)
+    }
+    source.addEventListener('stream.ready', current(event => this.ready(event)))
+    source.addEventListener('stream.ping', current(() => {}))
+    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS]) source.addEventListener(name, current(event => this.receive(event)))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including
@@ -172,6 +196,17 @@ export class LiveNodeStore {
       else this.setState('reconnecting')
     }
   }
+  private recover() {
+    if (!this.views.size) return
+    this.source?.close(); this.source = null
+    clearTimeout(this.retryTimer); this.retryTimer = undefined
+    this.lastEventId = null
+    this.rows.gap()
+    this.forgetDirty()
+    this.setState('reconnecting')
+    for (const view of [...this.views]) view.resync?.('gap')
+    this.connect()
+  }
   private scheduleRetry() {
     this.setState('reconnecting')
     if (!this.views.size) { this.setState('off'); return }
@@ -180,6 +215,7 @@ export class LiveNodeStore {
     this.retryTimer = setTimeout(() => { this.retryTimer = undefined; if (this.views.size && !this.source) this.connect() }, wait)
   }
   private disconnect() {
+    this.health?.stop(); this.health = undefined
     clearTimeout(this.retryTimer); this.retryTimer = undefined
     this.source?.close(); this.source = null
     // A later stream starts fresh: views load again anyway when they open.

@@ -8,7 +8,25 @@
 export interface TenantBrandLogo { url: string; width: number; height: number }
 export interface TenantBrand { short_name?: string; logo?: TenantBrandLogo; logo_dark?: TenantBrandLogo }
 export interface BrandLogoInfo extends TenantBrandLogo { content_type: string; size: number; sha256: string; uploaded_at: string }
-export interface BrandSettings { short_name: string; logo: BrandLogoInfo | null; logo_dark: BrandLogoInfo | null; updated_at?: string; cleaned?: boolean }
+export interface BrandSettings { short_name: string; logo: BrandLogoInfo | null; logo_dark: BrandLogoInfo | null; updated_at?: string; cleaned?: boolean; svg_cleanup?: SVGCleanup }
+
+export interface SVGCleanup { removed_attribute_count: number; removed_attributes: string[]; removed_element_count: number }
+
+// The upload report contains names only; toast renders this message as text.
+export function logoCleanupMessage(settings: Pick<BrandSettings, 'cleaned' | 'svg_cleanup'>, locale?: string | null) {
+  if (!settings.cleaned) return ''
+  const de = locale?.toLowerCase().startsWith('de') ?? false
+  const report = settings.svg_cleanup
+  if (report?.removed_attribute_count) {
+    const count = report.removed_attribute_count
+    const names = report.removed_attributes.slice(0, 8).join(', ') + (report.removed_attributes.length > 8 ? ', …' : '')
+    return de
+      ? `${count} ${count === 1 ? 'nicht zeichnendes Attribut entfernt' : 'nicht zeichnende Attribute entfernt'} (${names}).`
+      : `Removed ${count} non-drawing ${count === 1 ? 'attribute' : 'attributes'} (${names}).`
+  }
+  if (report?.removed_element_count) return de ? 'Gespeichert. Nicht zeichnende SVG-Metadaten wurden entfernt.' : 'Saved. Non-drawing SVG metadata was removed.'
+  return de ? 'Gespeichert. SVG-Kommentare wurden entfernt.' : 'Saved. SVG comments were removed.'
+}
 
 export const MAX_SHORT_NAME = 32
 export const MAX_LOGO_BYTES = 256 * 1024

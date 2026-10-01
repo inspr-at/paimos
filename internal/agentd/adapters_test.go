@@ -62,7 +62,7 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			continue
 		}
-		if vendor == "pi" {
+		if vendor == "pi" || vendor == "pi_usage" {
 			data := any(map[string]any{})
 			if frame.Type == "get_state" {
 				data = map[string]any{"model": map[string]string{"provider": "anthropic", "id": "test-model"}, "thinkingLevel": "high"}
@@ -72,6 +72,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			if frame.Type == "clear_queue" {
 				data = map[string]any{"steering": []string{"held steer"}, "followUp": []string{"held follow"}}
+			}
+			if vendor == "pi_usage" && frame.Type == "prompt" {
+				_, _ = os.Stdout.Write(append(piUsageFixture(1, "test-model", 10, 4, 2, 3), '\n'))
 			}
 			_ = write.Encode(map[string]any{"id": id, "type": "response", "command": frame.Type, "success": true, "data": data})
 			continue
@@ -192,6 +195,9 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
+			if vendor == "cursor_usage" {
+				result = map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 10, "outputTokens": 4, "cacheReadTokens": 2, "cacheWriteTokens": 3, "reasoningTokens": 1}}
+			}
 		case "initialize":
 			if strings.HasPrefix(vendor, "cursor") {
 				result = map[string]int{"protocolVersion": 1}

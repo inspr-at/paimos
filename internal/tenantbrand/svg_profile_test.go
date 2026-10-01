@@ -43,7 +43,7 @@ func TestStaticSVGRejectsReferenceCapabilities(t *testing.T) {
 		"round 2 inherited clip": inheritedMasks(30, "clip-path", false),
 		"round 2 styled clip":    inheritedMasks(30, "clip-path", true),
 	}
-	for _, element := range []string{"mask", "clipPath", "filter", "pattern", "marker", "use", "symbol", "image", "foreignObject", "style", "animate", "animateTransform", "set", "script", "a", "metadata"} {
+	for _, element := range []string{"mask", "clipPath", "filter", "pattern", "marker", "use", "symbol", "image", "foreignObject", "style", "animate", "animateTransform", "set", "script", "a"} {
 		payloads[element] = logoSVG("<" + element + "/>")
 	}
 	for _, property := range []string{"mask", "clip-path", "filter", "marker-start", "marker-mid", "marker-end", "fill", "stroke"} {

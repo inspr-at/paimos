@@ -160,12 +160,26 @@ jobs:
         run: npm run lint
       - working-directory: web
         run: npm run build
+      - name: Access scope and role helper tests
+        working-directory: web
+        run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts
+      - name: Install browser for access dialog regressions
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Access dialog regressions (hosted only)
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
+      - name: Preserve failed access dialog traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: access-dialog-failures
+          path: web/test-results/
+          retention-days: 7
       - name: Install shells for account command tests
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
       - working-directory: web
         run: npm run test:unit
-      - working-directory: web
-        run: npx playwright install --with-deps chromium
       - name: Planning columns regression and theme screenshots
         working-directory: web
         run: npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2
@@ -189,7 +203,7 @@ jobs:
         env:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts --workers=2
+        run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts --workers=2
 
   release-check:
     runs-on: ubuntu-latest
@@ -204,6 +218,8 @@ jobs:
           node --test scripts/check-own-release-notes.test.mjs
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
+      - run: node --test scripts/cross-family-gate.test.mjs
+      - run: node --test scripts/release-pin-pr.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
@@ -276,6 +292,31 @@ jobs:
       - name: Test workspace model provider controls
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/model-provider.spec.ts --workers=1
+
+  status-autopilot-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: node --experimental-strip-types --test tests/status-autopilot.test.ts
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - working-directory: web
+        env:
+          STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts --workers=1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: status-autopilot-screenshots
+          path: ${{ runner.temp }}/status-autopilot-shots
 
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:

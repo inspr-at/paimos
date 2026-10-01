@@ -19,6 +19,39 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+func TestPlanningUsageLessSessionDoesNotAddBilling(t *testing.T) {
+	u := newPlanUsage()
+	u.add(usageLine{session: "unreported"})
+	if !u.unreported["unreported"] || len(u.sessions) != 1 || u.reported ||
+		u.listUnpriced || u.paidUnknown || len(u.billingModes) != 0 {
+		t.Fatalf("usage-less session invented usage or billing: %+v", u)
+	}
+	for _, mode := range []string{"api", "subscription"} {
+		for _, input := range []int64{0, 1_000_000} {
+			for _, missingFirst := range []bool{false, true} {
+				u := newPlanUsage()
+				model, price, zero := "grok-4.7", "2", int64(0)
+				cost := "2.000000"
+				if input == 0 {
+					cost = "0.000000"
+				}
+				if missingFirst {
+					u.add(usageLine{session: "unreported"})
+				}
+				u.add(usageLine{session: "reported", model: &model, input: &input, output: &zero, cached: &zero,
+					billing: &mode, cost: &cost, rateIn: &price, rateOut: &price, rateCached: &price})
+				if !missingFirst {
+					u.add(usageLine{session: "unreported"})
+				}
+				if !u.reported || u.input != input || len(u.sessions) != 2 || len(u.unreported) != 1 ||
+					u.listUnpriced || u.paidUnknown || len(u.billingModes) != 1 || !u.billingModes[mode] {
+					t.Fatalf("mode=%s input=%d missingFirst=%t: %+v", mode, input, missingFirst, u)
+				}
+			}
+		}
+	}
+}
+
 func TestPlanningMedian(t *testing.T) {
 	for _, tc := range []struct {
 		in   []float64

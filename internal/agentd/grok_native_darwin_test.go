@@ -101,8 +101,8 @@ func TestGrokNativeUsageUpdate(t *testing.T) {
 	if p.violation.Load() || got != nil {
 		t.Fatal("token-free usage update became tokens or a violation")
 	}
-	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":3,"cachedReadTokens":4}}}`))
-	if p.violation.Load() || got == nil || got.Model != grokModel || got.InputTokens == nil || *got.InputTokens != 11 || got.OutputTokens == nil || *got.OutputTokens != 3 || got.CachedInputTokens == nil || *got.CachedInputTokens != 4 || got.BillingMode != "unknown" {
+	p.onEvent([]byte(`{"method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"usage_update","inputTokens":11,"outputTokens":3,"cachedReadTokens":4,"cacheCreationTokens":2}}}`))
+	if p.violation.Load() || got == nil || got.Model != grokModel || got.InputTokens == nil || *got.InputTokens != 17 || got.OutputTokens == nil || *got.OutputTokens != 3 || got.CachedInputTokens == nil || *got.CachedInputTokens != 4 || got.BillingMode != "unknown" {
 		t.Fatalf("native usage %+v violation %t", got, p.violation.Load())
 	}
 }
