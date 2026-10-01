@@ -25,7 +25,24 @@ func TestRowVersionValidationRunsAfterDDLLocksRelease(t *testing.T) {
 	})
 	var sessionFile, runFile uint32
 	var writer pgx.Tx
+	var writerReleased bool
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if writer != nil && !writerReleased {
+			// The preceding file completed both VALIDATEs with this writer
+			// still holding its lock. Later migrations may legitimately need
+			// a stronger table lock (for example the AEON-498 index swap).
+			var validated int
+			if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM pg_constraint WHERE conname IN ('harness_sessions_row_version_check','agent_runs_row_version_check') AND convalidated`).Scan(&validated); err != nil {
+				return err
+			}
+			if validated != 2 {
+				return fmt.Errorf("validated under writer lock = %d, want 2", validated)
+			}
+			if err := writer.Rollback(t.Context()); err != nil {
+				return err
+			}
+			writerReleased = true
+		}
 		switch name {
 		case "1052_row_versions.sql":
 			return d.App.QueryRow(t.Context(), `SELECT
@@ -52,7 +69,8 @@ func TestRowVersionValidationRunsAfterDDLLocksRelease(t *testing.T) {
 				return err
 			}
 			// Existing writers must not prevent validation. Keep this transaction
-			// open until the real migration runner finishes both VALIDATEs.
+			// open until the real migration runner finishes both VALIDATEs,
+			// then release it before any later migration.
 			_, err = writer.Exec(t.Context(), `LOCK TABLE harness_sessions, agent_runs IN ROW EXCLUSIVE MODE`)
 			return err
 		}
