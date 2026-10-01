@@ -1,8 +1,10 @@
 # PAIMOS AEON
 
-The next generation of Paimos: an agents-first, voice-first, multi-tenant work platform in the INSPR family. Hybrid human work stays first-class: a fully dynamic work tree, list, search and a Markdown sidebar viewer.
+PAIMOS AEON is an open-source, self-hosted work platform for people and AI agents in the INSPR family. It brings projects, tickets and knowledge into a fully dynamic work tree, with list and outline views, search and live updates.
 
-Status: under construction (release R0). Live at <https://aeon.barta.cm> once R0 ships. Decisions: PPM project AEON, ADR-001 (foundation) and ADR-002 (stack: Go, Postgres 18 + pgvector, Vue 3).
+Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
+
+Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 ## Develop
 
@@ -275,11 +277,11 @@ People with `keys.manage` can edit an active key in **Access → Agents → Edit
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
-`whoami` calls `GET /api/me`. Issue, knowledge, search and onboard exit 3 with `arrives in R1` until those endpoints exist. `aeon mcp` serves those tools over stdio.
+`whoami` calls `GET /api/me`. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
 
 `paimos model resolve review-gate --author-family codex` resolves a reviewer outside the author's family. `--author-family` accepts `openai`, `anthropic`, `xai` and `cursor`, plus harness aliases `codex` → `openai`, `claude` → `anthropic` and `grok` → `xai`. `pi` is ambiguous: pass the model's family explicitly. The API response and CLI JSON echo the normalised `author_family`; omitting it for other roles returns an empty string.
 
-Versioning: INSPR Calendar Versioning, INSPR-CalVer3 (`inspr-calver-3`, `YYMMDDhhmmss.0.0`); releases up to 260929113854.0.0 stay INSPR-CalVer2 history. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
+Release metadata lives in `version.json`. The version display uses the pinned INSPR presentation bundle, checked by `just release-check`; historical release metadata remains unchanged.
 
 `node scripts/release-timing.mjs --rollout PATH --release LABEL --json` reports
 cut → live, PR → merge, gate → live and rollback timings. `PATH` is a rollout
@@ -437,7 +439,7 @@ and do not replace the ticket's worker marker or release review gates.
 Nix installs `bin/aeon` and a `bin/paimos` symlink:
 
 ```sh
-nix profile install github:inspr-at/aeon#aeon
+nix profile install github:inspr-at/paimos#aeon
 ```
 
 GitHub release assets, next to `paimos-agentd` for the same four OS/architecture pairs and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the CLI file on `PATH` as `aeon`; a symlink named `paimos` selects its compatibility mode. For checksum-verified computer pairing, see [Agent integration](docs/AGENT_INTEGRATION.md).
@@ -904,7 +906,7 @@ loads the catalog once for its request; later requests recheck the grants.
 Channel reports include duplicates only from sets whose exact scope the caller
 may read, including the project permission and scoped ownership checks.
 
-## UI shell (P0.5 / AEON-10)
+## Web workspace
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
 menu, and light/dark themes. The theme follows the operating system until the
@@ -924,8 +926,7 @@ On phones, List and Outline share a bottom-centred updates chip above the safe
 area, footer and selection sheet, with scroll clearance for the last row; the
 desktop action stays in the table header. Lazy pages retain the server's order.
 
-The auth adapter is isolated in `web/src/lib/api.ts`. Pending P0.3 contract
-confirmation, it expects `/api/me` to return
+The auth adapter is isolated in `web/src/lib/api.ts`. It expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean }`.
 A 401 clears identity and routes to sign-in. Development email sign-in is
 hidden unless the server explicitly returns `dev_mode: true` (including on its
@@ -1350,7 +1351,7 @@ lock. Startup drops only fallback identities that cannot be re-derived from
 the approved installation; signed images and other harnesses remain available.
 Refresh validates new fallback identities against their approved installations.
 
-Identity regressions cover release-13 wrapper pairing upgrades, native exec
+Identity regressions cover wrapper pairing upgrades, native exec
 chains, vendor updates, Linux root fallback and its repair, unsigned Rosetta
 image refusals, signature failures, writable installations, real
 running-process rename-over attacks,
