@@ -929,8 +929,9 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			If     string `yaml:"if"`
 			Needs  any    `yaml:"needs"`
 			Steps  []struct {
-				Run string `yaml:"run"`
-				If  string `yaml:"if"`
+				Run string            `yaml:"run"`
+				If  string            `yaml:"if"`
+				Env map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -948,10 +949,22 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 			if step.If != "" {
 				t.Fatal("timing budgets have a conditional skip")
 			}
+			if step.Env["GOFLAGS"] != "-count=1" {
+				t.Fatal("timing budgets must execute rather than replay cached results")
+			}
 		}
 	}
 	if count != 1 {
 		t.Fatalf("timing command runs %d times", count)
+	}
+	foundGuard := false
+	for _, step := range workflow.Jobs["release-check"].Steps {
+		if strings.Contains(step.Run, "go test ./scripts/ci-runner-guard -count=1") {
+			foundGuard = true
+		}
+	}
+	if !foundGuard {
+		t.Fatal("release runner guard tests must bypass cached results")
 	}
 	gate := workflow.Jobs["go"]
 	needs, ok := gate.Needs.([]any)

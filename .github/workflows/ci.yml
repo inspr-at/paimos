@@ -138,6 +138,8 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       - name: Timing budgets, alone
+        env:
+          GOFLAGS: -count=1
         run: go run ./scripts/ci-go-shards test-timing
 
   go-static:
@@ -251,7 +253,7 @@ jobs:
       - name: Enforce test runner trust boundary
         run: |
           node --test scripts/ci-runner-route.test.mjs
-          go test ./scripts/ci-runner-guard
+          go test ./scripts/ci-runner-guard -count=1
           go run ./scripts/ci-runner-guard
 
   e2e:
