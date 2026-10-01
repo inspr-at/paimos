@@ -12,6 +12,7 @@ on:
       - scripts/smoke-image.sh
       - scripts/releaseworkflow/**
       - scripts/release-image-index*.mjs
+      - scripts/release-pin-pr*.mjs
       - Dockerfile
 
 permissions:
@@ -51,6 +52,7 @@ jobs:
         run: |
           go test ./scripts/releaseworkflow
           node --test scripts/release-image-index.test.mjs
+          node --test scripts/release-pin-pr.test.mjs
       - name: Validate version and presentation bundle
         id: version
         run: |
