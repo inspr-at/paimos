@@ -611,13 +611,20 @@ func TestRequestLogRoutes(t *testing.T) {
 // AEON-175: classic API paths proxied to /from-classic/api/* are gone for
 // every method, without auth, and never reach the SPA or a module.
 func TestClassicAPIPathsAreGone(t *testing.T) {
-	srv := (&Server{}).Handler()
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(method, "/from-classic/api/issues/12?x=1", strings.NewReader(`{}`)))
-		if rec.Code != http.StatusGone || rec.Header().Get("Cache-Control") != "no-store" ||
-			strings.TrimSpace(rec.Body.String()) != `{"error":"moved","location":"https://aeon.barta.cm"}` {
-			t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
+	for _, origin := range []string{"", "https://work.example.org/", "https://work.example.org/path?value=\"quoted\""} {
+		srv := (&Server{PublicURL: origin}).Handler()
+		location := strings.TrimRight(origin, "/")
+		if location == "" {
+			location = "/"
+		}
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(method, "/from-classic/api/issues/12?x=1", strings.NewReader(`{}`)))
+			var body map[string]string
+			if rec.Code != http.StatusGone || rec.Header().Get("Cache-Control") != "no-store" ||
+				json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body) != 2 || body["error"] != "moved" || body["location"] != location {
+				t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
+			}
 		}
 	}
 }

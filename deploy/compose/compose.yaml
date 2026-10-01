@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Run from a checkout with the variables in docs/SELF-HOSTING.md exported.
+name: aeon
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db-super
+    secrets:
+      - db-super
+      - db-app
+    volumes:
+      # Postgres 18 uses a versioned PGDATA below this parent directory.
+      - postgres-data:/var/lib/postgresql
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP stays closed until the first-run init scripts have completed.
+      test: [CMD, pg_isready, -h, "127.0.0.1", -U, postgres, -d, aeon]
+      interval: 2s
+      timeout: 3s
+      retries: 45
+
+  aeon:
+    image: "${AEON_IMAGE:?Pin ghcr.io/inspr-at/aeon:<version> or its digest; no latest tag}"
+    user: "65532:65532"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${AEON_HTTP_PORT:-8080}:8080"
+    environment:
+      AEON_ENV: prod
+      AEON_ADDR: ":8080"
+      AEON_DATABASE_URL: "postgres://aeon@postgres:5432/aeon?sslmode=disable"
+      AEON_DATABASE_PASSWORD_FILE: /run/secrets/db-app
+      AEON_SESSION_KEY_FILE: /run/secrets/session
+      AEON_MESSAGING_KEY_FILE: /run/secrets/messaging
+      AEON_FILES_DIR: /data/files
+      AEON_PUBLIC_URL: "${AEON_PUBLIC_URL:?Set the external HTTPS origin}"
+      AEON_OIDC_ISSUER: "${AEON_OIDC_ISSUER:?Set the OIDC discovery issuer}"
+      AEON_OIDC_CLIENT_ID: "${AEON_OIDC_CLIENT_ID:?Set the public OIDC client ID}"
+      AEON_BOOTSTRAP_ADMIN_EMAIL: "${AEON_BOOTSTRAP_ADMIN_EMAIL:?Set the initial administrator email}"
+      AEON_BOOTSTRAP_TENANT_SLUG: "${AEON_BOOTSTRAP_TENANT_SLUG:-workspace}"
+      AEON_BOOTSTRAP_TENANT_NAME: "${AEON_BOOTSTRAP_TENANT_NAME:-Workspace}"
+    secrets:
+      - db-app
+      - session
+      - messaging
+    volumes:
+      - type: bind
+        source: "${AEON_DATA_DIR:?Set an absolute host data directory}/files"
+        target: /data/files
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 90s
+      retries: 12
+
+volumes:
+  postgres-data:
+
+secrets:
+  db-super:
+    file: "${AEON_DATA_DIR:?Set an absolute host data directory}/secrets/db-super"
+  db-app:
+    file: "${AEON_DATA_DIR:?Set an absolute host data directory}/secrets/db-app"
+  session:
+    file: "${AEON_DATA_DIR:?Set an absolute host data directory}/secrets/session"
+  messaging:
+    file: "${AEON_DATA_DIR:?Set an absolute host data directory}/secrets/messaging"

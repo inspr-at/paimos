@@ -61,10 +61,11 @@ func writeInternal(w http.ResponseWriter) {
 	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
 }
 
-// /api/me advertises dev login even before a session exists.
+// /api/me advertises public sign-in configuration even before a session exists.
 func (m *Module) writeMeUnauthorized(w http.ResponseWriter) {
 	writeJSON(w, http.StatusUnauthorized, struct {
-		Error   string `json:"error"`
-		DevMode bool   `json:"dev_mode"`
-	}{Error: "unauthorized", DevMode: m.cfg.Dev()})
+		Error           string `json:"error"`
+		DevMode         bool   `json:"dev_mode"`
+		OIDCDisplayName string `json:"oidc_display_name"`
+	}{Error: "unauthorized", DevMode: m.cfg.Dev(), OIDCDisplayName: m.cfg.OIDCDisplayName})
 }

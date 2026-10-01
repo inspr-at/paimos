@@ -1,14 +1,14 @@
 # Security
 
-Report a vulnerability through a private GitHub security advisory on this repository (`inspr-at/aeon`). Do not open a public issue, pull request, or chat message that includes exploit detail, credentials, or tenant data. After the repository is renamed to `inspr-at/paimos`, use the advisory flow on the name GitHub redirects to. Give the affected calendar coordinate, what an attacker can do, and whether you have already seen it used.
+Report a vulnerability privately to the maintainer, Markus Barta, at [markus@barta.com](mailto:markus@barta.com). The repository is [inspr-at/paimos](https://github.com/inspr-at/paimos). GitHub private vulnerability reporting is currently disabled, so use email. Do not open a public issue, pull request, or chat message that includes exploit detail, credentials, or tenant data. Give the affected release name and the build identifier from the app or CLI, what an attacker can do, and whether you have already seen it used.
 
 ## Supported versions
 
-The supported release is the latest published INSPR calendar coordinate (`YYMMDDhhmmss.0.0`, the `version` field of `version.json` and the `v` tag that matches it). Older coordinates are not supported. `dev` builds are not a supported release.
+The supported release is the latest published release in [GitHub Releases](https://github.com/inspr-at/paimos/releases). Older releases are not supported. `dev` builds are not a supported release. The build identifier is the `version` field of `version.json` and its matching Git tag.
 
 ## Security model
 
-People sign in with OIDC (Zitadel). A session belongs to one tenant. Email does not choose a tenant or join one. Agents do not use that login. They authenticate with a scoped API key.
+People sign in with OpenID Connect (OIDC) through the configured identity provider. A session belongs to one tenant. Email does not choose a tenant or join one. Agents do not use that login. They authenticate with a scoped API key.
 
 Every tenant row is isolated by Postgres row-level security on `tenant_id`. Production must use a database role that is not a superuser and does not bypass row-level security. A superuser would ignore the policies.
 

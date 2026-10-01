@@ -6,6 +6,34 @@ info:
 servers:
   - url: /api
 paths:
+  /from-classic/api/{legacyPath}:
+    servers:
+      - url: /
+    parameters:
+      - name: legacyPath
+        in: path
+        required: true
+        description: Retired Classic API suffix, including any nested path segments.
+        schema: {type: string}
+    get:
+      operationId: classicAPIGone
+      summary: Retired Classic API tombstone
+      description: Every HTTP method under this prefix returns the same 410 response without authentication. The location is this installation's AEON_PUBLIC_URL, or a relative root when no public URL is configured. No Classic data is served.
+      security: []
+      responses:
+        '410':
+          description: Classic API permanently retired.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, location]
+                properties:
+                  error: {type: string, const: moved}
+                  location: {type: string, example: 'https://work.example.org'}
   /plugins/aithema/settings:
     get:
       operationId: aithemaSettingsGet
@@ -2857,7 +2885,7 @@ paths:
     get:
       operationId: getAgentKeyScopes
       summary: Load a key and the scopes a person may grant it
-      description: Requires a person with keys.manage. The grantable set intersects agent-grantable permissions, the agent's existing workspace role, the editor's permissions and the original key creator's live ceiling. No role is expanded and no secret is returned.
+      description: Requires a person with keys.manage. The grantable set intersects agent-grantable permissions, the agent's roles, the editor's permissions and the original key creator's live ceiling. Returns the workspace agent_role and role_grantable_scopes that a person with roles.manage may add to its custom role. Automatically prunes unknown stored scopes with an audit entry. No role is expanded and no secret is returned.
       security: [{session: []}]
       responses:
         '200':
@@ -2870,6 +2898,11 @@ paths:
                 properties:
                   key: {$ref: '#/components/schemas/AgentKey'}
                   grantable_scopes: {type: array, items: {type: string}}
+                  agent_role:
+                    oneOf:
+                      - {$ref: '#/components/schemas/AuthzRole'}
+                      - {type: 'null'}
+                  role_grantable_scopes: {type: array, items: {type: string}}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required}
         '404': {description: Key not found in this tenant}
@@ -2877,7 +2910,7 @@ paths:
     patch:
       operationId: changeAgentKeyScopes
       summary: Add or remove scopes without rotating the key
-      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. The resulting set must fit the existing agent role, editor permissions and original creator ceiling. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records agent_key.scopes_changed with actor and before/after in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after, any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
       security: [{session: []}]
       requestBody:
         required: true
@@ -2890,6 +2923,13 @@ paths:
               properties:
                 add: {type: array, maxItems: 256, items: {type: string}}
                 remove: {type: array, maxItems: 256, items: {type: string}}
+                role_extension:
+                  type: object
+                  additionalProperties: false
+                  required: [role_id, add]
+                  properties:
+                    role_id: {type: string, format: uuid}
+                    add: {type: array, minItems: 1, maxItems: 256, items: {type: string}}
       responses:
         '200':
           description: Updated key metadata without a secret
@@ -7903,7 +7943,7 @@ components:
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.1']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.8']}}
@@ -13136,12 +13176,14 @@ components:
       properties:
         error: {type: string, enum: [unauthorized]}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
+        oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
     Me:
       type: object
       description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
       required: [principal, tenant, identity, dev_mode]
       properties:
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
+        oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
         principal:
           $ref: "#/components/schemas/Principal"
         tenant:
