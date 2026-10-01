@@ -18,6 +18,7 @@ const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
+  human_check?: string | null
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
@@ -58,7 +59,7 @@ export interface MockOptions {
   hold?: (request: { path: string; method: string; query: URLSearchParams }) => { until: Promise<unknown>; computed?: () => void } | undefined
 }
 
-const STATE_ORDER = ['open', 'new', 'backlog', 'blocked', 'in_progress', 'active', 'qa', 'accepted', 'delivered', 'done', 'cancelled', 'archived']
+const STATE_ORDER = ['new', 'backlog', 'open', 'blocked', 'in_progress', 'active', 'qa', 'done', 'delivered', 'accepted', 'cancelled', 'archived']
 const PRIORITY_ORDER = ['high', 'medium', 'low', 'none']
 
 export function fixtures(options: MockOptions = {}) {
@@ -157,7 +158,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
-    id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
+    id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
     priority: typeof node.fields.priority === 'string' ? node.fields.priority : null, assignee,
@@ -561,6 +562,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
+        .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
         .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
@@ -615,7 +617,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const values = facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+          const values = facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
             : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
             : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1
@@ -661,12 +663,16 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = forward(node.updated_at, now + 30_000); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
-        const patch = body as { state?: string; fields?: Record<string, unknown> }
+        const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null }
         const nextState = typeof patch.state === 'string' ? patch.state : node.state
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)
         if (refusal) return route.fulfill({ status: 422, json: refusal })
-        Object.assign(node, body as object, { updated_at: forward(node.updated_at, now + 60_000 + calls.length) })
+        if ('human_check' in patch) {
+          if (patch.human_check === null && node.human_check) nextFields.human_check_completed = { text: node.human_check, by: me.id, at: new Date(now).toISOString() }
+          else if (patch.human_check) delete nextFields.human_check_completed
+        }
+        Object.assign(node, body as object, { fields: nextFields, updated_at: forward(node.updated_at, now + 60_000 + calls.length) })
       }
       const { kind_slug: kind, project: _project, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })

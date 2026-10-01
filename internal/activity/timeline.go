@@ -441,7 +441,7 @@ func tagNames(v any) []string {
 
 func nativeFields(r record, people map[string]Author) record {
 	f := object(r["fields"])
-	return record{"status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
+	return record{"human_check": r["human_check"], "status": r["state"], "priority": f["priority"], "assignee": personName(f["assignee"], "", people), "title": r["title"], "parent": r["parent_id"], "tags": tagLabel(f["tags"])}
 }
 
 func classicFields(r record, source string, people map[string]Author) record {
@@ -465,7 +465,7 @@ func personName(v any, source string, people map[string]Author) any {
 
 func diff(before, after record) []FieldChange {
 	var changes []FieldChange
-	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags"} {
+	for _, field := range []string{"status", "priority", "assignee", "title", "parent", "tags", "human_check"} {
 		a, b := scalar(before[field]), scalar(after[field])
 		if (a == nil && b == nil) || (a != nil && b != nil && *a == *b) {
 			continue

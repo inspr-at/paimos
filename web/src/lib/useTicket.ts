@@ -31,7 +31,7 @@ export type SaveResult = 'ok' | 'conflict' | 'error'
 // A change to one ticket: title, body and state as given, fields as only the
 // keys that change (undefined removes one). The save builds the fields on one
 // server copy and sends that copy's revision (AEON-326).
-export interface TicketChange { title?: string; body?: string; state?: string; fields?: Record<string, unknown> }
+export interface TicketChange { title?: string; body?: string; state?: string; human_check?: string | null; fields?: Record<string, unknown> }
 
 // Move a ticket under another parent (an epic, or the project for "No epic").
 // The move carries the revision the person sees; the server checks it under
@@ -294,6 +294,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     if (change.title !== undefined) body.title = change.title
     if (change.body !== undefined) body.body = change.body
     if (change.state !== undefined) body.state = change.state
+    if (change.human_check !== undefined) body.human_check = change.human_check
     if (change.fields) {
       // Only the keys the viewer changed, over the copy the save is checked against.
       const fields = { ...(copy.fields ?? {}) }

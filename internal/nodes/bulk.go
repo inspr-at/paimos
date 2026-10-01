@@ -485,7 +485,7 @@ func loadBulkTargets(ctx context.Context, tx pgx.Tx, ids []string) ([]bulkTarget
 		var fields, position string
 		n := &t.node
 		if err := rows.Scan(&n.ID, &n.Key, &n.KindID, &n.Title, &n.Body, &fields, &n.State, &n.ParentID, &position,
-			&n.CreatedAt, &n.UpdatedAt, &n.DeletedAt, &t.kindSlug, &t.projectID); err != nil {
+			&n.CreatedAt, &n.UpdatedAt, &n.DeletedAt, &n.HumanCheck, &t.kindSlug, &t.projectID); err != nil {
 			return nil, err
 		}
 		if fields == "" {

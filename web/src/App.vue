@@ -11,6 +11,7 @@ import AppFooter from './components/AppFooter.vue'
 import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
+import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
 import TicketPeekHost from './components/TicketPeekHost.vue'
 import { command, consume } from './lib/commands'
@@ -241,6 +242,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <ConfirmHost />
     <DoneGateHost />
     <ShortcutSheet ref="shortcuts" />
+    <StatusHelpSheet />
     <TooltipHost />
   </div>
 </template>

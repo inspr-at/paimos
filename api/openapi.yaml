@@ -3218,6 +3218,19 @@ paths:
         '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /status/help:
+    get:
+      operationId: getStatusHelp
+      summary: The same status definitions and live workspace limits for people and agents
+      description: Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility. Queued describes Open in the work queue; it is not a stored status. No status values are changed.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Definitions, rules and effective settings, content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
+        '400': {description: Invalid project id}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {description: Project is not visible}
   /nodes:
     get:
       operationId: listNodes
@@ -3231,6 +3244,7 @@ paths:
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
         - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
         - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: human_check, in: query, description: 'pending or none; ! excludes. Pending means human_check contains non-empty text. Combines with other filters and applies to facets and pagination.', schema: {type: array, items: {type: string, enum: [pending, none, '!pending', '!none']}}}
         - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
         - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
@@ -3238,7 +3252,7 @@ paths:
         - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -13748,7 +13762,7 @@ components:
             type: object
             required: [field, from, to]
             properties:
-              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind]}
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind, human_check]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
     Attachment:
@@ -13769,6 +13783,55 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
+    StatusHelp:
+      type: object
+      required: [definitions, queued, autopilot, triage, limits_source]
+      properties:
+        limits_source: {type: string, enum: [defaults, workspace]}
+        project_id: {type: string, format: uuid}
+        project_name: {type: string}
+        definitions:
+          type: array
+          items:
+            type: object
+            required: [state, label, meaning, hint, set_by, exit, rules]
+            properties:
+              state: {type: string}
+              label: {type: string}
+              meaning: {type: string}
+              hint: {type: string}
+              set_by: {type: string}
+              exit: {type: boolean}
+              rules: {type: array, items: {type: string}}
+        queued:
+          type: object
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Queued}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
+        autopilot:
+          type: object
+          required: [enabled, effective_enabled, project_mode, rules]
+          properties:
+            enabled: {type: boolean, description: Workspace master switch}
+            effective_enabled: {type: boolean, description: Project mode overrides the workspace master}
+            project_mode: {type: string, enum: [inherit, on, off]}
+            rules:
+              type: object
+              additionalProperties:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  days: {type: integer, minimum: 1, maximum: 365}
+        triage:
+          type: object
+          required: [mode, available]
+          description: Triage autopilot is a later package; its approved default is Apply. available=false marks the planned setting rather than claiming an active engine.
+          properties:
+            mode: {type: string, enum: [off, suggest, apply]}
+            available: {type: boolean}
     Node:
       description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
       type: object
@@ -13795,6 +13858,10 @@ components:
         fields:
           type: object
           description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+        human_check:
+          type: [string, 'null']
+          maxLength: 500
+          description: Optional pending person-only check. Automatic moves to Delivered and Accepted skip it. A person clears it with PATCH human_check=null; fields.human_check_completed then carries server-authored text, by (principal id) and at (UTC timestamp). Null when no pending check exists.
         state:
           type: string
         parent_id:
@@ -13876,6 +13943,7 @@ components:
       type: object
       required: [kind_id, title]
       properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: Optional pending human check; non-empty text after trimming}
         kind_id:
           type: string
           format: uuid
@@ -13909,6 +13977,7 @@ components:
       type: object
       minProperties: 1
       properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; a new pending check clears that provenance. Existing revision preconditions apply.'}
         estimate_hours:
           type: [number, 'null']
           exclusiveMinimum: 0

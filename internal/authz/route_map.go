@@ -183,6 +183,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/inbox/stream":                                                  "inbox.read",
 	"GET /api/inbox/targets":                                                 "inbox.read",
 	"GET /api/kinds":                                                         "nodes.read",
+	"GET /api/status/help":                                                   "nodes.read",
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",

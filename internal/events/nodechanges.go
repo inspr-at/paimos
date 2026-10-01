@@ -37,7 +37,7 @@ var nodeChangeTypes = map[string]bool{
 
 // The node attributes a change names, in this order; custom fields follow
 // as fields.<name>. Timestamps and event annotations are not attributes.
-var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "parent_id", "position", "deleted_at"}
+var nodeAttributes = []string{"key", "kind_id", "title", "body", "state", "human_check", "parent_id", "position", "deleted_at"}
 
 type snapshotObject map[string]json.RawMessage
 
