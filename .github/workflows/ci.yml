@@ -164,6 +164,9 @@ jobs:
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
+      - name: Morning briefing unit checks
+        working-directory: web
+        run: npx vitest run tests/morning-briefing.unit.test.ts tests/ticket-outcomes.unit.test.ts --maxWorkers=1
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
@@ -173,6 +176,10 @@ jobs:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
         run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts --workers=2
+
+      - name: Morning briefing regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
 
   release-check:
     runs-on: ubuntu-latest

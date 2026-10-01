@@ -38,6 +38,13 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
+// Briefing links focus the existing request card; decisions stay on that card.
+watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
+  if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
+  await nextTick()
+  cursor.value = id
+  focusRow(id)
+})
 const live = ref(false)
 const stale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
 const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))

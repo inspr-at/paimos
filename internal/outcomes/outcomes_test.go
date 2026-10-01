@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -465,6 +467,12 @@ func testOutcomeVisibility(t *testing.T, d *dbtest.DB) {
 	page := decodePage(t, listed.Body.Bytes())
 	if listed.Code != http.StatusOK || len(page) != 1 || page[0].TicketKey != "VIS-3" {
 		t.Fatalf("guest list: %d %+v %s", listed.Code, page, listed.Body.String())
+	}
+	from := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	to := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	ranged := callAs(t, New(d.App), guest, http.MethodGet, "/api/outcomes?from="+url.QueryEscape(from)+"&to="+url.QueryEscape(to), "")
+	if page := decodePage(t, ranged.Body.Bytes()); ranged.Code != http.StatusOK || len(page) != 1 || page[0].TicketKey != "VIS-3" {
+		t.Fatalf("guest date range: %d %+v", ranged.Code, page)
 	}
 	var adminCount int
 	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM outcome_events WHERE idempotency_key IN ('vis-seen-a','vis-hidden-b')`).Scan(&adminCount); err != nil || adminCount != 2 {

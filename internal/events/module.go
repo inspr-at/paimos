@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -121,8 +122,17 @@ type page struct {
 	NextAfter *int64  `json:"next_after"`
 }
 
-func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int) (page, error) {
+type eventRange struct {
+	from, to *time.Time
+	types    []string
+}
+
+func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int, ranges ...eventRange) (page, error) {
 	result := page{Items: make([]Event, 0)}
+	var bounds eventRange
+	if len(ranges) > 0 {
+		bounds = ranges[0]
+	}
 	// Read as the reader: row-level security shows its projects only.
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Quote events use the quote-scoped collaboration stream, which rechecks
@@ -130,7 +140,9 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 		// tenant-wide list or stream, even when node_id is supplied.
 		rows, err := tx.Query(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
    FROM events WHERE tenant_id=$1 AND id>$2 AND ($3::uuid IS NULL OR node_id=$3) AND type NOT LIKE 'quote.%'
-   ORDER BY id LIMIT $4`, p.TenantID, after, nullable(node), limit+1)
+     AND ($5::timestamptz IS NULL OR at >= $5) AND ($6::timestamptz IS NULL OR at < $6)
+     AND ($7::text[] IS NULL OR type = ANY($7))
+   ORDER BY id LIMIT $4`, p.TenantID, after, nullable(node), limit+1, bounds.from, bounds.to, bounds.types)
 		if err != nil {
 			return err
 		}
@@ -183,7 +195,30 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid node_id, after or limit")
 		return
 	}
-	result, err := m.read(r.Context(), p, node, after, int(limit))
+	var bounds eventRange
+	if q.Has("from") || q.Has("to") {
+		from, fromErr := time.Parse(time.RFC3339Nano, q.Get("from"))
+		to, toErr := time.Parse(time.RFC3339Nano, q.Get("to"))
+		if fromErr != nil || toErr != nil || !from.Before(to) || to.Sub(from) > 366*24*time.Hour {
+			writeError(w, 400, "invalid_request", "from and to must define an increasing RFC3339 range of at most 366 days")
+			return
+		}
+		bounds.from, bounds.to = &from, &to
+	}
+	if q.Has("type") {
+		bounds.types = strings.Split(q.Get("type"), ",")
+		if len(bounds.types) > 8 {
+			writeError(w, 400, "invalid_request", "at most eight event types may be requested")
+			return
+		}
+		for _, typ := range bounds.types {
+			if len(typ) == 0 || len(typ) > 128 || strings.TrimSpace(typ) != typ {
+				writeError(w, 400, "invalid_request", "invalid event type")
+				return
+			}
+		}
+	}
+	result, err := m.read(r.Context(), p, node, after, int(limit), bounds)
 	if err != nil {
 		failure(w, err)
 		return

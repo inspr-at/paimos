@@ -49,6 +49,29 @@ makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
 
+## Morning briefing
+
+People can open **Morning briefing** on Projects or `/briefing`. The daily
+in-app reminder uses a chosen time in the device's local timezone (08:00 by
+default). It reads existing completion and release outcomes, delivered-state
+and reported-merge events, failed reviews/CI, current approvals, held human
+requests and available journey decisions. Each fact links to its item and source.
+The suggested next step is one of those person actions or recorded findings.
+
+The first visit covers 24 hours; later visits start at that person's saved
+briefing visit. Only a complete successful read advances it. Failed sources and
+pagination limits are shown and retain the earlier cutoff. Very old visits are
+bounded to 366 days. Preferences use the existing tenant/person-scoped store;
+there is no new activity tracking or generated narrative.
+
+Usage requires `harness.read`. Its API list value is approximate, includes
+lifetime usage of sessions **started** in the window, and is not interval spend
+or an invoice. Recorded ticket totals reuse the planning columns' measured and
+estimated figures and Paid semantics; account budget windows describe current
+reported usage. Unknown usage stays unknown. Merge reports are read from the
+tenant event feed only with workspace `harness.read`. This slice delivers the
+in-app briefing; e-mail, push and spoken delivery remain future work.
+
 ## Develop
 
 ```sh
