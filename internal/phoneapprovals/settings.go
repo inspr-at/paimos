@@ -279,7 +279,7 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 			return fail(409, "add a passkey first")
 		}
 		var n int
-		if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL`, p.ID).Scan(&n); err != nil {
+		if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL AND endpoint_hash<>$2`, p.ID, digest(in.Endpoint)).Scan(&n); err != nil {
 			return err
 		}
 		if n >= 8 {

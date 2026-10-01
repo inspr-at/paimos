@@ -140,6 +140,11 @@ func (m *Module) person(w http.ResponseWriter, r *http.Request, write bool) (ten
 			return p, false
 		}
 		if n > 30 {
+			if n == 31 {
+				_ = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+					return audit(r.Context(), tx, p, "phone_approval.rate_limited", map[string]int{"window_seconds": 600})
+				})
+			}
 			w.Header().Set("Retry-After", "600")
 			respond(w, nil, fail(429, "too many attempts; try again later"))
 			return p, false
@@ -190,6 +195,11 @@ func loadUser(ctx context.Context, tx pgx.Tx, p tenant.Principal) (user, error) 
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, typ string, data any) error {
 	_, err := events.Append(ctx, tx, p, events.Change{Type: typ, After: data})
 	return err
+}
+func (m *Module) rejected(ctx context.Context, p tenant.Principal, kind, id string) {
+	_ = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		return audit(ctx, tx, p, "phone_approval.rejected", map[string]string{"kind": kind, "request_id": id})
+	})
 }
 func digest(v any) string {
 	b, _ := json.Marshal(v)
@@ -273,8 +283,9 @@ type Review struct {
 }
 
 func approvalReview(a approvals.Approval) Review {
-	a.AgentName = nil
-	return Review{Kind: "approval", ID: a.ID, Hash: digest(a), Pending: a.Decision == nil && a.ExpiresAt.After(time.Now()), Approval: &a}
+	bound := a
+	bound.AgentName = nil
+	return Review{Kind: "approval", ID: a.ID, Hash: digest(bound), Pending: a.Decision == nil && a.ExpiresAt.After(time.Now()), Approval: &a}
 }
 func attachReview(a attachwatch.View) Review {
 	a.UserCode = ""
@@ -445,6 +456,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 			return m.verify(ctx, tx, p, kind, id, d, approvalReview(a))
 		})
 		if err != nil {
+			m.rejected(ctx, p, kind, id)
 			var own *problem
 			if errors.As(err, &own) {
 				respond(w, nil, err)
@@ -461,6 +473,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 		}
 		a, err := m.pairing.DecideAttachVerified(ctx, p, id, "", "", d.Decision.Decision == "denied", func(tx pgx.Tx, a attachwatch.View) error { return m.verify(ctx, tx, p, kind, id, d, attachReview(a)) })
 		if err != nil {
+			m.rejected(ctx, p, kind, id)
 			var own *problem
 			if errors.As(err, &own) {
 				respond(w, nil, err)
