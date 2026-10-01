@@ -10,6 +10,45 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Local models for in-app AI
+
+Workspace AI is off by default. A person with `settings.manage` can open
+**Settings → Workspace → In-app AI**, enter an OpenAI-compatible API base URL
+and chat model, and select the features allowed to send content to that server.
+For [Ollama on the Aeon server](https://docs.ollama.com/api/openai-compatibility),
+use `http://localhost:11434/v1` and the name of
+an installed chat model. Save, then use **Test connection**: it sends only a
+small synthetic prompt, including while AI is off. Saving never contacts a model.
+The endpoint is resolved from the Aeon server; in Docker, `localhost` means the
+Aeon container. Use an address reachable from that container for a separate
+model service. Public, loopback and LAN endpoints are supported; redirects,
+link-local/metadata addresses, CGNAT, NAT64 and other special-use ranges are
+refused.
+
+The first connected feature is **Rewrite customer notes with AI**. Also enable
+the `business_crm` plugin with its `tools.invoke` permission. A person with
+`crm.manage` can request a rewrite; the selected server receives the customer
+name and notes. The result is a revision-bound draft: a person reviews and
+applies it separately. A changed customer or provider configuration refuses the
+stale generation. Delegated agent runs and Aithema intake retain their existing
+harness, plugin and approval controls; this setting does not select their models.
+
+API keys are optional and encrypted through the existing tenant-bound AES-GCM
+vault, separate from JSON settings and event data. Reads reveal only whether a
+key is set. A blank replacement clears the key; omitting it preserves it.
+Changing the base URL clears a retained key unless a replacement is supplied.
+Keep the existing `AEON_SESSION_KEY_FILE` stable across restarts; development
+hosts that store a provider key also need this persistent host secret.
+
+Semantic search and background indexing can use the same provider and key with
+a separate embedding model. Aeon's existing vector storage requires **1536
+dimensions**. Enabling embeddings or changing their endpoint/model queues a
+fresh index; vector identities include both, so search never mixes vector spaces.
+Without a configured, enabled workspace provider and feature, CRM generation
+makes no model request, indexing leaves its queue untouched, and search stays
+lexical. The server now uses these workspace settings for embeddings; migrate
+older `AEON_EMBEDDING_*` server configuration here.
+
 ## Develop
 
 ```sh
@@ -24,6 +63,13 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `?section=knowledge` retains its background section. Tickets is the default,
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
+
+The flow UI is hidden by default. People working on Paimos itself can enable
+**Show the flow controls (not yet tested end to end)** under **Settings →
+Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
+preference reveals the footer flow pill, Journey tab, stages and release walker;
+it does not grant action permissions. Journey bookmarks explain the opt-in while
+it is off. Turning it off removes the flow UI again.
 
 If a standing candidate or deployment gate expires or is revoked before
 deployment finishes, Journey offers renewal on the Deploy stage. An agent
@@ -199,6 +245,13 @@ between the text block and counts. Reduced motion, narrow screens and sparse
 graphs suppress it; hover exposes Open graph and Pause. Header framing and text
 separation are covered by `web/tests/header-glimpse.spec.ts`.
 
+Graph **Focus** fills the viewport and hides the app chrome. It prefers browser
+fullscreen when permitted and keeps the in-app full-frame layout when the API
+is absent, refused or ignored. Escape or **Exit** returns to the same graph,
+filters and selection. Open `/p/AEON/tickets?view=graph&focus=1` directly for
+in-app focus; knowledge graphs use the same parameters on their knowledge route.
+Focus preserves the graph's reduced-motion preference.
+
 ## Command line
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
@@ -332,6 +385,12 @@ and shared-inbox obligations stay outside the session thread.
 
 ### Agent work estimates
 
+Setting a ticket/task estimate also fills missing `route_role`, `area` and `complexity`. The server uses title and string labels/tags, then the nearest ancestor's classification or title hints, then `build` / `backend`. Explicit values win. Every server suggestion carries `<field>_source: "suggested"`, the acting principal's `<field>_by`, UTC `<field>_at`, and `<field>_confirmed: false`. A person can confirm a suggestion or an unconfirmed agent classification by resubmitting the same value without source/by/at, or with `aeon issue update KEY --role build --area backend --complexity S`. Agent values remain unconfirmed; client-supplied stamps cannot confer confirmation. Existing ticket rows are not backfilled.
+
+Complexity defaults to **S** for estimates up to 2 hours, **M** above 2 and up to 8 hours, and **L** above 8 hours. `build-hard` promotes one bucket (S → M, M → L, L → L). This is a deterministic suggestion, not a measured model-performance claim. Unconfirmed server-derived complexity follows estimate or role changes; explicit complexity retains its provenance. `aeon issue update KEY --estimate 2 --role build --area backend --complexity S` supplies all three, and issue JSON returns their stamps and confirmation flags.
+
+Harness sessions return `model_profile_id` for a unique tenant registry match by harness, model and effort. Recognized trailing effort suffixes (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`) move into `reasoning_effort`; `model_raw` retains the cleaned original string for audit. Unknown models, absent effort, conflicting explicit effort, and ambiguous profile versions stay unresolved. There is no inferred model alias or cross-tenant match. Model/effort heartbeats refresh the identity. An effort-only heartbeat preserves the stored original model string when a legacy session has no `model_raw`. The additive migration 1063 backfills only uniquely matched sessions, under tenant and project RLS, without changing registration replay digests. `SELECT aeon_backfill_session_model_profiles()` can repeat inside an authorized tenant transaction; it returns the updated-row count and leaves resolved and unknown rows unchanged.
+
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
 Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
 
@@ -339,7 +398,7 @@ Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEO
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.8`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it.
+Harness status and heartbeat declare `Aeon-Contract: harness-session/1.9`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -401,6 +460,16 @@ automatically. For a different native session, pass `--succeeds OLD_SESSION_UUID
 to `harness register` or `harness run-heartbeat`. The predecessor must belong to
 the same principal and project. A handed-over generation cannot revive through
 a late heartbeat.
+
+A Claude coordinator can register Claude children with the same authenticated
+`--agent`, `--parent-session LEAD_UUID` and a distinct private session reference
+and worker lease for each child. Child registration ignores the launcher's
+ambient `CLAUDE_CODE_SESSION_ID`, which belongs to the parent. For a child's own
+native binding, give `harness run-heartbeat` that child's `--source-session UUID`;
+manual registration can use the child's native ID as its private session ref.
+Explicit vendor references remain unique among active generations per tenant and
+agent across all harnesses. Registration conflicts name the conflicting field
+without returning private values.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
@@ -1336,6 +1405,13 @@ emits target fields.
 
 ### Attach a running session (AEON-352)
 
+Computer pairing connects agentd to Aeon once. Linking a running session to a
+ticket is a separate approval for that process. The attach CLI and review show
+**Computer paired · This session not yet linked** until activation; pairing does
+not grant permission to share conversation text. `aeon-agentd attach --language de`
+shows the pairing/session distinction and next-step guidance in German;
+the browser uses English or German for that guidance according to its language.
+
 From a separate interactive terminal on a paired computer, run
 `aeon-agentd attach --setup-root PATH --pid PID --harness codex --project-id UUID --ticket-id UUID --transcript PATH`.
 **Watch the conversation** is the default; the transcript must be a resolvable
@@ -1343,6 +1419,13 @@ physical file, as in the AEON-258 mirror. Choose **Status only (no conversation
 text)** at the local prompt, or pass `--status-only` (no transcript needed), to
 report status without reading or sharing conversation text. Missing or unsafe
 transcripts never silently select status-only.
+
+After reviewing the process and sharing mode, press Enter or `y` in the separate
+terminal for the local check. The CLI then opens the prefilled approval page on
+macOS and always prints the link as a fallback. `--no-browser` disables opening;
+other platforms use the printed link. Opening the page only fills in the code;
+the person must still review and approve in Aeon, followed by Touch ID when the
+pairing requires it. Keep the terminal open while linked; Ctrl-C detaches.
 
 On macOS, normal Terminal and Ghostty tabs and SSH terminals work with a
 root-owned `login` or `sshd-session` leader; tmux also remains supported.
@@ -1420,8 +1503,8 @@ rejects build failures as evidence and restores each source file. Real codesign
 checks also probe running installed vendor binaries; a harness with no running
 process is reported as skipped, while fixture signature checks still run.
 
-Review the kernel-observed process, physical folder and chosen mode, type `WATCH`
-or `ATTACH` as shown. The helper then says where to approve: the page, the menu
+Review the kernel-observed process, physical folder and chosen mode, then press
+Enter or `y` for the local check. The helper says where to approve: the page, the menu
 entry, the nine-digit code and how long it lives, plus a link
 (`/agents#attach=<code>`) that only fills the code in. **Agents** also lists the
 waiting request (computer, harness, expiry) with a **Review** button, and says so
@@ -1443,7 +1526,7 @@ requests receive HTTP 409 `update_agentd` and cannot create a watch or lease.
 An AEON-460 protocol-2 daemon with an omitted or v1 proof version is refused at
 registration with HTTP 409 `update_agentd` and “upgrade paimos-agentd” guidance,
 before approval or Touch ID; ordinary work continues with attachment disabled.
-The released older terminal helper shows `local lifecycle request rejected`
+An older terminal helper shows `local lifecycle request rejected`
 (the daemon's local refusal is `paired instance refused attach`), rather than
 the server's update message. Upgrade `paimos-agentd`, restart it and give fresh
 approval. Existing pairing capabilities and Enclave keys remain valid; the proof
@@ -1453,9 +1536,19 @@ A newer daemon connecting to an older server receives HTTP 400 on attach
 registration because that server rejects an unknown `attach_protocol` or
 `local_consent_proof_version` field.
 The daemon logs the server's refusal, disables attach and keeps serving work
-and local control. An attach attempt through that daemon shows
-`local lifecycle request rejected`. After updating the server, restart agentd
+and local control. The updated helper shows version-repair guidance on the
+existing authenticated, kernel-checked socket; unauthenticated callers only get
+the generic auth refusal. After updating the server, restart agentd
 to retry attach registration; there is no in-process registration retry.
+
+Owner refusal guidance distinguishes incompatible attach versions, a pairing
+that no longer authenticates, unavailable project/ticket access, an expired code
+and the live approval-request limit. Server errors preserve `code` and `error`
+and add `attach_refusal` only after checking the computer proof and principal
+(or the signed-in person owner). Unknown causes remain generic. Revoked HTTP
+bearers stay unauthenticated; pairing repair is offered only by the locally
+authenticated interactive helper. Poll refusals still detach and clear local
+state, and no uncertain conversation submission is retried.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.
@@ -1482,7 +1575,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.8`:
+The reporter contract is `harness-session/1.9`:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.
@@ -1497,7 +1590,7 @@ This is the canonical inventory of server egress; there is no global switch that
 | --- | --- | --- |
 | OIDC discovery, signing keys and token exchange at the configured identity provider | No issuer/client configured | `AEON_OIDC_ISSUER` and `AEON_OIDC_CLIENT_ID`; requests follow sign-in/token verification. Clear the issuer/client to disable. |
 | Zitadel user lookup, creation and invitations | No provisioner | `AEON_IDENTITY_PROVISIONER=zitadel` plus `AEON_ZITADEL_URL`, tenant/org and token-file configuration; authorized invite operations. `none` or unset disables it. |
-| Embedding requests to the configured endpoint | Lexical search only | `AEON_EMBEDDING_URL` with model configuration enables query/queue embeddings. Unset the URL to disable. |
+| Workspace model chat and embedding requests to the configured OpenAI-compatible endpoint | Off by default; lexical search only | A person with `settings.manage` enables the workspace provider and selects each feature. Disabling the provider or deselecting a feature stops its model calls. **Test connection** is the only model call while the provider is disabled; it requires an explicit person request and sends a synthetic prompt. Saving never contacts the model. |
 | Inbox webhook delivery, including target DNS checks | No registered webhook receivers | An authorized receiver registers its webhook target; unregister/replace it to disable. Delivery workers run by default but have no external destination until configured. |
 | Messaging routine webhook wakes | No registered routine webhook targets; messaging off in production without a key file | `AEON_MESSAGING_KEY_FILE` enables messaging (development uses an ephemeral key); an authorized routine receiver selects a webhook target. Remove that target to disable wakes. |
 | GitHub doctrine metadata/tree/blob reads | No registered remote sources or requested sync | Authorized doctrine source registration and explicit sync/proposal operations select the repository and immutable pin. Private reads additionally require `AEON_DOCTRINE_CREDENTIALS_DIR` and a tenant/repository allowlist. Remove the source to disable future reads. |

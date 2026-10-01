@@ -112,6 +112,7 @@ type heartbeatOptions struct {
 	UsageID           string
 	CodexHome         string
 	GrokHome          string
+	AccountID         string
 	BillingMode       string
 	SubscriptionLabel string
 	PrintControls     bool
@@ -166,6 +167,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
 			fs.string(&o.GrokHome, "grok-home", 0, "Grok home (default $GROK_HOME or ~/.grok)")
+			fs.string(&o.AccountID, "account-id", 0, "Aeon account UUID; saved billing used when billing-mode is unknown")
 			fs.string(&o.BillingMode, "billing-mode", 0, "unknown, api, or subscription (default unknown)")
 			fs.string(&o.SubscriptionLabel, "subscription-label", 0, "public subscription label; only with --billing-mode subscription")
 			fs.bool(&o.PrintControls, "print-controls", 0, "print request JSON records and pending control/message lines; --json emits NDJSON")
@@ -286,6 +288,12 @@ func (o *heartbeatOptions) prepare() error {
 	}
 	if heartbeatText(o.Host, 200) == "" {
 		return usagef("--host is required")
+	}
+	if o.AccountID != "" && o.Capacity.Account != "" && o.AccountID != o.Capacity.Account {
+		return usagef("usage and capacity accounts must match")
+	}
+	if o.AccountID != "" && !validUUID(o.AccountID) {
+		return usagef("invalid --account-id")
 	}
 	switch o.BillingMode {
 	case "", "unknown", "api", "subscription":
@@ -785,7 +793,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, err
 	}
 	if me.Principal.Name != o.Agent {
-		return heartbeatSession{}, false, usagef("--agent must name the authenticated agent")
+		return heartbeatSession{}, false, harnessAgentMismatch(me.Principal.Name)
 	}
 	lease, err := readOrCreateStateSecret(&session.hold, "lease.key", 32)
 	if err != nil {
@@ -824,7 +832,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.Parent != "" {
 		body["parent_harness_session_id"] = strings.ToLower(o.Parent)
 	}
-	attachVendorSessionRef(body, o.Harness, ref, lease)
+	attachVendorSessionRef(body, o.Harness, ref, lease, o.Parent, o.SourceSession)
 	var boundTicket string
 	if o.Ticket != "" {
 		ticketID, err := rt.harnessTicket(projectID, o.Ticket, 0)
@@ -870,7 +878,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		// A crashed coordinator can still count as healthy until its last
 		// heartbeat expires. Retry only that registration conflict, keeping
 		// the same body and state lock until the server can adopt its children.
-		if o.Role != "coordinator" || o.SourceSession == "" || err.Error() != "api 409: active generation conflicts with registration" {
+		if o.Role != "coordinator" || o.SourceSession == "" || (err.Error() != "api 409: active generation conflicts with registration" && err.Error() != "api 409: "+harness.RegistrationLeaseConflict) {
 			return heartbeatSession{}, false, err
 		}
 		if err = ownerCtx.Err(); err != nil {
