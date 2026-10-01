@@ -5,7 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func refusalCause(t *testing.T, w *httptest.ResponseRecorder, cause string) {
@@ -98,18 +101,40 @@ func TestAttachCodeExpiryCausePreservesTheEndedRequest(t *testing.T) {
 func TestAttachRevokedPairingCauseRequiresRetainedAuthentication(t *testing.T) {
 	f, key, in := watchFixture(t)
 	otherKey, _ := extraWatchComputer(t, f, in)
+	var principal string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT principal_id::text FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&principal); err != nil {
+		t.Fatal(err)
+	}
 	// Model the race after the computer state commits but before auth middleware
 	// rejects its credential. No revoked credential is made usable by attach.
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, in.ComputerID); err != nil {
 		t.Fatal(err)
 	}
-	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 403), attachwatch.RefusalPairing)
+	// The complete HTTP path refuses a revoked computer even before its key
+	// itself is marked revoked, and never discloses a cause.
+	w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 401)
+	var body map[string]any
+	decodeResult(t, w, &body)
+	if _, exists := body["attach_refusal"]; exists {
+		t.Fatal("revoked computer passed HTTP authentication")
+	}
 	refusalCause(t, f.call("POST", "/api/agent-pairing/attach", in, false, otherKey, 403), "")
+	// Model an in-flight request authenticated before revocation committed.
+	// Enter the module with that prior principal and its real registered key;
+	// the production auth middleware above stays unchanged.
+	raceHandler := (&httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{f.pairing}}).Handler()
+	r := f.request("POST", "/api/agent-pairing/attach", in, false, key)
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), tenant.Principal{ID: principal, TenantID: f.tenantID, Kind: tenant.Agent, Scopes: agentpairing.RuntimePermissions, KeyCreatorID: f.person}))
+	race := httptest.NewRecorder()
+	raceHandler.ServeHTTP(race, r)
+	if race.Code != 403 {
+		t.Fatalf("in-flight revoked request status %d", race.Code)
+	}
+	refusalCause(t, race, attachwatch.RefusalPairing)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, in.ComputerID); err != nil {
 		t.Fatal(err)
 	}
-	w := f.call("POST", "/api/agent-pairing/attach", in, false, key, 401)
-	var body map[string]any
+	w = f.call("POST", "/api/agent-pairing/attach", in, false, key, 401)
 	decodeResult(t, w, &body)
 	if _, exists := body["attach_refusal"]; exists {
 		t.Fatal("unauthenticated revoked credential got an owner cause")
