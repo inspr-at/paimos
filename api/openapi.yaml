@@ -6,6 +6,34 @@ info:
 servers:
   - url: /api
 paths:
+  /from-classic/api/{legacyPath}:
+    servers:
+      - url: /
+    parameters:
+      - name: legacyPath
+        in: path
+        required: true
+        description: Retired Classic API suffix, including any nested path segments.
+        schema: {type: string}
+    get:
+      operationId: classicAPIGone
+      summary: Retired Classic API tombstone
+      description: Every HTTP method under this prefix returns the same 410 response without authentication. The location is this installation's AEON_PUBLIC_URL, or a relative root when no public URL is configured. No Classic data is served.
+      security: []
+      responses:
+        '410':
+          description: Classic API permanently retired.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, location]
+                properties:
+                  error: {type: string, const: moved}
+                  location: {type: string, example: 'https://work.example.org'}
   /plugins/aithema/settings:
     get:
       operationId: aithemaSettingsGet
