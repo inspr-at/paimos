@@ -181,11 +181,13 @@ type Reservation struct {
 	ID string `json:"reservation_id"`
 }
 type Route struct {
-	AccountID    string        `json:"account_id"`
-	AccountKey   string        `json:"account_key"`
-	AccountLabel string        `json:"account_label"`
-	DaemonID     string        `json:"daemon_id"`
-	Reservations []Reservation `json:"reservations"`
+	BillingMode       string        `json:"billing_mode"`
+	SubscriptionLabel string        `json:"subscription_label,omitempty"`
+	AccountID         string        `json:"account_id"`
+	AccountKey        string        `json:"account_key"`
+	AccountLabel      string        `json:"account_label"`
+	DaemonID          string        `json:"daemon_id"`
+	Reservations      []Reservation `json:"reservations"`
 }
 
 // API is the narrow authenticated AEON boundary. Implementations must use
@@ -302,6 +304,7 @@ type AccountProber interface {
 // signed out or signed in as someone else; errors, timeouts and unreadable
 // output are ProbeUnavailable. Vendor output never leaves the daemon.
 type ProbeStatus struct {
+	BillingMode       string
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string

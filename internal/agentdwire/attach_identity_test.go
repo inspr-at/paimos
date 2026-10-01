@@ -87,4 +87,11 @@ func TestAttachConflictDiagnosticIsSurfacedAndBounded(t *testing.T) {
 	if _, err = client.Lifecycle(t.Context(), ""); err == nil || err.Error() != "local lifecycle request rejected" {
 		t.Fatal("lifecycle contract changed", err)
 	}
+	for _, code := range []string{"attach_version_mismatch", "attach_pairing_revoked", "attach_ticket_not_visible", "attach_code_expired", "attach_live_limit"} {
+		body.Store(`{"code":"` + code + `","hint":"Check the cause and run attach again."}`)
+		_, err := client.Attach(t.Context(), agentd.AttachLocalRequest{Operation: "poll"})
+		if !errors.As(err, &detail) || detail.Code != code {
+			t.Fatal("owner repair cause was discarded by local transport")
+		}
+	}
 }

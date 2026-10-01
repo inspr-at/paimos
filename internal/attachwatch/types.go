@@ -56,6 +56,10 @@ const (
 	LiveMax          = 32
 	LiveLimitCode    = "attach_live_limit"
 	LiveLimitMessage = "too many attach requests are waiting for approval"
+	RefusalVersion   = "version_mismatch"
+	RefusalPairing   = "pairing_revoked"
+	RefusalTicket    = "ticket_not_visible"
+	RefusalExpired   = "code_expired"
 )
 
 type Process struct {

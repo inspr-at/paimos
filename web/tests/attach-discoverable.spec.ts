@@ -27,8 +27,11 @@ function request(id: string, state: State, options: { mins?: number; host?: stri
   }
 }
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: boolean; paused?: boolean } = {}) {
   await page.clock.install({ time: NOW })
+  // Freeze before navigation creates polling timers. A slow CI page load must
+  // not move the intended pause point into the past; requests expire in 9 min.
+  if (options.paused) await page.clock.pauseAt(NOW + 60_000)
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: true })
@@ -71,12 +74,14 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   await expect(row).toContainText('Claude on Markus’s MacBook')
   await page.screenshot({ path: `${shots}/single-waiting.png` })
   await expect(row).toContainText('Wants to watch the conversation')
+  await expect(row).toContainText('Computer paired · This session not yet linked')
   await expect(row).toContainText(/Expires in [89]m/)
   expect(posts).toEqual([])
   await row.getByRole('button', { name: 'Review' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Watch a running session' })).toBeVisible()
   await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
+  await expect(dialog).toContainText('Pairing your computer does not link a session.')
   await expect(dialog).toContainText('PDF worker image')
   // Reviewing is not approving: nothing was sent, and there is no code to type.
   expect(posts).toEqual([])
@@ -190,6 +195,29 @@ test('a link with anything but nine digits opens nothing', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Attach session' })).toBeVisible()
   await page.waitForTimeout(400)
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('German pairing guidance still only prefills the approval code', async ({ browser }) => {
+  const page = await browser.newPage({ locale: 'de-AT' })
+  try {
+    await setup(page)
+    const sent: string[] = []
+    await page.route('**/api/agent-pairing/attach/**', route => {
+      if (route.request().method() === 'GET') return route.fallback()
+      sent.push(route.request().url())
+      return route.fulfill({ json: request('r-de', 'pending') })
+    })
+    await page.goto('/agents#attach=123456789')
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: 'Eine laufende Sitzung verknüpfen' })).toBeVisible()
+    await expect(dialog).toContainText('Verknüpfe jede laufende Sitzung separat mit ihrem Ticket.')
+    await expect(dialog.getByLabel('Verknüpfungscode')).toHaveValue('123 456 789')
+    await expect.poll(() => new URL(page.url()).hash).toBe('')
+    expect(sent).toEqual([])
+    await dialog.getByRole('button', { name: 'Sitzung prüfen' }).click()
+    await expect(dialog).toContainText('Computer gekoppelt · Diese Sitzung ist noch nicht verknüpft')
+    expect(sent).toHaveLength(1)
+  } finally { await page.close() }
 })
 
 test('a person who cannot attach gets no dialog from the link, and the code leaves the address bar', async ({ page }) => {
@@ -518,7 +546,7 @@ const finishDecisionBody = (page: Page) => page.evaluate(() => (window as typeof
 
 for (const action of ['approve', 'revoke'] as const) {
   test(`an accepted ${action} refreshes pending requests and sessions after its review closes during body decoding`, async ({ page }) => {
-    const data = await setup(page)
+    const data = await setup(page, { paused: true })
     let state: State = 'pending', pendingReads = 0, sessionReads = 0
     await page.route(PENDING, route => { pendingReads++; return route.fulfill({ json: { requests: [request('r-wait', state)] } }) })
     await page.route('**/api/harness-sessions?*', route => { sessionReads++; return route.fallback() })
@@ -532,8 +560,7 @@ for (const action of ['approve', 'revoke'] as const) {
     await expect(session).toContainText('imac0')
     await strip(page).getByRole('button', { name: 'Review' }).click()
     await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
-    // Pause below both polling intervals: only the accepted write can refresh.
-    await page.clock.pauseAt(NOW + 1_000)
+    // The clock has not advanced since startup: only the accepted write can refresh.
     await holdDecisionBody(page, action)
     await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
@@ -555,13 +582,12 @@ for (const action of ['approve', 'revoke'] as const) {
   })
 
   test(`an accepted ${action} body is aborted and dropped when the identity changes during decoding`, async ({ page }) => {
-    await setup(page)
+    await setup(page, { paused: true })
     await list(page, [request('r-wait', 'pending')])
     await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => route.fulfill({ json: request('r-wait', action === 'approve' ? 'approved' : 'detached') }))
     await page.goto('/agents')
     await strip(page).getByRole('button', { name: 'Review' }).click()
     await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
-    await page.clock.pauseAt(NOW + 1_000)
     await holdDecisionBody(page, action)
     await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
