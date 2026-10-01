@@ -127,7 +127,11 @@ func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(tap), &wf); err != nil {
 		t.Fatalf("homebrew-tap.yml: %v", err)
 	}
-	if _, ok := wf.On["workflow_dispatch"]; !ok || len(wf.On) != 1 {
+	on, ok := wf.On.(map[string]any)
+	if !ok {
+		t.Fatalf("tap workflow events must be a mapping, got %#v", wf.On)
+	}
+	if _, ok := on["workflow_dispatch"]; !ok || len(on) != 1 {
 		t.Fatalf("tap workflow must use trusted main dispatch only, got %#v", wf.On)
 	}
 	for _, needle := range []string{
