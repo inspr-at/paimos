@@ -77,30 +77,125 @@ static int copy_data(NSData *data, void **raw, int *size) {
  memcpy(*raw, data.bytes, data.length); *size = (int)data.length; return errSecSuccess;
 }
 
-// Never adopt a same-user pre-created Keychain item with a permissive ACL.
-// Check the actual returned item, including the ACL owner, before trusting or
-// updating its data. Integrity/partition entries only constrain access further.
-static BOOL daemon_item_access(SecKeychainItemRef item) {
- SecAccessRef access = NULL; CFArrayRef acls = NULL; SecCodeRef self = NULL;
- SecRequirementRef expectedRequirement = NULL;
- CFDataRef expected = NULL; BOOL ok = NO, hasGrant = NO;
- uid_t owner = (uid_t)-1; gid_t group; SecAccessOwnerType ownerType = 0;
- if (SecKeychainItemCopyAccess(item, &access) != errSecSuccess) goto done;
- if (SecAccessCopyOwnerAndACL(access, &owner, &group, &ownerType, NULL) != errSecSuccess || owner != 0 || ownerType != kSecUseOnlyUID) goto done;
- if (SecAccessCopyACLList(access, &acls) != errSecSuccess || !acls || !SecTrustedApplicationCopyRequirement) goto done;
- if (SecCodeCopySelf(kSecCSDefaultFlags, &self) != errSecSuccess || SecCodeCopyDesignatedRequirement(self, kSecCSDefaultFlags, &expectedRequirement) != errSecSuccess || SecRequirementCopyData(expectedRequirement, kSecCSDefaultFlags, &expected) != errSecSuccess) goto done;
+static SecAccessRef daemon_access(void);
+
+// SecAccessGetOwnerAndACL returns separately allocated CSSM nodes. Collect
+// before freeing so shared pointers are released once (Apple's ChunkFreeWalker).
+static void collect_subject_allocations(CSSM_LIST_ELEMENT_PTR element, NSMutableSet *allocations) {
+ while (element) {
+  NSValue *address = [NSValue valueWithPointer:element];
+  if ([allocations containsObject:address]) return;
+  [allocations addObject:address];
+  if (element->ElementType == CSSM_LIST_ELEMENT_SUBLIST) collect_subject_allocations(element->Element.Sublist.Head, allocations);
+  else if (element->ElementType == CSSM_LIST_ELEMENT_DATUM && element->Element.Word.Data) [allocations addObject:[NSValue valueWithPointer:element->Element.Word.Data]];
+  element = element->NextElement;
+ }
+}
+
+void aeon_vault_free_owner_acl(CSSM_ACL_OWNER_PROTOTYPE_PTR owner, uint32 count, CSSM_ACL_ENTRY_INFO_PTR entries) {
+ NSMutableSet *allocations = [NSMutableSet new];
+ if (owner) { collect_subject_allocations(owner->TypedSubject.Head, allocations); [allocations addObject:[NSValue valueWithPointer:owner]]; }
+ if (entries) {
+  for (uint32 i = 0; i < count; i++) {
+   collect_subject_allocations(entries[i].EntryPublicInfo.TypedSubject.Head, allocations);
+   if (entries[i].EntryPublicInfo.Authorization.AuthTags) [allocations addObject:[NSValue valueWithPointer:entries[i].EntryPublicInfo.Authorization.AuthTags]];
+  }
+  [allocations addObject:[NSValue valueWithPointer:entries]];
+ }
+ for (NSValue *address in allocations) free(address.pointerValue);
+}
+
+// PROCESS is a type WORDID followed by exactly one selector DATUM. Read the
+// complete tuple, including delegation; authorization equality alone is unsafe.
+static NSArray *process_subject(const CSSM_LIST *subject, CSSM_BOOL delegate) {
+ CSSM_LIST_ELEMENT_PTR type = subject->Head;
+ CSSM_LIST_ELEMENT_PTR data = type ? type->NextElement : NULL;
+ if (!type || type->ElementType != CSSM_LIST_ELEMENT_WORDID || type->WordID != CSSM_ACL_SUBJECT_TYPE_PROCESS ||
+  !data || data->ElementType != CSSM_LIST_ELEMENT_DATUM || data->NextElement || subject->Tail != data ||
+  !data->Element.Word.Data || data->Element.Word.Length != sizeof(CSSM_ACL_PROCESS_SUBJECT_SELECTOR)) return nil;
+ CSSM_ACL_PROCESS_SUBJECT_SELECTOR selector;
+ memcpy(&selector, data->Element.Word.Data, sizeof(selector));
+ return @[@(type->WordID), @(selector.version), @(selector.mask), @(selector.uid), @(selector.gid), @(delegate)];
+}
+
+// The native PARTITION subject stores a plist, not a display string. Require
+// the exact one-team payload; extra partitions or dictionary keys fail closed.
+static BOOL daemon_partition_entry(const CSSM_ACL_ENTRY_PROTOTYPE *entry) {
+ const CSSM_LIST *subject = &entry->TypedSubject;
+ CSSM_LIST_ELEMENT_PTR type = subject->Head;
+ CSSM_LIST_ELEMENT_PTR data = type ? type->NextElement : NULL;
+ if (!type || type->ElementType != CSSM_LIST_ELEMENT_WORDID || type->WordID != CSSM_ACL_SUBJECT_TYPE_PARTITION ||
+  !data || data->ElementType != CSSM_LIST_ELEMENT_DATUM || data->NextElement || subject->Tail != data || entry->Delegate != CSSM_FALSE ||
+  !data->Element.Word.Data || data->Element.Word.Length == 0 || data->Element.Word.Length > 4096) return NO;
+ NSData *payload = [NSData dataWithBytes:data->Element.Word.Data length:data->Element.Word.Length];
+ id value = [NSPropertyListSerialization propertyListWithData:payload options:NSPropertyListImmutable format:NULL error:NULL];
+ return [value isEqual:@{@"Partitions": @[@"teamid:P66J39QV6V"]}];
+}
+
+static NSArray *access_subjects(SecAccessRef access, NSUInteger nonSimpleCount, BOOL reference) {
+ CSSM_ACL_OWNER_PROTOTYPE_PTR owner = NULL; CSSM_ACL_ENTRY_INFO_PTR entries = NULL; uint32 count = 0;
+ NSMutableArray *subjects = [NSMutableArray new]; NSArray *result = nil;
+ // Unavailable/unreadable legacy introspection must fail closed.
+ if (SecAccessGetOwnerAndACL(access, &owner, &count, &entries) != errSecSuccess || !owner || (count && !entries)) goto done;
+ {
+  NSArray *ownerSubject = process_subject(&owner->TypedSubject, owner->Delegate);
+  NSArray *rootSubject = @[@(CSSM_ACL_SUBJECT_TYPE_PROCESS), @(CSSM_ACL_PROCESS_SELECTOR_CURRENT_VERSION), @(CSSM_ACL_MATCH_UID), @0, @0, @(CSSM_FALSE)];
+  if (!ownerSubject || ![ownerSubject isEqualToArray:rootSubject]) goto done;
+  for (uint32 i = 0; i < count; i++) {
+   const CSSM_ACL_ENTRY_PROTOTYPE *entry = &entries[i].EntryPublicInfo;
+   if (entry->Authorization.NumberOfAuthTags && !entry->Authorization.AuthTags) goto done;
+   if (entry->Authorization.NumberOfAuthTags == 1 && entry->Authorization.AuthTags[0] == CSSM_ACL_AUTHORIZATION_PARTITION_ID) {
+    if (!daemon_partition_entry(entry)) goto done;
+   }
+   CSSM_LIST_ELEMENT_PTR type = entry->TypedSubject.Head;
+   if (!type || type->ElementType != CSSM_LIST_ELEMENT_WORDID) goto done;
+   if (type->WordID != CSSM_ACL_SUBJECT_TYPE_PROCESS) continue;
+   NSArray *subject = process_subject(&entry->TypedSubject, entry->Delegate);
+   if (!subject || (reference && ![subject isEqualToArray:rootSubject])) goto done;
+   NSMutableSet *permissions = [NSMutableSet new];
+   for (uint32 j = 0; j < entry->Authorization.NumberOfAuthTags; j++) [permissions addObject:@(entry->Authorization.AuthTags[j])];
+   [subjects addObject:@[permissions, subject]];
+  }
+  // The owner is exposed as an additional non-simple ChangeACL pseudo-entry.
+  [subjects addObject:@[[NSSet setWithObject:@(CSSM_ACL_AUTHORIZATION_CHANGE_ACL)], ownerSubject]];
+  // A non-simple ANY, threshold or code-signature subject cannot hide among
+  // the UID entries: every non-simple entry must have a decoded PROCESS tuple.
+  if (subjects.count == nonSimpleCount) result = subjects;
+ }
+done:
+ aeon_vault_free_owner_acl(owner, count, entries);
+ return result;
+}
+
+// Inspect only in-memory access objects. Non-simple owner entries are not
+// allow-any application lists: macOS returns errSecACLNotSimple for UID subjects.
+// Preserve their order, authorizations and subjects for reference comparison.
+static NSDictionary *access_shape(SecAccessRef access, CFDataRef expected, BOOL persisted, BOOL reference) {
+ CFArrayRef acls = NULL; BOOL hasGrant = NO, hasIntegrity = NO, hasPartition = NO;
+ NSMutableArray *nonSimple = [NSMutableArray new];
+ if (!access || !expected || !SecTrustedApplicationCopyRequirement) return nil;
+ // access_subjects checks the raw root/OnlyUID owner, including delegation.
+ if (SecAccessCopyACLList(access, &acls) != errSecSuccess || !acls) return nil;
  for (id entry in (__bridge NSArray *)acls) {
   SecACLRef acl = (__bridge SecACLRef)entry;
   CFArrayRef auth = SecACLCopyAuthorizations(acl);
-  if (!auth) goto done;
+  if (!auth) goto denied;
   NSArray *permissions = CFBridgingRelease(auth);
-  if (permissions.count == 0) continue; // Root owner entry grants no operations.
-  if (permissions.count == 1 && ([permissions containsObject:(__bridge id)kSecACLAuthorizationIntegrity] || [permissions containsObject:(__bridge id)kSecACLAuthorizationPartitionID])) continue;
-  if (permissions.count != 1 || ![permissions containsObject:(__bridge id)kSecACLAuthorizationAny]) goto done;
   CFArrayRef apps = NULL; CFStringRef desc = NULL; SecKeychainPromptSelector prompt = 0;
   OSStatus status = SecACLCopyContents(acl, &apps, &desc, &prompt);
   if (desc) CFRelease(desc);
-  if (status != errSecSuccess || !apps || CFArrayGetCount(apps) != 1 || prompt != 0) { if (apps) CFRelease(apps); goto done; }
+  if (status == errSecACLNotSimple) {
+   if (apps) CFRelease(apps);
+   [nonSimple addObject:[NSSet setWithArray:permissions]];
+   continue;
+  }
+  BOOL integrity = permissions.count == 1 && [permissions containsObject:(__bridge id)kSecACLAuthorizationIntegrity];
+  BOOL partition = permissions.count == 1 && [permissions containsObject:(__bridge id)kSecACLAuthorizationPartitionID];
+  if (status == errSecSuccess && !apps && prompt == 0 && ((integrity && !hasIntegrity) || (partition && !hasPartition))) {
+   hasIntegrity |= integrity; hasPartition |= partition;
+   continue;
+  }
+  if (status != errSecSuccess || hasGrant || permissions.count != 1 || ![permissions containsObject:(__bridge id)kSecACLAuthorizationAny] || !apps || CFArrayGetCount(apps) != 1 || prompt != 0) { if (apps) CFRelease(apps); goto denied; }
   CFDataRef actual = NULL; SecRequirementRef requirement = NULL;
   status = SecTrustedApplicationCopyRequirement((SecTrustedApplicationRef)CFArrayGetValueAtIndex(apps, 0), &requirement);
   if (status == errSecSuccess && requirement) status = SecRequirementCopyData(requirement, kSecCSDefaultFlags, &actual);
@@ -108,13 +203,48 @@ static BOOL daemon_item_access(SecKeychainItemRef item) {
   CFRelease(apps);
   BOOL matches = status == errSecSuccess && actual && CFEqual(actual, expected);
   if (actual) CFRelease(actual);
-  if (!matches) goto done;
+  if (!matches) goto denied;
   hasGrant = YES;
  }
- ok = hasGrant;
+ CFRelease(acls);
+ if (!hasGrant || (persisted && !hasPartition)) return nil;
+ {
+  NSArray *subjects = access_subjects(access, nonSimple.count, reference);
+  return subjects ? @{@"authorizations": nonSimple, @"subjects": subjects} : nil;
+ }
+denied:
+ CFRelease(acls);
+ return nil;
+}
+
+// Pure shape check: no signing validation, Keychain reads/writes or prompts.
+static BOOL access_matches(SecAccessRef access, SecAccessRef reference, CFDataRef expected, BOOL persisted) {
+ NSDictionary *actualShape = access_shape(access, expected, persisted, NO);
+ NSDictionary *referenceShape = access_shape(reference, expected, NO, YES);
+ return actualShape && referenceShape && [actualShape[@"authorizations"] isEqualToArray:referenceShape[@"authorizations"]] &&
+  [actualShape[@"subjects"] isEqualToArray:referenceShape[@"subjects"]];
+}
+
+BOOL aeon_vault_access_matches(SecAccessRef access, SecAccessRef reference, CFDataRef expected) {
+ return access_matches(access, reference, expected, NO);
+}
+
+BOOL aeon_vault_persisted_access_matches(SecAccessRef access, SecAccessRef reference, CFDataRef expected) {
+ return access_matches(access, reference, expected, YES);
+}
+
+// Never adopt a same-user pre-created Keychain item with a permissive ACL.
+// Build the reference in memory with the very same code used to create items.
+static BOOL daemon_item_access(SecKeychainItemRef item) {
+ SecAccessRef access = NULL, reference = NULL; SecCodeRef self = NULL;
+ SecRequirementRef expectedRequirement = NULL; CFDataRef expected = NULL; BOOL ok = NO;
+ if (SecKeychainItemCopyAccess(item, &access) != errSecSuccess) goto done;
+ reference = daemon_access(); if (!reference) goto done;
+ if (SecCodeCopySelf(kSecCSDefaultFlags, &self) != errSecSuccess || SecCodeCopyDesignatedRequirement(self, kSecCSDefaultFlags, &expectedRequirement) != errSecSuccess || SecRequirementCopyData(expectedRequirement, kSecCSDefaultFlags, &expected) != errSecSuccess) goto done;
+ ok = aeon_vault_persisted_access_matches(access, reference, expected);
 done:
  if (expected) CFRelease(expected); if (expectedRequirement) CFRelease(expectedRequirement); if (self) CFRelease(self);
- if (acls) CFRelease(acls); if (access) CFRelease(access);
+ if (reference) CFRelease(reference); if (access) CFRelease(access);
  return ok;
 }
 
@@ -139,21 +269,32 @@ int aeon_vault_read(const char *keyID, void **raw, int *size) {
 // requirement, so signed updates retain access without trusting a pathname.
 // The ACL owner is root, not this user's UID: same-user code cannot change the
 // ACL as owner. All operations are granted solely to the signed daemon.
-static SecAccessRef daemon_access(void) {
- SecTrustedApplicationRef app = NULL; SecAccessRef access = NULL; SecACLRef acl = NULL;
- if (SecTrustedApplicationCreateFromPath(NULL, &app) != errSecSuccess) return NULL;
+SecAccessRef aeon_vault_access_for_application(SecTrustedApplicationRef app) {
+ if (!app) return NULL;
+ SecAccessRef access = NULL; SecACLRef acl = NULL;
  CFErrorRef error = NULL;
- access = SecAccessCreateWithOwnerAndACL(0, 0, kSecUseOnlyUID, NULL, &error);
+ // Empty authorization sets mean Any in the legacy backend. The affected
+ // persisted UID entry exposes Any explicitly; match that shape in memory.
+ NSArray *ownerAuthorizations = @[(__bridge id)kSecACLAuthorizationAny];
+ access = SecAccessCreateWithOwnerAndACL(0, 0, kSecUseOnlyUID, (__bridge CFArrayRef)ownerAuthorizations, &error);
  if (error) CFRelease(error);
- if (!access) { CFRelease(app); return NULL; }
+ if (!access) return NULL;
  NSArray *apps = @[(__bridge id)app];
  OSStatus status = SecACLCreateWithSimpleContents(access, (__bridge CFArrayRef)apps, CFSTR("Aeon pairing"), 0, &acl);
  if (status == errSecSuccess) {
   NSArray *authorizations = @[(__bridge id)kSecACLAuthorizationAny];
   status = SecACLUpdateAuthorizations(acl, (__bridge CFArrayRef)authorizations);
  }
- if (acl) CFRelease(acl); CFRelease(app);
+ if (acl) CFRelease(acl);
  if (status != errSecSuccess) { CFRelease(access); return NULL; }
+ return access;
+}
+
+static SecAccessRef daemon_access(void) {
+ SecTrustedApplicationRef app = NULL;
+ if (SecTrustedApplicationCreateFromPath(NULL, &app) != errSecSuccess) return NULL;
+ SecAccessRef access = aeon_vault_access_for_application(app);
+ CFRelease(app);
  return access;
 }
 

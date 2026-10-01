@@ -84,7 +84,66 @@ func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string
 				return fmt.Errorf("migrate public link tokens: %w", err)
 			}
 		}
+		if name == "1061_agent_roles_models_read.sql" {
+			if err := migrateTenantAgentRoles(ctx, conn, name); err != nil {
+				return fmt.Errorf("migrate agent role model discovery: %w", err)
+			}
+		}
 		if err := applyFile(ctx, conn, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FORCE RLS also applies to the migration owner. Run the additive role backfill
+// in each tenant before recording the file globally. ON CONFLICT makes retries
+// after a partially completed run safe; the normal file application is a no-op
+// for an unscoped owner and harmless for a bypass migration connection.
+func migrateTenantAgentRoles(ctx context.Context, conn *pgxpool.Conn, name string) error {
+	sql, err := migrationFiles.ReadFile("migrations/" + name)
+	if err != nil {
+		return err
+	}
+	// Reuse the advisory-lock connection, including for pools of size one.
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := func() error {
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			if err := enterTenant(ctx, tx, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '5s'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR UPDATE`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, string(sql)); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}(); err != nil {
 			return err
 		}
 	}
