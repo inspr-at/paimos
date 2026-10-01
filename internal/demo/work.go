@@ -290,9 +290,9 @@ func (s *seeder) showcaseApproval(work demoWork) error {
 	}, http.StatusCreated, &approval, nil); err != nil {
 		return fmt.Errorf("showcase approval request: %w", err)
 	}
-	// Activity projects comments and node changes, so leave linked notes beside
+	// Activity projects comments and node changes, so leave reference notes beside
 	// the real request and decision rather than inventing approval events.
-	if err := s.comment(work.agent, work.ticket, fmt.Sprintf("Fictional approval request: may I edit the lantern label? [Approval record](/approvals) `%s` is waiting for Demo Operator.", approval.ID)); err != nil {
+	if err := s.comment(work.agent, work.ticket, fmt.Sprintf("Fictional approval request: may I edit the lantern label? Approval `%s` is waiting for Demo Operator.", approval.ID)); err != nil {
 		return err
 	}
 	if err := s.api.do(s.admin, "", http.MethodPost, "/api/approvals/"+approval.ID+"/decision", map[string]any{
@@ -300,7 +300,7 @@ func (s *seeder) showcaseApproval(work demoWork) error {
 	}, http.StatusOK, nil, nil); err != nil {
 		return fmt.Errorf("showcase approval decision: %w", err)
 	}
-	return s.comment(s.admin, work.ticket, fmt.Sprintf("Fictional approval decision: approved the proposed lantern label edit requested by Lumen Scribe. [Approval record](/approvals) `%s` keeps the decision with this ticket.", approval.ID))
+	return s.comment(s.admin, work.ticket, fmt.Sprintf("Fictional approval decision: approved the proposed lantern label edit requested by Lumen Scribe. Approval `%s` keeps the decision with this ticket.", approval.ID))
 }
 
 func (s *seeder) pendingApproval() error {

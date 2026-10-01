@@ -216,7 +216,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
 	t.Helper()
 	admin := tenant.Principal{TenantID: tenantID, Kind: tenant.Person}
-	var showcase, harbor, project string
+	var showcase, harbor, project, approvalID string
 	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
 			return err
@@ -224,7 +224,10 @@ func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
 		if err := tx.QueryRow(t.Context(), `SELECT id::text,project_id::text FROM nodes WHERE key='LT-1'`).Scan(&showcase, &project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='HT-1'`).Scan(&harbor)
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='HT-1'`).Scan(&harbor); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT a.id::text FROM approval_requests a JOIN approval_decisions d ON d.tenant_id=a.tenant_id AND d.request_id=a.id JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.agent_principal_id JOIN principals decider ON decider.tenant_id=d.tenant_id AND decider.id=d.decided_by_principal_id WHERE a.resource_id=$1::uuid AND a.scope='nodes.write' AND p.name='Lumen Scribe' AND d.decision='approved' AND decider.name='Demo Operator'`, showcase).Scan(&approvalID)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -259,6 +262,9 @@ func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
 			agentEntries++
 		}
 		if next < len(want) && item.Author.Name == want[next].author && strings.Contains(*item.BodyMarkdown, want[next].text) {
+			if (next == 3 || next == 4) && !strings.Contains(*item.BodyMarkdown, "`"+approvalID+"`") {
+				t.Fatal("showcase approval note does not reference the stored person-approved request")
+			}
 			next++
 		}
 	}
