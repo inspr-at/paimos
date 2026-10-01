@@ -17,6 +17,7 @@ import (
 
 // Options tunes the queue worker. Zero values take the defaults.
 type Options struct {
+	Resolve        Resolver
 	Interval       time.Duration
 	Batch          int
 	MaxAttempts    int
@@ -30,6 +31,7 @@ type Options struct {
 type Worker struct {
 	pool      *pgxpool.Pool
 	provider  Provider
+	resolve   Resolver
 	interval  time.Duration
 	batch     int
 	maxTries  int
@@ -41,7 +43,7 @@ type Worker struct {
 // The coordinator runs Worker.Run beside the search module; pass the same
 // Provider to search.New so query vectors use the stored model.
 func NewWorker(pool *pgxpool.Pool, provider Provider, opts Options) *Worker {
-	if pool == nil || provider == nil {
+	if pool == nil || (provider == nil && opts.Resolve == nil) {
 		panic("embedding.NewWorker: pool and provider are required")
 	}
 	if opts.Interval <= 0 {
@@ -59,6 +61,7 @@ func NewWorker(pool *pgxpool.Pool, provider Provider, opts Options) *Worker {
 	return &Worker{
 		pool:      pool,
 		provider:  provider,
+		resolve:   opts.Resolve,
 		interval:  opts.Interval,
 		batch:     opts.Batch,
 		maxTries:  opts.MaxAttempts,
@@ -129,7 +132,18 @@ func (w *Worker) tenantIDs(ctx context.Context) ([]string, error) {
 func (w *Worker) processTenant(ctx context.Context, tenantID string) (int, error) {
 	// The worker embeds every project's nodes for search (ADR-003 P2).
 	ctx = db.AllProjects(ctx, "embedding worker")
-	model := strings.TrimSpace(w.provider.Model())
+	provider := w.provider
+	if w.resolve != nil {
+		var err error
+		provider, err = w.resolve(ctx, tenantID)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if provider == nil {
+		return 0, nil
+	}
+	model := strings.TrimSpace(provider.Model())
 	if model == "" || len(model) > 200 {
 		return 0, errors.New("embedding model is not configured")
 	}
@@ -141,7 +155,7 @@ func (w *Worker) processTenant(ctx context.Context, tenantID string) (int, error
 	for i, job := range live {
 		texts[i] = Document(job.Title, job.Body)
 	}
-	vectors, err := w.provider.Embed(ctx, texts)
+	vectors, err := provider.Embed(ctx, texts)
 	if err != nil || len(vectors) != len(live) {
 		msg := "embedding request failed"
 		if err == nil {

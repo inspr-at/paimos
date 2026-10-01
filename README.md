@@ -10,6 +10,43 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Local models for in-app AI
+
+Workspace AI is off by default. A person with `settings.manage` can open
+**Settings → Workspace → In-app AI**, enter an OpenAI-compatible API base URL
+and chat model, and select the features allowed to send content to that server.
+For Ollama on the Aeon server, use `http://localhost:11434/v1` and the name of
+an installed chat model. Save, then use **Test connection**: it sends only a
+small synthetic prompt, including while AI is off. Saving never contacts a model.
+The endpoint is resolved from the Aeon server; in Docker, `localhost` means the
+Aeon container. Use an address reachable from that container for a separate
+model service. Public, loopback and LAN endpoints are supported; redirects and
+link-local/metadata addresses are refused.
+
+The first connected feature is **Rewrite customer notes with AI**. Also enable
+the `business_crm` plugin with its `tools.invoke` permission. A person with
+`crm.manage` can request a rewrite; the selected server receives the customer
+name and notes. The result is a revision-bound draft: a person reviews and
+applies it separately. A changed customer or provider configuration refuses the
+stale generation. Delegated agent runs and Aithema intake retain their existing
+harness, plugin and approval controls; this setting does not select their models.
+
+API keys are optional and encrypted through the existing tenant-bound AES-GCM
+vault, separate from JSON settings and event data. Reads reveal only whether a
+key is set. A blank replacement clears the key; omitting it preserves it.
+Changing the base URL clears a retained key unless a replacement is supplied.
+Keep the existing `AEON_SESSION_KEY_FILE` stable across restarts; development
+hosts that store a provider key also need this persistent host secret.
+
+Semantic search and background indexing can use the same provider and key with
+a separate embedding model. Aeon's existing vector storage requires **1536
+dimensions**. Enabling embeddings or changing their endpoint/model queues a
+fresh index; vector identities include both, so search never mixes vector spaces.
+Without a configured, enabled workspace provider and feature, CRM generation
+makes no model request, indexing leaves its queue untouched, and search stays
+lexical. The server now uses these workspace settings for embeddings; migrate
+older `AEON_EMBEDDING_*` server configuration here.
+
 ## Develop
 
 ```sh
