@@ -49,7 +49,7 @@ async function setup(page: Page, theme = 'light', rights = true, extraLead = fal
   })
   await page.goto('/agents')
   await expect(row(page, 4)).toBeVisible()
-  await page.locator('.group-toggle').filter({ hasText: 'Stopped' }).click()
+  await page.locator('.group-toggle').filter({ hasText: 'Ended' }).click()
   return { moves: () => moves, undos: () => undos }
 }
 

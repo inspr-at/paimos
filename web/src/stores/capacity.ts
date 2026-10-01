@@ -47,7 +47,7 @@ export const useCapacity = defineStore('capacity', () => {
     const computer = computerOf.value.get(a.id)
     return {
       id: a.id, label: a.label, harness: a.harness, host: a.host_label || computer?.computer_name || a.daemon_id, state: a.state, last_probe_ok: a.last_probe_ok, plan: a.plan,
-      fingerprint: a.quota_fingerprint, groupId: a.group_id, groupName: a.group_name,
+      fingerprint: a.quota_pool_fingerprint, groupId: a.group_id, groupName: a.group_name,
       // The computer's setup flag is computer-wide; sign-ins are judged per account (probe_failure).
       connectivity: computer?.connectivity,
       disconnecting: computer?.enrollments.some(e => e.account_id === a.id && e.state === 'draining') ?? false,

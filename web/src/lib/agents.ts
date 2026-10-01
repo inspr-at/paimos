@@ -31,7 +31,7 @@ export interface HarnessSession {
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
-  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; finished: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
   eta_ready_at?: string | null; eta_live_at?: string | null; progress_pct?: number | null; eta_reported_at?: string | null; eta_stale?: boolean
   // AEON-280: the last inbox pull of this generation; absent until it pulls once.
   inbox_seen_at?: string | null; inbox_seen_via?: 'hook' | 'drain' | 'long_poll' | 'stream' | 'ack' | null
@@ -66,7 +66,7 @@ export interface AllowanceWindow extends AllowanceWrite {
 }
 export interface AgentAccount {
   ongoing_use_approved?: boolean
-  reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; statusline_enabled?: boolean
+  reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; quota_pool_fingerprint?: string; statusline_enabled?: boolean
   statusline_opt_in?: 'own' | 'workspace'
   provider?: string; model?: string; model_status?: 'known' | 'unknown' | 'unchecked'; model_data_note?: boolean
   openrouter_credits?: { observed_at: string; usage: number | null; limit: number | null; remaining: number | null }
@@ -225,4 +225,9 @@ export const setClaudeStatusline = (id: string, enabled: boolean) => request<{ e
 
 export function claudeStatuslineCopy(audience: AgentAccount['statusline_opt_in'], name: string) {
   return audience === 'workspace' ? `Show ${name} in this Claude account's status line` : `Show ${name} in your Claude status line`
+}
+
+/** Pool only accounts a person explicitly confirms; fingerprints remain hints. */
+export function putQuotaPool(account_ids: string[], quota_fingerprint: string, confirmed: boolean): Promise<void> {
+  return request<void>('/agent-accounts/quota-pool', 'PUT', { account_ids, quota_fingerprint, confirmed })
 }

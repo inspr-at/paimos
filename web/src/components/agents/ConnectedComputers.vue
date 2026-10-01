@@ -16,7 +16,7 @@ import { usePoller } from '../../lib/usePolledData'
 import { useAgents } from '../../stores/agents'
 import HarnessMark from './HarnessMark.vue'
 
-const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean }>()
+const props = defineProps<{ permissions: PairingPermissions; compactEmpty?: boolean; embedded?: boolean; refreshToken?: number }>()
 const emit = defineEmits<{ loaded: [computers: PairingView[]] }>()
 const agents = useAgents()
 
@@ -82,6 +82,7 @@ function pathParts(path: string) {
 
 let loadTurn = 0
 watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
+watch(() => props.refreshToken, token => { if (typeof token === 'number' && token > 0 && props.permissions.canListComputers) void load() })
 const stopAccess = onAccessChange(change => { if (change === 'reset') dropSignedInList() })
 const poller = usePoller(() => load(), 20_000, { enabled: () => props.permissions.canListComputers })
 // Every write on /agents drops this list's read in flight and reads it again (AEON-402).
