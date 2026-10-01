@@ -3,6 +3,8 @@
 package demo
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"time"
@@ -24,7 +26,7 @@ func (s *seeder) agents() error {
 	s.scribe, s.scribeKey, err = s.agent("Lumen Scribe", []string{
 		"intake.write", "approvals.request", "approvals.propose",
 		"account.manage", "run.claim", "run.telemetry", "run.create",
-		"harness.write", "work_orders.write", "work_orders.read",
+		"harness.write", "harness.worker", "work_orders.write", "work_orders.read",
 		"nodes.read", "nodes.write",
 	})
 	if err != nil {
@@ -69,15 +71,18 @@ func (s *seeder) work() error {
 	var profiles []struct {
 		ID      string `json:"id"`
 		Harness string `json:"harness"`
+		Model   string `json:"model"`
+		Effort  string `json:"effort"`
 		Enabled bool   `json:"enabled"`
 	}
 	if err := s.api.do(s.admin, "", http.MethodGet, "/api/models", nil, http.StatusOK, &profiles, nil); err != nil {
 		return fmt.Errorf("models: %w", err)
 	}
-	var profileID string
+	var profileID, model, effort string
 	for _, profile := range profiles {
 		if profile.Enabled && profile.Harness == "codex" {
 			profileID = profile.ID
+			model, effort = profile.Model, profile.Effort
 			break
 		}
 	}
@@ -96,6 +101,14 @@ func (s *seeder) work() error {
 		"label": "Fictional Lumen desk", "max_parallel_runs": 1,
 	}, http.StatusCreated, &account, nil); err != nil {
 		return fmt.Errorf("agent account: %w", err)
+	}
+	// The launch cascade comes from account metadata and its explicit profile
+	// grant. It is configuration for the fictional desk, not runner presence.
+	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPut, "/api/agent-accounts/"+account.ID+"/metadata", map[string]any{
+		"label": "Lumen desk", "plan": "Demo allowance", "host_label": "Lumen workstation",
+		"allowed_model_profile_ids": []string{profileID},
+	}, http.StatusOK, nil, nil); err != nil {
+		return fmt.Errorf("account metadata: %w", err)
 	}
 	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "available": true,
@@ -140,14 +153,47 @@ func (s *seeder) work() error {
 		return fmt.Errorf("telemetry: %w", err)
 	}
 	ticket := s.ids["LT-1"]
+	var session idBody
 	if err := s.api.do(s.admin, "", http.MethodPost, "/api/projects/"+s.lumenID+"/harness-sessions", map[string]any{
 		"agent_principal_id": s.scribe.ID, "run_id": run.ID, "ticket_node_id": ticket,
 		"work_order_id": order.NodeID, "harness": "codex", "host": "demo-workstation",
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
 		"advertised_capabilities": []string{"inbox", "status"},
 		"harness_session_ref":     sessionRef, "worker_lease": lease,
-	}, http.StatusCreated, nil, nil); err != nil {
+		"display_label": "Lumen lantern pass", "model": model, "reasoning_effort": effort,
+		"account_label": "Lumen desk", "brief": "Review the fictional lantern label and report the result.",
+	}, http.StatusCreated, &session, nil); err != nil {
 		return fmt.Errorf("harness session: %w", err)
+	}
+	path := "/api/projects/" + s.lumenID + "/harness-sessions/" + session.ID
+	// Hash authored fictional instruction bytes, never workstation files or
+	// a version string. The provenance endpoint persists identities only.
+	instructions := "Review the fictional lantern label. Ask a person before changing the release.\n"
+	digest := sha256.Sum256([]byte(instructions))
+	workerHeaders := map[string]string{"X-Aeon-Worker-Lease": lease}
+	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPost, path+"/provenance", map[string]any{
+		"items": []map[string]any{{
+			"kind": "skill", "logical_name": "lantern-review/SKILL.md", "hash_kind": "content",
+			"content_sha256": hex.EncodeToString(digest[:]), "byte_size": len(instructions),
+		}},
+	}, http.StatusOK, nil, workerHeaders); err != nil {
+		return fmt.Errorf("instruction provenance: %w", err)
+	}
+	if err := s.comment(s.scribe, ticket, fmt.Sprintf("I work on this — session: Lumen lantern pass (%s); role: builder; started: %s\n\nFictional demo: review the lantern label and return evidence to the reading-room team.", session.ID, start)); err != nil {
+		return err
+	}
+	if err := s.comment(s.scribe, ticket, fmt.Sprintf("The fictional lantern label review is complete. [Session evidence and instruction provenance](/agents/%s) are linked to run `%s`. This is seeded history; no runner executed it.", session.ID, run.ID)); err != nil {
+		return err
+	}
+	if err := s.comment(s.nia, ticket, "The lantern label reads clearly. Keep this review with the reading-room ticket so the next person can trace the decision."); err != nil {
+		return err
+	}
+	// End the historical session. Never send a heartbeat to make a screenshot
+	// look live; real runner presence requires a paired local daemon.
+	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPost, path+"/stop", map[string]any{
+		"reason": "process_exited",
+	}, http.StatusOK, nil, workerHeaders); err != nil {
+		return fmt.Errorf("end demo session: %w", err)
 	}
 	return s.pendingApproval()
 }

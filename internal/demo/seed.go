@@ -104,6 +104,12 @@ func (s *seeder) run() error {
 	if err := s.work(); err != nil {
 		return err
 	}
+	if err := s.pendingJourney(); err != nil {
+		return err
+	}
+	if err := s.step("work"); err != nil {
+		return err
+	}
 	if err := s.hours(); err != nil {
 		return err
 	}

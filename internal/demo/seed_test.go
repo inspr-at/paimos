@@ -3,26 +3,38 @@
 package demo
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/journey"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestDemoSeedRefusesOutsideDev(t *testing.T) {
-	t.Setenv("AEON_ENV", "prod")
-	if _, err := Seed(t.Context(), nil, "lumen-demo"); err == nil {
-		t.Fatal("prod seed was allowed")
-	}
-	t.Setenv("AEON_ENV", "")
-	if err := Run(t.Context(), nil, []string{"seed", "--tenant", "lumen-demo"}, nil); err == nil {
-		t.Fatal("unset AEON_ENV was allowed")
+	for _, environment := range []string{"prod", "", "staging", "DEV", "dev "} {
+		t.Run("environment="+environment, func(t *testing.T) {
+			t.Setenv("AEON_ENV", environment)
+			const want = "aeon demo seed is allowed only when AEON_ENV=dev"
+			if _, err := Seed(t.Context(), nil, "lumen-demo"); err == nil || err.Error() != want {
+				t.Fatalf("Seed did not guard before the database: %v", err)
+			}
+			if err := Run(t.Context(), nil, []string{"seed", "--tenant", "lumen-demo"}, nil); err == nil || err.Error() != want {
+				t.Fatalf("Run did not guard before the database: %v", err)
+			}
+		})
 	}
 }
 
@@ -59,6 +71,7 @@ func TestDemoSeedTwice(t *testing.T) {
 	if kinds != 5 || knowledge < 8 || agents != 2 || sessions < 1 || finished < 1 || pending < 1 || hours < 3 || rates != 1 || tickets < 40 {
 		t.Fatalf("kinds %d knowledge %d agents %d sessions %d finished %d pending %d hours %d rates %d tickets %d", kinds, knowledge, agents, sessions, finished, pending, hours, rates, tickets)
 	}
+	assertCaptureState(t, database, first.TenantID)
 	second, err := Seed(ctx, database.App, "lumen-demo")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +91,12 @@ func TestDemoSeedTwice(t *testing.T) {
 }
 
 func TestDemoInterruptedRunRollsBackAndRetryConverges(t *testing.T) {
+	for _, step := range []string{"agents", "work"} {
+		t.Run(step, func(t *testing.T) { interruptedSeed(t, step) })
+	}
+}
+
+func interruptedSeed(t *testing.T, interruptAt string) {
 	t.Setenv("AEON_ENV", "dev")
 	database := dbtest.Open(t)
 	ctx := t.Context()
@@ -87,7 +106,7 @@ func TestDemoInterruptedRunRollsBackAndRetryConverges(t *testing.T) {
 	}
 	baseline := seedRows(t, database, tenantID)
 	_, err = seedWithHook(ctx, database.App, "retry-demo", func(step string) error {
-		if step == "agents" {
+		if step == interruptAt {
 			return errors.New("injected interruption")
 		}
 		return nil
@@ -160,6 +179,18 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 		`SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb)::text FROM principals t`,
 		`SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb)::text FROM events t`,
 	}
+	// Compare every seed-owned ledger too: a no-op replay must not refresh
+	// probes, allowance windows, approvals, journeys or historical evidence.
+	for _, table := range []string{
+		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
+		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
+		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
+		"intake_sources", "intake_drafts", "intake_citations", "intake_draft_acceptances",
+		"time_entries", "cost_unit_rates",
+	} {
+		queries = append(queries, `SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb)::text FROM `+table+` t`)
+	}
 	rows := make([]string, len(queries))
 	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
 		for i, query := range queries {
@@ -173,6 +204,92 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 		t.Fatal(err)
 	}
 	return rows
+}
+
+// Assert through the same reads used by the UI: rows alone do not prove that
+// the launch cascade, journey gate and historical session can be displayed.
+func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
+	t.Helper()
+	var admin tenant.Principal
+	var ticket, glass, project, sessionID, scribeID string
+	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		admin.TenantID, admin.Kind = tenantID, tenant.Person
+		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='NGLASS-1'`).Scan(&glass); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT s.id::text,s.project_id::text,s.ticket_node_id::text,s.agent_principal_id::text FROM harness_sessions s`).Scan(&sessionID, &project, &ticket, &scribeID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := newAPI(t.Context(), database.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog agentaccounts.Catalog
+	if err := api.do(admin, "", http.MethodGet, "/api/agent-accounts/catalog?role=build", nil, http.StatusOK, &catalog, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Hosts) != 1 || catalog.Hosts[0].Label != "Lumen workstation" || len(catalog.Hosts[0].Harnesses) != 1 {
+		t.Fatal("launch host or harness missing")
+	}
+	accounts := catalog.Hosts[0].Harnesses[0].Accounts
+	if len(accounts) != 1 || accounts[0].Label != "Lumen desk" || len(accounts[0].Models) != 1 || len(accounts[0].Models[0].Efforts) != 1 || accounts[0].RegisteredBy != scribeID {
+		t.Fatal("launch account or explicit model grant missing")
+	}
+	view, err := (&seeder{api: api, admin: admin}).journeyView(glass)
+	if err != nil || view.Stage != "requirements" || view.RequirementsScope == "" {
+		t.Fatalf("pending journey: %+v, error %v", view, err)
+	}
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.id=a.resource_id AND n.tenant_id=a.tenant_id WHERE n.key='NGLASS-1' AND a.scope LIKE 'journey.requirements.%' AND a.expires_at>now() AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.request_id=a.id AND d.tenant_id=a.tenant_id)`); n != 1 {
+		t.Fatal("missing pending revision-bound gate")
+	}
+	var gateView journey.Journey
+	if err := api.do(admin, "", http.MethodGet, "/api/projects/"+glass+"/journey", nil, http.StatusOK, &gateView, nil); err != nil {
+		t.Fatal(err)
+	}
+	gateVisible := false
+	for _, stage := range gateView.Stages {
+		if stage.Key == "requirements" && stage.GateOfferID != nil && stage.GateOfferState == "pending" && stage.GateScope == view.RequirementsScope {
+			gateVisible = true
+		}
+	}
+	if !gateVisible {
+		t.Fatal("GateApprovals has no pending requirements offer")
+	}
+	var session harness.Session
+	path := "/api/projects/" + project + "/harness-sessions/" + sessionID
+	if err := api.do(admin, "", http.MethodGet, path, nil, http.StatusOK, &session, nil); err != nil {
+		t.Fatal(err)
+	}
+	if session.RunStatus == nil || *session.RunStatus != "completed" || session.StoppedAt == nil || session.HeartbeatAt != nil || session.HasProblem == nil || *session.HasProblem {
+		t.Fatal("session should have completed evidence, an end and no fake heartbeat or problem")
+	}
+	var provenance harness.ProvenancePage
+	if err := api.do(admin, "", http.MethodGet, path+"/provenance", nil, http.StatusOK, &provenance, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(provenance.Revisions) != 1 || provenance.Revisions[0].RecordedBy != scribeID || len(provenance.Revisions[0].Items) != 1 {
+		t.Fatal("historical instruction provenance missing")
+	}
+	item := provenance.Revisions[0].Items[0]
+	instructions := "Review the fictional lantern label. Ask a person before changing the release.\n"
+	digest := sha256.Sum256([]byte(instructions))
+	if item.LogicalName != "lantern-review/SKILL.md" || item.ContentSHA256 == nil || *item.ContentSHA256 != hex.EncodeToString(digest[:]) || item.ByteSize == nil || *item.ByteSize != int64(len(instructions)) {
+		t.Fatal("provenance does not match the authored fictional instructions")
+	}
+	code, activity, err := api.call(admin, "", http.MethodGet, "/api/nodes/"+ticket+"/activity", nil, nil)
+	if err != nil || code != http.StatusOK {
+		t.Fatalf("activity status %d error %v", code, err)
+	}
+	for _, text := range []string{"Ivo Quill", "Nia Frost", "Lumen Scribe", "I work on this", "/agents/" + sessionID, *session.RunID} {
+		if !strings.Contains(string(activity), text) {
+			t.Fatalf("linked ticket activity lacks %q", text)
+		}
+	}
 }
 
 func scalar(t *testing.T, database *dbtest.DB, tenantID, query string) int {
