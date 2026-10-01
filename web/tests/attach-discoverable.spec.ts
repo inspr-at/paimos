@@ -475,6 +475,41 @@ test('a decision still on its way when the person changes shows nothing to the n
   await expect(page.getByText('Approved. Keep the attach terminal open')).toHaveCount(0)
 })
 
+test('an accepted decision still refreshes canonical sessions when its review closes during body decoding', async ({ page }) => {
+  await setup(page)
+  await list(page, [request('r-wait', 'pending')])
+  let sessionReads = 0
+  await page.route('**/api/harness-sessions?*', route => { sessionReads++; return route.fallback() })
+  await page.route('**/api/agent-pairing/attach/r-wait/approve', route => route.fulfill({ json: request('r-wait', 'approved') }))
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+  // The server already accepted the write. Delay only decoding its returned body,
+  // so closing the dialog cannot undo it and must not stop the canonical reread.
+  await page.evaluate(() => {
+    const original = window.fetch.bind(window)
+    const state = window as typeof window & { __finishAttachBody?: () => void }
+    window.fetch = async (...args) => {
+      const response = await original(...args)
+      if (String(args[0]).endsWith('/r-wait/approve')) {
+        const body = await response.json()
+        response.json = () => new Promise(resolve => { state.__finishAttachBody = () => resolve(body) })
+      }
+      return response
+    }
+  })
+  await page.getByRole('button', { name: 'Allow live watch' }).click()
+  await expect.poll(() => page.evaluate(() => '__finishAttachBody' in window)).toBe(true)
+  await page.getByRole('button', { name: 'Close attach review' }).click()
+  const before = sessionReads
+  await page.evaluate(() => (window as typeof window & { __finishAttachBody: () => void }).__finishAttachBody())
+  await expect.poll(() => sessionReads).toBeGreaterThan(before)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Attach session' }).click()
+  await expect(page.getByLabel('Attach code')).toHaveValue('')
+  await expect(page.getByRole('dialog')).not.toContainText('Approved. Keep the attach terminal open')
+})
+
 test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
