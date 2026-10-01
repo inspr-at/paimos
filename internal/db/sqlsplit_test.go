@@ -180,6 +180,7 @@ func TestConcurrentIndexOptOut(t *testing.T) {
 		{"crlf", "-- aeon:no-transaction\r\nCREATE INDEX CONCURRENTLY pending ON messages(id);", true, true},
 		{"if not exists", "-- aeon:no-transaction\nCREATE INDEX CONCURRENTLY IF NOT EXISTS pending ON messages(id);", true, true},
 		{"unique", "-- aeon:no-transaction\nCREATE UNIQUE INDEX CONCURRENTLY pending ON messages(id);", true, true},
+		{"multiline unique", "-- aeon:no-transaction\nCREATE UNIQUE INDEX CONCURRENTLY pending\n    ON messages(id);", true, true},
 		{"unique if not exists", "-- aeon:no-transaction\nCREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS pending ON messages(id);", true, true},
 		{"normal", "CREATE TABLE messages(id int);", false, true},
 		{"marker must be first", "-- license\n-- aeon:no-transaction\nCREATE TABLE messages(id int);", false, true},

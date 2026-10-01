@@ -309,7 +309,7 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 		return "", "", nil
 	}
 	if len(stmts) == 1 {
-		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*) ON ([a-z_][a-z0-9_]*)\s*\(`
+		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)\s*\(`
 		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
 			return match[1], match[2], nil
 		}
