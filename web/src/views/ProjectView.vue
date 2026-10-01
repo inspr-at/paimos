@@ -10,9 +10,9 @@ import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
+import { planningPresent } from '../lib/planning'
 import { useDensity, useHeaderGraph } from '../lib/prefs'
-import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
-import { COST_COLUMNS } from '../lib/planning'
+import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
 import { useDeveloperSettings } from '../lib/developerSettings'
@@ -96,9 +96,14 @@ const tablePrefs = computed<ListPrefs | null>(() => {
   return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
 })
 const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
-// ≈ Cost and Paid are offered only to people who may see usage (the server sends no cost otherwise).
+// Cost is offered only to people who may see usage (harness.read).
 const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
-const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value).filter(id => usageVisible.value || !(COST_COLUMNS as ColumnId[]).includes(id)), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+const toolbarColumns = computed(() => {
+  const columns = pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value)
+  const notes = columns.visible.includes('list_cost') && !planningPresent([...rowsById.value.values()]).list_cost
+    ? { list_cost: 'Nothing reported in this list yet; cells show —' } : {}
+  return { ...columns, notes }
+})
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
@@ -1592,7 +1597,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
-        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
         :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
