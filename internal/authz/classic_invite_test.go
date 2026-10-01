@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package authz
+package authz_test
 
 import (
 	"encoding/json"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -102,7 +103,7 @@ func TestClassicInviteLinking(t *testing.T) {
 				t.Fatal(err)
 			}
 			mux := http.NewServeMux()
-			New(d.App).Mount(mux)
+			authz.New(d.App).Mount(mux)
 			body := map[string]any{"email": "person@example.com", "workspace_role_id": roleID}
 			if tc.projectOnly {
 				delete(body, "workspace_role_id")
@@ -128,7 +129,7 @@ func TestClassicInviteLinking(t *testing.T) {
 				var err error
 				// A verified first sign-in can accept the email's pending invite
 				// without a token; the auth package tests the verification gate.
-				person, err = AcceptInvite(ctx, tx, tid, signinID, "PERSON@example.com", "New Person", "")
+				person, err = authz.AcceptInvite(ctx, tx, tid, signinID, "PERSON@example.com", "New Person", "")
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -174,6 +175,15 @@ func TestClassicInviteLinking(t *testing.T) {
 				if count != map[bool]int{true: 0, false: 1}[tc.projectOnly] {
 					t.Fatalf("workspace bindings: %d", count)
 				}
+				if !tc.projectOnly {
+					var bound string
+					if err := tx.QueryRow(ctx, `SELECT role_id::text FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, tid, person.ID).Scan(&bound); err != nil {
+						return err
+					}
+					if bound != roleID {
+						t.Fatal("classic role replaced the invited role")
+					}
+				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -185,7 +195,7 @@ func TestClassicInviteLinking(t *testing.T) {
 			if rec.Code != 200 {
 				t.Fatalf("directory: %d %s", rec.Code, rec.Body.String())
 			}
-			var directory MemberDirectory
+			var directory authz.MemberDirectory
 			if err := json.Unmarshal(rec.Body.Bytes(), &directory); err != nil {
 				t.Fatal(err)
 			}
