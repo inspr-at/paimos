@@ -38,12 +38,6 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 	if protocol == 0 {
 		protocol = 1 // Legacy daemons must keep serving, with attach disabled.
 	}
-	if protocol != 1 && protocol != attachwatch.Protocol {
-		return fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required")
-	}
-	if protocol == attachwatch.Protocol && in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
-		return fail(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required")
-	}
 	if !hashRE.MatchString(in.PollKey) || !hashRE.MatchString(in.DeviceProof) || in.PollKey == in.DeviceProof || in.Text != "" {
 		return fail(403, "forbidden", "fresh daemon poll key required")
 	}
@@ -64,6 +58,12 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		_, principal, _, _, proof, err := attachComputer(ctx, tx, in.ComputerID)
 		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
 			return fail(403, "forbidden", "computer proof rejected")
+		}
+		if protocol != 1 && protocol != attachwatch.Protocol {
+			return attachFailure(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required", attachwatch.RefusalVersion)
+		}
+		if protocol == attachwatch.Protocol && in.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+			return attachFailure(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required", attachwatch.RefusalVersion)
 		}
 		// Even a caller holding the lifecycle proof cannot take over a previous
 		// approval by registering another key. No pending/approved watch survives.
@@ -143,15 +143,21 @@ func attachComputer(ctx context.Context, tx pgx.Tx, computer string) (owner, pri
 }
 func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attachwatch.Snapshot) error {
 	p := tenant.Principal{ID: owner, TenantID: tenantID, Kind: tenant.Person}
-	if authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil || authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}) != nil {
+	if authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil {
 		return fail(403, "forbidden", "owner delegation no longer valid")
 	}
-	var ok bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL) AND EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ok)
+	if authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}) != nil {
+		return attachFailure(403, "forbidden", "owner delegation no longer valid", attachwatch.RefusalTicket)
+	}
+	var ticketOK, enrollmentOK bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if !ticketOK {
+		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", attachwatch.RefusalTicket)
+	}
+	if !enrollmentOK {
 		return fail(409, "conflict", "project, ticket or harness enrollment changed")
 	}
 	return nil
@@ -225,14 +231,6 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
 		return
 	}
-	if expected.protocol != attachwatch.Protocol {
-		WriteError(w, fail(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required"))
-		return
-	}
-	if expected.proofVersion != attachwatch.LocalConsentProofVersion {
-		WriteError(w, fail(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required"))
-		return
-	}
 	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
 		return
@@ -253,8 +251,24 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
 		owner, principal, host, workspace, _, err := attachComputer(ctx, tx, in.ComputerID)
-		if err != nil || principal != p.ID {
+		if err != nil {
+			// A revoked HTTP bearer remains unauthenticated. This case only
+			// gives repair guidance to an authenticated principal for its own
+			// retained computer row and registered, memory-only poll key.
+			var retainedPrincipal, state string
+			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID && state == "revoked" {
+				return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+			}
 			return fail(403, "forbidden", "computer proof rejected")
+		}
+		if principal != p.ID {
+			return fail(403, "forbidden", "computer proof rejected")
+		}
+		if expected.protocol != attachwatch.Protocol {
+			return attachFailure(409, "update_agentd", "update agentd to attach protocol 2; fresh approval required", attachwatch.RefusalVersion)
+		}
+		if expected.proofVersion != attachwatch.LocalConsentProofVersion {
+			return attachFailure(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required", attachwatch.RefusalVersion)
 		}
 		if in.Operation == "request" {
 			s := in.Snapshot
@@ -331,12 +345,16 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			rejected = fail(403, "forbidden", "attach approval binding changed")
 			return attachEnd(ctx, tx, &out, "detached")
 		}
+		waiting := out.State == "pending" || out.State == "approved"
 		expired, err := attachExpired(ctx, tx, &out)
 		if err != nil {
 			return err
 		}
 		if expired {
 			rejected = fail(410, "attach_ended", "watch ended; new approval required")
+			if waiting {
+				rejected = attachFailure(410, "attach_ended", "watch ended; new approval required", attachwatch.RefusalExpired)
+			}
 			return nil
 		}
 		if in.Digest != out.Digest || in.Snapshot.Digest() != out.Digest {

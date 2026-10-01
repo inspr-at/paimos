@@ -169,8 +169,8 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					if err != nil || status.DaemonID != c.DaemonID {
 						t.Fatal("local control unavailable after registration", err)
 					}
-					// An unauthenticated attach gets 404 while disabled, and
-					// reaches the auth guard after restart against the update.
+					// The existing socket keeps the auth guard even while attach
+					// is disabled; unauthenticated callers receive no cause.
 					transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 						return (&net.Dialer{}).DialContext(ctx, "unix", local.Socket)
 					}}
@@ -181,10 +181,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 						t.Fatal(err)
 					}
 					res.Body.Close()
-					want := 404
-					if afterUpdate {
-						want = 403
-					}
+					want := 403
 					if res.StatusCode != want {
 						t.Fatalf("attach availability: got %d, want %d", res.StatusCode, want)
 					}

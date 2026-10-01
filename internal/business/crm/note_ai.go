@@ -46,6 +46,20 @@ type NoteGenerator interface {
 	GenerateNote(context.Context, modelregistry.Profile, NotePrompt) (NoteGeneration, error)
 }
 
+// WorkspaceNoteGenerator resolves in-app model settings instead of a harness
+// scout route. Existing host generators keep their original registry contract.
+type WorkspaceNoteGenerator interface {
+	NoteGenerator
+	NoteModel(context.Context, pgx.Tx) (modelregistry.Profile, error)
+}
+
+func (m *module) selectedNoteModel(ctx context.Context, tx pgx.Tx) (modelregistry.Profile, error) {
+	if provider, ok := m.noteGenerator.(WorkspaceNoteGenerator); ok {
+		return provider.NoteModel(ctx, tx)
+	}
+	return noteModel(ctx, tx)
+}
+
 type noteTool struct{ generator NoteGenerator }
 
 func (t noteTool) Invoke(ctx context.Context, call plugins.Call, id string, input any) (any, error) {
@@ -143,7 +157,7 @@ func (m *module) noteState(ctx context.Context, p tenant.Principal, id string) (
 			}
 			return err
 		}
-		profile, err = noteModel(ctx, tx)
+		profile, err = m.selectedNoteModel(ctx, tx)
 		if errors.Is(err, pgx.ErrNoRows) {
 			state.Reason = "No model is configured for AI note rewriting."
 			return nil
@@ -235,8 +249,8 @@ func (m *module) generateNote(w http.ResponseWriter, r *http.Request) {
 		if current.Revision != c.Revision || current.CustomerNotes != c.CustomerNotes {
 			return errConflict
 		}
-		selected, err := noteModel(r.Context(), tx)
-		if err != nil || selected.ID != profile.ID {
+		selected, err := m.selectedNoteModel(r.Context(), tx)
+		if err != nil || selected.ID != profile.ID || selected.Version != profile.Version {
 			return errConflict
 		}
 		if generated.RunID != "" {
@@ -255,10 +269,16 @@ func (m *module) generateNote(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return appendCRM(r.Context(), tx, p, id, "crm.note_rewrite_drafted", nil, map[string]any{
+		evidence := map[string]any{
 			"draft_id": draftID, "base_revision": c.Revision, "source": "ai", "model_profile_id": profile.ID,
 			"run_id": generated.RunID, "input_tokens": generated.InputTokens, "output_tokens": generated.OutputTokens, "cost_micros": generated.CostMicros,
-		})
+		}
+		if _, workspace := m.noteGenerator.(WorkspaceNoteGenerator); workspace {
+			delete(evidence, "model_profile_id")
+			evidence["workspace_provider_id"] = profile.ID
+			evidence["workspace_provider_revision"] = profile.Version
+		}
+		return appendCRM(r.Context(), tx, p, id, "crm.note_rewrite_drafted", nil, evidence)
 	})
 	if err != nil {
 		writeErr(w, err)
