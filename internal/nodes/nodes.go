@@ -250,6 +250,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			fields, err = canonicalRouteFields(p, kind.Slug, fields, nil)
 		}
 		if err == nil {
+			fields, err = suggestEstimateRoute(ctx, tx, p, kind.Slug, in.Title, parentID, fields, nil)
+		}
+		if err == nil {
 			fields, err = canonicalRoadmapPublication(p, kind.Slug, fields, nil)
 		}
 		if err == nil {
@@ -438,6 +441,13 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 			if err == nil {
 				fields, err = canonicalRouteFields(p, kind.Slug, fields, current.Fields)
+			}
+			if err == nil {
+				title := current.Title
+				if value, ok := raw["title"]; ok {
+					title, _ = parsePatchString(value)
+				}
+				fields, err = suggestEstimateRoute(ctx, tx, p, kind.Slug, title, current.ParentID, fields, current.Fields)
 			}
 			if err == nil {
 				fields, err = canonicalRoadmapPublication(p, kind.Slug, fields, current.Fields)

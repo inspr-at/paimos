@@ -57,7 +57,7 @@ func TestTicketRouteMigrationPreservesCustomSchema(t *testing.T) {
 		if err := json.Unmarshal(schema, &parsed); err != nil {
 			return err
 		}
-		if parsed.Additional == nil || *parsed.Additional || len(parsed.Properties) != 13 {
+		if parsed.Additional == nil || *parsed.Additional || len(parsed.Properties) != 20 {
 			t.Fatalf("custom schema: %s", schema)
 		}
 		for _, key := range []string{

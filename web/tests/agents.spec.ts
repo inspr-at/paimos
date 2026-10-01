@@ -216,7 +216,8 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   await expect(reason).toBeFocused()
   await reason.fill('Fine for this run.')
   await page.keyboard.press('Enter')
-  await expect(page.locator('.toast').filter({ hasText: 'Approved: nova was told.' })).toBeVisible()
+  // The card itself confirms (AEON-505), then folds away.
+  await expect(queue(page).locator('.item.settled')).toContainText('Approved·nova may claim a run and start work')
   expect(calls.find(c => c.path.endsWith('/decision'))?.body).toEqual({ decision: 'approved', reason: 'Fine for this run.' })
   expect(data.approvals.find(a => a.scope === 'run.claim' && a.decision === 'approved' && a.agent_principal_id.endsWith('2'))).toBeTruthy()
   await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(3)

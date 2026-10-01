@@ -288,10 +288,10 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('the only integration exception is the unchanged merged 1054 contract migration', () => {
+test('the original integration exception remains the unchanged merged 1054 contract migration', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.equal(manifest.exceptions.length, 1);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql']);
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   assert.equal(entry.ticket, 'AEON-397');
@@ -303,7 +303,7 @@ test('the only integration exception is the unchanged merged 1054 contract migra
   assert.equal(destructive(source), true);
 });
 
-test('the current tree passes only with the explicit 1054 contract exception', () => {
+test('the current tree passes only with the explicit pinned contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -311,6 +311,6 @@ test('the current tree passes only with the explicit 1054 contract exception', (
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.equal(withoutException.length, 1);
-  assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql']);
+  for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
