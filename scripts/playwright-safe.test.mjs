@@ -344,15 +344,26 @@ test('persistent supervisor root verification failure kills the group before rel
 })
 
 for (const mode of ['transient', 'persistent', 'owner-change']) {
-  test(`root preload handles ${mode} ps misses before suite code executes`, async () => {
+  test(`root preload handles ${mode} ps misses before suite code executes`, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
     const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
     const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
     const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
-    const result = await runOwnedCommand(process.execPath, ['-e', script], {
-      lockPath, graceMs: 50,
-      env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
-    })
+    // Isolate preload publication: for the transient case the supervisor
+    // cannot verify the root, so only the preload can record it before work.
+    const original = childProcess.spawnSync
+    const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
+      return original(command, args, options)
+    }) : undefined
+    syncBuiltinESMExports()
+    let result
+    try {
+      result = await runOwnedCommand(process.execPath, ['-e', script], {
+        lockPath, graceMs: 50,
+        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+      })
+    } finally { injected?.mock.restore(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
     assert.ok(calls >= 2)
     assert.equal(result.metrics.remaining_processes, 0)
@@ -360,7 +371,7 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     if (mode === 'transient') {
       assert.equal(result.code, 0)
       const entries = readFileSync(ready, 'utf8').trim().split('\n').map(line => JSON.parse(line))
-      assert.ok(entries.length >= 2, 'both supervisor and preload must record the verified root')
+      assert.equal(entries.length, 1, 'preload must publish the verified root before suite code')
       assert.ok(entries.every(entry => validStart(entry.started)))
       assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
     } else if (mode === 'persistent') {
