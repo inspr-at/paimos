@@ -64,6 +64,24 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+Ticket lists refresh worker names, progress and ETA on session registration,
+heartbeat, rebinding and stop events. The shared live feed also refreshes after
+reconnecting and on lifecycle changes; heartbeats leave it on its 20-second poll.
+The ticket list still refetches ETA and lead projections on heartbeat hints.
+List and Outline reconnect and fully resync after visibility, pageshow, online,
+or a clock gap longer than twice the 5-second check period. A 45-second silent
+stream also reconnects; live-mode SSE sends observable `stream.ping` events at
+the 15-second keepalive deadline without changing the durable event cursor.
+The freshness dot shows Live, Reconnecting, or an amber last-update age. Until
+both list and live-worker reads recover, workers and ETAs are dimmed and past
+estimates show their last clock time without asserting current overdue work.
+List projections use the additive `Aeon-Event-Position` response header to
+reject older snapshots even
+when the ticket's own `updated_at` has not changed. A node-list response names
+the counter before its handler as a lower bound and runs once. A page covering
+the hint that triggered its batch updates the row immediately; newer hints
+remain queued for a follow-up read, so busy tenants do not need a quiet gap.
+
 The flow UI is hidden by default. People working on Paimos itself can enable
 **Show the flow controls (not yet tested end to end)** under **Settings →
 Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace

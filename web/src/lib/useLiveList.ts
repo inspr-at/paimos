@@ -155,6 +155,18 @@ export function useLiveList(options: LiveListOptions) {
   const classified = new Map<string, { at: number; revision: string | null }>()
   const flash = ref(new Set<string>())
   const message = ref('')
+  const streamState = ref(store.state)
+  const updatedAt = ref<number | null>(options.loadedOnce.value ? Date.now() : null)
+  const catchingUp = ref(false)
+  const readFailed = ref(false)
+  let resyncPending = false
+  const dataStale = computed(() => streamState.value !== 'live' || catchingUp.value || readFailed.value || updatedAt.value === null)
+  function refreshed() {
+    if (resyncPending || queue.size) return
+    catchingUp.value = false
+    readFailed.value = false
+    updatedAt.value = Date.now()
+  }
   let queue = new Map<string, Queued>()
   let batchTimer: ReturnType<typeof setTimeout> | undefined
   let checkTimer: ReturnType<typeof setInterval> | undefined
@@ -185,9 +197,12 @@ export function useLiveList(options: LiveListOptions) {
     // The list refetches through its own query, never one node at a time.
     shows: () => false,
     changed(change) { receive(change) },
-    resync() { resync() },
+    resync() { resyncRetry.clear(); resync() },
     // Reads that failed while the stream was away are tried again.
     resumed() {
+      // Reconnect always checks the authorized projections, even if durable
+      // replay is complete: live ETA and workers can change without a revision.
+      resync()
       flushRetry.resume()
       // A pending addition read before the loss cannot join until a read
       // confirms it again, even when the stream resumes its full history.
@@ -244,8 +259,8 @@ export function useLiveList(options: LiveListOptions) {
   // ---------- Refetch and classify ----------
   // A read the list no longer needs (a load replaced the rows meanwhile)
   // still tells the row store what it found, unless a gap makes it doubtful.
-  function keep(items: ListItem[], sent: number) {
-    if (!nodes.gapSince(sent)) for (const item of items) nodes.adopt(item, sent)
+  function keep(items: ListItem[], sent: number, floors?: Map<string, number | undefined>) {
+    if (!nodes.gapSince(sent)) for (const item of items) nodes.adopt(item, sent, { projectionFloor: floors?.get(item.id) })
   }
   // True when a read failed: those rows went back to the queue.
   async function flush(): Promise<boolean> {
@@ -262,6 +277,9 @@ export function useLiveList(options: LiveListOptions) {
     for (let i = 0; i < ids.length; i += PAGE) {
       const chunk = ids.slice(i, i + PAGE)
       const sent = nodes.mark()
+      // Snapshot each projection floor before the request, including hints a
+      // resync (eventId 0) may have coalesced with this batch.
+      const floors = new Map(chunk.map(id => [id, nodes.projectionFloor(id)]))
       // What the store knew when the query was sent: a later copy that finds
       // a row the query did not return changed after it (a restore, say).
       const knew = new Map(chunk.map(id => [id, nodes.revision(id)]))
@@ -271,7 +289,7 @@ export function useLiveList(options: LiveListOptions) {
         const page = await fetchList({ ...apiParams(project, filters.value, { limit: PAGE }), ids: chunk }, 'matches')
         if (run !== generation) { keep(page.items, sent); return false }
         // The store has what the query found at once, not after the next read.
-        keep(page.items, sent)
+        keep(page.items, sent, floors)
         matched = new Map(page.items.map(item => [item.id, item]))
         // Shown rows that no longer match: closed, or gone from the project?
         const missing = chunk.filter(id => !matched.has(id) && rowById(id) && batch.get(id)!.change.change !== 'deleted')
@@ -299,12 +317,14 @@ export function useLiveList(options: LiveListOptions) {
         // the query did not return is judged by that read, not by the later
         // one that found it: news since the first (a restore) makes it stale.
         const overtaken = !matched.has(id) && (nodes.touchedSince(id, sent) || (!!copy && compareRevision(copy.updated_at, knew.get(id)) > 0))
-        if (copy) nodes.adopt(copy, sent)
+        if (copy) nodes.adopt(copy, sent, { projectionFloor: floors.get(id) })
         // A copy the store holds off (a deletion it learned after the read
         // was sent, without knowing when) cannot tell either: read again.
-        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id)))) { requeue(id, queued); continue }
+        if (overtaken || (copy && (nodes.newer(id, copy.updated_at) || nodes.isDeleted(id) || !nodes.projectionsCurrent(id, floors.get(id))))) { requeue(id, queued); continue }
         const newer = queue.get(id)
-        if (newer) {
+        // Apply the page that includes this batch's hint now. Only consume newer
+        // hints if it also includes them; otherwise the next batch reads again.
+        if (newer && nodes.projectionsCurrent(id)) {
           queue.delete(id)
           queued.change = mergeChanges(queued.change, newer.change)
           queued.own = queued.own && newer.own
@@ -317,6 +337,8 @@ export function useLiveList(options: LiveListOptions) {
     // Counts follow the rows: waiting updates change them when they apply.
     if (outcome.some(entry => entry.kind === 'patch' && entry.newer)) options.applied?.()
     watchPending()
+    if (failed) readFailed.value = true
+    else refreshed()
     return failed
   }
 
@@ -505,6 +527,8 @@ export function useLiveList(options: LiveListOptions) {
   const resyncRetry = new RefreshRetry(() => refreshLoaded())
   function resync() {
     if (!options.active.value || !options.loadedOnce.value) return
+    catchingUp.value = true
+    resyncPending = true
     if (options.loading.value) { resyncWanted = true; return }
     resyncRetry.request()
   }
@@ -528,7 +552,7 @@ export function useLiveList(options: LiveListOptions) {
         page = { items: pages.flatMap(page => page.items), next_cursor: null }
       } else page = await fetchList(apiParams(project, filters.value, { limit: Math.max(PAGE / 4, Math.min(PAGE, rows.value.length)) }), 'matches')
     }
-    catch { return run === generation }
+    catch { if (run === generation) readFailed.value = true; return run === generation }
     if (run !== generation) { keep(page.items, sent); return false }
     // Another gap after this read was sent: the resync it asked for reads again.
     if (nodes.gapSince(sent)) return false
@@ -543,13 +567,15 @@ export function useLiveList(options: LiveListOptions) {
     for (const row of rows.value) {
       seen.add(row.id)
       const item = fresh.get(row.id)
-      if (!item || nodes.waiting(row.id) || nodes.newer(row.id, item.updated_at)) receive(reread(row.id, item))
+      if (!item || !nodes.current(row.id) || !nodes.projectionsCurrent(row.id) || nodes.waiting(row.id) || nodes.newer(row.id, item.updated_at)) receive(reread(row.id, item))
     }
     for (const id of [...pending.ids(), ...queue.keys(), ...afterEditor]) {
       if (seen.has(id)) continue
       seen.add(id)
       if (!queue.has(id)) receive(reread(id))
     }
+    resyncPending = false
+    refreshed()
     return false
   }
 
@@ -560,6 +586,7 @@ export function useLiveList(options: LiveListOptions) {
     clearTimeout(batchTimer); batchTimer = undefined
     // A load reads the list anew: a refresh that failed is not needed any more.
     flushRetry.clear(); resyncRetry.clear()
+    resyncPending = false
     pending.clear(); held.clear(); afterEditor.clear(); classified.clear()
     watchPending()
   }
@@ -583,6 +610,7 @@ export function useLiveList(options: LiveListOptions) {
     if (read.kind === 'load' && read.sent !== undefined) for (const id of nodes.changedSince(read.sent)) if (!rowById(id) && !queue.has(id)) receive(reread(id))
     if (read.kind === 'load' && resyncWanted) { resyncWanted = false; resyncRetry.request() }
     else if (queue.size) schedule()
+    if (!nodes.gapSince(read.sent ?? nodes.mark())) refreshed()
   })
   watch(options.loading, loading => { if (!loading && queue.size) schedule() })
   watch(options.active, (on, was) => {
@@ -597,6 +625,11 @@ export function useLiveList(options: LiveListOptions) {
     watchPending()
   })
   onScopeDispose(store.subscribe(view))
+  onScopeDispose(store.onState(state => {
+    streamState.value = state
+    if (state === 'reconnecting' || state === 'connecting') catchingUp.value = true
+  }))
+  streamState.value = store.state
   onScopeDispose(nodes.hold(() => [...rows.value.map(row => row.id), ...pending.ids(), ...queue.keys()]))
   onScopeDispose(env.listen(() => { lastInput = env.now() }))
   onScopeDispose(() => {
@@ -611,7 +644,7 @@ export function useLiveList(options: LiveListOptions) {
     return out
   })
   return {
-    pending, pill, labels, flash, message, layout, apply,
+    pending, pill, labels, flash, message, layout, apply, updatedAt, dataStale,
     // Selected ids deleted meanwhile, for the bulk bar.
     deletedAmong: (ids: Iterable<string>) => pending.deletedAmong(ids),
     // For tests: run the batch and the safe-apply check now.

@@ -139,7 +139,10 @@ export const readSessionRequests = async (projectId: string, sessionId: string, 
   (await call<{ controls?: SessionChangeRequest[] }>(`/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}`, 'GET', undefined, signal)).body.controls ?? []
 // Agents working right now in every visible project, in one read (AEON-184). A
 // privacy-filtered projection for the Projects page, never merged with session rows.
-export const getLiveAgents = async () => (await call<LivePage>('/harness-sessions/live?include_inactive=true')).body
+export const getLiveAgents = async () => {
+  const answer = await call<LivePage>('/harness-sessions/live?include_inactive=true')
+  return stampAt(answer.body, { position: answer.position, start: answer.start })
+}
 
 // ---------- Writes ----------
 export const removeSession = async (session: { id: string; project_id: string }, reason: string) => {
