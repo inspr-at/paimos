@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentcompat"
 )
 
 const apiBase = "/api/agent-pairing"
@@ -61,11 +63,23 @@ type ProofRequest struct {
 	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
 }
 type SetupProgress struct {
+	AgentRelease    *agentcompat.Release     `json:"agent_release,omitempty"`
 	HarnessDetails  map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses map[string]string        `json:"harness_statuses,omitempty"`
 	State           string                   `json:"state"`
 	ErrorCode       string                   `json:"error_code,omitempty"`
 }
+
+// reportRelease uses the normal lifecycle response as capability negotiation.
+// It adds no discovery request, including during cold revocation or cleanup.
+func reportRelease(view View, progress *SetupProgress) *SetupProgress {
+	if view.AgentCompatibility != nil {
+		release := agentcompat.Current()
+		progress.AgentRelease = &release
+	}
+	return progress
+}
+
 type Verification struct {
 	Policy         string    `json:"policy"`
 	Mode           string    `json:"mode"`
@@ -94,6 +108,7 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	AgentCompatibility *agentcompat.Result      `json:"agent_compatibility,omitempty"`
 	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses    map[string]string        `json:"harness_statuses,omitempty"`
 	ExistingComputerID string                   `json:"existing_computer_id,omitempty"`
@@ -125,11 +140,12 @@ type View struct {
 	Revision           int64                    `json:"revision"`
 }
 type Guide struct {
-	InstanceURL       string   `json:"instance_url"`
-	DefaultTenantSlug string   `json:"default_tenant_slug"`
-	Protocol          string   `json:"protocol"`
-	Platforms         []string `json:"platforms"`
-	Version           string   `json:"version,omitempty"`
+	AgentCompatibility *agentcompat.Policy `json:"agent_compatibility,omitempty"`
+	InstanceURL        string              `json:"instance_url"`
+	DefaultTenantSlug  string              `json:"default_tenant_slug"`
+	Protocol           string              `json:"protocol"`
+	Platforms          []string            `json:"platforms"`
+	Version            string              `json:"version,omitempty"`
 }
 
 type PairingAPI interface {
@@ -236,6 +252,16 @@ func (c HTTPClient) Redeem(ctx context.Context, r ProofRequest) (View, error) {
 func (c HTTPClient) Reconcile(ctx context.Context, r ProofRequest) (View, error) {
 	var v View
 	e := c.call(ctx, "POST", "/reconcile", "", r, &v)
+	// A server downgrade may leave a saved advertisement from the newer server.
+	// Strict legacy decoding rejects the additive field before any mutation;
+	// retry that request once with only the old lifecycle shape.
+	var apiErr *APIError
+	if r.Progress != nil && r.Progress.AgentRelease != nil && errors.As(e, &apiErr) && apiErr.Code == "invalid_request" {
+		progress := *r.Progress
+		progress.AgentRelease = nil
+		r.Progress = &progress
+		e = c.call(ctx, "POST", "/reconcile", "", r, &v)
+	}
 	return v, e
 }
 func (c HTTPClient) Disconnect(ctx context.Context, token secret, account string) (View, error) {

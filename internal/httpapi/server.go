@@ -6,8 +6,10 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -36,6 +38,9 @@ type Server struct {
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
 	Web fs.FS
+	// PublicURL is this installation's origin, including the Classic API tombstone.
+	// Empty uses a relative root instead of another operator's installation.
+	PublicURL string
 	// Brand is the product's names from AEON_BRAND_FILE (brand.Load at startup);
 	// nil serves the embedded brand.json.
 	Brand *brand.Brand
@@ -121,7 +126,7 @@ func (s *Server) build() {
 	// Old classic API paths that used to be proxied from pm.barta.cm and
 	// flow.inspr.at/paimos land here (AEON-175). They moved for good: answer
 	// every method with 410 and the new location, without auth and without data.
-	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(handleClassicAPIGone)))
+	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(s.handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
 	// The catalog and roadmap HTML patterns are the public declarations for those pages.
 	spa := commonMiddleware(spaHandler(s.Web, s.brand()))
@@ -140,9 +145,13 @@ func (s *Server) build() {
 	s.handler = root
 }
 
-func handleClassicAPIGone(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleClassicAPIGone(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusGone)
-	_, _ = w.Write([]byte(`{"error":"moved","location":"https://aeon.barta.cm"}` + "\n"))
+	location := strings.TrimRight(s.PublicURL, "/")
+	if location == "" {
+		location = "/"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "moved", "location": location})
 }
