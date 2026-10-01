@@ -926,14 +926,19 @@ desktop action stays in the table header. Lazy pages retain the server's order.
 
 The auth adapter is isolated in `web/src/lib/api.ts`. Pending P0.3 contract
 confirmation, it expects `/api/me` to return
-`{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean }`.
+`{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean, oidc_display_name?: string }`.
 A 401 clears identity and routes to sign-in. Development email sign-in is
 hidden unless the server explicitly returns `dev_mode: true` (including on its
-401 response). It never relies on Vite's development mode. Login navigates to
+401 response). It never relies on Vite's development mode. Set
+`AEON_OIDC_DISPLAY_NAME` to the public name of your identity provider (for example,
+`Acme SSO`); the sign-in button, redirect hint and provider-specific errors use
+that name. Unset or whitespace-only names show neutral sign-in copy. The name
+is exposed on both the authenticated and unauthenticated `/api/me` responses.
+Login navigates to
 `/api/auth/login`; development login posts `{ email }` to `/api/auth/dev-login`;
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use
 same-origin credentials, a ten-second timeout, and no browser response cache.
-The backend owns authentication cookies and the INSPR authentication redirect.
+The backend owns authentication cookies and the configured OIDC authentication redirect.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty

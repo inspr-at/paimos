@@ -20,6 +20,9 @@ const email = ref('')
 const busy = ref(false)
 const retrying = ref(false)
 const devError = ref('')
+const providerName = computed(() => session.oidcDisplayName)
+const signInLabel = computed(() => providerName.value ? `Sign in with ${providerName.value}` : 'Sign in')
+const providerAccount = computed(() => providerName.value ? `Your ${providerName.value} account` : 'Your account')
 const returnPath = computed(() => {
   const value = route.query.return
   return typeof value === 'string' ? safeReturnPath(value) : pendingSignInReturn()
@@ -27,16 +30,16 @@ const returnPath = computed(() => {
 function startOIDC() { rememberSignInReturn(returnPath.value); session.beginSignIn() }
 
 // Codes the sign-in flow can send back as ?error=.
-const FLOW_ERRORS: Record<string, { title: string; body: string }> = {
-  failed: { title: 'Sign-in didn’t finish', body: 'INSPR ID answered, but the sign-in could not be completed. Please try once more.' },
-  denied: { title: 'Sign-in was cancelled', body: 'Access was declined at INSPR ID. Sign in again whenever you are ready.' },
+const flowErrors = computed<Record<string, { title: string; body: string }>>(() => ({
+  failed: { title: 'Sign-in didn’t finish', body: `${providerName.value ? `${providerName.value} answered, but the sign-in` : 'The sign-in'} could not be completed. Please try once more.` },
+  denied: { title: 'Sign-in was cancelled', body: `Access was declined${providerName.value ? ` at ${providerName.value}` : ''}. Sign in again whenever you are ready.` },
   expired: { title: 'Your session ended', body: 'For your security you were signed out after a while. Sign in again to pick up where you left off.' },
-  not_member: { title: 'Not a member of this workspace yet', body: 'Your INSPR ID works, but this workspace has not added you. Ask its owner for an invitation.' },
+  not_member: { title: 'Not a member of this workspace yet', body: `${providerAccount.value} works, but this workspace has not added you. Ask its owner for an invitation.` },
   unavailable: { title: 'Sign-in is not available right now', body: 'The workspace is not ready to accept sign-ins. Please try again in a moment.' },
-}
+}))
 const flowError = computed(() => {
   const code = typeof route.query.error === 'string' ? route.query.error : ''
-  return code ? FLOW_ERRORS[code] ?? FLOW_ERRORS.failed : null
+  return code ? flowErrors.value[code] ?? flowErrors.value.failed : null
 })
 const DEV_ERRORS: Record<SignInError['reason'], string> = {
   not_member: 'This email is not a member of this workspace yet.',
@@ -97,8 +100,8 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
         </div>
       </div>
 
-      <a class="btn primary login-button" href="/api/auth/login" @click="startOIDC"><AppIcon name="key" :size="16" />Sign in with INSPR ID<AppIcon name="arrow" :size="15" class="go" /></a>
-      <p class="fine">One account for everything INSPR. You are sent to INSPR ID and back.</p>
+      <a class="btn primary login-button" href="/api/auth/login" @click="startOIDC"><AppIcon name="key" :size="16" />{{ signInLabel }}<AppIcon name="arrow" :size="15" class="go" /></a>
+      <p class="fine">You are sent to {{ providerName || 'your identity provider' }} and back.</p>
 
       <form v-if="session.devMode" class="dev-form" @submit.prevent="signIn">
         <p class="dev-divider"><span class="eyebrow">Development only</span></p>

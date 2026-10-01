@@ -8,7 +8,7 @@ The supported release is the latest published INSPR calendar coordinate (`YYMMDD
 
 ## Security model
 
-People sign in with OIDC (Zitadel). A session belongs to one tenant. Email does not choose a tenant or join one. Agents do not use that login. They authenticate with a scoped API key.
+People sign in with the operator's configured OpenID Connect (OIDC) identity provider. A session belongs to one tenant. Email does not choose a tenant or join one. Agents do not use that login. They authenticate with a scoped API key.
 
 Every tenant row is isolated by Postgres row-level security on `tenant_id`. Production must use a database role that is not a superuser and does not bypass row-level security. A superuser would ignore the policies.
 
