@@ -81,12 +81,11 @@ func (m *Module) accountLinkDevice(w http.ResponseWriter, r *http.Request) {
 		var proof string
 		var owner *string
 		var revision int64
-		var now time.Time
-		err := tx.QueryRow(r.Context(), `SELECT c.lifecycle_hash,a.owner_person_id::text,a.link_revision,clock_timestamp()
+		err := tx.QueryRow(r.Context(), `SELECT c.lifecycle_hash,a.owner_person_id::text,a.link_revision
 FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
 JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
 WHERE a.id=$1 AND a.registered_by_principal_id=$2 AND c.principal_id=$2 AND a.daemon_id=c.daemon_id
-AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.archived_at IS NULL FOR UPDATE OF a`, in.AccountID, p.ID).Scan(&proof, &owner, &revision, &now)
+AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.archived_at IS NULL FOR UPDATE OF a`, in.AccountID, p.ID).Scan(&proof, &owner, &revision)
 		if err != nil {
 			return notFound(err)
 		}
@@ -96,21 +95,20 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 		if err = AccountFence(r.Context(), tx, in.AccountID, false); err != nil {
 			return err
 		}
+		if _, err = expireAccountLinks(r.Context(), tx, p, in.AccountID); err != nil {
+			return err
+		}
 		out.AccountID = in.AccountID
 		if in.Operation == "poll" {
 			var oldRevision int64
 			var linkedPerson *string
-			var expiry time.Time
-			err = tx.QueryRow(r.Context(), `SELECT state,expires_at,account_revision,person_id::text FROM account_person_link_requests WHERE id=$1 AND account_id=$2`, in.RequestID, in.AccountID).Scan(&out.State, &expiry, &oldRevision, &linkedPerson)
+			err = tx.QueryRow(r.Context(), `SELECT state,account_revision,person_id::text FROM account_person_link_requests WHERE id=$1 AND account_id=$2`, in.RequestID, in.AccountID).Scan(&out.State, &oldRevision, &linkedPerson)
 			if err != nil {
 				return notFound(err)
 			}
 			out.RequestID = in.RequestID
 			if oldRevision != revision || out.State == "linked" && (owner == nil || linkedPerson == nil || *owner != *linkedPerson) {
 				out.State = "revoked"
-			}
-			if out.State == "pending" && !expiry.After(now) {
-				out.State = "expired"
 			}
 			if out.State == "linked" {
 				if err = tx.QueryRow(r.Context(), `SELECT name FROM principals WHERE id=$1 AND kind='person'`, owner).Scan(&out.PersonName); err != nil {
@@ -132,9 +130,6 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 		var expiry time.Time
 		err = tx.QueryRow(r.Context(), `SELECT id::text,state,expires_at FROM account_person_link_requests WHERE account_id=$1 AND account_revision=$2 ORDER BY created_at DESC,id DESC LIMIT 1`, in.AccountID, revision).Scan(&out.RequestID, &out.State, &expiry)
 		if err == nil {
-			if out.State == "pending" && !expiry.After(now) {
-				out.State = "expired"
-			}
 			if in.Operation != "renew" {
 				return nil
 			}
@@ -142,9 +137,6 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 				return fail(409, "conflict", "account code is still pending")
 			}
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if _, err = tx.Exec(r.Context(), `UPDATE account_person_link_requests SET state='expired' WHERE account_id=$1 AND state='pending'`, in.AccountID); err != nil {
 			return err
 		}
 		var code string
@@ -155,7 +147,7 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 			}
 			code = fmt.Sprintf("%06d", n.Int64())
 			var exists bool
-			if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM account_person_link_requests WHERE user_code=$1)`, code).Scan(&exists); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM account_person_link_requests WHERE user_code_hash=$1)`, digest(code)).Scan(&exists); err != nil {
 				return err
 			}
 			if !exists {
@@ -166,7 +158,7 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 		if code == "" {
 			return fail(429, "rate_limited", "try again later")
 		}
-		if err = tx.QueryRow(r.Context(), `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code,account_revision) VALUES($1,$2,$3,$4) RETURNING id::text,expires_at`, p.TenantID, in.AccountID, code, revision).Scan(&out.RequestID, &expiry); err != nil {
+		if err = tx.QueryRow(r.Context(), `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code_hash,account_revision) VALUES($1,$2,$3,$4) RETURNING id::text,expires_at`, p.TenantID, in.AccountID, digest(code), revision).Scan(&out.RequestID, &expiry); err != nil {
 			return err
 		}
 		out.State = "pending"
@@ -174,7 +166,7 @@ AND c.state='connected' AND e.state='connected' AND c.archived_at IS NULL AND a.
 		out.Code = code[:3] + " " + code[3:]
 		out.URI = m.origin + "/link"
 		out.ExpiresAt = &expiry
-		return m.accountLinkEvent(r.Context(), tx, p, "account.link_offered", in.AccountID, "", revision)
+		return accountLinkEvent(r.Context(), tx, p, "account.link_offered", in.AccountID, "", revision)
 	})
 	if err != nil {
 		WriteError(w, err)
@@ -205,24 +197,27 @@ WHERE l.id=$1 AND a.archived_at IS NULL AND l.account_revision=a.link_revision F
 	v.Digest = digest(string(b))
 	return v, nil
 }
-func pendingAccountLink(ctx context.Context, tx pgx.Tx, v accountLinkReview) error {
+
+// A terminal result is separate from transaction errors so expiry and its audit
+// commit even when the HTTP response is 410. Callers hold the pairing lock.
+func pendingAccountLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, v accountLinkReview) (bool, error) {
 	if v.State != "pending" {
-		return fail(410, "code_expired", "account code expired or was used")
+		return false, nil
+	}
+	if expired, err := expireAccountLinks(ctx, tx, p, v.AccountID); err != nil || expired > 0 {
+		return false, err
 	}
 	if err := AccountFence(ctx, tx, v.AccountID, false); err != nil {
-		return err
+		return false, err
 	}
-	var unowned, live bool
-	if err := tx.QueryRow(ctx, `SELECT owner_person_id IS NULL,clock_timestamp()<$2 FROM agent_accounts WHERE id=$1`, v.AccountID, v.ExpiresAt).Scan(&unowned, &live); err != nil {
-		return err
-	}
-	if !live {
-		return fail(410, "code_expired", "account code expired or was used")
+	var unowned bool
+	if err := tx.QueryRow(ctx, `SELECT owner_person_id IS NULL FROM agent_accounts WHERE id=$1`, v.AccountID).Scan(&unowned); err != nil {
+		return false, err
 	}
 	if !unowned {
-		return fail(409, "conflict", "account is already linked")
+		return false, fail(409, "conflict", "account is already linked")
 	}
-	return nil
+	return true, nil
 }
 func (m *Module) accountLinkLookup(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	if r.Header.Get("Authorization") != "" {
@@ -246,20 +241,31 @@ func (m *Module) accountLinkLookup(w http.ResponseWriter, r *http.Request, p ten
 		return
 	}
 	var out accountLinkReview
+	var terminal bool
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var id string
-		if err := tx.QueryRow(r.Context(), `SELECT id::text FROM account_person_link_requests WHERE user_code=$1`, code).Scan(&id); err != nil {
+		var id, storedHash string
+		codeHash := digest(code)
+		if err := tx.QueryRow(r.Context(), `SELECT id::text,user_code_hash FROM account_person_link_requests WHERE user_code_hash=$1`, codeHash).Scan(&id, &storedHash); err != nil {
 			return notFound(err)
+		}
+		if subtle.ConstantTimeCompare([]byte(storedHash), []byte(codeHash)) != 1 {
+			return fail(404, "not_found", "account code not found")
 		}
 		var err error
 		out, err = readAccountLink(r.Context(), tx, id, p)
 		if err != nil {
 			return err
 		}
-		return pendingAccountLink(r.Context(), tx, out)
+		pending, err := pendingAccountLink(r.Context(), tx, p, out)
+		terminal = !pending
+		return err
 	})
 	if err != nil {
 		WriteError(w, err)
+		return
+	}
+	if terminal {
+		WriteError(w, fail(410, "code_expired", "account code expired or was used"))
 		return
 	}
 	reply(w, out)
@@ -288,33 +294,45 @@ func (m *Module) accountLinkApprove(w http.ResponseWriter, r *http.Request, p te
 		return
 	}
 	var out accountLinkReview
+	var terminal bool
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = readAccountLink(r.Context(), tx, r.PathValue("requestId"), p)
 		if err != nil {
 			return err
 		}
-		if err = pendingAccountLink(r.Context(), tx, out); err != nil {
+		pending, err := pendingAccountLink(r.Context(), tx, p, out)
+		if err != nil {
 			return err
+		}
+		if !pending {
+			terminal = true
+			return nil
 		}
 		if out.Revision != *in.Revision || subtle.ConstantTimeCompare([]byte(out.Digest), []byte(in.Digest)) != 1 {
 			return fail(409, "conflict", "account details changed; review the code again")
-		}
-		if _, err = tx.Exec(r.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=clock_timestamp() WHERE id=$1`, out.AccountID, p.ID); err != nil {
-			return err
 		}
 		consumed, err := tx.Exec(r.Context(), `UPDATE account_person_link_requests SET state='linked',person_id=$2 WHERE id=$1 AND state='pending' AND expires_at>clock_timestamp()`, out.RequestID, p.ID)
 		if err != nil {
 			return err
 		}
 		if consumed.RowsAffected() != 1 {
-			return fail(410, "code_expired", "account code expired or was used")
+			terminal = true
+			_, err = expireAccountLinks(r.Context(), tx, p, out.AccountID)
+			return err
+		}
+		if _, err = tx.Exec(r.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=clock_timestamp() WHERE id=$1`, out.AccountID, p.ID); err != nil {
+			return err
 		}
 		out.State = "linked"
-		return m.accountLinkEvent(r.Context(), tx, p, "account.linked", out.AccountID, p.ID, out.Revision)
+		return accountLinkEvent(r.Context(), tx, p, "account.linked", out.AccountID, p.ID, out.Revision)
 	})
 	if err != nil {
 		WriteError(w, err)
+		return
+	}
+	if terminal {
+		WriteError(w, fail(410, "code_expired", "account code expired or was used"))
 		return
 	}
 	reply(w, out)
@@ -390,7 +408,7 @@ func (m *Module) accountUnlink(w http.ResponseWriter, r *http.Request, p tenant.
 		if _, err := tx.Exec(r.Context(), `UPDATE account_person_link_requests SET state='revoked',person_id=NULL WHERE account_id=$1 AND state IN ('pending','linked')`, id); err != nil {
 			return err
 		}
-		return m.accountLinkEvent(r.Context(), tx, p, "account.unlinked", id, p.ID, revision+1)
+		return accountLinkEvent(r.Context(), tx, p, "account.unlinked", id, p.ID, revision+1)
 	})
 	if err != nil {
 		WriteError(w, err)
@@ -399,7 +417,63 @@ func (m *Module) accountUnlink(w http.ResponseWriter, r *http.Request, p tenant.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(204)
 }
-func (m *Module) accountLinkEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, event, account, person string, revision int64) error {
+func expireAccountLinks(ctx context.Context, tx pgx.Tx, p tenant.Principal, account string) (int, error) {
+	var revision int64
+	err := tx.QueryRow(ctx, `UPDATE account_person_link_requests SET state='expired'
+WHERE account_id=$1 AND state='pending' AND expires_at<=clock_timestamp() RETURNING account_revision`, account).Scan(&revision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 1, accountLinkEvent(ctx, tx, p, "account.link_expired", account, "", revision)
+}
+
+// Called under the pairing lock in the lifecycle transaction. Only pending
+// requests whose enrollment or computer was disconnected change state, so
+// retries and later drain finalization cannot append the event twice.
+func cancelDisconnectedAccountLinks(ctx context.Context, tx pgx.Tx, computer string) error {
+	rows, err := tx.Query(ctx, `UPDATE account_person_link_requests l SET state='revoked'
+FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+WHERE l.tenant_id=e.tenant_id AND l.account_id=e.account_id AND e.computer_id=$1
+AND l.state='pending' AND (e.state<>'connected' OR c.state<>'connected')
+RETURNING l.tenant_id::text,l.account_id::text,l.account_revision,c.principal_id::text`, computer)
+	if err != nil {
+		return err
+	}
+	type cancelled struct {
+		tenant, account, principal string
+		revision                   int64
+	}
+	var links []cancelled
+	for rows.Next() {
+		var link cancelled
+		if err = rows.Scan(&link.tenant, &link.account, &link.revision, &link.principal); err != nil {
+			rows.Close()
+			return err
+		}
+		links = append(links, link)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, link := range links {
+		p, ok := tenant.PrincipalFrom(ctx)
+		if !ok || p.TenantID != link.tenant {
+			// Lifecycle proof requests have no authenticated principal; attribute
+			// automatic revocation to the computer's paired agent.
+			p = tenant.Principal{ID: link.principal, TenantID: link.tenant, Kind: tenant.Agent}
+		}
+		if err = accountLinkEvent(ctx, tx, p, "account.link_cancelled", link.account, "", link.revision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func accountLinkEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, event, account, person string, revision int64) error {
 	_, err := events.Append(ctx, tx, p, events.Change{Type: event, After: map[string]any{"account_id": account, "person_id": person, "revision": revision}})
 	return err
 }

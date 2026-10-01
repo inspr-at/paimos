@@ -1936,7 +1936,7 @@ paths:
     post:
       operationId: accountLinkDevice
       summary: Offer or poll one account ownership code on its paired computer
-      description: Requires the paired runtime bearer with account.probe and its installation lifecycle proof. Only its connected enrollment is accepted. A first offer returns one six-digit code valid for ten minutes; subsequent offers never repeat the prompt. An explicit renew replaces an expired offer. Polls name the original request. No ownership, ongoing-use approval, capacity, grants or pairing changes occur here.
+      description: Requires the paired runtime bearer with account.probe and its installation lifecycle proof. Only its connected enrollment is accepted. A first offer returns one six-digit code valid for ten minutes; only its hash is persisted and subsequent offers never repeat the code or prompt. An explicit renew replaces an expired offer. Polls name the original request. Due pending requests become expired with one account.link_expired event in the same transaction. Computer or enrollment disconnect cancels pending requests with account.link_cancelled. No ownership, ongoing-use approval, capacity, grants or pairing changes occur here.
       requestBody:
         required: true
         content:
@@ -1960,14 +1960,14 @@ paths:
     post:
       operationId: lookupAccountLink
       summary: Review an account code as the current person
-      description: Same-origin signed-in person with profile.write. The code is looked up only in that person's tenant. A consumed or expired code cannot be looked up. No account ownership is changed.
+      description: Same-origin signed-in person with profile.write. The code hash is looked up only in that person's tenant and verified with a constant-time comparison. A consumed or expired code cannot be looked up. Observing expiry persists the expired state and account.link_expired event before returning 410. No account ownership is changed.
       requestBody:
         required: true
         content:
           application/json:
             schema: {type: object, additionalProperties: false, required: [user_code], properties: {user_code: {type: string, maxLength: 16}}}
       responses:
-        '200': {description: Account, computer and current person to confirm, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
+        '200': {description: 'Account, computer and current person to confirm', content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
         '403': {description: Same-origin signed-in person required}
         '404': {description: Code not found in current tenant}
         '410': {description: Code expired or consumed}
@@ -1976,7 +1976,7 @@ paths:
     post:
       operationId: approveAccountLink
       summary: Link the reviewed account to the current person in one confirmation
-      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Atomically consumes the code and appends account.linked. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
+      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Atomically consumes the code and appends account.linked. Observing expiry persists the expired state and account.link_expired event before returning 410. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
       parameters: [{name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody:
         required: true
