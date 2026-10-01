@@ -404,6 +404,23 @@ Cut and live for the §1 baseline come from rollout `cut_at` / `live_at` (the re
 
 Quote the JSON as release evidence. This repository has no `RUNBOOK.md`; the process runbook is the PPM entry `runbook/flywheel`, which is not edited here.
 
+### Native agentd qualification (AEON-487)
+
+Before publishing the release or merging its tap PR, download the signed
+`paimos-agentd-darwin-<arch>` asset and `SHA256SUMS` from the exact draft tag
+with the coordinator's approved identity. Verify its SHA-256 against that file
+and require `spctl --assess --type execute --verbose <asset>` to accept it.
+On the operator's Mac, with the existing daemon stopped, run
+`<asset> serve --setup-root <the operator's paired root>` in the foreground
+for 10 seconds. Require the control socket (`daemon/agentd.sock` under that
+root) to appear and the process to stay running; then stop it with Ctrl-C.
+Run the attach preview before any Touch ID qualification. Record the exact
+asset, digest and results; in-memory ACL fixtures alone do not qualify a release.
+The native ACL fixtures must also pass with the affected five-entry shape,
+exact root PROCESS selectors and the sole `teamid:P66J39QV6V` partition.
+Unreadable legacy subjects or unexpected partition payloads fail closed;
+qualification must use the existing paired item without rewriting its ACL.
+
 ### Publish after live verification (AEON-356)
 
 Run this explicit step from the release coordinator's checked-out release commit, only after recording the successful live verification against the image digest in the draft notes. Confirm the tag, draft state and complete nine-asset set (eight binaries plus `SHA256SUMS`); do not publish a draft from a failed or partial tag workflow.
