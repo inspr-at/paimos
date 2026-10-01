@@ -190,6 +190,8 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 			query += ` AND EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id=events.tenant_id AND n.id=events.node_id AND n.project_id=$8::uuid)`
 		}
 		if bounds.byTime {
+			// Direct bounds remain index conditions even for a generic prepared plan.
+			query = strings.Replace(query, "($5::timestamptz IS NULL OR at >= $5) AND ($6::timestamptz IS NULL OR at < $6)", "at >= $5::timestamptz AND at < $6::timestamptz", 1)
 			if bounds.cursorAt != nil {
 				args = append(args, bounds.cursorAt, bounds.cursorID)
 				query += ` AND (at,id)>($` + strconv.Itoa(len(args)-1) + `::timestamptz,$` + strconv.Itoa(len(args)) + `::bigint)`

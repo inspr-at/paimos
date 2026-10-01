@@ -115,14 +115,15 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
   const events = { items: [...new Map(eventItems.map(e => [e.id, e])).values()] }
   if (window.capped) notes.push('Your last visit was more than 366 days ago. This briefing covers the latest 366 days.')
   if (approvals?.length === 200) notes.push('Approvals show the latest 200 pending requests. Open Agents to check older requests.')
-  const ids = [...new Set([...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...(events?.items.filter(e => eventFact(e, 'p', 't')).map(e => e.node_id).filter((id): id is string => !!id) ?? []), ...(approvals?.filter(a => a.resource_kind === 'node').map(a => a.resource_id).filter((id): id is string => !!id) ?? [])])]
+  const logIds = new Set([...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...events.items.filter(e => eventFact(e, 'p', 't')).map(e => e.node_id).filter((id): id is string => !!id)])
+  const ids = [...new Set([...logIds, ...(approvals?.filter(a => a.resource_kind === 'node').map(a => a.resource_id).filter((id): id is string => !!id) ?? [])])]
   const rows: ListItem[] = []
   for (let i = 0; i < ids.length; i += 200) {
-    const page = await source('Ticket details', listNodes({ ids: ids.slice(i, i + 200), limit: 200 }, { signal }), true)
+    const page = await source('Ticket details', listNodes({ ids: ids.slice(i, i + 200), limit: 200 }, { signal }), ids.slice(i, i + 200).some(id => logIds.has(id)))
     if (page) rows.push(...page.items)
   }
   // Run telemetry is attached to its work order. Its ticket parent supplies the item link.
-  const parentIds = [...new Set(rows.filter(n => n.kind_slug === 'work_order' && n.parent?.kind_slug === 'ticket').map(n => n.parent!.id))].filter(id => !rows.some(n => n.id === id))
+  const parentIds = [...new Set(rows.filter(n => logIds.has(n.id) && n.kind_slug === 'work_order' && n.parent?.kind_slug === 'ticket').map(n => n.parent!.id))].filter(id => !rows.some(n => n.id === id))
   for (let i = 0; i < parentIds.length; i += 200) {
     const page = await source('Ticket details', listNodes({ ids: parentIds.slice(i, i + 200), limit: 200 }, { signal }), true)
     if (page) rows.push(...page.items)

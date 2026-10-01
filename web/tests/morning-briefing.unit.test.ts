@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { briefingCost, briefingDue, briefingRange, eventFact, loadBriefingEvents, loadBriefingOutcomes, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
+import { briefingCost, briefingDue, briefingRange, eventFact, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
 import { usageDashboard } from './usage-data'
 
 const now = new Date('2026-10-01T08:00:00Z')
@@ -59,4 +59,31 @@ it('continues each existing log without dropping or repeating rows', async () =>
 it('rejects nonadvancing pagination rather than marking a partial visit read', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ outcomes: [outcome], next_cursor: 'same' }), { status: 200 })))
   await expect(loadBriefingOutcomes(briefingRange(null, now))).rejects.toThrow('pagination did not advance')
+})
+
+it('gets the cutoff from the server log snapshot and preserves its submillisecond precision', async () => {
+  const range = { from: '2026-09-30T08:00:00.000001Z', to: '2026-10-01T08:00:00.123456Z', first: false, capped: false }
+  const requests: URL[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input, 'https://aeon.test'); requests.push(url)
+    return new Response(JSON.stringify(url.searchParams.has('briefing') ? { items: [{ id: 1 }], next_cursor: 'time-cursor', window: range } : { items: [{ id: 2 }], next_cursor: null }), { status: 200 })
+  }))
+  expect(await loadBriefingWindow({ last_visit: range.from })).toEqual({ range, events: { items: [{ id: 1 }, { id: 2 }], truncated: false } })
+  expect(requests[0]!.searchParams.get('since')).toBe(range.from)
+  expect(requests[0]!.searchParams.has('to')).toBe(false)
+  expect(requests[1]!.searchParams.get('to')).toBe(range.to)
+  expect(requests[1]!.searchParams.get('from')).toBe(range.from)
+})
+it('sums permitted dashboard amounts exactly and deduplicates shared account windows', () => {
+  const first = usageDashboard('reported'), second = usageDashboard('reported')
+  first.totals.estimated_cost_usd = '9007199254740993.000000000001'
+  second.totals.estimated_cost_usd = '0.000000000009'
+  first.totals.input_tokens = '9007199254740993'; second.totals.input_tokens = '10'
+  first.allowance.windows = [{ window_id: 'shared' } as typeof first.allowance.windows[number]]
+  second.allowance.windows = [...first.allowance.windows]
+  const total = sumBriefingUsage([first, second])
+  expect(total.totals.estimated_cost_usd).toBe('9007199254740993.000000000010')
+  expect(total.totals.input_tokens).toBe('9007199254741003')
+  expect(total.allowance.windows).toHaveLength(1)
+  expect(total.totals.unreported_sessions).toBe(first.totals.unreported_sessions + second.totals.unreported_sessions)
 })
