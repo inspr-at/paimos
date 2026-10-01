@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -100,7 +101,7 @@ func TestStatusHelpLiveLimitsAndProjectOverrides(t *testing.T) {
 	raw, _ := json.Marshal(defaults.Autopilot.Rules)
 	write := func(enabled bool, mode string) {
 		t.Helper()
-		err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO status_autopilot_settings(tenant_id,enabled,rules) VALUES($1,$2,$3) ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,rules=excluded.rules`, p.TenantID, enabled, raw)
 			if err != nil {
 				return err
