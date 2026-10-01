@@ -27,6 +27,11 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":principal-backfill"); err != nil {
 			return err
 		}
+		// Serialize email repairs with invitation candidate selection, imports
+		// and manual linking. Acquire this before taking any principal row locks.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,i.display_name,p.email,i.email,u.after->'classic',u.after->'principal'->>'name',to_jsonb(p)
    FROM principals p JOIN identities i ON i.id=p.identity_id
    LEFT JOIN LATERAL (SELECT after FROM events WHERE tenant_id=p.tenant_id
