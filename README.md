@@ -147,6 +147,28 @@ changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
 cited sources, turns and design inputs; `format=stored` also returns the exact
 submitted bytes. `cursor` returns the latest snapshot and replay position.
 
+Journal and snapshot contracts support minor 2 while retaining legacy inline
+pending operations. New `pending_op.content` records and reference snapshots
+require `min_reader: 2`. Content is immutable and deduplicated by SHA-256 within
+each tenant/session; every submitted event ID retains byte-exact conflict
+checking. A reference snapshot commits only after its content sequence, digest
+and UTF-8 size match an acknowledged content record in the same session.
+
+Large content and snapshots use the AIT-89 chunk protocol on the existing
+routes: POST with `upload=<original-byte SHA-256>&ack=seq` and a JSON body
+`{offset,total,chunk}` containing canonical base64 of up to 256 KiB. Intermediate
+replies contain `{offset,total}`; only a complete, digest-verified submission
+commits and returns `{seq}`. Offset zero restarts an interrupted upload. Staging
+survives host restarts, permits at most 64 unfinished uploads per session, and
+is discarded on takeover or purge. Every request retains the 1 MiB cap.
+`ack=seq` also works for ordinary writes. `cursor?snapshot=seq` returns a bounded
+snapshot reference; `records?digests=<sha256>` resolves content addresses to
+sequences, and `records?ids=<seq>&offset=<byte offset>&length=262144` returns
+`{seq,offset,total,chunk}` for lossless hydration. The adapter verifies and
+hydrates reference content through these reads; snapshots retain their exact
+reference envelopes. Migration 1100's narrowly relaxed storage constraint has
+an explicit policy exception requiring coordinator review before merge/release.
+
 The ledger admits against session, principal/day and tenant/day caps, commits
 one digest-bound claim per hold after a matching worker `budget.hold` journal
 acknowledgement, and settles actual cost or an unknown maximum. Only the claim's

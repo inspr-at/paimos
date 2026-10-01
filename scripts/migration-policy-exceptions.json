@@ -7,6 +7,12 @@
       "sourceCommit": "17d9dc7975cfccf77744ed69cb66c9d2e86d68fe",
       "ticket": "AEON-397",
       "reason": "Contract behavior change already merged before policy integration: the replacement reservation guard requires person-confirmed quota_pool_fingerprint instead of self-reported quota_fingerprint. Existing accounts start unconfirmed, so new/reactivated shared-pool holds stop until a person confirms; existing active holds may still release/settle. This is not expand-safe and previous-binary read probes do not prove quota-write compatibility. AEON-415 draft PR #71 exposes this exact-byte exception for coordinator review; owner acceptance of the rollout or a staged follow-up migration is required before release."
+    },
+    {
+      "file": "1100_aithema_pending_content.sql",
+      "sha256": "c1367e072e272895061b58f9aa4309df2c561b49b4007da3f1fb1c0ffd27cb37",
+      "ticket": "AEON-483",
+      "reason": "AIT-89 requires logical snapshots and pending_op.content records larger than 1 MiB, transported in bounded 256 KiB chunks. This migration only relaxes the original_bytes check for those documents; the ordinary-event bound and previous binary columns remain intact. DROP CONSTRAINT is outside the structural expand-safe allowlist, so the exact-byte exception is explicit for coordinator review before merge/release. Workers only measure draft CI; this does not grant acceptance or skip previous-binary compatibility probes."
     }
   ]
 }
