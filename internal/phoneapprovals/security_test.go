@@ -35,7 +35,7 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 	}
 	requestFor := func(resourceID any, expired bool) string {
 		var id string
-		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,'nodes.read',CASE WHEN $3::uuid IS NULL THEN 'tenant' ELSE 'project' END,$3,'Phone fixture',CASE WHEN $4 THEN now()-interval '1 second' ELSE now()+interval '2 hours' END) RETURNING id::text`, f.p.TenantID, f.agent.ID, resourceID, expired).Scan(&id); err != nil {
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,'nodes.read',CASE WHEN $3::uuid IS NULL THEN 'tenant' ELSE 'node' END,$3,'Phone fixture',CASE WHEN $4 THEN now()-interval '1 second' ELSE now()+interval '2 hours' END) RETURNING id::text`, f.p.TenantID, f.agent.ID, resourceID, expired).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id
