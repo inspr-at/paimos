@@ -169,8 +169,8 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	if err := tx.QueryRow(ctx, `SELECT coalesce(max(sequence),0)+1 FROM harness_controls WHERE session_id=$1`, s.ID).Scan(&sequence); err != nil {
 		return s, err
 	}
-	c, err := scanControl(tx.QueryRow(ctx, `INSERT INTO harness_controls(tenant_id,session_id,kind,value,sequence,requested_by_principal_id,expected_generation)
- VALUES($1,$2,'stop','pause',$3,$4,$2) RETURNING `+controlColumns, p.TenantID, s.ID, sequence, p.ID))
+	c, err := scanControl(tx.QueryRow(ctx, `INSERT INTO harness_controls(tenant_id,session_id,kind,request_payload,sequence,requested_by_principal_id,expected_generation)
+ VALUES($1,$2,'stop','{"pause":true}'::jsonb,$3,$4,$2) RETURNING `+controlColumns, p.TenantID, s.ID, sequence, p.ID))
 	if err != nil {
 		return s, err
 	}

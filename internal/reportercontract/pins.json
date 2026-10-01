@@ -700,7 +700,7 @@
   },
   "harness-session": {
     "version": "harness-session/1.10",
-    "sha256": "a43b2a466a938a58aea6f80a45617b8c0a4186fc8019e8ab573a6ecd1ba171f8",
+    "sha256": "709a3c9ff72acda248270afa5294360863778df2208f807ae3e3a0d80191096d",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -865,7 +865,6 @@
           "continuation": {
             "properties": {
               "brief": {
-                "never truncated to the metadata brief label.": null,
                 "type": "string"
               },
               "handover": {
@@ -1728,7 +1727,6 @@
           "continuation": {
             "properties": {
               "brief": {
-                "never truncated to the metadata brief label.": null,
                 "type": "string"
               },
               "handover": {

@@ -4783,7 +4783,7 @@ paths:
       responses:
         '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid payload}
-        '403': {description: Ownership, scope or worker proof rejected}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
         '409': {description: Session or pause transition conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/pause-plan:
     parameters:
@@ -4796,7 +4796,7 @@ paths:
       responses:
         '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
         '400': {description: Invalid payload}
-        '403': {description: Ownership, scope or worker proof rejected}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
         '409': {description: Session or pause transition conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/resume:
     parameters:
@@ -4809,7 +4809,7 @@ paths:
       responses:
         '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessResume'}}}}
         '400': {description: Invalid payload}
-        '403': {description: Ownership, scope or worker proof rejected}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
         '409': {description: Session or pause transition conflicts}
   /projects/{projectId}/harness-sessions/pause:
     parameters:
@@ -5310,7 +5310,7 @@ paths:
     post:
       security: *auth
       operationId: yieldHarnessSession
-      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with value=pause are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
       requestBody:
         required: true
         content:
@@ -12042,7 +12042,7 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
-        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit stopped or heartbeat-lost coordinator, or paused worker with a durable resume request, owned by the same principal in this project.}
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: 'Explicit stopped or heartbeat-lost coordinator, or paused worker with a durable resume request, owned by the same principal in this project.'}
         max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
         rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80, description: "Aeon CLI or agentd version reporting the capability."}
         agent_principal_id: {type: string, format: uuid}
@@ -12368,7 +12368,7 @@ components:
       properties:
         succeeds_session_id: {type: string, format: uuid}
         handover: {$ref: '#/components/schemas/HarnessHandover'}
-        brief: {type: string, description: Full continuation brief built from the durable handover, never truncated to the metadata brief label.}
+        brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
     HarnessResumeRequest:
       type: object
       additionalProperties: false

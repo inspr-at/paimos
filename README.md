@@ -438,7 +438,7 @@ may control other registrations). An agent coordinator uses `--project`,
 Global `--all` spans the person's visible authorized projects; `--project` narrows
 it. Batches return up to 200 items and `more`; repeat while `more` is true.
 Requests and the default ten-minute handover deadline persist in Postgres.
-The pause control uses the existing `stop` kind with `value=pause`; managed
+The pause control uses the existing `stop` kind with `request_payload.pause=true`; managed
 yield holds it aside so it cannot accidentally trigger an immediate signal.
 Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
 an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.

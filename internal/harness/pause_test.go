@@ -135,7 +135,7 @@ func TestPauseRequestsConcurrentAndManagedYieldKeepsLegacyStop(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "applied", "reason": "paused"}, lease), 409)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var count int
-		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1 AND value='pause'`, strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")).Scan(&count)
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1 AND request_payload->>'pause'='true'`, strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")).Scan(&count)
 		if err == nil && count != 1 {
 			t.Error("duplicate pause controls")
 		}
