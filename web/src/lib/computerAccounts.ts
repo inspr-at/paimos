@@ -111,7 +111,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
   if (!computer && row.state === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${row.host} until it reports again.` }
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }
   if (computer && computer.computer_state === 'connected' && computer.setup_state !== 'connected' && computer.connectivity !== 'online') return { kind: 'setup', text: 'Waiting for setup', tone: 'mute', tip: `${computer.computer_name} has not confirmed that setup finished.` }
-  if (row.state === 'signin') return { kind: 'signin', text: 'Signed out', tone: 'warn', command: LOGIN_COMMAND[row.harness] ?? '', tip: `Sign in again on ${computer?.computer_name ?? row.host}; Aeon never takes the password.` }
+  if (row.state === 'signin') return { kind: 'signin', text: 'Signed out', tone: 'warn', command: LOGIN_COMMAND[row.harness] ?? '', tip: `Sign in again on ${computer?.computer_name ?? row.host}; the password stays with the vendor.` }
   if (computer && enrollment) {
     const label = describeEnrollmentStatus(computer, enrollment)
     if (label && label !== 'Ready') {
@@ -215,6 +215,9 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
   for (const row of input.rows) if (!owner.has(row.id)) loose.set(row.host || 'Unknown computer', [...(loose.get(row.host || 'Unknown computer') ?? []), row])
   for (const [host, rows] of loose) {
     const accounts = rows.map(r => line(r, null))
+    // Accounts from an older pairing of a listed computer stay on its card.
+    const same = cards.find(c => c.computer && c.name === host)
+    if (same) { same.accounts.push(...accounts); same.legend ||= accounts.some(a => a.capacity.kind === 'bar' && a.capacity.gauge.tick !== null); continue }
     const offline = rows.every(r => r.state === 'offline')
     cards.push({
       key: `host:${host}`, name: host, computer: null, status: offline ? { text: 'Offline', tone: 'warn', live: false } : null, caption: '', agent: '', notice: null,

@@ -42,6 +42,9 @@ const computersRef = ref<InstanceType<typeof ConnectedComputers>>()
 
 // ---------- Fold, remembered per person (AEON-402) ----------
 const layoutPref = usePreference<{ setupFolded?: boolean }>('agents-page')
+// The stored choice decides before the cards first show: no flash of a folded panel.
+const layoutReady = ref(false)
+void layoutPref.ready.then(() => { layoutReady.value = true })
 const folded = computed(() => !!layoutPref.value.value?.setupFolded)
 function toggleFold() { layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded: !folded.value }, 0) }
 
@@ -149,13 +152,17 @@ async function removeAccount(line: AccountLine, host: string) {
     confirmLabel: 'Remove account', danger: true,
   })
   if (!ok) return
+  const menus = () => [...(root.value?.querySelectorAll<HTMLElement>('.acct .row-more button') ?? [])]
+  const index = menus().findIndex(el => el.closest<HTMLElement>('.acct')?.dataset.account === line.id)
   removing.value = line.id
   try {
     await agents.removeAccount(line.row)
     toast(`Removed ${line.identity}. Its runs and history stay.`)
+    // A disabled button takes no focus: settle busy before moving focus to the next row's menu.
     removing.value = ''
     await nextTick()
-    root.value?.querySelector<HTMLElement>('#ac-title')?.focus()
+    const left = menus()
+    ;(left[Math.min(index, left.length - 1)] ?? root.value?.querySelector<HTMLElement>('#ac-title'))?.focus()
   } catch (e) {
     const busyRun = e instanceof Error && /still working/i.test(e.message)
     toast(busyRun ? `A run is still working on ${line.identity}. Remove it once that run ends.` : e instanceof Error ? e.message : 'The account was not removed. Please try again.', { tone: 'error' })
@@ -327,10 +334,10 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 </script>
 
 <template>
-  <section ref="root" class="ac" :class="{ folded }" aria-labelledby="ac-title">
+  <section v-if="layoutReady" ref="root" class="ac" :class="{ folded }" aria-labelledby="ac-title">
     <div class="ac-head">
       <div class="ac-title">
-        <button type="button" class="fold" :aria-expanded="!folded" aria-controls="ac-body" :aria-label="folded ? 'Show accounts and computers' : 'Fold accounts and computers'" @click="toggleFold">
+        <button type="button" class="fold" :aria-expanded="!folded" aria-controls="ac-body" aria-label="Accounts and computers" :data-tip="folded ? 'Show' : 'Fold'" @click="toggleFold">
           <AppIcon name="chevron-right" :size="14" class="chev" />
         </button>
         <h2 id="ac-title" tabindex="-1">Accounts and computers</h2>
