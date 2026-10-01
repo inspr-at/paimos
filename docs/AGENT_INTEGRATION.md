@@ -239,6 +239,8 @@ nulls when the original estimate or route was unknown. No historical start is
 backfilled from today's values. The snapshot records hours, estimated tokens and
 API list cost, the planned profile/model/effort and registry revision, and calibration
 and price/mix rates. Cost calibration excludes other projects' private costs.
+The baseline is stored separately from editable ticket fields; closing an episode
+changes only its lifecycle metadata, never the captured estimate.
 The latest snapshot accompanies live planning; its cost and cost-rate fields are
 omitted without `harness.read` on both the ticket's current project and its saved
 source project, including after project moves (AEON-370).
