@@ -28,7 +28,7 @@ export function agentData(world: AgentWorld) {
     [agent(1)]: 'claude:camy', [agent(2)]: 'codex:nova', [agent(3)]: 'pi:pixel', [agent(4)]: 'cursor:kite',
     [agent(5)]: 'grok:amy', [agent(6)]: 'claude:sable', [agent(7)]: 'codex:orbit',
   }
-  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null }
+  const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null, finished: false }
   const summary = (nodeId: unknown) => typeof nodeId === 'string' && world.nodes?.[nodeId] ? { id: nodeId, ...world.nodes[nodeId] } : null
   const session = (n: number, fields: Record<string, unknown>) => ({ ...base, id: id('5e', n), ...fields, project: summary(fields.project_id) ?? { id: fields.project_id, key: '', title: '' }, ticket: summary(fields.ticket_node_id) })
   const sessions = world.empty ? [] : [
@@ -313,3 +313,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
   await page.route('**/api/**', handler)
   return calls
 }
+// Reads of the tenant-wide session list the Agents page keeps fresh. Every accepted
+// write on the page reads it again (AEON-449): compare the count before and after.
+export const sessionListReads = (calls: { path: string; method: string; query?: URLSearchParams }[]) =>
+  calls.filter(call => call.method === 'GET' && call.path === '/api/harness-sessions' && call.query?.get('view') === 'current').length

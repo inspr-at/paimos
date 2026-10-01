@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingGuide } from './agent-pairing-fixtures'
+import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingEnrollment, pairingGuide, pairingView } from './agent-pairing-fixtures'
 
 test('Homebrew offers two commands and removal after draining', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -316,6 +317,173 @@ test('an unknown formula check shows the direct download without claiming the ta
   await expect(page.locator('option', { hasText: 'direct download' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Copy checksum installer' })).toBeVisible()
 })
+
+const LIVE_COMPUTER = '33333333-3333-4333-8333-333333333333'
+const LIVE_OTHER = '99999999-9999-4999-8999-999999999999'
+const LIVE_ENROLLMENTS = () => [
+  pairingEnrollment('44444444-4444-4444-8444-444444444444', 'cursor-1', 'cursor', 'Cursor work'),
+  pairingEnrollment('55555555-5555-4555-8555-555555555555', 'codex-1', 'codex', 'Codex work'),
+]
+const liveSettingUp = () => pairingView({
+  state: 'approved', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 2, setup_state: 'approved', connectivity: 'unknown', enrollments: LIVE_ENROLLMENTS(),
+})
+const liveConnected = () => pairingView({
+  state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 4, setup_state: 'connected', connectivity: 'online',
+  last_seen_at: '2026-09-27T20:00:30.000Z', harness_statuses: { codex: 'ready' }, harness_details: { codex: { state: 'ready' } }, enrollments: LIVE_ENROLLMENTS(),
+})
+
+// A stream the test drives: it records the URLs the page opens and delivers named events with JSON data.
+async function fakeEventStream(page: Page) {
+  await page.addInitScript(() => {
+    const opened: string[] = []
+    Object.assign(window, { __streams: opened })
+    class Stream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      constructor(url: string) {
+        super()
+        opened.push(String(url))
+        window.addEventListener('test:stream', event => {
+          const { name, data } = (event as CustomEvent<{ name: string; data: unknown }>).detail
+          this.dispatchEvent(new MessageEvent(name, { data: JSON.stringify(data) }))
+        })
+      }
+      close() {}
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+}
+const emitStream = (page: Page, name: string, data: unknown) => page.evaluate(detail => window.dispatchEvent(new CustomEvent('test:stream', { detail })), { name, data })
+const reported = (computer: string) => ({ id: 1, type: 'agent_pairing.reported', after: { computer_id: computer, setup_state: 'connected' } })
+
+// Approve the fixture pairing and land on the review that follows the computer.
+async function approveFixture(page: Page) {
+  await page.goto('/agents/register-agent')
+  await page.getByLabel('Pairing code').fill('123-456-789')
+  await page.getByRole('button', { name: 'Look up code' }).click()
+  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
+  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await expect(review.getByRole('heading', { name: 'Setting up', exact: true })).toBeVisible()
+  return review
+}
+
+test('a daemon connect updates the review to Connected without a reload', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await fakeEventStream(page)
+  await mockWork(page, fixtures())
+  await mockPairing(page)
+  let connectedNow = false
+  let reads = 0
+  await page.route('**/api/agent-pairing/computers**', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/agent-pairing/computers') return route.fulfill({ json: { computers: connectedNow ? [liveConnected()] : [] } })
+    reads += 1
+    return route.fulfill({ json: connectedNow ? liveConnected() : liveSettingUp() })
+  })
+  const review = await approveFixture(page)
+  await expect(page.getByRole('heading', { name: 'Connected', exact: true })).toHaveCount(0)
+  await expect(page.getByText('No computers are connected in this workspace yet.')).toBeVisible()
+  // The page follows the stream in live mode: it never asks for the history.
+  expect(await page.evaluate(() => (window as unknown as { __streams: string[] }).__streams)).toContain('/api/events/stream?after=latest')
+  expect(await page.evaluate(() => (window as unknown as { __streams: string[] }).__streams.filter(url => !url.includes('after=latest')).length)).toBe(0)
+  // Another computer's report does not wake it.
+  await emitStream(page, 'agent_pairing.reported', reported(LIVE_OTHER))
+  await page.clock.runFor(1000)
+  expect(reads).toBe(0)
+  connectedNow = true
+  // A burst of its own reports reads once.
+  for (let i = 0; i < 12; i++) await emitStream(page, 'agent_pairing.reported', reported(LIVE_COMPUTER))
+  await page.clock.runFor(400)
+  await expect(review.getByRole('heading', { name: 'Connected', exact: true })).toBeVisible()
+  expect(reads).toBe(1)
+  await expect(review.getByText('Ready', { exact: true })).toBeVisible()
+  await expect(review.getByText('Add another harness from this computer, or set an ongoing allowance when you want more work.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Connected computers' }).locator('.status')).toHaveText('Connected')
+})
+
+test('a reset during an outstanding read that then fails does not restart polling', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await fakeEventStream(page)
+  await mockWork(page, fixtures())
+  await mockPairing(page)
+  const held: Route[] = []
+  await page.route('**/api/agent-pairing/computers/**', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    held.push(route)
+  })
+  const review = await approveFixture(page)
+  await page.clock.runFor(5000)
+  await expect.poll(() => held.length).toBe(1)
+  await review.getByRole('button', { name: 'Use a different code' }).click()
+  await expect(page.getByLabel('Pairing code')).toBeVisible()
+  await held[0].fulfill({ status: 503, json: { error: 'unavailable', code: 'unavailable' } })
+  // Half an hour of backoff and lifetime would pass: nothing reads again.
+  await page.clock.runFor(30 * 60 * 1000)
+  expect(held).toHaveLength(1)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+for (const [name, final] of [
+  ['a failed setup', () => pairingView({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 3, setup_state: 'setup_failed', setup_error: 'installation_failed', connectivity: 'offline', enrollments: LIVE_ENROLLMENTS() })],
+  ['a failed verification on an offline computer', () => pairingView({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 3, setup_state: 'connected', connectivity: 'offline', enrollments: LIVE_ENROLLMENTS().map(item => ({ ...item, verification_state: 'failed', verification_error: 'The run did not finish.' })) })],
+  ['a cancelled verification on an offline computer', () => pairingView({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 3, setup_state: 'connected', connectivity: 'offline', enrollments: LIVE_ENROLLMENTS().map(item => ({ ...item, verification_state: 'cancelled' })) })],
+] as const) {
+  test(`${name} ends the polling`, async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+    await fakeEventStream(page)
+    await mockWork(page, fixtures())
+    await mockPairing(page)
+    let reads = 0
+    await page.route('**/api/agent-pairing/computers/**', route => {
+      if (route.request().method() !== 'GET') return route.fallback()
+      reads += 1
+      return route.fulfill({ json: reads === 1 ? final() : liveSettingUp() })
+    })
+    await approveFixture(page)
+    await page.clock.runFor(5000)
+    await expect.poll(() => reads).toBe(1)
+    await page.clock.runFor(10 * 60 * 1000)
+    expect(reads).toBe(1)
+  })
+}
+
+// The page states after approval, in light and dark, axe-clean and without sideways
+// scroll at 390 px. PAIRING_LIVE_SHOTS=<dir> also writes the screenshots.
+const LIVE_STATES: [string, () => Record<string, unknown>, string][] = [
+  ['setting-up', () => ({ state: 'approved', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 2, setup_state: 'approved', connectivity: 'unknown', enrollments: LIVE_ENROLLMENTS() }), 'Setting up'],
+  ['connected', () => ({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 4, setup_state: 'connected', connectivity: 'online', last_seen_at: '2026-09-27T20:00:30.000Z', harness_statuses: { codex: 'ready' }, harness_details: { codex: { state: 'ready' } }, enrollments: LIVE_ENROLLMENTS() }), 'Connected'],
+  ['setup-failed', () => ({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 3, setup_state: 'setup_failed', setup_error: 'installation_failed', connectivity: 'offline', enrollments: LIVE_ENROLLMENTS() }), ''],
+  ['verification-failed', () => ({ state: 'redeemed', computer_id: LIVE_COMPUTER, computer_state: 'connected', revision: 3, setup_state: 'connected', connectivity: 'offline', enrollments: LIVE_ENROLLMENTS().map(item => ({ ...item, verification_state: 'failed', verification_error: 'The run did not finish.' })) }), ''],
+]
+for (const [name, state, title] of LIVE_STATES) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const width of [1280, 390]) {
+      test(`register page ${name} in ${colorScheme} at ${width}px passes axe and fits`, async ({ page }) => {
+        await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+        await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await fakeEventStream(page)
+        await mockWork(page, fixtures())
+        await mockPairing(page, {}, state())
+        await page.route('**/api/agent-pairing/computers/**', route => route.request().method() === 'GET' ? route.fulfill({ json: pairingView(state()) }) : route.fallback())
+        const review = await approveFixture(page)
+        await page.clock.runFor(5500)
+        if (title) await expect(review.getByRole('heading', { name: title, exact: true })).toBeVisible()
+        await expect(page.getByRole('region', { name: 'Connected computers' })).toBeVisible()
+        await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+        const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+        const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}`).join('\n')}`)
+        expect(summary, summary.join('\n')).toEqual([])
+        if (process.env.PAIRING_LIVE_SHOTS) {
+          mkdirSync(process.env.PAIRING_LIVE_SHOTS, { recursive: true })
+          await page.screenshot({ path: join(process.env.PAIRING_LIVE_SHOTS, `register-${name}__${width}__${colorScheme}.png`), fullPage: true })
+        }
+      })
+    }
+  }
+}
 
 test('Agents links to Connect your machine', async ({ page }) => {
   await mockWork(page, fixtures())

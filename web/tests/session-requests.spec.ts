@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
-import { agentData, mockAgents } from './agents-fixtures'
+import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 import type { SessionChangeRequest } from '../src/lib/agents'
 
 const now = Date.parse('2026-09-29T06:00:00Z')
@@ -17,7 +17,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', admin = true
   const worker = data.sessions[1]!
   Object.assign(worker, { management_mode: 'unmanaged', display_label: 'Release checks', model: 'Current model', reasoning_effort: 'medium', account_label: 'Codex Pro', run_id: null, parent_harness_session_id: null })
   data.sessions.splice(0, data.sessions.length, worker); data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0)
-  await mockAgents(page, data)
+  const calls = await mockAgents(page, data)
   const controls: SessionChangeRequest[] = []
   const submissions: Record<string, unknown>[] = []
   const path = `**/api/projects/${worker.project_id}/harness-sessions/${worker.id}`
@@ -39,7 +39,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', admin = true
       models: [{ model: 'Catalog model', family: 'openai', efforts: [{ effort: 'high', model_profile_id: profileID, version: 'v1' }] }],
     }] }] }],
   } }))
-  return { worker, controls, submissions }
+  return { worker, controls, submissions, calls }
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
@@ -81,6 +81,19 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(requests.getByText('Expired', { exact: true })).toBeVisible()
   })
 }
+
+test('an accepted request reads the lists again', async ({ page }) => {
+  const { worker, calls } = await setup(page)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const requests = page.getByRole('complementary', { name: 'Session details' }).getByRole('region', { name: 'Session requests' })
+  await requests.getByText('Ask this session to…').click()
+  await requests.getByRole('textbox', { name: 'Requested session name' }).fill('Ready for release')
+  const before = sessionListReads(calls)
+  await requests.getByRole('button', { name: 'Send request' }).click()
+  await expect(requests).toContainText('Requested · waiting for the session')
+  await page.clock.runFor(100)
+  await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
+})
 
 test('a managed or stopped session has no request composer', async ({ page }) => {
   const { worker } = await setup(page)

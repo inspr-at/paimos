@@ -118,9 +118,11 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = rt.stdin, rt.stdout, rt.stderr
 	if !ownedprocess.Configure(cmd) {
+		session.stopReason = stopProcessFailed
 		return errors.Join(errors.New("owned process group unavailable"), finish())
 	}
 	if err = cmd.Start(); err != nil {
+		session.stopReason = stopProcessFailed
 		return errors.Join(err, finish())
 	}
 	life := ownedprocess.Track(cmd)
@@ -154,6 +156,10 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 		}
 		timer.Stop()
 	}
+	// The stop names how the job ended: a clean exit finishes it, any other exit
+	// fails it, and an interrupt is a plain stop (AEON-437). Set before the loop
+	// that closes the session sees the cancellation.
+	session.stopReason = jobStopReason(ctx.Err() != nil, childErr)
 	cancelBeat()
 	beatErr := <-beatDone
 	if beatErr != nil {
@@ -174,4 +180,32 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 		return childErr
 	}
 	return beatErr
+}
+
+// Stop reasons the server accepts for a session whose process ended.
+const (
+	stopProcessExited = "process_exited"
+	stopProcessFailed = "process_failed"
+)
+
+// persistedStopReason is what stop.intent may carry: only how a job ended. Any other
+// text, including a reason the server takes for other stops, reads back as a plain stop.
+func persistedStopReason(reason string) string {
+	switch reason = strings.TrimSpace(reason); reason {
+	case stopProcessExited, stopProcessFailed:
+		return reason
+	default:
+		return ""
+	}
+}
+
+func jobStopReason(interrupted bool, childErr error) string {
+	switch {
+	case interrupted:
+		return "stopped"
+	case childErr == nil:
+		return stopProcessExited
+	default:
+		return stopProcessFailed
+	}
 }

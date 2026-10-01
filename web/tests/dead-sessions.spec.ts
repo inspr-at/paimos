@@ -83,7 +83,7 @@ test('Lost contact is an ended row with a bin; one click removes, Undo brings it
   await page.goto('/agents')
   // Not a Problem under Needs attention: it sits with the ended sessions.
   await expect(page.locator('.group-row.attention')).not.toContainText('cursor-275')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lost.id)).toContainText('Lost contact')
   const bin = row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' })
   await page.mouse.move(0, 0)
@@ -103,7 +103,7 @@ test('Lost contact is an ended row with a bin; one click removes, Undo brings it
 test('Undo is offered only when the server says this person may undo', async ({ page }) => {
   const { lost, undone } = await setup(page, { undoable: false })
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
   await expect(page.getByText('Removed cursor-275', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
@@ -229,7 +229,7 @@ test('a managed_control_v1 session without fresh ownership offers no Interrupt o
 test('sessions that ended over a day ago leave the list and stay in History', async ({ page }) => {
   const { old, lost, views } = await setup(page)
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lost.id)).toBeVisible()
   await expect(row(page, old.id)).toHaveCount(0)
   expect(views.every(v => v === 'current')).toBe(true)
@@ -269,7 +269,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.emulateMedia({ colorScheme: theme })
     await page.goto('/agents')
     await page.evaluate(t => { document.documentElement.dataset.theme = t }, theme)
-    await page.getByRole('button', { name: /^Stopped/ }).click()
+    await page.getByRole('button', { name: /^Ended/ }).click()
     await expect(row(page, lost.id)).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (width === 390) {

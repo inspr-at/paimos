@@ -4,6 +4,7 @@ package agentaccounts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers account, allowance and routing routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("PUT /api/agent-accounts/quota-pool", m.quotaPool)
 	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/signals", m.signals)
 	mux.HandleFunc("GET /api/agent-accounts/{accountId}/statusline", m.statusline)
 	mux.HandleFunc("PUT /api/agent-accounts/{accountId}/statusline", m.statusline)
@@ -282,13 +284,23 @@ func (m *Module) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out RouteResult
+	var routeErr error
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = reserve(r.Context(), tx, r, p, body.RunID, body.DaemonID, body.AccountIDs, body.EstimatedUnits)
+		var released *routeCommitError
+		if errors.As(err, &released) {
+			routeErr = released.err
+			return nil
+		}
 		return err
 	})
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if routeErr != nil {
+		writeErr(w, routeErr)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

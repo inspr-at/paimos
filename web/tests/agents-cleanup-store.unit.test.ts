@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { archiveAccount, cancelRun, listAccounts, listRuns, type AgentAccount, type AgentRun } from '../src/lib/agents'
+import { archiveAccount, listAccounts, type AgentAccount } from '../src/lib/agents'
+import { cancelRun, listRuns, type AgentRunRow } from '../src/lib/agentRows'
 import { useAgents } from '../src/stores/agents'
+import { wired, wiredPage } from './wire-fixtures'
 
 vi.mock('../src/lib/agents', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agents')>(),
-  listAccounts: vi.fn(), listRuns: vi.fn(), archiveAccount: vi.fn(), cancelRun: vi.fn(),
-  listAllSessions: async () => ({ items: [], next_cursor: null }), listApprovals: async () => [], listModels: async () => [],
+  listAccounts: vi.fn(), archiveAccount: vi.fn(),
+  listApprovals: async () => [], listModels: async () => [],
   listMessages: async () => ({ items: [] }), listTargets: async () => [],
+}))
+vi.mock('../src/lib/agentRows', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/lib/agentRows')>(),
+  listRuns: vi.fn(), cancelRun: vi.fn(), listAllSessions: async () => wiredPage([]),
 }))
 vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
 
 const account = (id: string) => ({ id, state: 'available' }) as AgentAccount
-const run = (id: string, status: AgentRun['status']) => ({ id, status }) as AgentRun
+const run = (id: string, status: AgentRunRow['status'], row_version = 1) => ({ id, status, row_version }) as AgentRunRow
+type RunPage = ReturnType<typeof wiredPage<AgentRunRow>>
 function deferred<T>() {
   let resolve!: (value: T) => void
   return { promise: new Promise<T>(r => { resolve = r }), resolve }
@@ -42,26 +49,28 @@ it('a poll in flight during Remove does not restore the removed account', async 
 
 // AEON-402: a list or per-agent read older than Cancel must not undo it.
 it('a poll in flight during Cancel does not overwrite cancelled with queued', async () => {
-  vi.mocked(listRuns).mockResolvedValue({ items: [run('r', 'queued')], next_cursor: null })
+  vi.mocked(listRuns).mockResolvedValue(wiredPage([run('r', 'queued')]))
   const store = useAgents()
   await store.loadAll()
   expect(store.runs.r?.status).toBe('queued')
 
-  const staleList = deferred<{ items: AgentRun[]; next_cursor: null }>()
-  const staleAgent = deferred<{ items: AgentRun[]; next_cursor: null }>()
+  const staleList = deferred<RunPage>()
+  const staleAgent = deferred<RunPage>()
   vi.mocked(listRuns).mockReset()
   vi.mocked(listRuns).mockReturnValueOnce(staleList.promise).mockReturnValueOnce(staleAgent.promise)
-  vi.mocked(cancelRun).mockResolvedValueOnce(run('r', 'cancelled'))
+  vi.mocked(cancelRun).mockResolvedValueOnce(wired(run('r', 'cancelled', 2)))
   const poll = store.loadAll()
   const agentPoll = store.refreshAgentRuns('agent')
   await vi.waitFor(() => expect(listRuns).toHaveBeenCalledTimes(2))
+  // Both answers are from requests that started before the cancel.
+  const olderList = wiredPage([run('r', 'queued')]), olderAgent = wiredPage([run('r', 'queued')])
   await store.cancelQueuedRun({ id: 'r' })
-  staleList.resolve({ items: [run('r', 'queued')], next_cursor: null })
-  staleAgent.resolve({ items: [run('r', 'queued')], next_cursor: null })
+  staleList.resolve(olderList)
+  staleAgent.resolve(olderAgent)
   await Promise.all([poll, agentPoll])
   expect(store.runs.r?.status).toBe('cancelled')
 
-  vi.mocked(listRuns).mockResolvedValue({ items: [run('r', 'cancelled')], next_cursor: null })
+  vi.mocked(listRuns).mockResolvedValue(wiredPage([run('r', 'cancelled', 2)]))
   await store.refreshAgentRuns('agent')
   expect(store.runs.r?.status).toBe('cancelled')
 })

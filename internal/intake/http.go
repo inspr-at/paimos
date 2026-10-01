@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -26,7 +28,10 @@ import (
 
 // Module serves the intake routes.
 type Module struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	keys      *tokens.KeySet
+	authority AuthorityStore
+	clock     func() time.Time
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -40,21 +45,46 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers the intake routes on mux.
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/projects/{projectId}/intake/sources", m.addSource)
-	mux.HandleFunc("GET /api/projects/{projectId}/intake", m.getIntake)
-	mux.HandleFunc("POST /api/projects/{projectId}/intake/transcript-turns", m.addTurn)
-	mux.HandleFunc("POST /api/projects/{projectId}/intake/drafts", m.proposeDraft)
-	mux.HandleFunc("POST /api/projects/{projectId}/intake/drafts/{draftId}/accept", m.acceptDraft)
+	mux.HandleFunc("POST /api/projects/{projectId}/intake/sources", m.delegated(m.addSource, scopeWrite))
+	mux.HandleFunc("GET /api/projects/{projectId}/intake", m.delegated(m.getIntake, scopeRead))
+	mux.HandleFunc("POST /api/projects/{projectId}/intake/transcript-turns", m.delegated(m.addTurn, scopeWrite))
+	mux.HandleFunc("POST /api/projects/{projectId}/intake/drafts", m.delegated(m.proposeDraft, scopeWrite))
+	mux.HandleFunc("POST /api/projects/{projectId}/intake/drafts/{draftId}/accept", m.delegated(m.acceptDraft, ""))
+	mux.HandleFunc("POST /api/projects/{projectId}/intake/drafts/{draftId}/replace", m.delegated(m.replaceDraft, scopeWrite))
 }
 
 type httpError struct {
 	status int
 	msg    string
+	code   string
 }
 
 func (e *httpError) Error() string { return e.msg }
 
-func fail(status int, msg string) error { return &httpError{status: status, msg: msg} }
+func refusal(status int, code, msg string) error {
+	return &httpError{status: status, code: code, msg: msg}
+}
+
+func fail(status int, msg string) error {
+	code := "invalid_request"
+	switch status {
+	case http.StatusUnauthorized:
+		code = "unauthenticated"
+	case http.StatusForbidden:
+		code = "forbidden"
+	case http.StatusNotFound:
+		code = "not_found"
+	case http.StatusConflict:
+		code = "conflict"
+	case http.StatusRequestEntityTooLarge:
+		code = "too_large"
+	case http.StatusServiceUnavailable:
+		code = "unavailable"
+	case http.StatusInternalServerError:
+		code = "internal"
+	}
+	return refusal(status, code, msg)
+}
 
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
@@ -83,7 +113,12 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	if err := dec.Decode(dst); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		status := http.StatusBadRequest
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeError(w, status, "invalid JSON")
 		return false
 	}
 	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
@@ -100,7 +135,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteError(w, status, msg)
+	he := fail(status, msg).(*httpError)
+	writeCode(w, status, he.code, msg)
+}
+
+func writeCode(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func writeResult(w http.ResponseWriter, status int, v any, err error) {
@@ -110,7 +151,7 @@ func writeResult(w http.ResponseWriter, status int, v any, err error) {
 	}
 	var he *httpError
 	if errors.As(err, &he) {
-		writeError(w, he.status, he.msg)
+		writeCode(w, he.status, he.code, he.msg)
 		return
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -127,6 +168,10 @@ func writeResult(w http.ResponseWriter, status int, v any, err error) {
 			writeError(w, http.StatusBadRequest, "invalid value")
 			return
 		case "P0001":
+			if pe.Message == "already_accepted" || pe.Message == "draft_superseded" {
+				writeCode(w, http.StatusConflict, pe.Message, pe.Message)
+				return
+			}
 			writeError(w, http.StatusConflict, "conflict")
 			return
 		}
@@ -136,6 +181,16 @@ func writeResult(w http.ResponseWriter, status int, v any, err error) {
 }
 
 func authorize(ctx context.Context, r *http.Request, tx pgx.Tx, p tenant.Principal, write bool) ([]string, error) {
+	if c, ok := delegatedClaims(ctx); ok {
+		want := scopeRead
+		if write {
+			want = scopeWrite
+		}
+		if !contains(c.Capabilities, want) {
+			return nil, fail(http.StatusForbidden, "exact delegated capability required")
+		}
+		return c.Capabilities, nil
+	}
 	if p.Kind == tenant.Person {
 		return nil, nil
 	}

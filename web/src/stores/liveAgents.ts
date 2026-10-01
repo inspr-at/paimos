@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { APIError } from '../lib/api'
-import { getLiveAgents } from '../lib/agents'
+import { getLiveAgents } from '../lib/agentRows'
 import { LIVE_POLL_MS, advanceActivity, agentKey, groupLive, sameLive, skewOf, type ActivityEvidence, type LiveAgent } from '../lib/liveAgents'
 import { useAgentAppearance } from '../lib/agentAppearance'
 import { usePolledData, usePoller } from '../lib/usePolledData'

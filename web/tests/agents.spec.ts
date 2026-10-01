@@ -83,7 +83,7 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await setup(page)
   await openAgents(page)
   // Three buckets in urgency order; each row still names its exact state.
-  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Stopped\s*1/])
+  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Ended\s*1/])
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
@@ -94,7 +94,7 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(row(page, session(6)).locator('.agent-state-label')).toHaveText('Working')
   // Stopped sessions fold away until asked for.
   await expect(row(page, session(7))).toHaveCount(0)
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, session(7))).toBeVisible()
   // One compact live line; the table groups carry the rest.
   await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText(/^\d+ live/)

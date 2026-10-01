@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1: one presentation contract for sessions, project indicators and previews.
 // Evidence stays separate from presentation; viewer thresholds never mutate it.
-export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'stopped'
+export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped'
 import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
 export type { AgentPalette }
 export interface AgentStatePreference {
@@ -13,11 +13,11 @@ export const DEFAULT_AGENT_STATE: Readonly<AgentStatePreference> = {
 }
 export const STATE_LABEL: Record<AgentState, string> = {
   working: 'Working', awaiting: 'Awaiting heartbeat', waiting: 'Needs something', throttled: 'Throttled', problem: 'Problem',
-  unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', stopped: 'Stopped',
+  unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', done: 'Done', stopped: 'Ended',
 }
 export const inactiveState = (state: AgentState) => state === 'idle' || state === 'stale' || state === 'stopped'
 export const movingState = (state: AgentState) => state === 'working'
-export const STATE_PRIORITY: Record<AgentState, number> = { problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, stopped: 8 }
+export const STATE_PRIORITY: Record<AgentState, number> = { problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, done: 8, stopped: 9 }
 export function leadingState(states: (AgentState | undefined)[]): AgentState {
   return states.reduce<AgentState>((lead, state) => STATE_PRIORITY[state ?? 'working'] < STATE_PRIORITY[lead] ? state ?? 'working' : lead, 'stopped')
 }
@@ -60,8 +60,11 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
 }
 export interface StateEvidence {
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
-  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null
-  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]
+  stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; progress_pct?: number | null
+  // The server's answer to "did it complete its job": always sent, false included, also
+  // where stop_reason is withheld. The only input to Done; nothing here derives it.
+  finished: boolean
+  needs_attention?: boolean; has_problem?: boolean; attention_reasons?: readonly AttentionReason[]
   eta_stale?: boolean
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
 }
@@ -73,6 +76,12 @@ export const LOST_CONTACT = 'heartbeat_lost'
 export function problemReason(reason?: string | null) {
   return !!reason && reason !== LOST_CONTACT && /\b(error|errored|failed|failure|blocked|crash(?:ed)?|ownership lost|heartbeat lost|timeout|timed out)\b/i.test(reason.replace(/[_-]+/g, ' '))
 }
+// AEON-437: Done is positive evidence: the worker reported all of its work AND its
+// launcher recorded a clean exit. The server derives `finished` from exactly that
+// (aeon_session_finished) and puts it in every session, live and event payload, so
+// it is the one answer and this file has no second one: it never reads the percent
+// or the stop reason to decide Done. A plain stop, a force stop, a spent budget, a
+// failure and a silence the server closed are not a finish; they are Ended or failed.
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
 export function heartbeatEvidence(evidence: StateEvidence, now: number) {
@@ -109,7 +118,10 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     const until = evidence.limit_resets_at ? limitUntil(evidence.limit_resets_at, now) : ''
     return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
   }
-  if (evidence.phase === 'stopped' || evidence.stopped_at) return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
+  if (evidence.phase === 'stopped' || evidence.stopped_at) {
+    if (evidence.finished) return result('done')
+    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
+  }
   const heartbeat = heartbeatEvidence(evidence, now)
   const working = ['starting', 'working', 'stopping'].includes(evidence.phase) && !['idle', 'throttled'].includes(evidence.activity)
   const heartbeatReason: StateReason = {

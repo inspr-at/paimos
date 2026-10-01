@@ -16,6 +16,7 @@ export function accountEmail(identity: Identity) {
 }
 
 import { learnPictures } from './avatar.ts'
+import { noteWrite } from './position.ts'
 import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
@@ -79,6 +80,9 @@ export async function api(path: string, init: RequestInit = {}) {
   })
   // Every caller, including those that handle Response themselves, revokes on 401.
   if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
+  // Every accepted write, from any component, raises the floor a read must reach
+  // to be newer than it (AEON-449); no write path can skip it.
+  if (response.ok && !['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase())) noteWrite(response)
   return response
 }
 

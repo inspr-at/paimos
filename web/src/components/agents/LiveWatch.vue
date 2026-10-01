@@ -2,13 +2,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
+import { openSessionWatch } from '../../lib/agentRows'
 import { appendWatchText, attachAction, metadataOnlyAttach, watchText } from '../../lib/attachWatch'
 import { can, onAccessChange } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession }>()
 const identity = useSession()
+const agents = useAgents()
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const metadataOnly = computed(() => !!props.session.watch && metadataOnlyAttach(props.session.watch))
 const allowed = computed(() => !metadataOnly.value && person.value && can('harness.watch', props.session.project_id))
@@ -32,7 +35,7 @@ function start() {
   stop()
   if (!allowed.value || !available.value) return
   error.value = ''; state.value = 'connecting'; lastFrame = Date.now()
-  const current = new EventSource(`/api/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}/watch`)
+  const current = openSessionWatch(props.session.project_id, props.session.id)
   stream = current
   const fresh = () => stream === current && allowed.value && available.value
   current.addEventListener('keepalive', () => { if (!fresh()) return; lastFrame = Date.now(); state.value = 'live' })
@@ -50,11 +53,12 @@ async function revoke() {
   if (!owner.value || !props.session.watch) return
   const requestID = props.session.watch.request_id
   revoking.value = true; error.value = ''
-  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
+  try { await attachAction(`/${encodeURIComponent(requestID)}/revoke`); void agents.afterWrite(); if (props.session.watch?.request_id === requestID) { revoked.value = true; stop(true) } }
   catch { if (props.session.watch?.request_id === requestID) error.value = 'Could not revoke the watch. Try again.' }
   finally { revoking.value = false }
 }
-watch(() => [props.session.id, identity.identity?.tenant.id, identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
+// A fresh canonical row for the same consent must not clear a local revocation.
+watch([() => props.session.id, () => props.session.watch?.request_id, () => identity.identity?.tenant.id, () => identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
 watch([allowed, available], () => { if (!allowed.value || !available.value) stop(true) })
 const stopAccess = onAccessChange(() => stop(true))
 function hidden() { if (document.hidden) stop() }

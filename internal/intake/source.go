@@ -30,13 +30,7 @@ func (m *Module) addSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out sourceView
-	err := m.tx(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if _, err := authorize(r.Context(), r, tx, p, true); err != nil {
-			return err
-		}
-		if err := lockProject(r.Context(), tx, projectID); err != nil {
-			return err
-		}
+	err := m.intakeTx(r, p, projectID, true, func(tx pgx.Tx, _ []string) error {
 		var err error
 		out, err = insertSource(r.Context(), tx, p, projectID, in)
 		return err
@@ -51,7 +45,7 @@ func insertSource(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID 
 	}
 	if found {
 		if !sameSource(existing, in) {
-			return sourceView{}, fail(http.StatusConflict, "idempotency key was used for different content")
+			return sourceView{}, refusal(http.StatusConflict, "idempotency_conflict", "idempotency key was used for different content")
 		}
 		return existing, nil
 	}
@@ -76,7 +70,7 @@ func insertSource(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID 
 			return sourceView{}, err
 		}
 		if !found || !sameSource(existing, in) {
-			return sourceView{}, fail(http.StatusConflict, "idempotency key was used for different content")
+			return sourceView{}, refusal(http.StatusConflict, "idempotency_conflict", "idempotency key was used for different content")
 		}
 		return existing, nil
 	}

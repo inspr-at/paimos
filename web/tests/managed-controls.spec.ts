@@ -2,7 +2,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, me, mockWork } from './work-fixtures'
-import { agentData, mockAgents } from './agents-fixtures'
+import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 const id = '5e000000-0000-4000-8000-000000000001'
@@ -11,7 +11,7 @@ async function setup(page: Page, options: { stale?: boolean; denied?: boolean; l
   await mockWork(page, fixtures(), { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   Object.assign(data.sessions[0]!, { advertised_capabilities: ['status', 'steer', 'interrupt', 'stop', 'managed_control_v1', 'rename', 'model', 'effort'], display_label: 'Focused session', model: 'fixture-model', reasoning_effort: 'high', process_ownership: ownership, process_observed_at: new Date(Date.now() - (options.stale ? 60000 : 1000)).toISOString() })
-  await mockAgents(page, data)
+  const calls = await mockAgents(page, data)
   if (options.denied) await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') || undefined)
     effective.workspace.permissions = effective.workspace.permissions.filter(p => p !== 'harness.control')
@@ -34,7 +34,7 @@ async function setup(page: Page, options: { stale?: boolean; denied?: boolean; l
   })
   await page.goto(`/agents/${id}`)
   await expect(page.getByRole('region', { name: 'Session controls' })).toBeVisible()
-  return { data, requests }
+  return { data, requests, calls }
 }
 const controls = (page: Page) => page.getByRole('region', { name: 'Session controls' })
 
@@ -50,6 +50,14 @@ test('steer is session-bound, ephemeral input with a real queued receipt', async
   expect(requests[0]!.request_id).toMatch(/^[a-f0-9-]{36}$/)
   await controls(page).getByRole('button', { name: 'Steer', exact: true }).click()
   await expect(controls(page).getByLabel('What should change?')).toHaveValue('')
+})
+
+test('an accepted control reads the lists again', async ({ page }) => {
+  const { calls } = await setup(page)
+  const before = sessionListReads(calls)
+  await controls(page).getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await expect(controls(page).getByRole('status')).toContainText('Interrupt applied')
+  await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
 test('interrupt sends directly, stop requires its local confirmation', async ({ page }) => {
