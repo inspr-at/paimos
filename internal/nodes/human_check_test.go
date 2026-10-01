@@ -50,6 +50,21 @@ func TestHumanCheckValidationAndAttribution(t *testing.T) {
 	if err != nil || !strings.Contains(string(preserved), check) {
 		t.Fatal("field replacement lost completion")
 	}
+	for _, next := range []string{check, "Another human check"} {
+		if _, err := humanCheckFields(agent, json.RawMessage(`{}`), raw, nil, &next, true); err == nil {
+			t.Fatal("agent erased a person's completion")
+		}
+	}
+	if _, err := humanCheckFields(agent, json.RawMessage(`{}`), nil, nil, &check, true); err != nil {
+		t.Fatalf("agent cannot add an initial pending check: %v", err)
+	}
+	if _, err := humanCheckFields(agent, json.RawMessage(`{}`), json.RawMessage(`{"human_check_completed":null}`), nil, &check, true); err != nil {
+		t.Fatalf("null is not completion provenance: %v", err)
+	}
+	reworded := "Check Touch ID and pairing"
+	if _, err := humanCheckFields(agent, json.RawMessage(`{}`), nil, &check, &reworded, true); err != nil {
+		t.Fatalf("agent cannot edit a pending check: %v", err)
+	}
 	reopened, err := humanCheckFields(person, raw, raw, nil, &check, true)
 	if err != nil || strings.Contains(string(reopened), "human_check_completed") {
 		t.Fatal("new pending check retained completion")
@@ -126,6 +141,17 @@ func TestHumanCheckCRUDFilterAndRevision(t *testing.T) {
 	if !strings.Contains(string(preserved.Fields), "human_check_completed") || !strings.Contains(string(preserved.Fields), p.ID) {
 		t.Fatalf("field replacement erased attribution: %s", body)
 	}
+	for _, text := range []string{"Touch ID on the paired Mac", "A different human check"} {
+		status, body = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"title":"Must not change","human_check":"`+text+`","fields":{"notes":"must not change","human_check_completed":null}}`)
+		if status != http.StatusForbidden {
+			t.Fatalf("agent erased completion: %d %s", status, body)
+		}
+		status, body = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
+		unchanged := decode[nodeJSON](t, status, body, 200)
+		if unchanged.HumanCheck != nil || unchanged.Title != preserved.Title || !unchanged.UpdatedAt.Equal(preserved.UpdatedAt) || !reflectJSONEqual(json.RawMessage(unchanged.Fields), json.RawMessage(preserved.Fields)) {
+			t.Fatalf("refused undo changed the node or provenance: %s", body)
+		}
+	}
 	status, _ = patch(n.UpdatedAt.Format(time.RFC3339Nano))
 	if status != 412 {
 		t.Fatalf("stale check accepted: %d", status)
@@ -134,6 +160,11 @@ func TestHumanCheckCRUDFilterAndRevision(t *testing.T) {
 	reopened := decode[nodeJSON](t, status, body, 200)
 	if reopened.HumanCheck == nil || strings.Contains(string(reopened.Fields), "human_check_completed") {
 		t.Fatalf("undo check: %s", body)
+	}
+	status, body = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"human_check":"Check Touch ID and pairing"}`)
+	reworded := decode[nodeJSON](t, status, body, 200)
+	if reworded.HumanCheck == nil || *reworded.HumanCheck != "Check Touch ID and pairing" {
+		t.Fatalf("agent cannot edit a pending check: %s", body)
 	}
 	other := addPrincipal(t, "human-other")
 	status, _ = call(t, &other, "PATCH", "/api/nodes/"+n.ID, `{"human_check":null}`)

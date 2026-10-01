@@ -2,12 +2,12 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, type MockOptions } from './work-fixtures'
 import { defaultStatusHelp, type StatusHelp } from '../src/lib/statusDefinitions'
 
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const shots = process.env.AEON_521A_SHOTS
-async function setup(page: Page, admin = true, options: { readOnly?: boolean; conflictOn?: string } = {}) {
+async function setup(page: Page, admin = true, options: MockOptions = {}) {
   const data = fixtures()
   data.nodes.find(node => node.id === 'n-1')!.human_check = 'Touch ID on the paired Mac'
   const calls = await mockWork(page, data, { admin, ...options })
@@ -81,15 +81,61 @@ test('a person checks and restores the flag under a revision; a read-only ticket
   const { calls } = await setup(page)
   const ws = panel(page)
   await expect(ws.getByRole('note', { name: 'Needs a human check' })).toContainText('Touch ID on the paired Mac')
-  await ws.getByRole('button', { name: 'Mark checked' }).click()
+  await ws.getByRole('button', { name: 'Mark checked' }).focus()
+  await page.keyboard.press('Enter')
   await expect(ws.getByText('Human check done')).toBeVisible()
+  await expect(ws.locator('.human-check').getByRole('button', { name: 'Undo' })).toBeFocused()
   const check = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')!
   expect(check.body).toEqual({ human_check: null })
-  await ws.locator('.human-check').getByRole('button', { name: 'Undo' }).click()
+  await page.keyboard.press('Enter')
   await expect(ws.getByRole('note', { name: 'Needs a human check' })).toBeVisible()
+  await expect(ws.getByRole('button', { name: 'Mark checked' })).toBeFocused()
   await setup(page, true, { readOnly: true })
   await expect(panel(page).getByRole('note', { name: 'Needs a human check' })).toBeVisible()
   await expect(panel(page).getByRole('button', { name: 'Mark checked' })).toHaveCount(0)
+})
+
+test('an agent cannot clear a pending check through the editor and can still save other edits', async ({ page }) => {
+  const { calls } = await setup(page, false, { principalKind: 'agent' })
+  const ws = panel(page)
+  await expect(ws.getByRole('button', { name: 'Mark checked' })).toHaveCount(0)
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  const check = ws.getByLabel('Needs a human check', { exact: true })
+  await check.fill('')
+  await ws.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Only a person can mark a human check checked.', { exact: true })).toBeVisible()
+  await expect(check).toBeFocused()
+  expect(calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')).toHaveLength(0)
+  await check.fill('Touch ID on the paired Mac')
+  await ws.getByLabel('Title', { exact: true }).fill('Title edited by an agent')
+  await ws.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(ws.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+  await expect(ws.getByRole('note', { name: 'Needs a human check' })).toContainText('Touch ID on the paired Mac')
+  const patch = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')!
+  expect(patch.body).toEqual({ title: 'Title edited by an agent' })
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  await check.fill('Check Touch ID and pairing')
+  await ws.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(ws.getByRole('note', { name: 'Needs a human check' })).toContainText('Check Touch ID and pairing')
+})
+
+test('an agent edits a checked ticket without exposing Undo or erasing completion', async ({ page }) => {
+  const data = fixtures()
+  const node = data.nodes.find(node => node.id === 'n-1')!
+  const completion = { text: 'Touch ID on the paired Mac', by: 'mira', at: '2026-10-01T18:00:00Z' }
+  node.human_check = null; node.fields.human_check_completed = completion
+  const calls = await mockWork(page, data, { principalKind: 'agent' })
+  await page.goto('/p/PHAROS/PHAROS-11')
+  const ws = panel(page)
+  await expect(ws.getByText('Human check done')).toBeVisible()
+  await expect(ws.locator('.human-check').getByRole('button', { name: 'Undo' })).toHaveCount(0)
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(ws.getByLabel('Needs a human check', { exact: true })).toBeDisabled()
+  await ws.getByLabel('Title', { exact: true }).fill('Checked ticket edited by an agent')
+  await ws.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(ws.getByText('Human check done')).toBeVisible()
+  expect(calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')!.body).toEqual({ title: 'Checked ticket edited by an agent' })
+  expect(node.fields.human_check_completed).toEqual(completion)
 })
 
 test('a stale check leaves the pending flag for review; help never chooses a status', async ({ page }) => {

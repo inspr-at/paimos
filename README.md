@@ -295,8 +295,9 @@ with `human_check=pending` or `none` (prefix `!` to exclude); request
 `facets=human_check` for counts. A person marks it checked with
 `PATCH /api/nodes/{id}` and `{"human_check":null}`. The server records the original
 text, person ID and UTC time in `fields.human_check_completed`; replacing fields
-preserves that provenance and cannot forge it. Setting another pending check
-clears the completion. Check and Undo in the ticket use the existing revision
+preserves that provenance and cannot forge it. Only a person can set another
+pending check when it clears a stored completion. Agents may add or edit pending
+checks that have no stored completion. Check and Undo in the ticket use the existing revision
 preconditions. Part B's automation skips pending checks when moving tickets to
 Delivered or Accepted.
 

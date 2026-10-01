@@ -325,7 +325,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         toast(`${target.key} was changed elsewhere. The newer version is shown; your draft is kept.`, { tone: 'error' })
         return 'conflict'
       }
-      if (e instanceof APIError && e.status === 403) {
+      if (e instanceof APIError && e.status === 403 && e.message !== 'only a person can mark a human check checked' && e.message !== 'only a person can undo a human check') {
         readOnly.value = true
         toast(`You can read ${target.key} but not change it.`, { tone: 'error' })
         return 'error'

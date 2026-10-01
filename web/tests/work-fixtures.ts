@@ -51,6 +51,7 @@ export interface MockOptions {
   failUpload?: boolean
   // The signed-in person is a workspace admin (shared project groups).
   admin?: boolean
+  principalKind?: 'person' | 'agent'
   // GET /api/harness-sessions/live answers with this status instead (AEON-184).
   liveStatus?: number
   // The live answer names more sessions than it lists (AEON-233).
@@ -421,7 +422,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
-    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {
@@ -666,6 +667,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
         const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null }
+        if (options.principalKind === 'agent' && 'human_check' in patch) {
+          if (patch.human_check === null && node.human_check) return route.fulfill({ status: 403, json: { error: 'only a person can mark a human check checked' } })
+          if (patch.human_check && node.fields.human_check_completed) return route.fulfill({ status: 403, json: { error: 'only a person can undo a human check' } })
+        }
         const nextState = typeof patch.state === 'string' ? patch.state : node.state
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)

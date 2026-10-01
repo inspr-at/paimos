@@ -68,6 +68,9 @@ func humanCheckFields(p tenant.Principal, fields, old json.RawMessage, before, a
 			}
 			next["human_check_completed"] = value
 		} else if after != nil {
+			if len(stored) > 0 && !bytes.Equal(stored, []byte("null")) && p.Kind != tenant.Person {
+				return nil, &httpError{status: 403, msg: "only a person can undo a human check"}
+			}
 			delete(next, "human_check_completed")
 		}
 	}

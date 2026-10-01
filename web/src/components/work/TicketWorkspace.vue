@@ -43,6 +43,7 @@ import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/
 import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
+import { useSession } from '../../stores/session'
 import StartAgentDialog from '../agents/StartAgentDialog.vue'
 
 // The ticket workspace: the same parts in the docked side panel and in the
@@ -94,6 +95,9 @@ function closeConvert() {
   void nextTick(() => header.value?.focusMore())
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
+const session = useSession()
+const humanCheckPerson = computed(() => session.identity?.principal.kind === 'person')
+const humanCheckEditable = computed(() => humanCheckPerson.value || !item.value?.fields.human_check_completed)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
 const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
 const linkable = computed(() => props.canLink && !ticket.readOnly.value && !ticket.gone.value)
@@ -208,7 +212,14 @@ async function saveEdit() {
   if (draft.title.trim() !== base.title) patch.title = draft.title.trim()
   if (draft.body !== base.body) patch.body = draft.body
   if (draft.state !== base.state) patch.state = draft.state
-  if (draft.humanCheck.trim() !== base.humanCheck) patch.human_check = draft.humanCheck.trim() || null
+  if (draft.humanCheck.trim() !== base.humanCheck) {
+    if (!humanCheckPerson.value && (!draft.humanCheck.trim() || !humanCheckEditable.value)) {
+      toast(!draft.humanCheck.trim() ? 'Only a person can mark a human check checked.' : 'Only a person can undo a human check.', { tone: 'error' })
+      root.value?.querySelector<HTMLInputElement>('.edit-human-check')?.focus()
+      return
+    }
+    patch.human_check = draft.humanCheck.trim() || null
+  }
   const changed: Record<string, unknown> = {}
   const setField = (name: string, value: string, before: string) => { if (value === before) return; changed[name] = value.trim() ? value : undefined }
   setField('acceptance_criteria', draft.acceptance, base.acceptance)
@@ -555,7 +566,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
           <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.</p></section>
+        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
