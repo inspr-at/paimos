@@ -27,8 +27,8 @@ export interface Version { version: string; scheme: string; brand?: import('./br
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {
   readonly kind: 'timeout' | 'network'
-  constructor(kind: 'timeout' | 'network') {
-    super(kind === 'timeout' ? 'The server did not answer within 10 s' : 'No connection')
+  constructor(kind: 'timeout' | 'network', timeoutMs = 10_000) {
+    super(kind === 'timeout' ? `The server did not answer within ${timeoutMs / 1000} s` : 'No connection')
     this.kind = kind
   }
 }
@@ -44,22 +44,23 @@ const pause = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
 })
 
 // Public reads can use this without adding cookies or weakening their referrer policy.
-export async function resilientFetch(url: string, init: RequestInit = {}) {
+export async function resilientFetch(url: string, init: RequestInit = {}, timeoutMs = 10_000) {
   const method = init.method ?? 'GET'
   const invocationStarted = Date.now()
+  const gapLimit = Math.max(30_000, timeoutMs + 5_000)
   for (let attempt = 0; ; attempt++) {
-    if (Date.now() - invocationStarted > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+    if (Date.now() - invocationStarted > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
     const started = Date.now()
-    const timeout = AbortSignal.timeout(10_000)
+    const timeout = AbortSignal.timeout(timeoutMs)
     const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout
     try {
       const response = await fetch(url, { ...init, signal })
-      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       return response
     } catch (error) {
-      if (Date.now() - started > 30_000) throw new StaleRequestError('Request crossed a long timer gap')
+      if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       if (init.signal?.aborted) throw error
-      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network')
+      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network', timeoutMs)
       if (!retryable(method, failure) || attempt >= 2 || error instanceof StaleRequestError) {
         throw error instanceof StaleRequestError ? error : failure
       }
@@ -68,7 +69,7 @@ export async function resilientFetch(url: string, init: RequestInit = {}) {
   }
 }
 
-export async function api(path: string, init: RequestInit = {}) {
+export async function api(path: string, init: RequestInit = {}, timeoutMs = 10_000) {
   // A revoked tab stays readable, but must not send another protected request.
   // Sign-in and public resources remain available to recover in a new tab.
   if (sessionEnded.blocked && path !== '/auth/dev-login' && !path.startsWith('/public/') && path !== '/version') {
@@ -77,7 +78,7 @@ export async function api(path: string, init: RequestInit = {}) {
   const response = await resilientFetch(`/api${path}`, {
     credentials: 'same-origin', cache: 'no-store', ...init,
     headers: { Accept: 'application/json', ...init.headers },
-  })
+  }, timeoutMs)
   // Every caller, including those that handle Response themselves, revokes on 401.
   if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
   // Every accepted write, from any component, raises the floor a read must reach
