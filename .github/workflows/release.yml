@@ -118,8 +118,18 @@ jobs:
           if-no-files-found: error
 
   # The server digest must never wait for signing/notarization or client builds.
-  image:
-    runs-on: ubuntu-latest
+  image-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            cache: buildcache
+            runner: ubuntu-24.04
+          - arch: arm64
+            cache: buildcache-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     permissions:
       # Preserve push access for the draft-aware release immutability lookup.
@@ -128,9 +138,6 @@ jobs:
       packages: write
       attestations: write
       id-token: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -216,16 +223,22 @@ jobs:
 
       # Docker's local image store cannot retain provenance. Load the image for
       # smoke, then use the same builder/context/args to export it with provenance.
+      - name: Require native platform
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in amd64:x86_64|arm64:aarch64) ;; *) echo 'Native runner architecture mismatch' >&2; exit 1 ;; esac
       - name: Build cached smoke image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           provenance: false
-          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
+          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
@@ -234,7 +247,7 @@ jobs:
       - name: Resolve loaded smoke image
         id: smoke-image
         env:
-          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
         run: |
           set -euo pipefail
           image="$(docker image ls --quiet --no-trunc "$SMOKE_TAG")"
@@ -250,22 +263,145 @@ jobs:
           AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/smoke-image.sh
 
-      # Only the calendar coordinate is a release tag. The mutable buildcache
-      # ref is a separate cache artifact; never publish a latest alias.
+      # Export by digest only. Neither worker can publish the release tag.
+      # Separate cache refs prevent parallel architectures overwriting each other.
       - name: Build and push
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           push: true
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           provenance: mode=max
-          tags: ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
-          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache,mode=max
+          outputs: type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
+          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }},mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
+      - name: Attest pushed image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/inspr-at/aeon
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # Keep existing token scopes: artifact-metadata:write is unnecessary.
+          create-storage-record: false
+
+      - name: Verify pushed image attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://ghcr.io/inspr-at/aeon@${DIGEST}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+
+      - name: Record platform digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/image-digests"
+          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/image-digests/$ARCH.txt"
+          {
+            echo "### Pushed and verified image"
+            echo
+            echo "ghcr.io/inspr-at/aeon@${DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/image-digests/${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # Both native smoke and platform attestation gates must finish successfully.
+  # Preserve the image job/output contract: deploy pins this multi-arch index.
+  image:
+    needs: [image-platform]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Validate inspr-calendar-v2 tag
+        id: version
+        run: node scripts/release-tag.mjs
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: image-digest-*
+          path: ${{ runner.temp }}/image-digests
+          merge-multiple: true
+      - name: Reject an existing GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[].tag_name')"
+          if printf '%s\n' "$tags" | grep -Fx -- "v${VERSION}" >/dev/null; then
+            echo "Release v${VERSION} already exists (draft or published); reserve a new coordinate" >&2
+            exit 1
+          fi
+
+      - name: Reject an existing image tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tags="$(gh api --paginate 'orgs/inspr-at/packages/container/aeon/versions?per_page=100' \
+            --jq '.[].metadata.container.tags[]?')"
+          if printf '%s\n' "$tags" | grep -Fx -- "$VERSION" >/dev/null; then
+            echo "Image tag ${VERSION} is already published; reserve a new coordinate" >&2
+            exit 1
+          fi
+
+      - name: Publish multi-arch index
+        id: push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release-image-index.mjs sources "$RUNNER_TEMP/image-digests" > "$RUNNER_TEMP/image-sources.txt"
+          mapfile -t sources < "$RUNNER_TEMP/image-sources.txt"
+          docker buildx imagetools create --dry-run "${sources[@]}" > "$RUNNER_TEMP/image-index.json"
+          node scripts/release-image-index.mjs verify "$RUNNER_TEMP/image-index.json"
+          docker buildx imagetools create --tag "ghcr.io/inspr-at/aeon:${VERSION}" \
+            --metadata-file "$RUNNER_TEMP/image-index-metadata.json" "${sources[@]}"
+          digest="$(jq -er '."containerimage.descriptor".digest' "$RUNNER_TEMP/image-index-metadata.json")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker buildx imagetools inspect --raw "ghcr.io/inspr-at/aeon@$digest" > "$RUNNER_TEMP/published-index.json"
+          node scripts/release-image-index.mjs verify "$RUNNER_TEMP/published-index.json"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Attest pushed image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
@@ -293,7 +429,7 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           {
-            echo "### Pushed and verified image"
+            echo "### Verified multi-arch release index (linux/amd64 + linux/arm64)"
             echo
             echo "ghcr.io/inspr-at/aeon@${DIGEST}"
           } >> "$GITHUB_STEP_SUMMARY"
