@@ -12555,7 +12555,7 @@ components:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
         version: {type: string, minLength: 1, maxLength: 64}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
-        family: {type: string, enum: [openai, anthropic, xai, cursor, google, unknown]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, unknown]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
@@ -12572,6 +12572,7 @@ components:
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
             effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: Shared effort scale; unknown stays null.}
+            provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]

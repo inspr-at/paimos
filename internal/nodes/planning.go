@@ -1001,7 +1001,7 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		route := &planRoute{}
 		if resolved != nil {
 			p := resolved.Profile
-			route.view = &planningRoute{Provider: p.Family, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
+			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort)}
 			var in, outRate, cached *float64
 			price := &planPrice{}

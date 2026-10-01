@@ -34,12 +34,13 @@ func modelNameSortSQL(namesArg string) (string, string) {
 	cte := `, ` + planningStatesCTE() + `, model_sessions AS (
   SELECT t.root,s.id,s.harness,
    coalesce(nullif(pk.model,''),nullif(s.model,''),nullif(s.model_raw,''),usage.model,'') AS model,
-   p.model_display,usage.tokens,
-   CASE WHEN pk.model IN ('opus','sonnet','haiku','fable') THEN coalesce(p.model_display->>'model_version','') ELSE '' END AS version_key
+   d.model_display,usage.tokens,
+   CASE WHEN pk.model IN ('opus','sonnet','haiku','fable') THEN coalesce(d.model_display->>'model_version','') ELSE '' END AS version_key
   FROM (` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task')`) + `) t
   JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
    AND ((SELECT aeon_visible_all()) OR s.project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
   LEFT JOIN model_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.model_profile_id
+    LEFT JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
   LEFT JOIN LATERAL aeon_session_model_key(p.model,p.effort) pk ON true
   LEFT JOIN LATERAL (
    SELECT min(u.model) AS model,sum(u.input_tokens+u.output_tokens) FILTER (

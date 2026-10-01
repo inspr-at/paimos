@@ -85,7 +85,7 @@ func validHarness(s string) bool {
 
 func validFamily(s string) bool {
 	switch s {
-	case "openai", "anthropic", "xai", "cursor", "google":
+	case "openai", "anthropic", "xai", "cursor":
 		return true
 	default:
 		return false

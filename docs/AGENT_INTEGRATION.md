@@ -267,8 +267,13 @@ The Model column defaults to 176px. Registry `display_name`, `short_name` and
 `model_version` are separate from the profile's revision `version`; alias versions
 stay unknown unless a new immutable profile explicitly supplies that metadata.
 Hovers, accessible names and model sorting retain the full name and model version.
-Migration 1074 stores model display metadata and effort levels without rewriting
-immutable profiles. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
+Migration 1074 stores model display metadata and effort levels in the immutable,
+tenant-isolated `model_profile_display` table without rewriting profile pins.
+Existing profiles are backfilled under each tenant’s RLS in the migration
+transaction; an insert trigger covers both current and previous-binary writers.
+The registry’s presentation `provider` is separate from its routing `family`: Pi
+profiles with explicit registered Gemini IDs retain family `unknown` and carry
+Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
 Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
 1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
 registered profile only when reported effort matches; unregistered, missing or

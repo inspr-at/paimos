@@ -37,12 +37,13 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
         coalesce(nullif(pk.model,''),nullif(s.model,''),nullif(s.model_raw,''),usage.model,''),
         s.model_profile_id::text, s.model_raw, coalesce(s.reasoning_effort,''), s.role,
         s.stopped_at IS NULL, usage.tokens,
-        coalesce(p.family,''),coalesce(p.model_display->>'display_name',''),coalesce(p.model_display->>'short_name',''),coalesce(p.model_display->>'model_version',''),
-        CASE WHEN lower(btrim(s.reasoning_effort))=lower(btrim(p.effort)) THEN p.effort_level END
+        coalesce(d.provider,''),coalesce(d.model_display->>'display_name',''),coalesce(d.model_display->>'short_name',''),coalesce(d.model_display->>'model_version',''),
+        CASE WHEN lower(btrim(s.reasoning_effort))=lower(btrim(p.effort)) THEN d.effort_level END
     FROM (`+planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`)+`) t
     JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
         AND ((SELECT aeon_visible_all()) OR s.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))
     LEFT JOIN model_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.model_profile_id
+    LEFT JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
     LEFT JOIN LATERAL aeon_session_model_key(p.model,p.effort) pk ON true
     LEFT JOIN LATERAL (
         SELECT min(u.model) AS model,

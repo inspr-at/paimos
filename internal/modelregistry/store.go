@@ -34,6 +34,7 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 type Profile struct {
 	Display
 	EffortLevel *int      `json:"effort_level"`
+	Provider    string    `json:"provider"`
 	ID          string    `json:"id"`
 	Slug        string    `json:"slug"`
 	Version     string    `json:"version"`
@@ -142,9 +143,14 @@ func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWr
 		INSERT INTO model_profiles
 			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true, $9::jsonb)
-		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at, model_display->>'display_name', model_display->>'short_name', model_display->>'model_version', effort_level`,
+		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
 		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, string(raw)).
-		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt, &out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel)
+		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, tenantID, out.ID).
+			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
+	}
 	return out, err
 }
 
@@ -158,9 +164,9 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, slug, version, harness, family, model, effort, tier, enabled, created_at, model_display->>'display_name', model_display->>'short_name', model_display->>'model_version', effort_level
-		FROM model_profiles
-		ORDER BY slug, version, id`)
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		ORDER BY p.slug, p.version, p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +174,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider); err != nil {
 			return nil, err
 		}
 		out = append(out, profile)
