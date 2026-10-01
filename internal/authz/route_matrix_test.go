@@ -107,7 +107,11 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	}
 	for _, operation := range []string{"pause", "resume"} {
 		pattern := "POST /api/harness-sessions/" + operation
-		check("project-only member", projectMember, pattern, true)
+		scope, scoped, err := ResolveRouteScope(ctx, d.App, pattern, "/api/harness-sessions/"+operation)
+		if err != nil || !scoped || !scope.AnyProject {
+			t.Fatalf("pause batch scope: %+v scoped=%v err=%v", scope, scoped, err)
+		}
+		checkIn("project-only member", projectMember, pattern, scope, true)
 		checkIn("guest", guest, pattern, Scope{AnyProject: true}, false)
 		check("viewer", people["viewer"], pattern, false)
 	}
