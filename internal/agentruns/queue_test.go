@@ -363,4 +363,35 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 	f.call(t, guest, "POST", "/api/queue/"+security+"/move", map[string]int{"position": 1}, 404, nil)
 	f.call(t, guest, "DELETE", "/api/queue/"+security, nil, 404, nil)
 	f.call(t, guest, "POST", "/api/queue/"+visible+"/move", map[string]int{"position": 1}, 200, &page)
+	if got := keys(f.queuePage(t)); !slices.Equal(got, []string{security, visible}) {
+		t.Fatalf("project move changed global order: %v", got)
+	}
+	hidden := f.ticket(t, "open", "urgent", nil)
+	f.addQueue(t, hidden, nil)
+	second := f.ticket(t, "open", "low", nil)
+	arrival := f.ticket(t, "open", "urgent", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=ANY($1::uuid[])`, []string{second, arrival}, project)
+		return err
+	})
+	f.call(t, guest, "POST", "/api/queue", map[string]string{"node_id": second}, 200, nil)
+	f.call(t, guest, "POST", "/api/queue/"+second+"/move", map[string]int{"position": 1}, 200, &page)
+	if page.Count != 2 || !slices.Equal(keys(page), []string{second, visible}) {
+		t.Fatalf("project move response leaked hidden work: %+v", page)
+	}
+	if got := keys(f.queuePage(t)); !slices.Equal(got, []string{security, second, hidden, visible}) {
+		t.Fatalf("move failed to preserve hidden slots: %v", got)
+	}
+	f.call(t, guest, "POST", "/api/queue", map[string]string{"node_id": arrival}, 200, nil)
+	if got := keys(f.queuePage(t)); !slices.Equal(got, []string{security, second, hidden, visible, arrival}) {
+		t.Fatalf("project append ignored hidden ranks: %v", got)
+	}
+	f.call(t, guest, "POST", "/api/queue/reset", map[string]any{}, 200, &page)
+	global := f.queuePage(t)
+	if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, second, visible}) {
+		// FIFO is the original queue timestamp, not the previous manual order.
+		if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, visible, second}) {
+			t.Fatalf("project reset left hidden ranks: %+v", global)
+		}
+	}
 }
