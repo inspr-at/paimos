@@ -27,7 +27,7 @@ func (m *Module) acceptProposal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	o := Observation{EvidenceID("proposal"), in.Harness, in.Model, in.Effort, "advertised"}
+	o := Observation{ReportID: EvidenceID("proposal"), Harness: in.Harness, Model: in.Model, Effort: in.Effort, Status: "advertised"}
 	if err := validateObservations([]Observation{o}); err != nil {
 		writeErr(w, err)
 		return

@@ -95,6 +95,7 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 	})
 	var before []Route
 	inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
+	New(appPool).sweep(t.Context())
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
 		t.Fatal("v3 profiles missing")
@@ -144,7 +145,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	p := makePrincipal(t, "reports", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, p.TenantID, "agent", "Worker", nil)
 	other := makePrincipal(t, "other-reports", "person", "Other", []string{"admin"})
-	o := Observation{EvidenceID("failure-one"), "codex", "gpt-6.1-sol", "high", "invalid"}
+	o := Observation{ReportID: EvidenceID("failure-one"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "invalid"}
 	send := func(p tenant.Principal, o Observation, want int) ReportResult {
 		raw, _ := json.Marshal([]Observation{o})
 		return decode[ReportResult](t, &p, "POST", "/api/models/reports", string(raw), want)
@@ -221,7 +222,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		}
 		return nil
 	})
-	o = Observation{EvidenceID("new-model"), "grok", "grok-next", "xhigh", "advertised"}
+	o = Observation{ReportID: EvidenceID("new-model"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if got := send(p, o, 200); got.Added != 1 {
 		t.Fatal(got)
 	}
@@ -422,11 +423,12 @@ func TestAutoAcceptOffRequiresPersonAndDoesNotWriteRoutes(t *testing.T) {
 	p := makePrincipal(t, "proposal-policy", "person", "Owner", []string{"admin"})
 	worker := addPrincipal(t, p.TenantID, "agent", "Worker", []string{"admin"})
 	grantModelReporter(t, p, worker)
+	worker.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	before := registryRoutes(t, p)
 	cfg := `{"agent_reports_enabled":true,"auto_add_profiles":false,"api_enabled":false,"interval_minutes":1440}`
 	decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", cfg, 200)
 	decode[RefreshResult](t, &worker, "POST", "/api/models/refresh", "{}", 200)
-	o := Observation{EvidenceID("pending-grok"), "grok", "grok-next", "xhigh", "advertised"}
+	o := Observation{ReportID: EvidenceID("pending-grok"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	raw, _ := json.Marshal([]Observation{o})
 	result := decode[ReportResult](t, &worker, "POST", "/api/models/reports", string(raw), 200)
 	if result.Added != 0 || result.Proposed != 1 {

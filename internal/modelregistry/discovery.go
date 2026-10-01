@@ -121,7 +121,7 @@ func discoveryObservations(vendor, evidence string, models []string) []Observati
 			}
 		}
 		for _, effort := range efforts {
-			out = append(out, Observation{EvidenceID(evidence + "/" + harness + "/" + id + "/" + effort), harness, id, effort, "advertised"})
+			out = append(out, Observation{ReportID: EvidenceID(evidence + "/" + harness + "/" + id + "/" + effort), Harness: harness, Model: id, Effort: effort, Status: "advertised"})
 		}
 	}
 	return out
