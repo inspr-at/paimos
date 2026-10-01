@@ -29,6 +29,8 @@ type seeder struct {
 	scribeKey string
 	clerk     tenant.Principal
 	clerkKey  string
+	scout     tenant.Principal
+	scoutKey  string
 	kinds     map[string]string
 	ids       map[string]string
 	lumenID   string
