@@ -20,6 +20,136 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Cross-family verdict and merge queue (AEON-411)
+
+The required **`gate/cross-family`** is a commit status posted **outside
+GitHub Actions** by `inspr-mbp2606-runner` (App ID `5134402`, existing
+installation `166478088`). The companion ruleset in
+`.github/cross-family-ruleset.json` binds that exact context to the App. Neither
+a successful nor a skipped Actions job with the same name can satisfy the
+binding. `.github/workflows/cross-family-preview.yml` is only a diagnostic
+mirror named `gate/policy-preview`; it runs unconditionally on `pull_request`
+and `merge_group: checks_requested`, with a read-only token. Pushes and manual
+dispatches emit neither gate context.
+
+The coordinator records the independent review's explicit `ok` and complete
+reviewed SHA in the ticket, then posts `gate/verdict` using its approved identity:
+
+```sh
+# Set these from the completed review, never from an assumed verdict.
+gh api "repos/inspr-at/paimos/statuses/$REVIEWED_SHA" \
+  -f state=success -f context=gate/verdict \
+  -f description="model=$REVIEW_MODEL; route=$REVIEW_ROUTE; review=$REVIEW_FILE"
+```
+
+Keep the description within GitHub's 140-character limit. The latest trusted
+`gate/verdict` governs, including pending/error/failure revocation. The allowlist
+in `.github/gate-posters.json` requires both login and immutable numeric ID
+(initially `markus-barta`, ID `276789`). Other creators cannot grant or revoke
+approval. The external App verifies those verdicts; it never conducts a review.
+
+**Trusted poster:** install the bootstrap `scripts/trusted-cross-family-poster.mjs`
+and its sibling `post-cross-family-gate.mjs` / `cross-family-gate.mjs` from one
+independently reviewed main revision in the coordinator's protected tooling.
+Its dedicated bare mirror must have origin
+`https://github.com/inspr-at/paimos.git`. In write mode it first posts pending
+using that installed trusted bundle, before a fetch or extraction can fail. On each invocation it refreshes
+`refs/remotes/origin/main`, extracts the checker, poster and allowlist from that
+commit into a private snapshot, and executes only those files. Candidate
+commits are fetched as Git objects for parent/tree comparisons; no candidate
+workflow, module, package install, hook or build runs. A PR checkout cannot
+serve as the mirror. Missing main policy, failed fetches and invalid events fail
+closed. The bootstrap itself is trusted installed code, never a PR-supplied
+entrypoint. CODEOWNERS covers the workflows, checker, poster, bootstrap,
+allowlist, ruleset payload and CODEOWNERS itself; the companion rule enables
+code owner review for those paths.
+
+The coordinator supplies an installation token for App `5134402` as the
+process-only `GATE_APP_TOKEN`, never as a repository/Actions secret. The App
+currently lacks the additional permissions this requires: the lead must grant
+`statuses: write`, `contents: read`, and `pull_requests: read` and accept them for
+this repository. Retain its existing runner permissions; this change does not
+alter the runner controller or provision credentials. Authenticate event input
+through verified GitHub webhook signatures or the coordinator's authenticated
+API reads; arbitrary uploaded event files are not trusted dispatch requests.
+
+```sh
+# BARE_MIRROR and EVENT_FILE are absolute paths in the coordinator's own tooling.
+# Default: read-only evaluation, with no status writes.
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  pull_request "$EVENT_FILE"
+# Explicit opt-in, used only by the coordinator's external watcher:
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  pull_request "$EVENT_FILE" --write
+# Queue checks use the signed checks_requested payload and exact synthetic SHA:
+node /trusted/tools/trusted-cross-family-poster.mjs "$BARE_MIRROR" \
+  merge_group "$EVENT_FILE" --write
+```
+
+The external watcher handles PR opened/synchronize/reopened and merge-group
+checks_requested events; Actions is not the dispatcher. After posting or
+revoking `gate/verdict`, the watcher re-evaluates the affected open PR and **all
+active merge groups containing it** (and serializes evaluations per target SHA).
+A missing watcher leaves the required status pending rather than approving.
+Every write-mode invocation posts pending first, then success only after all
+checks pass; errors post failure or leave pending if the API itself is down.
+The PR status targets the actual PR **head SHA**, including a fork's head in the
+base repository; the queue status targets **merge_group.head_sha**. Never copy a
+PR's success to a group without verifying every constituent PR. The API writer
+rejects a human or Actions creator; the ruleset's integration binding is the
+server-side enforcement, including against a writer forging the context.
+
+An exact reviewed head passes. Follow-ups pass only along the first-parent
+chain when every step has two parents, the second parent is on main's
+first-parent history, and `git merge-tree --write-tree` reproduces the actual
+commit tree. Blobs, paths and modes must match. New edits, conflict resolutions,
+normal commits (even empty or reverted), rebases and squashes require a fresh
+verdict. Missing evidence, API errors, partial pagination and changed heads fail
+closed. Queue checking reproduces every synthetic merge and resolves every
+second-parent SHA against open main PRs. Multiple PRs, including forks, with the
+same immutable SHA share one verdict check, but **every** matching PR is
+revalidated as open with that SHA, base repository and main branch. Missing
+matches and changed synthetic trees fail closed.
+
+**Architecture decision:** choose external App statuses on the current Free
+plan. [Required workflows](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging)
+would provide a trusted source workflow selected by repository/path and
+`refs/heads/main` in an organization/enterprise ruleset, with `merge_group`
+support. The org reports `plan=free`, and reading its rulesets returns HTTP 403
+with an upgrade requirement, so this is not currently available.
+[`pull_request_target`](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target)
+uses base workflow code and could safely perform read-only PR API inspection
+without checking out PR code. It does not establish trusted code for ordinary
+merge-group workflows, and an Actions-name requirement remains spoofable.
+[App-bound statuses](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
+are supported for non-Actions Apps with status-write permission; the
+[REST ruleset schema](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
+provides `integration_id`. The selected existing App avoids an invented ID or a
+paid-plan assumption. Its token must remain confined to the trusted external
+coordinator.
+
+**Lead rollout, after bootstrap:** keep ruleset `24240960` and its required
+`go`, `web`, `release-check`, `e2e`, `migration-compat` checks and merge queue
+unchanged. Install/wire the external poster, grant/accept the App permissions,
+then create the additive repo ruleset using the **exact JSON** in
+`.github/cross-family-ruleset.json`. Do not require the diagnostic Actions check
+or bind the required context to GitHub Actions (`15368`). Preserve a backup and
+rollback by disabling only the new ruleset. The existing admin PR-only bypass
+is retained as a deliberate operator control; the worker never uses it. A code
+owner cannot approve their own PR, so use an independent owner review or the
+operator's explicitly approved admin procedure when the PR author is the owner.
+Coordinate the new ruleset/baseline with the owning nixcfg coordinator before
+runner admission is enabled; workers make no foreign repo changes.
+
+Before activation, the lead records live evidence: unreviewed PR denied; trusted
+exact head and automatic main merge pass; workflow `if: false`/`exit 0` and a
+forged Actions/user status cannot satisfy the App-bound rule; both heads in a
+two-PR queue require review; duplicate-SHA fork PRs do not stall the queue;
+revocation refreshes PR and group statuses. Local fixtures validate repo code,
+not live GitHub enforcement. This worker changes no permissions, settings,
+rulesets, watcher deployment, merges or queues. Acceptance remains with the
+lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
+
 ### Test runner routing (AEON-438, AEON-459)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
