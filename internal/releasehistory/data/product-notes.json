@@ -3448,6 +3448,199 @@
           "group": "features"
         }
       ]
+    },
+    "261001072608.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 114,
+      "snapshot_sha256": "edfcc32178398a50993483896b7c4077102a6e7dd51e235c76c646ebe1fc4fa1",
+      "captured_at": "2026-10-01T07:44:06Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-397",
+          "pill_en": "Safer shared quotas",
+          "pill_de": "Sicherere geteilte Kontingente",
+          "benefit_en": "Accounts share a quota only after you confirm they are the same login, and queued runs never get stuck after a group change.",
+          "benefit_de": "Konten teilen ein Kontingent erst, wenn du bestätigst, dass es dasselbe Login ist, und wartende Läufe bleiben nach einer Gruppenänderung nicht hängen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-403",
+          "pill_en": "Clearer CLI errors",
+          "pill_de": "Klarere CLI-Fehler",
+          "benefit_en": "Registering a session tells you exactly what to fix when the ticket or work shape is wrong.",
+          "benefit_de": "Beim Registrieren einer Sitzung sagt die CLI genau, was zu korrigieren ist, wenn Ticket oder Arbeitsform nicht passen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-405",
+          "pill_en": "Honest release history",
+          "pill_de": "Ehrliche Release-Historie",
+          "benefit_en": "The release history on every instance lists all releases and shows fixes as fixes and features as features.",
+          "benefit_de": "Die Release-Historie zeigt auf jeder Instanz alle Releases und weist Fehlerbehebungen als solche und Funktionen als Funktionen aus.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-430",
+          "pill_en": "Release codenames",
+          "pill_de": "Codenamen für Releases",
+          "benefit_en": "Every release has a memorable sci-fi name, so you can tell releases apart at a glance and talk about them easily.",
+          "benefit_de": "Jedes Release hat einen einprägsamen Sci-Fi-Namen, damit du Releases auf einen Blick unterscheiden und leicht darüber sprechen kannst.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-431",
+          "pill_en": "Your company logo",
+          "pill_de": "Dein Logo im Kopfbereich",
+          "benefit_en": "Your workspace shows your company logo and short name in the top left, and the footer shows the current release name.",
+          "benefit_de": "Dein Arbeitsbereich zeigt oben links dein Firmenlogo und deinen Kurznamen, und die Fußzeile nennt das aktuelle Release.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-432",
+          "pill_en": "Bigger rule budgets",
+          "pill_de": "Größere Regelbudgets",
+          "benefit_en": "You can give your agents up to 500 KB of rules, see what each one costs per session, and older clients simply receive what they can handle.",
+          "benefit_de": "Du kannst deinen Agenten bis zu 500 KB Regeln geben, siehst, was das pro Sitzung kostet, und ältere Clients bekommen einfach so viel, wie sie verarbeiten können.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-434",
+          "pill_en": "Live pairing status",
+          "pill_de": "Kopplungsstatus live",
+          "benefit_en": "After you connect a machine, the page shows it as connected right away, without reloading.",
+          "benefit_de": "Nachdem du einen Rechner verbunden hast, zeigt die Seite ihn sofort als verbunden an, ohne Neuladen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-437",
+          "pill_en": "Done looks done",
+          "pill_de": "Fertig sieht fertig aus",
+          "benefit_en": "A worker that finished its job shows as done, so you can tell it apart from one that crashed.",
+          "benefit_de": "Ein Worker, der seine Aufgabe erledigt hat, erscheint als fertig, und du unterscheidest ihn von einem abgestürzten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-438",
+          "pill_en": "Faster test runs",
+          "pill_de": "Schnellere Testläufe",
+          "benefit_en": "Test and eval jobs use the fast mbp2606 builder when it is on and fall back to GitHub when it is off.",
+          "benefit_de": "Test- und Eval-Jobs nutzen den schnellen mbp2606-Builder, wenn er läuft, und sonst GitHub.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-440",
+          "pill_en": "Easy attach approval",
+          "pill_de": "Einfache Anhänge-Freigabe",
+          "benefit_en": "When you attach to a session, Aeon shows you right away where to approve it, without searching.",
+          "benefit_de": "Wenn du dich an eine Sitzung anhängst, zeigt Aeon dir sofort, wo du freigibst, ohne Suchen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-442",
+          "pill_en": "Safer attach approval",
+          "pill_de": "Sicherere Andock-Freigabe",
+          "benefit_en": "Attaching a session asks for your fingerprint by default on a Mac, and works from sudo or ssh shells on Linux.",
+          "benefit_de": "Das Andocken einer Sitzung fragt am Mac standardmäßig nach deinem Fingerabdruck und funktioniert unter Linux auch aus sudo- oder ssh-Shells.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-443",
+          "pill_en": "Always an ETA",
+          "pill_de": "Immer eine ETA",
+          "benefit_en": "Every ticket and running agent shows an estimate and a live ETA without anyone having to ask for it.",
+          "benefit_de": "Jedes Ticket und jeder laufende Agent zeigt eine Schätzung und eine aktuelle ETA, ohne dass jemand danach fragen muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-444",
+          "pill_en": "Doctrine inbox",
+          "pill_de": "Eingang für Doktrin",
+          "benefit_en": "When an agent suggests a better rule, you see it right away in Doctrine and can send it to git with one click.",
+          "benefit_de": "Wenn ein Agent eine bessere Regel vorschlägt, siehst du sie sofort unter Doktrin und kannst sie mit einem Klick nach git schicken.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-449",
+          "pill_en": "Always current",
+          "pill_de": "Immer aktuell",
+          "benefit_en": "What you see on /agents never jumps back to an older state after you act.",
+          "benefit_de": "Was du auf /agents siehst, springt nach einer Aktion nie auf einen älteren Stand zurück.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-450",
+          "pill_en": "Cross-model review",
+          "pill_de": "Modellübergreifende Prüfung",
+          "benefit_en": "Every change an agent makes is checked by a different AI before it can merge, and you see the verdict on the ticket.",
+          "benefit_de": "Jede Änderung eines Agenten wird vor dem Merge von einer anderen KI geprüft, und du siehst das Urteil am Ticket.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-457",
+          "pill_en": "Self-updating roadmap",
+          "pill_de": "Selbstaktualisierende Roadmap",
+          "benefit_en": "The public roadmap always shows what's really coming next, straight from the work itself.",
+          "benefit_de": "Die öffentliche Roadmap zeigt immer, was wirklich als Nächstes kommt, direkt aus der Arbeit selbst.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-458",
+          "pill_en": "Agents always listening",
+          "pill_de": "Agenten hören immer zu",
+          "benefit_en": "Every agent session you register can receive your messages right away, without extra setup.",
+          "benefit_de": "Jede registrierte Agenten-Sitzung kann deine Nachrichten sofort empfangen, ohne zusätzliche Einrichtung.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-460",
+          "pill_en": "Unforgeable Touch ID",
+          "pill_de": "Fälschungssichere Touch ID",
+          "benefit_en": "Only you, at your Mac, can approve an attach with Touch ID; no program on your computer can fake it.",
+          "benefit_de": "Nur du an deinem Mac kannst ein Andocken per Touch ID freigeben; kein Programm auf deinem Computer kann das fälschen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-461",
+          "pill_en": "PMA follows releases",
+          "pill_de": "PMA folgt Releases",
+          "benefit_en": "Agents now know that pm.augmentoring.com follows each verified Aeon release through its documented update flow, and nothing else changes there.",
+          "benefit_de": "Agenten wissen jetzt, dass pm.augmentoring.com jedem geprüften Aeon-Release über den dokumentierten Ablauf folgt und dort sonst nichts geändert wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-463",
+          "pill_en": "Aithema drafts in Aeon",
+          "pill_de": "Aithema-Entwürfe in Aeon",
+          "benefit_en": "Drafts that come from Aithema keep their extra details and show them in Aeon, exactly as they were sent.",
+          "benefit_de": "Entwürfe aus Aithema behalten ihre zusätzlichen Angaben und zeigen sie in Aeon genau so, wie sie gesendet wurden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-468",
+          "pill_en": "Stable agent order",
+          "pill_de": "Stabile Agenten-Reihenfolge",
+          "benefit_en": "The agents list keeps its order while it updates, and you can sort it by any column.",
+          "benefit_de": "Die Agentenliste behält beim Aktualisieren ihre Reihenfolge, und du kannst sie nach jeder Spalte sortieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-470",
+          "pill_en": "Deactivate agents",
+          "pill_de": "Agenten deaktivieren",
+          "benefit_en": "You can deactivate an agent you no longer use, which revokes its keys, and re-pairing a computer no longer leaves duplicates behind.",
+          "benefit_de": "Du kannst einen Agenten, den du nicht mehr brauchst, deaktivieren und damit seine Schlüssel widerrufen; erneutes Koppeln eines Rechners hinterlässt keine Duplikate mehr.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-475",
+          "pill_en": "Correct epic progress",
+          "pill_de": "Richtiger Epic-Fortschritt",
+          "benefit_en": "An epic's progress no longer drops when one of its tickets finishes cleanly.",
+          "benefit_de": "Der Fortschritt eines Epics sinkt nicht mehr, wenn eines seiner Tickets sauber fertig wird.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
