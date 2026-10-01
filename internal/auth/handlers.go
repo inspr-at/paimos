@@ -199,6 +199,8 @@ func (m *Module) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleMe(w http.ResponseWriter, r *http.Request) {
+	// This authenticated self-service endpoint has no role or key-scope gate.
+	// loadMe always selects the caller from the trusted authentication context.
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		m.writeMeUnauthorized(w)
