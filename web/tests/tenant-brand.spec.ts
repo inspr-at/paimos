@@ -13,6 +13,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
+import type { SVGCleanup } from '../src/lib/tenantBrand'
 
 // A square mark and a wide lockup in dark ink (so dark mode needs its plate),
 // plus a light-ink version of the wide one for dark mode.
@@ -24,7 +25,7 @@ const WIDE_DARK = wide('#f1f5f9')
 type Variant = 'light' | 'dark'
 interface Stored { body: string; type: string; width: number; height: number; sha: string }
 export interface BrandWorld {
-  short_name: string; logos: Partial<Record<Variant, Stored>>; puts: { path: string; type: string; size: number }[]; codename?: string; fail?: string
+  short_name: string; logos: Partial<Record<Variant, Stored>>; puts: { path: string; type: string; size: number }[]; codename?: string; fail?: string; cleanup?: SVGCleanup
   // Writes wait on `hold`; `inflight` and `maxInflight` count writes the server is handling at once.
   hold?: Promise<void>; arrived: number; inflight: number; maxInflight: number
 }
@@ -97,9 +98,9 @@ export async function mockBrand(page: Page, w: BrandWorld, options: { admin?: bo
         w.puts.push({ path, type, size: body.length })
         if (w.fail) return route.fulfill({ status: 400, json: { error: w.fail } })
         if (type === 'image/svg+xml' && body.includes('<script')) return route.fulfill({ status: 400, json: { error: 'SVG element <script> is not supported; use a static logo with paths, shapes, text or gradients' } })
-        const cleaned = body.includes('<!--')
+        const cleaned = body.includes('<!--') || !!w.cleanup
         w.logos[v] = stored(body.replace(/<!--[\s\S]*?-->/g, ''), type)
-        return route.fulfill({ json: settingsOf(w, cleaned) })
+        return route.fulfill({ json: { ...settingsOf(w, cleaned), ...(w.cleanup ? { svg_cleanup: w.cleanup } : {}) } })
       })
     }
     return route.fallback()
@@ -107,11 +108,13 @@ export async function mockBrand(page: Page, w: BrandWorld, options: { admin?: bo
   return history
 }
 
-async function setup(page: Page, w: BrandWorld, options: { admin?: boolean } = {}) {
+async function setup(page: Page, w: BrandWorld, options: { admin?: boolean; locale?: string } = {}) {
   await mockWork(page, fixtures(), { admin: options.admin !== false })
   const role = options.admin === false ? 'member' : 'admin'
   await mockBusiness(page, businessData({ role }), { role })
-  await mockSettings(page, settingsData())
+  const data = settingsData()
+  data.profile.locale = options.locale ?? 'en-GB'
+  await mockSettings(page, data)
   return mockBrand(page, w, options)
 }
 
@@ -255,6 +258,21 @@ test('an admin sets the brand in Settings → Workspace; the header follows at o
   await expect(lockup(page).locator('.mark-backing')).toBeVisible()
   expect(errors).toEqual([])
 })
+
+// The server decides what is removed; the card reports names as plain text.
+for (const locale of ['en-GB', 'de-AT']) {
+  test(`SVG upload names non-drawing removals in ${locale}`, async ({ page }) => {
+    const w = brandWorld()
+    w.cleanup = { removed_attribute_count: 3, removed_attributes: ['role', 'aria-label', 'data-name'], removed_element_count: 0 }
+    await setup(page, w, { locale })
+    await page.goto('/settings/workspace#brand')
+    const svg = WIDE.replace('<svg ', '<svg role="img" aria-label="Northwind" data-name="Logo" ')
+    await page.locator('#brand').getByLabel('Logo file', { exact: true }).setInputFiles({ name: 'export.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) })
+    await expect(page.locator('.toast')).toContainText(locale === 'de-AT'
+      ? '3 nicht zeichnende Attribute entfernt (role, aria-label, data-name).'
+      : 'Removed 3 non-drawing attributes (role, aria-label, data-name).')
+  })
+}
 
 // The review's repro: an upload's response used to overwrite the name typed while it was in flight.
 test('a short name typed while a logo uploads is kept and saved after it, never overwritten; writes run one at a time', async ({ page }) => {
