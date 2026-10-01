@@ -24,6 +24,18 @@ type step struct {
 }
 
 type job struct {
+	RunsOn   string `yaml:"runs-on"`
+	If       string
+	Strategy struct {
+		FailFast bool `yaml:"fail-fast"`
+		Matrix   struct {
+			Include []struct {
+				Arch   string
+				Cache  string
+				Runner string
+			}
+		}
+	}
 	Needs       []string
 	Permissions map[string]string
 	Outputs     map[string]string
@@ -75,7 +87,7 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	if len(w.On) != 1 || w.On["push"] == nil {
 		t.Fatal("publishing must remain tag-push only")
 	}
-	if len(w.Jobs["image"].Needs) != 0 {
+	if len(w.Jobs["image-platform"].Needs) != 0 || !reflect.DeepEqual(w.Jobs["image"].Needs, []string{"image-platform"}) || w.Jobs["image"].If != "" {
 		t.Fatal("server image waits for another job")
 	}
 	if !reflect.DeepEqual(w.Jobs["assets"].Needs, []string{"agentd-darwin", "image"}) {
@@ -100,7 +112,7 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 }
 
 func TestSmokeBeforePushAndAttest(t *testing.T) {
-	j := readWorkflow(t, "release.yml").Jobs["image"]
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
 	buildIndex, build := named(t, j, "Build cached smoke image")
 	smokeIndex, smoke := named(t, j, "Smoke production image")
 	pushIndex, push := named(t, j, "Build and push")
@@ -133,8 +145,8 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if push.With["context"] != "." || push.With["push"] != "true" || push.With["provenance"] != "mode=max" || !strings.Contains(push.With["cache-to"], "type=registry,") || !strings.HasSuffix(push.With["cache-to"], ",mode=max") {
 		t.Fatal("pushed image requires generated history, registry cache and provenance")
 	}
-	if push.With["tags"] != "ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}" {
-		t.Fatal("publish only the immutable release coordinate")
+	if push.With["tags"] != "" || push.With["outputs"] != "type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true" {
+		t.Fatal("platform jobs must publish by digest without tagging the release")
 	}
 	if !strings.HasPrefix(attest.Uses, "actions/attest-build-provenance@") || attest.With["subject-name"] != "ghcr.io/inspr-at/aeon" || attest.With["subject-digest"] != "${{ steps.push.outputs.digest }}" || attest.With["push-to-registry"] != "true" || attest.With["create-storage-record"] != "false" {
 		t.Fatal("attestation must bind the pushed digest without new token scopes")
@@ -152,7 +164,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 }
 
 func TestLoadedImageResolverFailsClosed(t *testing.T) {
-	_, resolve := named(t, readWorkflow(t, "release.yml").Jobs["image"], "Resolve loaded smoke image")
+	_, resolve := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Resolve loaded smoke image")
 	_, dryResolve := named(t, readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"], "Resolve loaded smoke image")
 	if resolve.Run != dryResolve.Run || !reflect.DeepEqual(resolve.Env, dryResolve.Env) {
 		t.Fatal("production and dry run must resolve the same loaded image")
@@ -194,7 +206,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) {
 		t.Fatal("workflow defaults must be read-only")
 	}
-	if !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
+	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
 	}
 	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read"}) {
@@ -206,7 +218,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	if _, ok := dry.On["pull_request_target"]; ok {
 		t.Fatal("dry run must never use pull_request_target")
 	}
-	_, productionBuild := named(t, release.Jobs["image"], "Build cached smoke image")
+	_, productionBuild := named(t, release.Jobs["image-platform"], "Build cached smoke image")
 	_, dryBuild := named(t, dry.Jobs["image-dry-run"], "Build cached smoke image")
 	if !reflect.DeepEqual(productionBuild.With, dryBuild.With) || productionBuild.Uses != dryBuild.Uses {
 		t.Fatal("dry run must exercise the production smoke build")
@@ -257,7 +269,7 @@ func shell(t *testing.T, run, git, gh string, vars ...string) error {
 }
 
 func TestAnnotatedTagGuardFailsClosed(t *testing.T) {
-	_, guard := named(t, readWorkflow(t, "release.yml").Jobs["image"], "Require an annotated release tag")
+	_, guard := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Require an annotated release tag")
 	for _, tc := range []struct {
 		name, git string
 		ok        bool
@@ -278,8 +290,10 @@ func TestAnnotatedTagGuardFailsClosed(t *testing.T) {
 func TestImmutabilityGuardsFailClosed(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
 	for _, target := range []struct{ job, step, coordinate string }{
+		{"image-platform", "Reject an existing GitHub release", "v260930120000.0.0"},
 		{"image", "Reject an existing GitHub release", "v260930120000.0.0"},
 		{"assets", "Reject an existing GitHub release", "v260930120000.0.0"},
+		{"image-platform", "Reject an existing image tag", "260930120000.0.0"},
 		{"image", "Reject an existing image tag", "260930120000.0.0"},
 	} {
 		t.Run(target.job+"/"+target.step, func(t *testing.T) {
@@ -345,5 +359,80 @@ esac`,
 				t.Fatalf("standalone build/cleanup behavior changed: %s", calls)
 			}
 		})
+	}
+}
+
+func TestNativePlatformsAndIndexPublication(t *testing.T) {
+	release := readWorkflow(t, "release.yml")
+	dry := readWorkflow(t, "release-image-check.yml")
+	platform := release.Jobs["image-platform"]
+	dryPlatform := dry.Jobs["image-dry-run"]
+	if !reflect.DeepEqual(platform.Strategy, dryPlatform.Strategy) || platform.Strategy.FailFast || len(platform.Strategy.Matrix.Include) != 2 {
+		t.Fatal("production and dry run require the same two independent native jobs")
+	}
+	for i, expected := range []struct{ arch, runner string }{{"amd64", "ubuntu-24.04"}, {"arm64", "ubuntu-24.04-arm"}} {
+		entry := platform.Strategy.Matrix.Include[i]
+		if entry.Arch != expected.arch || entry.Runner != expected.runner || entry.Cache != map[string]string{"amd64": "buildcache", "arm64": "buildcache-arm64"}[expected.arch] {
+			t.Fatal("incorrect native runner mapping")
+		}
+	}
+	for _, j := range []job{platform, dryPlatform} {
+		if j.RunsOn != "${{ matrix.runner }}" || j.If != "" {
+			t.Fatal("platform jobs must always run on the native matrix")
+		}
+		probeIndex, probe := named(t, j, "Require native platform")
+		buildIndex, build := named(t, j, "Build cached smoke image")
+		if probeIndex >= buildIndex || probe.If != "" || build.With["platforms"] != "linux/${{ matrix.arch }}" || build.With["cache-from"] != "type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}" {
+			t.Fatal("native check, platform or independent cache missing")
+		}
+		for _, tc := range []struct {
+			arch, machine string
+			ok            bool
+		}{{"amd64", "x86_64", true}, {"arm64", "aarch64", true}, {"arm64", "x86_64", false}, {"amd64", "aarch64", false}} {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "uname"), []byte("#!/bin/bash\necho "+tc.machine+"\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", probe.Run)
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ARCH="+tc.arch)
+			if err := cmd.Run(); (err == nil) != tc.ok {
+				t.Fatalf("native probe %s/%s: %v", tc.arch, tc.machine, err)
+			}
+		}
+		for _, s := range j.Steps {
+			if strings.Contains(s.Uses, "qemu") {
+				t.Fatal("emulated release build")
+			}
+		}
+	}
+	_, push := named(t, platform, "Build and push")
+	if push.With["cache-to"] != "type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }},mode=max" {
+		t.Fatal("parallel cache writes overlap")
+	}
+	verifyIndex, _ := named(t, platform, "Verify pushed image attestation")
+	exportIndex, export := named(t, platform, "Record platform digest")
+	if exportIndex <= verifyIndex || !strings.Contains(export.Run, `image-digests/$ARCH.txt`) {
+		t.Fatal("digest handoff must follow verified attestation")
+	}
+	index := release.Jobs["image"]
+	pushIndex, merge := named(t, index, "Publish multi-arch index")
+	attestIndex, attest := named(t, index, "Attest pushed image")
+	indexVerifyIndex, _ := named(t, index, "Verify pushed image attestation")
+	if !(pushIndex < attestIndex && attestIndex < indexVerifyIndex) || attest.With["subject-digest"] != "${{ steps.push.outputs.digest }}" {
+		t.Fatal("index attestation gate missing")
+	}
+	for _, name := range []string{"Reject an existing GitHub release", "Reject an existing image tag"} {
+		i, _ := named(t, index, name)
+		if i >= pushIndex {
+			t.Fatal("index immutability check must precede publication")
+		}
+	}
+	for _, fragment := range []string{"release-image-index.mjs sources", "imagetools create --dry-run", "release-image-index.mjs verify", `--tag "ghcr.io/inspr-at/aeon:${VERSION}"`, "containerimage.descriptor", "imagetools inspect --raw", `echo "digest=$digest"`} {
+		if !strings.Contains(merge.Run, fragment) {
+			t.Fatalf("index publication missing %s", fragment)
+		}
+	}
+	if strings.Count(merge.Run, "release-image-index.mjs verify") != 2 || merge.If != "" {
+		t.Fatal("validate index before and after publication")
 	}
 }

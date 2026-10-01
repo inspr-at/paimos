@@ -11,6 +11,7 @@ on:
       - .github/workflows/release-image-check.yml
       - scripts/smoke-image.sh
       - scripts/releaseworkflow/**
+      - scripts/release-image-index*.mjs
       - Dockerfile
 
 permissions:
@@ -22,7 +23,17 @@ concurrency:
 
 jobs:
   image-dry-run:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            cache: buildcache
+            runner: ubuntu-24.04
+          - arch: arm64
+            cache: buildcache-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,7 +48,9 @@ jobs:
         with:
           go-version: "1.26"
       - name: Check release workflow invariants
-        run: go test ./scripts/releaseworkflow
+        run: |
+          go test ./scripts/releaseworkflow
+          node --test scripts/release-image-index.test.mjs
       - name: Validate version and presentation bundle
         id: version
         run: |
@@ -47,22 +60,28 @@ jobs:
       - name: Release history fixture
         run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Require native platform
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in amd64:x86_64|arm64:aarch64) ;; *) echo 'Native runner architecture mismatch' >&2; exit 1 ;; esac
       - name: Build cached smoke image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           provenance: false
-          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:buildcache
+          tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
       - name: Resolve loaded smoke image
         id: smoke-image
         env:
-          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}
+          SMOKE_TAG: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
         run: |
           set -euo pipefail
           image="$(docker image ls --quiet --no-trunc "$SMOKE_TAG")"
@@ -77,4 +96,4 @@ jobs:
           AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/smoke-image.sh
       - name: Record dry run
-        run: echo 'Release image built and smoked; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'linux/${{ matrix.arch }} built and smoked natively; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
