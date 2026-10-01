@@ -14,11 +14,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // POST /api/nodes/bulk applies one change to many nodes in one tenant
@@ -309,6 +311,14 @@ type bulkTarget struct {
 func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPlan) (bulkResult, error) {
 	result := bulkResult{Items: []nodeJSON{}, Unchanged: []string{}, Skipped: []bulkSkip{}}
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if plan.state != nil && workqueue.Terminal(*plan.state) {
+			if err := agentpairing.Lock(ctx, tx); err != nil {
+				return err
+			}
+			if err := lockTree(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -414,6 +424,11 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 			latest := current
 			if edit {
+				if plan.state != nil && workqueue.Terminal(state) {
+					if _, err := workqueue.RemoveQueued(ctx, tx, p, current.ID); err != nil {
+						return err
+					}
+				}
 				latest, err = scanNode(tx.QueryRow(ctx, `UPDATE nodes SET state=$2, fields=$3::jsonb,
 				 updated_at=greatest(clock_timestamp(), updated_at + interval '1 microsecond')
 				 WHERE id=$1::uuid AND deleted_at IS NULL RETURNING `+nodeReturning, current.ID, state, string(fields)))

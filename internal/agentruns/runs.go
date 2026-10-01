@@ -109,11 +109,13 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-			if err := queueLock(r.Context(), tx); err != nil {
-				return nil, err
-			}
 			if err := agentpairing.Lock(r.Context(), tx); err != nil {
 				return nil, err
+			}
+			if route.pattern == "POST /api/runs/{runId}/claim" {
+				if err := queueLock(r.Context(), tx); err != nil {
+					return nil, err
+				}
 			}
 			v, err := route.fn(r, tx, p)
 			var pe *agentpairing.Error

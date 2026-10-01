@@ -168,10 +168,12 @@ func (m *module) queueMove(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	shared = append(shared, queueEntry{})
 	copy(shared[to+1:], shared[to:])
 	shared[to] = moved
+	ids := make([]string, len(shared))
 	for i, e := range shared {
-		if _, err = tx.Exec(r.Context(), `UPDATE agent_runs SET queue_rank=$2 WHERE id=$1 AND status='queued'`, e.Run.ID, i+1); err != nil {
-			return nil, err
-		}
+		ids[i] = e.Run.ID
+	}
+	if err = workqueue.ReorderShared(r.Context(), tx, ids); err != nil {
+		return nil, err
 	}
 	if err = workorders.Record(r.Context(), tx, p, moved.NodeID, "queue.moved", map[string]int{"position": from + 1}, map[string]int{"position": in.Position}); err != nil {
 		return nil, err
@@ -183,18 +185,23 @@ func (m *module) queueReset(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if err != nil {
 		return nil, err
 	}
+	hasShared := false
 	for _, e := range entries {
 		if !e.Queued.Targeted {
+			hasShared = true
 			if err = queuePermission(r.Context(), tx, p, e.ProjectID, true); err != nil {
 				return nil, err
 			}
 		}
 	}
+	if !hasShared {
+		return m.queueList(r, tx, p)
+	}
+	if err = workqueue.ResetShared(r.Context(), tx); err != nil {
+		return nil, err
+	}
 	for _, e := range entries {
 		if !e.Queued.Targeted && e.Queued.Manual {
-			if _, err = tx.Exec(r.Context(), `UPDATE agent_runs SET queue_rank=NULL WHERE id=$1 AND status='queued'`, e.Run.ID); err != nil {
-				return nil, err
-			}
 			if err = workorders.Record(r.Context(), tx, p, e.NodeID, "queue.reset", e.Queued, nil); err != nil {
 				return nil, err
 			}

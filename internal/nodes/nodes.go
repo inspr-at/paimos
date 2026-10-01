@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
@@ -355,6 +356,17 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	var node nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if value, ok := raw["state"]; ok {
+			state, _ := parsePatchString(value)
+			if workqueue.Terminal(state) {
+				if err := agentpairing.Lock(ctx, tx); err != nil {
+					return err
+				}
+				if err := lockTree(ctx, tx); err != nil {
+					return err
+				}
+			}
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -477,6 +489,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 			}
 		}
+		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
+			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
+				return err
+			}
+		}
 		idPh := add(id)
 		q := fmt.Sprintf(`UPDATE nodes SET %s WHERE id = %s::uuid AND deleted_at IS NULL RETURNING %s`,
 			strings.Join(sets, ", "), idPh, nodeReturning)
@@ -504,6 +521,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) (time.Time, error) {
 	var revision time.Time
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -520,6 +540,9 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		}
 		if kind.Slug == "tag" {
 			return badRequest("delete tags through /api/tags/{tagId}")
+		}
+		if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
+			return err
 		}
 		// Like every other write, the delete moves updated_at forward: a
 		// transaction that started before a later update committed must not

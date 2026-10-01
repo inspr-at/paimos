@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -67,8 +66,8 @@ func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
-// Same tree lock as nodes, work orders and status autopilot, before pairing,
-// order/run/account rows and the tenant event counter. Claim and queue edits
+// Same tree lock as nodes, work orders and status autopilot, after pairing and
+// before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
@@ -112,10 +111,10 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					}
 				}
 				if route.write {
-					if err := queueLock(r.Context(), tx); err != nil {
+					if err := agentpairing.Lock(r.Context(), tx); err != nil {
 						return err
 					}
-					if err := agentpairing.Lock(r.Context(), tx); err != nil {
+					if err := queueLock(r.Context(), tx); err != nil {
 						return err
 					}
 				}
@@ -310,7 +309,7 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	var rank *int
 	if in.Agent == "" {
-		if err = tx.QueryRow(ctx, workqueue.CTE+`SELECT CASE WHEN count(queue_rank)>0 THEN coalesce(max(queue_rank),0)::int+1 END FROM queue_ordered WHERE queue_target_agent_id IS NULL`).Scan(&rank); err != nil {
+		if rank, err = workqueue.AppendRank(ctx, tx); err != nil {
 			return nil, err
 		}
 	}
@@ -407,19 +406,6 @@ func (m *module) queueRemove(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if v.Status != "queued" {
 		return nil, workorders.Fail(409, "run has already started")
 	}
-	if err = agentaccounts.Release(ctx, tx, p, v.ID, "", ""); err != nil {
-		return nil, err
-	}
-	_, err = tx.Exec(ctx, `UPDATE agent_runs SET status='cancelled',started_at=clock_timestamp(),ended_at=clock_timestamp() WHERE id=$1`, v.ID)
-	if err != nil {
-		return nil, err
-	}
-	_, err = tx.Exec(ctx, `UPDATE work_orders SET status='cancelled',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1`, v.OrderID)
-	if err != nil {
-		return nil, err
-	}
-	if err = workorders.Record(ctx, tx, p, t.ID, "queue.removed", v, map[string]any{"run_id": v.ID}); err != nil {
-		return nil, err
-	}
-	return map[string]bool{"removed": true}, nil
+	removed, err := workqueue.RemoveQueued(ctx, tx, p, t.ID)
+	return map[string]bool{"removed": removed}, err
 }

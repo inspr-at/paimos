@@ -391,4 +391,13 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 	if global.Manual || !slices.Equal(keys(global), []string{hidden, arrival, security, visible, second}) {
 		t.Fatalf("project reset left hidden ranks: %+v", global)
 	}
+	f.call(t, f.person, "POST", "/api/queue/"+security+"/move", map[string]int{"position": 1}, 200, nil)
+	for _, id := range []string{visible, second, arrival} {
+		f.call(t, guest, "DELETE", "/api/queue/"+id, nil, 200, nil)
+	}
+	f.call(t, guest, "POST", "/api/queue/reset", map[string]any{}, 200, &page)
+	global = f.queuePage(t)
+	if page.Count != 0 || !global.Manual || !slices.Equal(keys(global), []string{security, hidden}) {
+		t.Fatalf("empty visible reset modified hidden work: %+v", global)
+	}
 }

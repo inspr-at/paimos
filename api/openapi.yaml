@@ -18,7 +18,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     post:
       operationId: addWorkQueue
-      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup.
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -79,7 +79,7 @@ paths:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: moveWorkQueue
-      description: Move to a one-based position in the visible shared queue. All affected entries must be manageable. Targeted entries cannot move into the shared queue. Manual order lasts until Reset; new arrivals append while manual order is active.
+      description: Move to a one-based position in the visible shared queue. All affected visible entries must be manageable. The full shared partition is renumbered under the tree lock; hidden entries retain their slots and relative order. Targeted entries cannot move into the shared queue. Manual order lasts until Reset; new arrivals append after the full shared partition while manual order is active.
       security: [{session: []}, {agentKey: []}]
       requestBody:
         required: true
@@ -93,7 +93,7 @@ paths:
   /queue/reset:
     post:
       operationId: resetWorkQueue
-      description: Reset the visible shared queue to priority then original FIFO. Requires queue management authority for every affected ticket. Targeted lines are untouched.
+      description: Reset the full shared partition to priority then original FIFO. Requires queue management authority for every visible shared ticket; clears hidden ranks internally under the tree lock without exposing hidden entries. Targeted lines are untouched.
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}

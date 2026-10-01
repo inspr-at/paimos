@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -53,11 +54,33 @@ const CTE = `WITH queue_source AS (
  ) `
 
 func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Queued, error) {
+	settings, err := statusautopilot.Load(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	projectModes := map[string]bool{}
+	projectRows, err := tx.Query(ctx, `SELECT project_id::text,mode='on' FROM status_autopilot_projects WHERE mode<>'inherit'`)
+	if err != nil {
+		return nil, err
+	}
+	for projectRows.Next() {
+		var id string
+		var enabled bool
+		if err = projectRows.Scan(&id, &enabled); err != nil {
+			projectRows.Close()
+			return nil, err
+		}
+		projectModes[id] = enabled
+	}
+	projectRows.Close()
+	if err = projectRows.Err(); err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, CTE+`SELECT q.queue_node_id::text,q.queue_position,
  p.id::text,p.name,p.kind,q.queue_at,q.id::text,q.queue_target_agent_id::text,
  CASE WHEN q.queue_target_agent_id IS NOT NULL OR q.queue_routed_at IS NOT NULL THEN q.agent_principal_id::text END,
  q.model_profile_id::text,q.manual_order,q.state,coalesce(q.queue_security_review_required,false),q.fields,
- (q.queue_position=q.first_ready_position)
+ (q.queue_position=q.first_ready_position),q.project_id::text
  FROM queue_heads q JOIN principals p ON p.tenant_id=q.tenant_id AND p.id=q.queue_by_principal_id
  WHERE ($1::uuid[] IS NULL OR q.queue_node_id=ANY($1::uuid[]))`, ids)
 	if err != nil {
@@ -69,14 +92,25 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Queued, err
 		var id, state string
 		var fields []byte
 		var head *bool
+		var project *string
 		q := &Queued{}
-		if err := rows.Scan(&id, &q.Position, &q.By.ID, &q.By.Name, &q.By.Kind, &q.At, &q.RunID, &q.TargetAgentID, &q.ExpectedAgentID, &q.ProfileID, &q.Manual, &state, &q.SecurityReview, &fields, &head); err != nil {
+		if err := rows.Scan(&id, &q.Position, &q.By.ID, &q.By.Name, &q.By.Kind, &q.At, &q.RunID, &q.TargetAgentID, &q.ExpectedAgentID, &q.ProfileID, &q.Manual, &state, &q.SecurityReview, &fields, &head, &project); err != nil {
 			return nil, err
 		}
 		q.Targeted = q.TargetAgentID != nil
 		q.Waiting = head != nil && *head
 		if q.Waiting {
-			q.WaitReason = "Autopilot is off; a coordinator takes it"
+			enabled := settings.Enabled
+			if project != nil {
+				if override, ok := projectModes[*project]; ok {
+					enabled = override
+				}
+			}
+			if !enabled && q.ExpectedAgentID == nil {
+				q.WaitReason = "Autopilot is off; a coordinator takes it"
+			} else {
+				q.WaitReason = "Waiting for coordinator routing"
+			}
 		}
 		if State(state) == "blocked" {
 			q.Waiting = true
