@@ -5,6 +5,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,41 +16,42 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
-	EstimateHours       *float64 `json:"estimate_hours,omitempty"`
-	EstimateSource      string   `json:"estimate_source,omitempty"`
-	EstimateBy          string   `json:"estimate_by,omitempty"`
-	EstimateAt          string   `json:"estimate_at,omitempty"`
-	PillEN              string   `json:"pill_en,omitempty"`
-	PillDE              string   `json:"pill_de,omitempty"`
-	BenefitEN           string   `json:"benefit_en,omitempty"`
-	BenefitDE           string   `json:"benefit_de,omitempty"`
-	Hide                bool     `json:"hide_from_release_notes,omitempty"`
-	Warnings            []string `json:"warnings,omitempty"`
-	IssueKey            string   `json:"issue_key"`
-	Title               string   `json:"title"`
-	Type                string   `json:"type"`
-	Status              string   `json:"status"`
-	Priority            string   `json:"priority"`
-	RouteRole           string   `json:"route_role,omitempty"`
-	RouteRoleSource     string   `json:"route_role_source,omitempty"`
-	RouteRoleBy         string   `json:"route_role_by,omitempty"`
-	RouteRoleAt         string   `json:"route_role_at,omitempty"`
-	Area                string   `json:"area,omitempty"`
-	AreaSource          string   `json:"area_source,omitempty"`
-	AreaBy              string   `json:"area_by,omitempty"`
-	AreaAt              string   `json:"area_at,omitempty"`
-	RouteRoleConfirmed  *bool    `json:"route_role_confirmed,omitempty"`
-	AreaConfirmed       *bool    `json:"area_confirmed,omitempty"`
-	Complexity          string   `json:"complexity,omitempty"`
-	ComplexitySource    string   `json:"complexity_source,omitempty"`
-	ComplexityBy        string   `json:"complexity_by,omitempty"`
-	ComplexityAt        string   `json:"complexity_at,omitempty"`
-	ComplexityConfirmed *bool    `json:"complexity_confirmed,omitempty"`
-	Description         string   `json:"description,omitempty"`
-	ID                  string   `json:"id"`
-	Assignee            string   `json:"assignee,omitempty"`
-	Tags                []string `json:"tags,omitempty"`
-	Comments            []string `json:"comments,omitempty"`
+	Queued              *workqueue.Queued `json:"queued,omitempty"`
+	EstimateHours       *float64          `json:"estimate_hours,omitempty"`
+	EstimateSource      string            `json:"estimate_source,omitempty"`
+	EstimateBy          string            `json:"estimate_by,omitempty"`
+	EstimateAt          string            `json:"estimate_at,omitempty"`
+	PillEN              string            `json:"pill_en,omitempty"`
+	PillDE              string            `json:"pill_de,omitempty"`
+	BenefitEN           string            `json:"benefit_en,omitempty"`
+	BenefitDE           string            `json:"benefit_de,omitempty"`
+	Hide                bool              `json:"hide_from_release_notes,omitempty"`
+	Warnings            []string          `json:"warnings,omitempty"`
+	IssueKey            string            `json:"issue_key"`
+	Title               string            `json:"title"`
+	Type                string            `json:"type"`
+	Status              string            `json:"status"`
+	Priority            string            `json:"priority"`
+	RouteRole           string            `json:"route_role,omitempty"`
+	RouteRoleSource     string            `json:"route_role_source,omitempty"`
+	RouteRoleBy         string            `json:"route_role_by,omitempty"`
+	RouteRoleAt         string            `json:"route_role_at,omitempty"`
+	Area                string            `json:"area,omitempty"`
+	AreaSource          string            `json:"area_source,omitempty"`
+	AreaBy              string            `json:"area_by,omitempty"`
+	AreaAt              string            `json:"area_at,omitempty"`
+	RouteRoleConfirmed  *bool             `json:"route_role_confirmed,omitempty"`
+	AreaConfirmed       *bool             `json:"area_confirmed,omitempty"`
+	Complexity          string            `json:"complexity,omitempty"`
+	ComplexitySource    string            `json:"complexity_source,omitempty"`
+	ComplexityBy        string            `json:"complexity_by,omitempty"`
+	ComplexityAt        string            `json:"complexity_at,omitempty"`
+	ComplexityConfirmed *bool             `json:"complexity_confirmed,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	ID                  string            `json:"id"`
+	Assignee            string            `json:"assignee,omitempty"`
+	Tags                []string          `json:"tags,omitempty"`
+	Comments            []string          `json:"comments,omitempty"`
 }
 
 type issueInput struct {
@@ -87,6 +89,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		estimate = &h
 	}
 	return issueView{
+		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
 		IssueKey:            n.Key,

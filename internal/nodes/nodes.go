@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state, parent_id::text, position::text, created_at, updated_at, deleted_at`
@@ -23,20 +24,21 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at`
 
 type nodeJSON struct {
-	Estimate  *estimateView   `json:"estimate,omitempty"`
-	Warnings  []string        `json:"warnings,omitempty"`
-	ID        string          `json:"id"`
-	Key       string          `json:"key"`
-	KindID    string          `json:"kind_id"`
-	Title     string          `json:"title"`
-	Body      string          `json:"body"`
-	Fields    json.RawMessage `json:"fields"`
-	State     string          `json:"state"`
-	ParentID  *string         `json:"parent_id"`
-	Position  string          `json:"position"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	DeletedAt *time.Time      `json:"deleted_at"`
+	Queued    *workqueue.Queued `json:"queued,omitempty"`
+	Estimate  *estimateView     `json:"estimate,omitempty"`
+	Warnings  []string          `json:"warnings,omitempty"`
+	ID        string            `json:"id"`
+	Key       string            `json:"key"`
+	KindID    string            `json:"kind_id"`
+	Title     string            `json:"title"`
+	Body      string            `json:"body"`
+	Fields    json.RawMessage   `json:"fields"`
+	State     string            `json:"state"`
+	ParentID  *string           `json:"parent_id"`
+	Position  string            `json:"position"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	DeletedAt *time.Time        `json:"deleted_at"`
 }
 
 type nodeCreate struct {
@@ -191,6 +193,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Estimate = views[id]
+		queued, err := workqueue.Load(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Queued = queued[id]
 		return nil
 	})
 	return node, err
