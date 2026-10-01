@@ -427,6 +427,88 @@ func TestModelResolveCompatTranscript(t *testing.T) {
 	}
 }
 
+func TestModelResolveAuthorFamilyAliases(t *testing.T) {
+	for _, tc := range []struct{ input, family string }{
+		{"claude", "anthropic"}, {"codex", "openai"}, {"grok", "xai"},
+		{"anthropic", "anthropic"}, {"openai", "openai"}, {"xai", "xai"}, {"cursor", "cursor"},
+		{" codex ", "openai"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			isolate(t)
+			var paths []string
+			sameFamily := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.Method+" "+r.URL.String())
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/models/resolve":
+					if r.URL.Query().Get("author_family") != tc.family {
+						t.Errorf("request author_family = %q; want %q", r.URL.Query().Get("author_family"), tc.family)
+					}
+					family := "anthropic"
+					if tc.family == family {
+						family = "openai"
+					}
+					if sameFamily {
+						family = tc.family
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"role": "review-gate", "author_family": tc.family,
+						"profile": map[string]any{"id": "profile", "slug": "reviewer", "family": family},
+						"ladder":  []any{}, "owner_required": false, "source": "aeon",
+					})
+				case "/api/models":
+					_, _ = w.Write([]byte(`[]`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("PAIMOS_URL", srv.URL)
+			t.Setenv("PAIMOS_API_KEY", testKey)
+			args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "model", "resolve", "review-gate", "--author-family", tc.input}
+			code, out, stderr := runCLI(args, "")
+			var got map[string]any
+			if code != 0 || stderr != "" || json.Unmarshal([]byte(out), &got) != nil || got["author_family"] != tc.family || len(paths) != 2 {
+				t.Fatalf("resolve exit %d out %q stderr %q requests %v", code, out, stderr, paths)
+			}
+			// An alias must preserve the CLI's guard against a same-family reviewer.
+			sameFamily = true
+			code, out, stderr = runCLI(args, "")
+			if code != 1 || out != "" || !strings.Contains(stderr, "selected author family") || len(paths) != 3 {
+				t.Fatalf("same-family resolve exit %d out %q stderr %q requests %v", code, out, stderr, paths)
+			}
+		})
+	}
+}
+
+func TestModelResolveRejectsAmbiguousAndUnknownAuthorFamilies(t *testing.T) {
+	isolate(t)
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	t.Setenv("PAIMOS_URL", srv.URL)
+	t.Setenv("PAIMOS_API_KEY", testKey)
+	for _, input := range []string{"pi", "unknown"} {
+		args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "model", "resolve", "review-gate", "--author-family", input}
+		code, out, stderr := runCLI(args, "")
+		if code != 2 || out != "" || requests != 0 {
+			t.Fatalf("invalid family exit %d out %q stderr %q requests %d", code, out, stderr, requests)
+		}
+		for _, value := range []string{"openai", "anthropic", "xai", "cursor", "codex", "claude", "grok"} {
+			if !strings.Contains(stderr, value) {
+				t.Errorf("error %q omits accepted value %q", stderr, value)
+			}
+		}
+		if input == "pi" && (!strings.Contains(stderr, "ambiguous") || !strings.Contains(stderr, "pass the model family")) {
+			t.Errorf("pi should request an explicit family: %q", stderr)
+		}
+	}
+}
+
 func TestModelResolveOwnerRequiredTranscript(t *testing.T) {
 	isolate(t)
 	var paths []string

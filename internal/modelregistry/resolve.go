@@ -16,6 +16,7 @@ import (
 // Resolution is the role choice exposed by GET /api/models/resolve.
 type Resolution struct {
 	Role            string      `json:"role"`
+	AuthorFamily    string      `json:"author_family"`
 	Profile         *Profile    `json:"profile"`
 	Ladder          []Candidate `json:"ladder"`
 	CommandTemplate string      `json:"command_template,omitempty"`
@@ -46,9 +47,11 @@ func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) 
 	if !ok {
 		return Resolution{}, fail(http.StatusBadRequest, "unknown model role")
 	}
-	if q.AuthorFamily != "" && !validFamily(q.AuthorFamily) {
-		return Resolution{}, fail(http.StatusBadRequest, "unknown author family")
+	author, err := NormalizeAuthorFamily(q.AuthorFamily)
+	if err != nil {
+		return Resolution{}, fail(http.StatusBadRequest, err.Error())
 	}
+	q.AuthorFamily = author
 	if role.cross && q.AuthorFamily == "" {
 		return Resolution{}, fail(http.StatusBadRequest, "review-gate requires author_family")
 	}
@@ -66,7 +69,7 @@ func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) 
 	if err != nil {
 		return Resolution{}, err
 	}
-	out := Resolution{Role: q.Role, Ladder: []Candidate{}, Source: "aeon"}
+	out := Resolution{Role: q.Role, AuthorFamily: q.AuthorFamily, Ladder: []Candidate{}, Source: "aeon"}
 	for _, step := range steps {
 		reasons := skipReasons(step, role, q, now, health)
 		candidate := Candidate{ProfileID: step.ProfileID, SkipReasons: reasons}
