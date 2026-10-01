@@ -2,7 +2,7 @@
 // INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest and every version
 // surface reveals them. Inside a control (the footer's history button, a release
 // row) the control's hover or keyboard focus reveals and its click still acts;
-// standing alone (the release heading, "Running here") the version is the shared
+// standing alone (the release heading, the history's title) the version is the shared
 // renderer's copy pill. Reduced motion switches at once.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
@@ -80,7 +80,7 @@ test('release history rows: hover and the keyboard’s current row reveal; a cli
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
 })
 
-test('release heading and "Running here": the copy pill reveals on hover and focus and copies exactly', async ({ page, context }) => {
+test('release heading and the history title: the copy pill reveals on hover and focus and copies exactly', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.setViewportSize({ width: 1280, height: 800 })
   const history = await setup(page)
@@ -98,10 +98,11 @@ test('release heading and "Running here": the copy pill reveals on hover and foc
   await page.keyboard.press('Enter')
   await expect(copy).toHaveAttribute('data-copy-state', 'copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
-  const running = sheet(page).getByRole('group', { name: 'Release cadence' }).locator('.value')
-  await expectRest(running)
-  await version(running).hover()
-  await expectRevealed(running)
+  // The title names the live release (AEON-488); unnamed, it is the version itself.
+  const title = sheet(page).getByRole('heading', { level: 1 })
+  await expectRest(title)
+  await version(title).hover()
+  await expectRevealed(title)
 })
 
 test('journey release list: hover and focus reveal; a click still opens the release', async ({ page }) => {

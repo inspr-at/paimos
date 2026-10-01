@@ -4,17 +4,19 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { groupByDay, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, stats as statsOf, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 import { normalKey } from '../../lib/ticketLinks'
-import { relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
+import ReleaseCodename from './ReleaseCodename.vue'
 import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
@@ -147,7 +149,6 @@ const runningSince = computed(() => runningHere.value === current.value ? histor
 const currentKnown = computed(() => byVersion.value.has(current.value))
 // The published release before the one the server runs: where a rollback would go.
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
-const stats = computed(() => statsOf(releases.value, now.value))
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
@@ -156,6 +157,17 @@ const compareTo = computed(() => mode.value === 'compare' && cursor.value && cur
 // the newer of the cached history and the version the update poll already saw.
 const server = computed(() => liveServer(current.value, store.available))
 const notice = computed(() => releaseNotice(pageRuns.value, server.value, missing.value))
+// The title (AEON-488) is the release live on the server, by its codename: the
+// newer of what the server and this page know. The eyebrow names the product;
+// Details adds the generation and the counts.
+const hero = computed(() => { const v = liveServer(server.value, pageRuns.value); return isCalendarVersion(v) ? v : '' })
+const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
+const eyebrow = computed(() => view.value === 'details'
+  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${releases.value.length - reservedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : [])].join(' · ')
+  : `${brand.value.wordmark} · Releases`)
+// One status line under it: since when it runs here, or that this page is older.
+const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
+const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 
 // ---------- Selection ----------
@@ -384,15 +396,26 @@ const KINDS = [
 </script>
 
 <template>
-  <dialog ref="dialog" class="releases" aria-labelledby="releases-title" tabindex="-1" @cancel.prevent @keydown="keydown">
+  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" tabindex="-1" @cancel.prevent @keydown="keydown">
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
       <header class="head" :inert="covered">
         <div class="title-row">
           <!-- The mark leaves the release history for the home page, like the app header's mark. -->
-          <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="24" height="24" alt="" /></a>
+          <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="26" height="26" alt="" /></a>
           <div class="titles">
-            <p class="eyebrow">{{ generationLabel }} · Release history</p>
-            <h1 id="releases-title">{{ brand.wordmark }} releases</h1>
+            <p class="eyebrow">{{ eyebrow }}</p>
+            <h1 id="releases-title" class="hero" :class="{ named: !!hero }">
+              <ReleaseCodename v-if="hero" :version="hero" :name="heroName" />
+              <template v-else>{{ brand.wordmark }} releases</template>
+            </h1>
+            <p v-if="notice === 'update'" class="status-line outdated" role="status">
+              <span class="status-dot" aria-hidden="true" />
+              <span>Live on the server · this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" :name="byVersion.get(pageRuns)?.codename" class="status-version" /></span>
+              <button type="button" class="reload" @click="reload"><AppIcon name="refresh" :size="13" />Reload</button>
+            </p>
+            <p v-else-if="hero" class="status-line" :data-tip="runningSince ? `Live on this server since ${absoluteTime(runningSince)}` : undefined">
+              <span class="status-dot live" aria-hidden="true" /><span>{{ liveLine }}</span>
+            </p>
           </div>
           <span class="spacer" />
           <div class="switches">
@@ -416,24 +439,19 @@ const KINDS = [
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
           <button type="button" class="icon-btn close-btn" aria-label="Close release history" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
         </div>
-        <p v-if="notice === 'update'" class="notice" role="status">
-          <AppIcon name="info" :size="14" />
-          <span>A newer release is live: this page still runs <ReleaseName v-if="pageRuns" :version="pageRuns" class="notice-version" />, and the server runs <ReleaseName v-if="server" :version="server" class="notice-version" />.</span>
-          <button type="button" class="btn sm" @click="reload"><AppIcon name="refresh" :size="12" />Reload</button>
-        </p>
-        <p v-else-if="notice === 'missing'" class="notice" role="status">
+        <p v-if="notice === 'missing'" class="notice" role="status">
           <AppIcon name="info" :size="14" />
           <span><CalendarVersion :value="missing" class="notice-version" /> is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
-        <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
+        <ReleaseStats v-if="releases.length && !phone" class="stats" :releases="releases" :now="now" />
+        <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 2" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases" :inert="covered">
           <!-- Phones: the stats scroll away with the list, inside the gutter. -->
-          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="runningHere" :live-since="runningSince" :now="now" />
+          <ReleaseStats v-if="releases.length && phone" compact class="stats" :releases="releases" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
               <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
@@ -563,20 +581,51 @@ const KINDS = [
 }
 .releases[open] { display: block; }
 .releases::backdrop { background: var(--scrim); }
-.shell { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: 1640px; margin: 0 auto; padding: 0 var(--gutter); }
+.shell {
+  position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: 1640px; margin: 0 auto; padding: 0 var(--gutter);
+  /* A soft aurora behind the title (AEON-488): aqua, teal and gold lights. */
+  --aurora-1: rgba(127, 216, 207, .55); --aurora-2: rgba(14, 111, 108, .22); --aurora-3: rgba(232, 192, 122, .32);
+  background:
+    radial-gradient(220px 160px at 130px 30px, var(--aurora-1), transparent) no-repeat,
+    radial-gradient(190px 130px at 440px 30px, var(--aurora-2), transparent) no-repeat,
+    radial-gradient(160px 110px at 670px 40px, var(--aurora-3), transparent) no-repeat;
+}
+:root[data-theme="dark"] .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .shell { --aurora-1: rgba(127, 216, 207, .2); --aurora-2: rgba(164, 229, 223, .08); --aurora-3: rgba(232, 192, 122, .12); } }
 
 /* ---------- Head ---------- */
 .head { display: grid; gap: 14px; padding: 18px 0 16px; }
-.title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 /* The two switches sit with search and Compare, at the header controls' 36 px. */
 .switches { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .switches .seg button { height: 30px; padding: 0 12px; }
-.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
+.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 52px; height: 52px; border-radius: 15px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
 .mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
-.titles { min-width: 0; }
-.titles .eyebrow { margin: 0; }
-.titles h1 { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title on frosted glass: eyebrow, the codename, one status line. */
+.titles {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 26px 14px 22px; border-radius: 22px;
+  --glass-a: rgba(255, 255, 255, .62); --glass-b: rgba(255, 255, 255, .34); --glass-hi: rgba(255, 255, 255, .95); --glass-ring: rgba(255, 255, 255, .55); --glass-glow: rgba(14, 111, 108, .45);
+  background: linear-gradient(135deg, var(--glass-a), var(--glass-b));
+  -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--glass-hi), inset 0 -1px 0 rgba(14, 111, 108, .06), 0 0 0 1px var(--glass-ring), 0 0 0 1.5px var(--line), 0 18px 40px -22px var(--glass-glow);
+}
+:root[data-theme="dark"] .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-hi: rgba(255, 255, 255, .1); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .titles { --glass-a: rgba(30, 60, 64, .72); --glass-b: rgba(16, 35, 39, .5); --glass-hi: rgba(255, 255, 255, .1); --glass-ring: rgba(164, 229, 223, .14); --glass-glow: rgba(0, 0, 0, .6); } }
+.titles .eyebrow { margin: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; overflow-wrap: anywhere; }
+/* The codename leads. Its padding holds the sparkles; the margin keeps the text in line. */
+.hero { position: relative; align-self: flex-start; max-width: calc(100% + 32px); margin: -10px -18px -8px -14px; padding: 10px 18px 8px 14px; font: 800 clamp(28px, 2.9vw, 42px)/1.05 var(--font); color: var(--ink); --sparkle: 18px; }
+.hero:not(.named) { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; }
+.hero :deep(.rn-stamp) { font-size: 15px; padding: 8px 12px; }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
+.status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 3px rgba(214, 155, 49, .18); }
+.status-dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); }
+.status-version { font-weight: 600; color: var(--ink); vertical-align: baseline; }
+.reload { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--teal-ink); font: 600 13px/1 var(--font); cursor: pointer; }
+@media (hover: hover) { .reload:hover { background: var(--row-hover); } }
+.reload:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (prefers-reduced-motion: no-preference) { .status-dot.live { animation: breathe 2.4s ease-in-out infinite; } }
+@keyframes breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(47, 143, 91, .16); } 50% { box-shadow: 0 0 0 6px rgba(47, 143, 91, .06); } }
 .spacer { flex: 1 1 0; }
 .search { width: min(360px, 32vw); }
 .search .field { height: 36px; border-radius: 999px; padding-right: 34px; }
@@ -590,9 +639,9 @@ const KINDS = [
 .notice-version { font-size: inherit; font-weight: 600; vertical-align: baseline; }
 .notice .btn, .notice .icon-btn { flex: none; }
 .notice svg { color: var(--teal-ink); }
-.stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
-.stats-placeholder .skeleton { border-radius: 14px; }
-@media (max-width: 1100px) { .stats-placeholder { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 275px; } }
+.stats-placeholder { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; height: 300px; }
+.stats-placeholder .skeleton { border-radius: 20px; }
+@media (max-width: 900px) { .stats-placeholder { grid-template-columns: minmax(0, 1fr); height: 600px; } }
 
 /* ---------- Body ---------- */
 .body { display: grid; grid-template-columns: minmax(360px, 460px) minmax(0, 1fr); gap: 28px; min-height: 0; }
@@ -710,7 +759,7 @@ const KINDS = [
 /* Too narrow for the title, switches and search in one line: the switches take the next one. */
 @media (max-width: 1180px) and (min-width: 761px) {
   .title-row { flex-wrap: wrap; row-gap: 10px; }
-  .switches { order: 10; flex-basis: 100%; padding-left: 52px; }
+  .switches { order: 10; flex-basis: 100%; padding-left: 64px; }
 }
 /* Too narrow for three columns: the release and its ticket side by side. */
 @media (max-width: 1279px) and (min-width: 761px) {
@@ -723,11 +772,13 @@ const KINDS = [
   .switches { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
   .switches .seg button { height: 38px; padding: 0 14px; }
   .title-row { flex-wrap: wrap; gap: 10px; }
-  .mark-backing { width: 34px; height: 34px; border-radius: 10px; }
-  .mark-backing img { width: 20px; height: 20px; }
-  .titles { flex: 1; }
-  .titles .eyebrow { display: none; }
-  .titles h1 { font-size: 21px; }
+  /* The codename takes the row beside Close; the mark waits on wider screens. */
+  .mark-backing { display: none; }
+  .titles { flex: 1; padding: 12px 16px; }
+  .hero { font-size: clamp(24px, 7.4vw, 30px); --sparkle: 15px; }
+  .hero:not(.named) { font-size: 21px; }
+  .hero :deep(.rn-stamp) { font-size: 13px; }
+  .reload { height: 44px; padding: 0 16px; }
   .spacer { display: none; }
   .close-btn { order: 1; width: 44px; height: 44px; }
   .notice .btn, .notice .icon-btn { height: 44px; }

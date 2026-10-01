@@ -87,8 +87,12 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
   await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases.find(r => r.version === history.current)!.codename })).toBeVisible()
-  await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
-  await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
+  // AEON-488: the title is the live release's codename under a product eyebrow, with one status line.
+  const live = history.releases.find(r => r.version === history.current)!
+  await expect(sheet(page).locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Releases')
+  await expect(sheet(page).getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
+  await expect(sheet(page).locator('.head .status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
+  await expect(sheet(page).locator('.detail .live-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · (published|tagged) /)
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?$/)
@@ -408,6 +412,8 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
   await expect(update).toBeVisible()
+  // AEON-488: the title already names what the server runs; the status line says this page is older.
+  await expect(sheet(page).getByRole('heading', { level: 1, name: newest.codename })).toBeVisible()
   await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version, false))
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
@@ -444,17 +450,20 @@ test('rows keep one look per state: current raised, new warm, selected ringed, t
   expect(current.outline).toBe('none')
 })
 
-test('nothing is clipped at 390: stats in a grid, the count on its own line, full headlines', async ({ page }) => {
+test('nothing is clipped at 390: stat card and chart stacked, the count on its own line, full headlines', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { history } = await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const stats = sheet(page).getByRole('group', { name: 'Release cadence' })
-  await expect(stats.getByText('Running here')).toBeVisible()
-  await expect(stats.getByText('This week')).toBeVisible()
-  await expect(stats.getByText('Median gap')).toHaveCount(0)
-  await stats.getByRole('button', { name: 'More stats' }).click()
-  await expect(stats.getByText('Median gap')).toBeVisible()
+  // AEON-488: one stat card that cycles, its arrows always there at 44 px, and the chart under it.
+  const card = sheet(page).getByRole('region', { name: 'Release stats' })
+  await expect(card.getByRole('group', { name: '1 of 7: Releases per week' })).toBeVisible()
+  const next = card.getByRole('button', { name: 'Next stat' })
+  await expect(next).toBeVisible()
+  expect((await next.boundingBox())!.height).toBe(44)
+  await next.click()
+  await expect(card.getByRole('group', { name: '2 of 7: Features per week' })).toBeVisible()
+  await expect(sheet(page).getByRole('region', { name: 'Release cadence' })).toBeVisible()
   await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
   const clipped = () => page.evaluate(() => {
     const out: string[] = []

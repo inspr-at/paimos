@@ -45,9 +45,12 @@ test('the detail heading is the name; the number is a quiet line in the notes; s
   const history = await open(page)
   const detail = sheet(page).locator('.detail')
   await expect(detail.locator('h2 .rn-name')).toHaveText(CODENAMES[5])
-  // No "Release 113"-style number in the header.
+  // No "Release 113"-style number in the header; Details shows it in the technical line (AEON-488).
   await expect(detail.locator('.eyebrow.top')).not.toContainText(/\d/)
-  await expect(detail.locator('.tech')).toHaveText(`Release ${history.releases[0].release_sequence} · ${history.releases[0].version}`)
+  await expect(detail.locator('.tech')).toHaveCount(0)
+  await sheet(page).getByRole('radio', { name: 'Details' }).click()
+  await expect(detail.locator('.tech')).toContainText(`PAIMOS 7 · Release ${history.releases[0].release_sequence} · stable · ${history.releases[0].version}`)
+  await sheet(page).getByRole('radio', { name: 'Highlights' }).click()
   await page.getByRole('searchbox', { name: 'Search releases' }).fill('cyan')
   await expect(options(page)).toHaveCount(1)
   await expect(options(page).first().locator('mark')).toHaveText('Cyan')

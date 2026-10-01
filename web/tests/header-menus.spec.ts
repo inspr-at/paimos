@@ -78,7 +78,9 @@ async function expectFullHistory(page: Page) {
   await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
   await page.waitForLoadState('networkidle')
   await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
-  await expect(history.getByRole('heading', { level: 1, name: 'PAIMOS AEON releases' })).toBeVisible()
+  // AEON-488: the eyebrow names the product; the title is the live release's codename.
+  await expect(history.locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Releases')
+  await expect(history.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
   return history
 }

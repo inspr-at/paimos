@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, span, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { emptyNotesLine, hasUsableNotes, hiddenNoteLine, localizedPresentation, markParts, presentRelease, releaseCopy, releasedAt, runWord, shortCommit, ticketsOf, writtenAfterLine, writtenAfterRelease, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { generationLabel } from '../../lib/brand'
+import { clockSince } from '../../lib/releaseStats'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
-import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
+import ReleaseCodename from './ReleaseCodename.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
 import TicketChips from './TicketChips.vue'
 
-// One release: when it shipped, its codename and its name when it has one,
-// what it brings, and the evidence behind it. Every release reads the same (AEON-305): backfilled
+// One release: its codename as the heading (AEON-488), when it went live and
+// shipped in one line, its features, fixes and tickets as counts, what it
+// brings, and the evidence behind it. Details adds the technical line. Every release reads the same (AEON-305): backfilled
 // notes and linked tickets both become blocks under Features and Fixes.
 // Highlights tells the benefits; Details lists the commits and shows the
 // evidence open (AEON-323).
@@ -40,12 +43,25 @@ const copyText = computed(() => releaseCopy(locale.value))
 // A ticket already heading a block needs no chip.
 const lined = computed(() => new Set([...lines.value.features, ...lines.value.fixes].map(line => line.key)))
 const chipTickets = computed(() => tickets.value.filter(key => !lined.value.has(key)))
-const live = computed(() => {
-  if (!props.current || !props.liveSince) return ''
-  const t = Date.parse(props.liveSince)
-  return Number.isNaN(t) ? '' : `Live on this server since ${absoluteTime(props.liveSince)}`
+// "Live here since Thu 12:15 · published 09:56, 3 hours ago" for the release this server runs.
+const liveLine = computed(() => {
+  const live = props.current && props.liveSince ? Date.parse(props.liveSince) : NaN
+  if (Number.isNaN(live) || !at.value) return ''
+  return `Live here since ${clockSince(live, props.now)} · ${props.release.published_at ? 'published' : 'tagged'} ${clockSince(Date.parse(at.value), props.now)}, ${relativeTime(at.value, { now: props.now, long: true })}`
 })
-const liveFor = computed(() => props.liveSince ? span(Math.max(60_000, props.now - Date.parse(props.liveSince))) : '')
+const channel = computed(() => props.release.release_channel ? `${props.release.release_channel.charAt(0).toUpperCase()}${props.release.release_channel.slice(1)} release` : 'Release')
+// A short list of what it brings when no presentation names it: the first pills, then how many more.
+const pillsLine = computed(() => {
+  if (presented.value || reserved.value) return ''
+  const told = [...lines.value.features, ...lines.value.fixes].map(line => line.pill || line.benefit).filter(Boolean)
+  if (told.length < 3) return ''
+  return `${told.slice(0, 4).join(' · ')}${told.length > 4 ? ` · and ${told.length - 4} more` : ''}`
+})
+// Details: the numbers behind the name in one quiet line.
+const techLine = computed(() => [
+  generationLabel.value, props.release.release_sequence > 0 ? `Release ${props.release.release_sequence}` : '', props.release.release_channel, props.release.version,
+  ev.value?.image?.digest ? `image ${digestShort(ev.value.image.digest)}` : '', props.release.tag ? `tag ${props.release.tag}` : '',
+].filter(Boolean).join(' · '))
 // Changes name their ticket only when the release has more than one.
 const soleTicket = computed(() => tickets.value.length === 1 ? tickets.value[0] : '')
 
@@ -58,7 +74,7 @@ const summary = computed(() => {
   if (ev.value.source_commit) bits.push(`commit ${shortCommit(ev.value.source_commit)}`)
   return bits.join(' · ') || (ev.value.unavailable.length ? 'Partly unavailable' : 'None recorded')
 })
-const digestShort = (d: string) => d.length > 30 ? `${d.slice(0, 19)}…${d.slice(-8)}` : d
+function digestShort(d: string) { return d.length > 30 ? `${d.slice(0, 19)}…${d.slice(-8)}` : d }
 const copied = ref('')
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 async function copy(what: string, text: string) {
@@ -76,22 +92,28 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
 <template>
   <article class="detail" :class="{ reserved }" aria-labelledby="release-detail-title">
-    <p class="eyebrow top">
-      <span>{{ reserved ? 'Reserved version' : 'Release' }}</span>
-      <span v-if="!reserved && release.release_channel" class="dot-sep">{{ release.release_channel }}</span>
-    </p>
-    <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseName :version="release.version" :name="release.codename"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName></h2>
-    <div class="badges">
-      <span v-if="current && !live" class="chip teal"><span class="live-dot" aria-hidden="true" />Current</span>
-      <span v-if="fresh" class="chip new">New since your last visit</span>
-      <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
-      <span v-if="reserved" class="chip">Reserved, never published</span>
+    <div class="top-row">
+      <p class="eyebrow top">{{ reserved ? 'Reserved version' : channel }}</p>
+      <div class="badges">
+        <span v-if="current" class="chip live-chip"><span class="live-dot" aria-hidden="true" />{{ liveLine ? 'Live here' : 'Current' }}</span>
+        <span v-if="fresh" class="chip new">New since your last visit</span>
+        <span v-if="rollback" class="chip"><AppIcon name="rollback" :size="11" />Rollback target</span>
+        <span v-if="reserved" class="chip">Reserved, never published</span>
+      </div>
     </div>
-    <p v-if="live" class="when live-line"><span class="live-dot" aria-hidden="true" />{{ live }}<span class="for"> · {{ liveFor }}</span></p>
-    <p v-if="at" class="when">
+    <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseCodename :version="release.version" :name="release.codename" :quiet="reserved"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseCodename></h2>
+    <p v-if="liveLine" class="when live-line" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">{{ liveLine }}</p>
+    <p v-else-if="at" class="when">
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
+    <p v-if="pillsLine" class="pills-line" :lang="lang">{{ pillsLine }}</p>
+    <div v-if="!reserved && (lines.features.length || lines.fixes.length || tickets.length)" class="counts">
+      <span v-if="lines.features.length" class="count-chip"><strong>{{ lines.features.length }}</strong> {{ lines.features.length === 1 ? 'feature' : 'features' }}</span>
+      <span v-if="lines.fixes.length" class="count-chip"><strong>{{ lines.fixes.length }}</strong> {{ lines.fixes.length === 1 ? 'fix' : 'fixes' }}</span>
+      <span v-if="tickets.length" class="count-chip"><strong>{{ tickets.length }}</strong> {{ tickets.length === 1 ? 'ticket' : 'tickets' }}</span>
+    </div>
+    <p v-if="details" class="tech mono">{{ techLine }}</p>
     <section class="notes" aria-label="Release notes">
       <div v-if="!reserved && presented" class="summary">
         <p v-if="presented.theme" class="kicker" :lang="presented.themeLang"><template v-for="(p, i) in parts(presented.theme)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template><LangBadge v-if="badge(presented.themeLang)" :lang="presented.themeLang" /></p>
@@ -108,8 +130,6 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </template>
       <p v-if="release.changes_omitted" class="none" :lang="lang">{{ copyText.omitted(release.changes_omitted) }}</p>
       <p v-if="writtenAfterRelease(release)" class="none written-after">{{ writtenAfterLine(locale) }}</p>
-      <!-- The numbers stay here, quiet, for whoever needs them (AEON-430). -->
-      <p v-if="release.codename" class="tech mono">{{ release.release_sequence > 0 ? `Release ${release.release_sequence} · ` : '' }}{{ release.version }}</p>
     </section>
 
     <!-- A reservation that was tagged still has evidence: often why it never published. -->
@@ -182,22 +202,27 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 
 <style scoped>
 .detail { display: grid; align-content: start; gap: 10px; max-width: 820px; }
-.top { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 0; }
-.dot-sep::before { content: '·'; margin-right: 8px; }
-/* The marketing name (AEON-430) is the heading; its version chip replaces it on hover. */
+.top-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.top { margin: 0; }
+/* The codename (AEON-430) is the heading, as the hero in the history's title; its version chip replaces it on hover. */
 .version { font: 500 clamp(24px, 2.2vw, 30px)/1.25 var(--mono); letter-spacing: 0; color: var(--ink); outline: none; }
-.version.named { font: 650 clamp(26px, 2.4vw, 34px)/1.2 var(--font); letter-spacing: -.015em; }
-.tech { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+/* The padding holds the sparkles; the margin keeps the text in line. */
+.version.named { position: relative; justify-self: start; max-width: calc(100% + 34px); margin: -10px -20px -10px -14px; padding: 10px 20px 10px 14px; font: 800 clamp(30px, 3.4vw, 54px)/1.05 var(--font); --sparkle: 20px; }
+.tech { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.6; color: var(--ink-3); overflow-wrap: anywhere; }
 .version:focus-visible { box-shadow: var(--focus-ring); border-radius: 8px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .badges:empty { display: none; }
 .chip { height: 24px; font-size: 11.5px; letter-spacing: .02em; }
+.live-chip { height: 22px; gap: 6px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.live-chip .live-dot { width: 6px; height: 6px; box-shadow: none; }
+.pills-line { margin: 4px 0 0; font-size: 19px; line-height: 1.45; font-weight: 500; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.count-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 13.5px; color: var(--ink); }
+.count-chip strong { font-weight: 650; font-variant-numeric: tabular-nums; }
 .chip.new { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: color-mix(in oklab, var(--gold-ink), var(--ink) 35%); }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
 .when { font-size: 13px; color: var(--ink-2); }
-.live-line { color: var(--ink); }
-.live-line .live-dot { display: inline-block; margin-right: 7px; vertical-align: 1px; }
-.live-line .for { white-space: nowrap; color: var(--ink-2); }
+.live-line { font-size: 15px; line-height: 1.5; color: var(--ink-2); }
 .reserved .version { color: var(--ink-2); }
 /* AEON-305: a compact header for a named release; the blocks below stay the main content. */
 .notes { display: grid; gap: 8px; margin-top: 10px; min-width: 0; }
@@ -249,6 +274,8 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
   .ext { min-height: 44px; }
   .summary { padding: 12px; }
   .summary .headline { font-size: 17px; }
+  .pills-line { font-size: 16px; }
+  .version.named { --sparkle: 15px; }
 }
 @media (prefers-reduced-motion: reduce) { .ev-chev { transition: none; } }
 </style>
