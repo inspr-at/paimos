@@ -62,15 +62,13 @@ func (m *Module) acceptProposal(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, profile := range profiles {
 			if profile.Harness == o.Harness && profile.Model == o.Model && profile.Effort == o.Effort {
-				out = profile
-				if out.Enabled {
+				if profile.Enabled {
+					out = profile
 					return nil
 				}
-				if _, err := tx.Exec(r.Context(), `UPDATE model_profiles SET enabled=true WHERE id=$1`, out.ID); err != nil {
-					return err
-				}
-				out.Enabled = true
-				return writeEvent(r.Context(), tx, p, "model.proposal_accepted", profile, out)
+				// Profiles are append-only, including their enabled state. A
+				// person grant creates a new pin and preserves the observation.
+				pin.Version = profile.Version + "-accepted"
 			}
 		}
 		out, err = insertProfile(r.Context(), tx, p.TenantID, pin)

@@ -35,7 +35,7 @@ func seedEvidenceSession(t *testing.T, owner, agent tenant.Principal, harness, m
 	var session string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, owner.TenantID, func(tx pgx.Tx) error {
 		var project string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,$2,id,'Evidence project' FROM node_kinds WHERE slug='project' RETURNING id::text`, owner.TenantID, "EVD-"+harness).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'EVD-1',id,'Evidence project' FROM node_kinds WHERE slug='project' RETURNING id::text`, owner.TenantID).Scan(&project); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,model,reasoning_effort) VALUES($1,$2,$3,$4,'fixture','unmanaged','worker',$5,$5,$6,$7) RETURNING id::text`, owner.TenantID, project, agent.ID, harness, []byte(harness), model, effort).Scan(&session)
@@ -60,6 +60,7 @@ func TestAgentEvidenceCannotSuppressUnattemptedOrForeignModels(t *testing.T) {
 	owner := makePrincipal(t, "evidence-binding", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	decode[[]Profile](t, &owner, "GET", "/api/models", "", 200)
 	before := registryRoutes(t, owner)
 	o := Observation{ReportID: EvidenceID("unattempted"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "invalid"}
@@ -112,6 +113,7 @@ func TestFailuresMustBeSpacedAndReceiptsAreBounded(t *testing.T) {
 	owner := makePrincipal(t, "spaced-evidence", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	seedEvidenceSession(t, owner, agent, "codex", "gpt-6.1-sol", "high")
 	o := Observation{ReportID: EvidenceID("first"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "invalid"}
 	second := o
@@ -186,6 +188,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	owner := makePrincipal(t, "disabled-observation", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
 	before := decode[[]Route](t, &owner, "PUT", "/api/models/routes", "[]", 200)
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
@@ -216,9 +219,19 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 		t.Fatal("agent granted a discovered profile")
 	}
 	accepted := decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
-	if !accepted.Enabled || accepted.ID != observed.ID {
-		t.Fatal("person did not enable immutable observed pin")
+	if !accepted.Enabled || accepted.ID == observed.ID {
+		t.Fatal("person grant did not create a separate enabled pin")
 	}
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		var enabled bool
+		if err := tx.QueryRow(t.Context(), `SELECT enabled FROM model_profiles WHERE id=$1`, observed.ID).Scan(&enabled); err != nil {
+			return err
+		}
+		if enabled {
+			t.Fatal("person grant mutated the immutable observed pin")
+		}
+		return nil
+	})
 	decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
 	if eventCount(t, owner, "model.proposal_accepted") != 1 || !reflect.DeepEqual(before, registryRoutes(t, owner)) {
 		t.Fatal("grant replay or grant changed policy")
@@ -230,6 +243,7 @@ func TestRefreshReleasesCatalogLockAndSharesIntervalWithAgents(t *testing.T) {
 	owner := makePrincipal(t, "refresh-concurrency", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
 	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	account := enrollEvidenceHarness(t, owner, agent, "codex")
 	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
 	mux := http.NewServeMux()

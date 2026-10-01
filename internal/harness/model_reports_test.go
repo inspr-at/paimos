@@ -29,7 +29,9 @@ func TestObservedProfileCannotBeRequestedUntilPersonAcceptance(t *testing.T) {
 	expect(t, f.call(f.person, "POST", path, request, ""), 400)
 	accept := map[string]any{"harness": "codex", "model": "gpt-next", "effort": "high"}
 	expect(t, f.call(f.agent, "POST", "/api/models/proposals/accept", accept, ""), 403)
-	expect(t, f.call(f.person, "POST", "/api/models/proposals/accept", accept, ""), 200)
+	accepted := f.call(f.person, "POST", "/api/models/proposals/accept", accept, "")
+	expect(t, accepted, 200)
+	request["model_profile_id"] = decode(t, accepted)["id"]
 	expect(t, f.call(f.person, "POST", path, request, ""), 201)
 }
 
