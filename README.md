@@ -1005,6 +1005,15 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+Settings → Workspace → Brand accepts static SVG logos and serves only the
+sanitized drawing. Non-drawing attributes (`role`, `aria-*`, `data-*`, `class`,
+`focusable`, `xml:space`, `enable-background`) and known editor metadata are
+removed. Upload feedback counts and names removed attributes in English or
+German using the person's profile language. Scripts, handlers, references,
+external paint URLs, animation and style elements still refuse the upload,
+including active features inside discarded metadata; internal CSS conversion
+is not supported.
+
 The ticket list and Outline share the causal row store and live stream. Field
 changes patch in place; moves, additions, removals and held edits wait behind
 **N updates · Show** (shortcut **U**), or apply after two idle seconds when no
