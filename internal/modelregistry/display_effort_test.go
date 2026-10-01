@@ -50,7 +50,7 @@ func TestStoredModelDisplayAndEffort(t *testing.T) {
 			{"claude", "anthropic", "opus", "high", "Claude Opus", "Opus", "", 3},
 			{"cursor", "xai", "grok-4.7-xhigh", "xhigh", "Grok", "Grok", "4.7", 4},
 			{"cursor", "cursor", "composer-2.5", "default", "Cursor Composer", "Composer", "2.5", -1},
-			{"pi", "google", "gemini-3.1-pro", "32769", "Pi gemini-3.1-pro", "gemini-3.1-pro", "", 5},
+			{"pi", "google", "gemini-3.1-pro", "32769", "Gemini Pro", "Gemini Pro", "3.1", 5},
 		} {
 			got, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "display-" + itoa(i), Version: "registry-revision-99", Harness: tc.harness, Family: tc.family, Model: tc.model, Effort: tc.effort, Tier: "standard"})
 			if err != nil {

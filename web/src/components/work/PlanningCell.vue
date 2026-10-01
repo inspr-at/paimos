@@ -20,7 +20,7 @@ const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cos
 
 <template>
   <span v-if="model" class="plan-model" :class="{ empty: model.state === 'none', planned: model.state === 'planned' }" :data-tip="model.tip" role="img" :aria-label="model.label" :aria-describedby="descriptionId">
-    <HarnessMark v-if="model.harness" class="brand" :harness="model.harness" :size="12" />
+    <HarnessMark v-if="model.harness" class="brand" :harness="model.harness" :provider="model.provider" :size="12" />
     <EffortMeter :level="model.effort" :enabled="modelDisplay.effortMeter" :planned="model.state === 'planned'" />
     <span class="model-name" aria-hidden="true">{{ model.state === 'planned' ? '~' : '' }}{{ model.text || '—' }}</span>
     <MeasuredMark v-if="model.state === 'measured'" />

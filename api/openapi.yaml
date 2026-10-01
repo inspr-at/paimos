@@ -12060,6 +12060,7 @@ components:
             label: {type: string, description: 'Display name such as "Codex astra · xhigh".'}
             profile: {type: string, description: Profile slug.}
             harness: {type: string}
+            provider: {type: string, description: Registry model provider used by the brand mark.}
             model: {type: string}
             effort: {type: string}
             display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
@@ -12080,6 +12081,7 @@ components:
             properties:
               label: {type: string, description: Short model label without effort.}
               harness: {type: string}
+              provider: {type: string, description: Registry model provider used by the brand mark.}
               model: {type: string}
               display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
               short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}

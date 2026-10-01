@@ -46,6 +46,8 @@ BEGIN
         m := regexp_match(raw, '^composer-([0-9]+(?:\.[0-9]+)*)(-fast)?$');
         IF m IS NOT NULL THEN short := 'Composer'||CASE WHEN m[2] IS NOT NULL THEN ' fast' ELSE '' END; name := 'Cursor '||short; ver := m[1]; END IF;
     END IF;
+    m := regexp_match(raw, '^(?:google/)?gemini-([0-9]+(?:\.[0-9]+)*)(?:-(pro|flash|flash-lite))?$');
+    IF m IS NOT NULL THEN short := 'Gemini'||CASE WHEN m[2] IS NOT NULL THEN ' '||initcap(replace(m[2],'-',' ')) ELSE '' END; name := short; ver := m[1]; END IF;
     RETURN jsonb_build_object('display_name',coalesce(overrides->>'display_name',name,initcap(harness)||' '||raw),
         'short_name',coalesce(overrides->>'short_name',short,raw),
         'model_version',coalesce(overrides->>'model_version',ver));

@@ -3,7 +3,7 @@
 // their list value. Work-start snapshots are the comparison baseline. Mirrors
 // api/openapi.yaml TicketPlanning. Free of Vue for unit tests.
 
-export interface ModelDisplay { display_name?: string; short_name?: string; model_version?: string }
+export interface ModelDisplay { provider?: string; display_name?: string; short_name?: string; model_version?: string }
 export interface ModelDisplayPrefs { effortMeter: boolean; modelNames: 'full' | 'short'; modelVersion: 'show' | 'hide' }
 export const DEFAULT_MODEL_DISPLAY: ModelDisplayPrefs = { effortMeter: true, modelNames: 'short', modelVersion: 'show' }
 export const EFFORT_NAMES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -106,7 +106,7 @@ function roleArea(row: PlanningRow): string {
 }
 
 // ---------- Model ----------
-export interface ModelCell { text: string; tip: string; state: 'none' | 'planned' | 'measured'; harness: string; more: number; label: string; effort: number | null; fullName: string }
+export interface ModelCell { text: string; tip: string; state: 'none' | 'planned' | 'measured'; harness: string; provider: string; more: number; label: string; effort: number | null; fullName: string }
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
 }
@@ -122,13 +122,13 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
   if (models.length) {
     const first = models[0]!, more = models.length - 1
     const level = effortLevel(first.sessions[0]?.effort_level), fullName = fullModelName(first), effort = effortTip(level)
-    return { text: shownModelName(first, prefs), effort: level, fullName, harness: first.harness, state: 'measured', more,
+    return { text: shownModelName(first, prefs), effort: level, fullName, provider: first.provider ?? '', harness: first.harness, state: 'measured', more,
       label: `${fullName}, measured${effort ? `, ${effort}` : ''}${more ? `, and ${more} more model${more === 1 ? '' : 's'}` : ''}`,
       tip: ['Used, per session:', ...usedLines(models), planLine(row)].join('\n') }
   }
   const route = plannedRoute(row)
   if (row.kind_slug !== 'epic' && route) {
-    return { text: shownModelName(route, prefs), effort: effortLevel(route.effort_level), fullName: fullModelName(route), harness: route.harness, state: 'planned', more: 0,
+    return { text: shownModelName(route, prefs), effort: effortLevel(route.effort_level), fullName: fullModelName(route), provider: route.provider ?? '', harness: route.harness, state: 'planned', more: 0,
       label: `${fullModelName(route)}, estimated (planned)${effortTip(route.effort_level) ? `, ${effortTip(route.effort_level)}` : ''}`,
       tip: [planLine(row), effortTip(route.effort_level), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].filter(Boolean).join('\n') }
   }
@@ -139,7 +139,7 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
     case 'review_gate': reason = `${roleArea(row)}\nChosen at dispatch from a family other than the author's`; break
     default: reason = `${roleArea(row)}\nThe model registry has no available route for this role`
   }
-  return { text: '', effort: null, fullName: '', harness: '', state: 'none', more: 0, label: 'No model', tip: `${row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'}\n${reason}` }
+  return { text: '', effort: null, fullName: '', provider: '', harness: '', state: 'none', more: 0, label: 'No model', tip: `${row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'}\n${reason}` }
 }
 
 // ---------- Figures ----------

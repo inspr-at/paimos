@@ -11,6 +11,7 @@ import (
 )
 
 type planningModel struct {
+	Provider string `json:"provider,omitempty"`
 	modelregistry.Display
 	Label    string                 `json:"label"`
 	Harness  string                 `json:"harness"`
@@ -36,7 +37,7 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
         coalesce(nullif(pk.model,''),nullif(s.model,''),nullif(s.model_raw,''),usage.model,''),
         s.model_profile_id::text, s.model_raw, coalesce(s.reasoning_effort,''), s.role,
         s.stopped_at IS NULL, usage.tokens,
-        coalesce(p.model_display->>'display_name',''),coalesce(p.model_display->>'short_name',''),coalesce(p.model_display->>'model_version',''),
+        coalesce(p.family,''),coalesce(p.model_display->>'display_name',''),coalesce(p.model_display->>'short_name',''),coalesce(p.model_display->>'model_version',''),
         CASE WHEN lower(btrim(s.reasoning_effort))=lower(btrim(p.effort)) THEN p.effort_level END
     FROM (`+planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`)+`) t
     JOIN harness_sessions s ON s.tenant_id=current_setting('aeon.tenant_id')::uuid AND s.ticket_node_id=t.id
@@ -56,10 +57,10 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
 	grouped := map[string]map[routeKey]*planningModel{}
 	running := map[string]int{}
 	for rows.Next() {
-		var root, harness, model string
+		var root, harness, model, provider string
 		var display modelregistry.Display
 		var session planningModelSession
-		if err := rows.Scan(&root, &session.ID, &harness, &model, &session.ProfileID, &session.Raw, &session.Effort, &session.Role, &session.Running, &session.Tokens, &display.DisplayName, &display.ShortName, &display.ModelVersion, &session.EffortLevel); err != nil {
+		if err := rows.Scan(&root, &session.ID, &harness, &model, &session.ProfileID, &session.Raw, &session.Effort, &session.Role, &session.Running, &session.Tokens, &provider, &display.DisplayName, &display.ShortName, &display.ModelVersion, &session.EffortLevel); err != nil {
 			return nil, nil, err
 		}
 		if session.Running {
@@ -75,16 +76,17 @@ func loadPlanningModels(ctx context.Context, tx pgx.Tx, ids []string) (map[strin
 		key := routeKey{harness: harness, model: model}
 		// AEON-503b canonicalises Anthropic IDs to aliases. Keep their declared
 		// model versions distinct; an unversioned alias remains unknown.
-		if modelregistry.ModelKey(model) == model && (model == "opus" || model == "sonnet" || model == "haiku" || model == "fable") {
+		if model == "opus" || model == "sonnet" || model == "haiku" || model == "fable" {
 			key.effort = display.ModelVersion
 		}
 		m := grouped[root][key]
 		if m == nil {
-			m = &planningModel{Display: display, Harness: harness, Model: model, Label: (modelregistry.Profile{Harness: harness, Model: model}).Label()}
+			m = &planningModel{Provider: provider, Display: display, Harness: harness, Model: model, Label: (modelregistry.Profile{Harness: harness, Model: model}).Label()}
 			grouped[root][key] = m
 		}
 		if m.DisplayName == "" && display.DisplayName != "" {
 			m.Display = display
+			m.Provider = provider
 		}
 		m.Sessions = append(m.Sessions, session)
 	}

@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createSSRApp } from 'vue'
 import { renderToString } from '@vue/server-renderer'
+import HarnessMark from '../src/components/agents/HarnessMark.vue'
+import { BRAND_MARKS } from '../src/components/agents/brandMarks'
 import EffortMeter from '../src/components/work/EffortMeter.vue'
 import { DEFAULT_MODEL_DISPLAY, effortLevel, effortTip, fullModelName, modelCell, shownModelName, type PlanningRow } from '../src/lib/planning'
 
@@ -22,6 +24,10 @@ describe('shared effort meter', () => {
     expect(effortLevel(0)).toBe(0)
     expect(effortTip(0)).toBe('Effort minimal · 0 of 5')
     expect(effortTip(null)).toBe('')
+  })
+  it('uses the registered provider mark for models hosted by another harness', async () => {
+    const mark = await renderToString(createSSRApp(HarnessMark, { harness: 'pi', provider: 'anthropic', size: 12 }))
+    expect(mark).toContain(`viewBox="${BRAND_MARKS.anthropic.viewBox}"`)
   })
   it('marks planned meters for the muted theme token', async () => {
     expect(await renderToString(createSSRApp(EffortMeter, { level: 4, planned: true }))).toContain('class="effort planned"')
