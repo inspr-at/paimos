@@ -8,8 +8,6 @@ import { message, subscribeAgents, type Approval, type SessionControl } from '..
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import type { AgentState } from '../lib/agentSignals'
 import { confirmAction } from '../lib/confirm'
-import { setupSummary } from '../lib/capacity'
-import { usePreference } from '../lib/preferences'
 import { toast } from '../lib/toast'
 import { TICKET_PEEK } from '../lib/ticketPeek'
 import { usePoller } from '../lib/usePolledData'
@@ -23,10 +21,10 @@ import SessionList from '../components/agents/SessionList.vue'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import LiveLine from '../components/agents/LiveLine.vue'
-import CapacityCard from '../components/agents/CapacityCard.vue'
+import AccountsComputers from '../components/agents/AccountsComputers.vue'
+import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import RunQueue from '../components/agents/RunQueue.vue'
-import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
 
@@ -76,15 +74,8 @@ const canDecideApproval = (approval: Approval) => session.identity?.principal.ki
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidden' && agents.accountsState !== 'forbidden')
 
-// ---------- Accounts and computers: one section that folds, remembered per person (AEON-402) ----------
-const layoutPref = usePreference<{ setupFolded?: boolean }>('agents-page')
-const layoutReady = ref(false)
-void layoutPref.ready.then(() => { layoutReady.value = true })
-const folded = computed(() => !!layoutPref.value.value?.setupFolded)
-function toggleSetup() { layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded: !folded.value }, 0) }
-const liveComputers = computed(() => capacity.computers.filter(c => c.computer_id && c.computer_state !== 'revoked').length)
-const setupLine = computed(() => setupSummary({ computers: liveComputers.value, ready: capacity.ready.live, total: capacity.ready.total }))
-const showSetup = computed(() => agents.loaded && layoutReady.value && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
+// ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
+const showSetup = computed(() => agents.loaded && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
 const pageTitle = ref<HTMLElement>()
 const waiting = computed(() => agents.needsCount + capacity.signins.length)
 
@@ -320,17 +311,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             @focus-row="id => cursor = id" @open-agent="openAgent" @settling="active => settling = active" @announce="announce"
           />
         </Transition>
-        <div v-if="showSetup" class="setup" :class="{ folded }">
-          <button type="button" class="setup-toggle" :aria-expanded="!folded" :aria-controls="folded ? undefined : 'setup-body'" @click="toggleSetup">
-            <AppIcon name="chevron-right" :size="14" class="chev" />
-            <span class="setup-title">Accounts and computers</span>
-            <span v-if="folded && setupLine" class="setup-line" :title="setupLine">{{ setupLine }}</span>
-          </button>
-          <div v-if="!folded" id="setup-body" class="setup-body">
-            <CapacityCard v-if="showCapacity" />
-            <ConnectedComputers :permissions="pairingAccess" compact-empty embedded />
-          </div>
-        </div>
+        <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
+        <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded"
@@ -381,19 +363,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 /* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
-/* Accounts and computers: a quiet label row that folds the two cards into one line. */
-.setup { display: grid; gap: 8px; min-width: 0; }
-.setup-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.setup-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 40px; padding: 0 12px 0 8px; border: 1px solid transparent; border-radius: 12px; background: none; color: var(--ink-2); font: 600 13px/1.3 var(--font); text-align: left; cursor: pointer; }
-.setup.folded .setup-toggle { min-height: 48px; padding: 0 16px 0 12px; border-color: var(--line); background: var(--surface-raised); }
-@media (hover: hover) { .setup-toggle:hover { background: var(--row-hover); color: var(--ink); } }
-.setup-toggle:focus-visible { box-shadow: var(--focus-ring); }
-.setup-toggle .chev { flex: none; color: var(--ink-3); transform: rotate(90deg); transition: transform .2s ease; }
-.setup.folded .setup-toggle .chev { transform: none; }
-@media (prefers-reduced-motion: reduce) { .setup-toggle .chev { transition: none; } }
-.setup-title { flex: none; }
-.setup-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-weight: 450; font-variant-numeric: tabular-nums; }
-.setup-line::before { content: '·'; padding-right: 8px; }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
 /* Wide screens dock the session panel: the page reflows beside it. */

@@ -68,6 +68,7 @@ const props = defineProps<{
   // "Deleted", ...) and stay dimmed; rows someone else just changed tint briefly.
   liveLabels?: Map<string, string>
   liveFlash?: Set<string>
+  liveStale?: boolean
   // "3 updates · Show": in the Title header, so it never covers a row.
   livePill?: { text: string; overflow: boolean } | null
 }>()
@@ -141,8 +142,9 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   const eta = etaFromTicket(row.eta)
   if (!eta || typeof eta.progress !== 'number') return null
   const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
-  const stale = !!eta.stale
-  return { pct, stale, label: progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone) }
+  const stale = !!eta.stale || !!props.liveStale
+  const label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
@@ -685,7 +687,7 @@ defineExpose({
                   <span v-if="epicChip(entry.row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(entry.row)!.title }}</span>
                   <span v-else class="parent-title mono">{{ epicChip(entry.row)!.key }}</span>
                 </span>
-                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" />
+                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                 <span v-if="dropTarget === entry.row.id" class="drop-pill"><AppIcon name="arrow" :size="11" />Move into {{ entry.row.key }}</span>
                 <span v-else-if="entry.tree?.stats && entry.tree.stats.scope" class="epic-progress" :data-tip="`${entry.tree.stats.done} of ${entry.tree.stats.scope} done${entry.tree.stats.total - entry.tree.stats.scope ? ` · ${entry.tree.stats.total - entry.tree.stats.scope} cancelled` : ''}`">
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
@@ -713,7 +715,7 @@ defineExpose({
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
                   <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" />
+                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>
@@ -762,7 +764,7 @@ defineExpose({
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" /></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
               <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>

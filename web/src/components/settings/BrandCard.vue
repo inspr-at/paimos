@@ -4,7 +4,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../../lib/api'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
-import { fitLogo, headerBrand, logoProblem, logoType, MAX_SHORT_NAME, publicBrand, type BrandSettings } from '../../lib/tenantBrand'
+import { fitLogo, headerBrand, logoCleanupMessage, logoProblem, logoType, MAX_SHORT_NAME, publicBrand, type BrandSettings } from '../../lib/tenantBrand'
+import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 import mark from '../../assets/brand/aeon-mark.svg'
 import AppIcon from '../AppIcon.vue'
@@ -15,6 +16,7 @@ import SettingsCard from './SettingsCard.vue'
 // each carries its own upload. Person-only and settings.manage on the server.
 type Variant = 'light' | 'dark'
 const session = useSession()
+const profile = useProfile()
 const settings = ref<BrandSettings | null>(null)
 const name = ref('')
 const working = reactive({ light: 0, dark: 0 }) // logo writes asked for and not yet answered
@@ -86,7 +88,8 @@ function upload(variant: Variant, file: File | undefined) {
       if (!response.ok) { problem.value = await message(response, 'The logo could not be saved.'); return }
       const next = await response.json() as BrandSettings
       apply(next)
-      if (next.cleaned) toast('Saved. SVG comments were removed.')
+      const cleanup = logoCleanupMessage(next, profile.profile?.locale)
+      if (cleanup) toast(cleanup)
     } catch { problem.value = 'The logo could not be saved. Check the connection and try again.' } finally {
       const input = inputs[variant].value
       if (input) input.value = ''

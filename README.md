@@ -64,6 +64,24 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+Ticket lists refresh worker names, progress and ETA on session registration,
+heartbeat, rebinding and stop events. The shared live feed also refreshes after
+reconnecting and on lifecycle changes; heartbeats leave it on its 20-second poll.
+The ticket list still refetches ETA and lead projections on heartbeat hints.
+List and Outline reconnect and fully resync after visibility, pageshow, online,
+or a clock gap longer than twice the 5-second check period. A 45-second silent
+stream also reconnects; live-mode SSE sends observable `stream.ping` events at
+the 15-second keepalive deadline without changing the durable event cursor.
+The freshness dot shows Live, Reconnecting, or an amber last-update age. Until
+both list and live-worker reads recover, workers and ETAs are dimmed and past
+estimates show their last clock time without asserting current overdue work.
+List projections use the additive `Aeon-Event-Position` response header to
+reject older snapshots even
+when the ticket's own `updated_at` has not changed. A node-list response names
+the counter before its handler as a lower bound and runs once. A page covering
+the hint that triggered its batch updates the row immediately; newer hints
+remain queued for a follow-up read, so busy tenants do not need a quiet gap.
+
 The flow UI is hidden by default. People working on Paimos itself can enable
 **Show the flow controls (not yet tested end to end)** under **Settings →
 Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
@@ -336,7 +354,7 @@ People with `keys.manage` can edit an active key in **Access → Agents → Edit
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
-`whoami` calls `GET /api/me`. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
+`whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
 
 `paimos model resolve review-gate --author-family codex` resolves a reviewer outside the author's family. `--author-family` accepts `openai`, `anthropic`, `xai` and `cursor`, plus harness aliases `codex` → `openai`, `claude` → `anthropic` and `grok` → `xai`. `pi` is ambiguous: pass the model's family explicitly. The API response and CLI JSON echo the normalised `author_family`; omitting it for other roles returns an empty string.
 
@@ -988,6 +1006,15 @@ menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
+
+Settings → Workspace → Brand accepts static SVG logos and serves only the
+sanitized drawing. Non-drawing attributes (`role`, `aria-*`, `data-*`, `class`,
+`focusable`, `xml:space`, `enable-background`) and known editor metadata are
+removed. Upload feedback counts and names removed attributes in English or
+German using the person's profile language. Scripts, handlers, references,
+external paint URLs, animation and style elements still refuse the upload,
+including active features inside discarded metadata; internal CSS conversion
+is not supported.
 
 The ticket list and Outline share the causal row store and live stream. Field
 changes patch in place; moves, additions, removals and held edits wait behind
