@@ -23,6 +23,13 @@ successful build or a valid existing index is recorded; an interrupted build or
 a crash before recording can safely be retried. Already recorded files are
 skipped. Tests in `concurrent_migration_test.go` exercise these recovery paths.
 
+AEON-486 backfills `models.read` into existing custom roles bound to agents in
+`1061_agent_roles_models_read.sql`. The migration runner enters each tenant on
+the advisory-lock connection before applying this additive SQL, because FORCE
+RLS also applies to the migration owner. Each tenant commits independently;
+`ON CONFLICT DO NOTHING` makes a partially completed run safe to retry. The
+filename is recorded only after every tenant succeeds. Key scopes are unchanged.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

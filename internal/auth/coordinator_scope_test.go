@@ -101,7 +101,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 					t.Fatal(err)
 				}
 				perms := workspacePermissions(t, tenantID, key.PrincipalID)
-				if slices.Contains(perms, "rules.read") || slices.Contains(perms, "models.read") != (tc.name == "current") {
+				if slices.Contains(perms, "rules.read") || !slices.Contains(perms, "models.read") {
 					t.Fatalf("%s workspace role permissions = %v", name, perms)
 				}
 				call(t, key.Token, http.MethodGet, "/api/models/resolve?role=build-hard", http.StatusOK)
