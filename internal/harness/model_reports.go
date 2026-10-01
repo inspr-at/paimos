@@ -2,12 +2,22 @@
 package harness
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
-	"net/http"
 )
+
+func modelEvidenceError(err error) error {
+	var coded interface{ StatusCode() int }
+	if errors.As(err, &coded) && coded.StatusCode() == http.StatusForbidden {
+		return workorders.Fail(http.StatusForbidden, "model evidence requires an enrolled harness and attempted model")
+	}
+	return workorders.Fail(http.StatusBadRequest, "invalid model evidence")
+}
 
 func (m *Module) modelReports(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := worker(r.Context(), tx, r, p)
@@ -19,7 +29,7 @@ func (m *Module) modelReports(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, err
 	}
 	if err := modelregistry.ReportInSession(r.Context(), tx, p, s.Harness, s.ID, in); err != nil {
-		return nil, workorders.Fail(400, "invalid model evidence")
+		return nil, modelEvidenceError(err)
 	}
 	return map[string]bool{"accepted": true}, nil
 }

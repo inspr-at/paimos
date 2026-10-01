@@ -109,6 +109,92 @@ func TestAgentEvidenceCannotSuppressUnattemptedOrForeignModels(t *testing.T) {
 	}
 }
 
+func TestEveryAgentObservationRequiresAvailableOwnedHarnessAccount(t *testing.T) {
+	reset(t)
+	owner := makePrincipal(t, "account-evidence", "person", "Owner", []string{"admin"})
+	agent := addPrincipal(t, owner.TenantID, "agent", "Grok worker", nil)
+	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.report"}
+	enrollEvidenceHarness(t, owner, agent, "grok")
+	seedEvidenceSession(t, owner, agent, "codex", "gpt-6.1-sol", "high")
+	// Even a matching self-registered session and another principal's codex
+	// account in this tenant cannot authorize the grok-only reporter.
+	other := addPrincipal(t, owner.TenantID, "agent", "Codex worker", nil)
+	account := enrollEvidenceHarness(t, owner, other, "codex")
+	for _, status := range []string{"invalid", "working", "advertised"} {
+		reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("foreign-account-" + status), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: status}}, 403)
+	}
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		var observations, receipts int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_observations),(SELECT count(*) FROM model_report_receipts)`).Scan(&observations, &receipts); err != nil {
+			return err
+		}
+		if observations != 0 || receipts != 0 {
+			t.Fatal("unenrolled session poisoned model evidence")
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2,state='unavailable' WHERE id=$1`, account, agent.ID)
+		return err
+	})
+	for _, status := range []string{"invalid", "working", "advertised"} {
+		reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("unavailable-account-" + status), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: status}}, 403)
+	}
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET state='available' WHERE id=$1`, account)
+		return err
+	})
+	o := Observation{ReportID: EvidenceID("available-account"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "invalid"}
+	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Recorded != 1 {
+		t.Fatal("available owned account could not report its attempted model")
+	}
+	// Revocation is enforced even while the previously authorized session lives.
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET state='unavailable' WHERE id=$1`, account)
+		return err
+	})
+	o.ReportID, o.Status = EvidenceID("revoked-account"), "working"
+	reportEvidence(t, agent, []Observation{o}, 403)
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		var observations, receipts, failures int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_observations),(SELECT count(*) FROM model_report_receipts),failures FROM model_observations`).Scan(&observations, &receipts, &failures); err != nil {
+			return err
+		}
+		if observations != 1 || receipts != 1 || failures != 1 {
+			t.Fatal("unavailable account changed evidence")
+		}
+		return nil
+	})
+}
+
+func TestWorkingEvidenceCannotUseAnotherModelsUsage(t *testing.T) {
+	reset(t)
+	owner := makePrincipal(t, "usage-evidence", "person", "Owner", []string{"admin"})
+	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
+	grantModelReporter(t, owner, agent)
+	agent.Scopes = []string{"models.report"}
+	enrollEvidenceHarness(t, owner, agent, "codex")
+	session := seedEvidenceSession(t, owner, agent, "codex", "gpt-6-astra", "high")
+	var until time.Time
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,output_tokens,provisional,billing_mode) VALUES($1,$2,'gpt-6.1-sol',1,20,true,'unknown')`, owner.TenantID, session); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,'codex','gpt-6.1-sol','high',2,now(),now()+interval '24 hours','agent') RETURNING suppressed_until`, owner.TenantID).Scan(&until)
+	})
+	o := Observation{ReportID: EvidenceID("different-model-usage"), Harness: "codex", Model: "gpt-6.1-sol", Effort: "high", Status: "working"}
+	reportEvidence(t, agent, []Observation{o}, 403)
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		var failures, receipts int
+		var suppressed *time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT failures,suppressed_until,(SELECT count(*) FROM model_report_receipts) FROM model_observations`).Scan(&failures, &suppressed, &receipts); err != nil {
+			return err
+		}
+		if failures != 2 || suppressed == nil || !suppressed.Equal(until) || receipts != 0 {
+			t.Fatal("different-model usage cleared suppression")
+		}
+		return nil
+	})
+}
+
 func TestFailuresMustBeSpacedAndReceiptsAreBounded(t *testing.T) {
 	reset(t)
 	owner := makePrincipal(t, "spaced-evidence", "person", "Owner", []string{"admin"})

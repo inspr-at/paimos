@@ -64,27 +64,28 @@ const (
 // attempted this exact tuple. Session routes additionally pin the proved lease.
 func authorizeObservation(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Observation, sessionID string) error {
 	var enrolled bool
-	if o.Status == "advertised" {
-		if p.Kind == tenant.Person {
-			return nil
-		}
-		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE registered_by_principal_id=$1 AND harness=$2 AND state='available') OR EXISTS(SELECT 1 FROM harness_sessions WHERE agent_principal_id=$1 AND harness=$2 AND stopped_at IS NULL AND archived_at IS NULL AND ($3='' OR id::text=$3))`, p.ID, o.Harness, sessionID).Scan(&enrolled)
-		if err != nil {
+	if p.Kind == tenant.Agent {
+		// Sessions are self-registered metadata, not account enrollment.
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE registered_by_principal_id=$1 AND harness=$2 AND state='available')`, p.ID, o.Harness).Scan(&enrolled); err != nil {
 			return err
 		}
-	} else {
-		err := tx.QueryRow(ctx, `SELECT EXISTS(
+		if !enrolled {
+			return fail(403, "model evidence requires an enrolled harness and attempted model")
+		}
+	}
+	if o.Status == "advertised" {
+		return nil
+	}
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
  SELECT 1 FROM harness_sessions s
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
  LEFT JOIN model_profiles m ON m.tenant_id=r.tenant_id AND m.id=r.model_profile_id
  WHERE s.agent_principal_id=$1 AND s.harness=$2 AND s.stopped_at IS NULL AND s.archived_at IS NULL
  AND ($5='' OR s.id::text=$5)
  AND ((s.model=$3 AND s.reasoning_effort=$4)
- OR (m.harness=$2 AND m.model=$3 AND m.effort=$4)
- OR ($6='working' AND s.reasoning_effort=$4 AND EXISTS(SELECT 1 FROM harness_session_usage u WHERE u.tenant_id=s.tenant_id AND u.session_id=s.id AND u.model=$3 AND u.output_tokens>0))))`, p.ID, o.Harness, o.Model, o.Effort, sessionID, o.Status).Scan(&enrolled)
-		if err != nil {
-			return err
-		}
+ OR (m.harness=$2 AND m.model=$3 AND m.effort=$4)))`, p.ID, o.Harness, o.Model, o.Effort, sessionID).Scan(&enrolled)
+	if err != nil {
+		return err
 	}
 	if !enrolled {
 		return fail(403, "model evidence requires an enrolled harness and attempted model")

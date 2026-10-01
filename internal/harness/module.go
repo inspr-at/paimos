@@ -771,7 +771,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		}
 	}
 	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, in.ModelReports); err != nil {
-		return nil, workorders.Fail(400, "invalid model evidence")
+		return nil, modelEvidenceError(err)
 	}
 	if s.TicketNodeID != nil && m.planningStart != nil {
 		if err = m.planningStart(ctx, tx, *s.TicketNodeID, "session"); err != nil {
@@ -1192,7 +1192,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, in.ModelReports); err != nil {
-		return nil, workorders.Fail(400, "invalid model evidence")
+		return nil, modelEvidenceError(err)
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err

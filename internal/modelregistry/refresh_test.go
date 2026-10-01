@@ -157,6 +157,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	}
 	grantModelReporter(t, p, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
+	enrollEvidenceHarness(t, p, agent, "codex")
 	seedEvidenceSession(t, p, agent, "codex", "gpt-6.1-sol", "high")
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 	sol := profileBySlug(profiles, "codex-6-1-sol-high")
