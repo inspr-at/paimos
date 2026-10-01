@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../lib/api'
+import { brand } from '../../lib/brand'
 import SettingsCard from './SettingsCard.vue'
 
 interface ProviderSettings {
@@ -67,7 +68,7 @@ async function test() {
     const response = await api('/settings/model-provider/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: settings.value.revision }) }, 35_000)
     if (!response.ok) { problem.value = response.status === 409 ? 'Save or reload the provider settings before testing.' : 'Connection test failed. Check the server address, model and API key.'; return }
     notice.value = 'Connection succeeded. The chat model answered the test.'
-  } catch { problem.value = 'Connection test failed. Check that the model server is reachable from the workspace server.' }
+  } catch { problem.value = `Connection test failed. Check that the model server is reachable from ${brand.value.short_name}.` }
   finally { busy.value = false }
 }
 </script>
@@ -81,7 +82,7 @@ async function test() {
         <label class="check"><input v-model="settings.enabled" type="checkbox" />Enable workspace AI</label>
         <label for="model-base">API base URL</label>
         <input id="model-base" v-model="settings.base_url" type="url" maxlength="2048" :required="settings.enabled" placeholder="http://localhost:11434/v1" autocomplete="off" spellcheck="false" aria-describedby="model-base-help" />
-        <p id="model-base-help" class="hint">Ollama example: http://localhost:11434/v1. This address is reached from the workspace server; localhost means that server.</p>
+        <p id="model-base-help" class="hint">Ollama example: http://localhost:11434/v1. This address is reached from the {{ brand.short_name }} server; localhost means that server.</p>
         <label for="chat-model">Chat model</label>
         <input id="chat-model" v-model="settings.chat_model" maxlength="200" :required="settings.enabled" placeholder="Your installed model name" autocomplete="off" spellcheck="false" />
         <label for="model-key">API key <span class="hint">optional</span></label>

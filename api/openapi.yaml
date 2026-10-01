@@ -2712,6 +2712,12 @@ paths:
     get:
       operationId: getMe
       summary: Acting principal, tenant and identity
+      description: >-
+        Requires a valid session or agent key, with no additional permission or
+        key scope. Project-only and empty-scope keys may read their own identity.
+        Returns only the caller's principal and roles, tenant identity and public
+        brand, and linked identity display fields; no other workspace data or
+        credentials. Other profile routes retain their own permission checks.
       security:
         - session: []
         - agentKey: []
@@ -3868,7 +3874,7 @@ paths:
   /events/stream:
     get:
       operationId: streamEvents
-      description: 'SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive. Live mode (AEON-326): with the after query parameter every connection first sends an event named stream.ready whose id and data {"after": N, "resumed": bool} name the event ID the stream continues after. after=latest starts at the newest event without replaying the log; a numeric after replays from there. Last-Event-ID (a browser reconnect) wins over after. A resume point more than 1000 events behind, or ahead of the newest event, restarts at the newest event. resumed is true only when the stream continues exactly after the ID the client sent; false (after=latest, or a restart) tells the client to refetch what it shows. Node events carry node_changes.'
+      description: 'SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive. Live mode (AEON-326): with the after query parameter every connection first sends an event named stream.ready whose id and data {"after": N, "resumed": bool} name the event ID the stream continues after. Live mode also sends stream.ping with data {} at the 15-second keepalive deadline, so browsers can detect a silent connection. Pings have no id, carry no tenant data, append no event and do not change the resume cursor. Streams without after retain comment-only keepalives. after=latest starts at the newest event without replaying the log; a numeric after replays from there. Last-Event-ID (a browser reconnect) wins over after. A resume point more than 1000 events behind, or ahead of the newest event, restarts at the newest event. resumed is true only when the stream continues exactly after the ID the client sent; false (after=latest, or a restart) tells the client to refetch what it shows. Node events carry node_changes.'
       security: *auth
       parameters:
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
@@ -5508,6 +5514,8 @@ paths:
       responses:
         '200':
           description: Live agents, freshest heartbeat first
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
           content:
             application/json:
               schema:
@@ -8090,7 +8098,7 @@ components:
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
     HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.9']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
-    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
+    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
     aithemaDelegated:
       type: http
@@ -14578,6 +14586,8 @@ components:
             $ref: '#/components/schemas/Node'
     Nodes:
       description: Node page
+      headers:
+        Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
       content:
         application/json:
           schema:
