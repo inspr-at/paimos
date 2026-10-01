@@ -175,15 +175,23 @@ func TestBrandSettingsArePersonOnlyAudited(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "SVG attribute onload is not supported") {
 		t.Fatalf("missing refusal reason: %s", w.Body.String())
 	}
-	static := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><!-- exported logo --><circle cx="20" cy="20" r="18" fill="#fff"/></svg>`
+	static := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="&lt;script&gt;" data-name="Mark"><!-- exported logo --><circle cx="20" cy="20" r="18" fill="#fff"/></svg>`
 	w = f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(static))
 	expect(t, w, 200)
 	s = settingsOf(t, w)
-	if s.LogoDark == nil || s.LogoDark.ContentType != "image/svg+xml" || !s.Cleaned {
+	if s.LogoDark == nil || s.LogoDark.ContentType != "image/svg+xml" || !s.Cleaned || s.SVGCleanup == nil || s.SVGCleanup.RemovedAttributeCount != 3 {
 		t.Fatalf("dark logo %+v cleaned %v", s.LogoDark, s.Cleaned)
 	}
 	// Refused uploads preserve the current logo and append no audit event.
 	storedDark := f.call(f.member, "GET", s.LogoDark.URL, "", nil).Body.String()
+	for _, bad := range []string{"role=", "aria-label", "data-name", "script", "exported logo"} {
+		if strings.Contains(storedDark, bad) {
+			t.Fatalf("removed metadata served: %s", storedDark)
+		}
+	}
+	if got := settingsOf(t, f.call(f.admin, "GET", "/api/settings/brand", "", nil)); got.Cleaned || got.SVGCleanup != nil {
+		t.Fatal("upload cleanup report persisted")
+	}
 	for _, feature := range []string{
 		`<mask id="m"><rect width="40" height="40"/></mask>`,
 		`<rect mask="inherit"/>`,
@@ -204,7 +212,10 @@ func TestBrandSettingsArePersonOnlyAudited(t *testing.T) {
 		}
 	}
 	// The same bytes again change nothing and append nothing.
-	expect(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(static)), 200)
+	same := settingsOf(t, f.call(f.admin, "PUT", "/api/settings/brand/logo/dark", "image/svg+xml", []byte(static)))
+	if !same.Cleaned || same.SVGCleanup == nil || same.SVGCleanup.RemovedAttributeCount != 3 {
+		t.Fatalf("repeat upload lost cleanup report: %+v", same)
+	}
 	expect(t, f.call(f.admin, "PUT", "/api/settings/brand", "application/json", name("Acme Studio")), 200)
 
 	var types []string

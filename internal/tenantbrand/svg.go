@@ -16,11 +16,86 @@ import (
 
 // SVG logos use a static drawing profile. Unsupported elements, attributes and
 // style properties refuse the upload rather than silently changing the logo.
+// Only non-drawing attributes and metadata are dropped; their values never reach
+// the output. Active features remain errors even inside dropped metadata.
 // There are no element references or inherited gradients: only fill and stroke
 // may name a same-document gradient. defs is an inert container for definitions.
 // Inline styles become allowlisted presentation attributes. Comments and the XML
 // declaration may be removed; output remains sharp without a server renderer.
 const svgNS = "http://www.w3.org/2000/svg"
+
+// Editor namespaces are matched by URI, never by a caller-controlled prefix.
+var svgEditorNamespaces = map[string]string{
+	"http://www.inkscape.org/namespaces/inkscape":        "inkscape",
+	"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd": "sodipodi",
+	"http://www.bohemiancoding.com/sketch/ns":            "sketch",
+	"http://www.serif.com/":                              "serif",
+	"http://www.figma.com/figma/ns":                      "figma",
+	"http://ns.adobe.com/AdobeIllustrator/10.0/":         "i",
+	"http://ns.adobe.com/Extensibility/1.0/":             "x",
+}
+
+const xmlNS = "http://www.w3.org/XML/1998/namespace"
+
+// SVGCleanup describes removed non-drawing input, without disclosing its values.
+type SVGCleanup struct {
+	RemovedAttributeCount int      `json:"removed_attribute_count"`
+	RemovedAttributes     []string `json:"removed_attributes"`
+	RemovedElementCount   int      `json:"removed_element_count"`
+	seen                  map[string]bool
+}
+
+func (c *SVGCleanup) removedAttribute(a xml.Attr) {
+	name := a.Name.Local
+	if prefix := svgEditorNamespaces[a.Name.Space]; prefix != "" {
+		name = prefix + ":" + name
+	} else if a.Name.Space == xmlNS {
+		name = "xml:" + name
+	}
+	c.RemovedAttributeCount++
+	if c.seen == nil {
+		c.seen = map[string]bool{}
+	}
+	if !c.seen[name] {
+		c.RemovedAttributes = append(c.RemovedAttributes, name)
+		c.seen[name] = true
+	}
+}
+
+func nonDrawingAttribute(a xml.Attr) bool {
+	if svgEditorNamespaces[a.Name.Space] != "" {
+		return true
+	}
+	if a.Name.Space == xmlNS {
+		return a.Name.Local == "space"
+	}
+	if a.Name.Space != "" {
+		return false
+	}
+	switch a.Name.Local {
+	case "role", "focusable", "class", "enable-background":
+		return true
+	}
+	return strings.HasPrefix(a.Name.Local, "aria-") || strings.HasPrefix(a.Name.Local, "data-")
+}
+
+// Active names cannot be hidden by rebinding a prefix to an editor namespace.
+func activeSVGAttribute(a xml.Attr) bool {
+	if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
+		return false
+	}
+	name := strings.ToLower(a.Name.Local)
+	return strings.HasPrefix(name, "on") || name == "href" || a.Name.Space == xmlNS && name == "base"
+}
+
+func activeSVGElement(name string) bool {
+	name = strings.ToLower(name)
+	switch name {
+	case "script", "foreignobject", "style", "use", "image", "set", "a", "symbol", "mask", "clippath", "filter", "pattern", "marker":
+		return true
+	}
+	return strings.HasPrefix(name, "animate")
+}
 
 var svgElements = map[string]bool{
 	"svg": true, "g": true, "defs": true, "title": true, "desc": true,
@@ -68,8 +143,13 @@ const (
 var errNotSVG = errors.New("not an SVG document")
 
 // SanitizeSVG validates the static profile and returns canonical bytes. cleaned
-// reports harmless comments removed, not unsupported features: those are errors.
+// reports harmless comments, non-drawing attributes or metadata removed.
+// Unsupported drawing and active features are errors.
 func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
+	return sanitizeSVG(in, &SVGCleanup{})
+}
+
+func sanitizeSVG(in []byte, cleanup *SVGCleanup) (out []byte, cleaned bool, err error) {
 	if len(in) > MaxLogoBytes {
 		return nil, false, TooLargeError{"the SVG exceeds 256 KB"}
 	}
@@ -78,7 +158,7 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 	dec.Entity = map[string]string{} // only the five predefined entities
 	var buf bytes.Buffer
 	var stack []string
-	elements := 0
+	elements, droppedDepth := 0, 0
 	ids := map[string]string{} // unique id -> element type
 	var paints []string
 	rootSeen, rootClosed := false, false
@@ -104,16 +184,44 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 			} else if rootClosed {
 				return nil, false, errors.New("SVG has more than one root element")
 			}
+			if activeSVGElement(t.Name.Local) {
+				return nil, false, fmt.Errorf("SVG element <%s> is not supported; use a static logo with paths, shapes, text or gradients", t.Name.Local)
+			}
+			metadata := (t.Name.Space == svgNS || t.Name.Space == "") && t.Name.Local == "metadata"
+			dropping := droppedDepth > 0 || metadata || svgEditorNamespaces[t.Name.Space] != ""
+			seen := map[xml.Name]bool{}
+			for _, a := range t.Attr {
+				if seen[a.Name] || activeSVGAttribute(a) || dropping && strings.ToLower(a.Name.Local) == "style" {
+					return nil, false, fmt.Errorf("SVG attribute %s is not supported in static logos", a.Name.Local)
+				}
+				if dropping && a.Name.Space == "" && (svgAttributes[a.Name.Local] || presentation[a.Name.Local]) {
+					if _, ok := cleanValue(a.Name.Local, a.Value); !ok {
+						return nil, false, fmt.Errorf("SVG attribute %s has an unsupported value", a.Name.Local)
+					}
+				}
+				seen[a.Name] = true
+			}
+			if dropping {
+				if len(stack) == 0 {
+					return nil, false, errNotSVG
+				}
+				cleanup.RemovedElementCount++
+				cleaned = true
+				droppedDepth++
+				stack = append(stack, t.Name.Local)
+				continue
+			}
 			if (t.Name.Space != svgNS && t.Name.Space != "") || !svgElements[t.Name.Local] {
 				return nil, false, fmt.Errorf("SVG element <%s> is not supported; use a static logo with paths, shapes, text or gradients", t.Name.Local)
 			}
 			if len(stack) > 0 && !svgChildAllowed(stack[len(stack)-1], t.Name.Local) {
 				return nil, false, fmt.Errorf("SVG element <%s> is not supported inside <%s>", t.Name.Local, stack[len(stack)-1])
 			}
-			attrs, refs, err := cleanAttributes(t.Attr)
+			attrs, refs, err := cleanAttributes(t.Attr, cleanup)
 			if err != nil {
 				return nil, false, err
 			}
+			cleaned = cleaned || cleanup.RemovedAttributeCount > 0
 			paints = append(paints, refs...)
 			for _, a := range attrs {
 				if a.name == "id" {
@@ -143,11 +251,18 @@ func SanitizeSVG(in []byte) (out []byte, cleaned bool, err error) {
 			}
 			top := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
+			if droppedDepth > 0 {
+				droppedDepth--
+				continue
+			}
 			buf.WriteString("</" + top + ">")
 			if len(stack) == 0 {
 				rootClosed = true
 			}
 		case xml.CharData:
+			if droppedDepth > 0 {
+				continue
+			}
 			if len(stack) > 0 && textElements[stack[len(stack)-1]] {
 				_ = xml.EscapeText(&buf, t)
 			} else if len(bytes.TrimSpace(t)) != 0 {
@@ -200,9 +315,10 @@ func svgChildAllowed(parent, child string) bool {
 
 type attribute struct{ name, value string }
 
-// cleanAttributes rejects every non-allowlisted attribute or declaration, even
+// cleanAttributes drops only non-drawing attributes and rejects every other
+// non-allowlisted attribute or declaration, even
 // if a later declaration would override it. Inline CSS wins over attributes.
-func cleanAttributes(in []xml.Attr) ([]attribute, []string, error) {
+func cleanAttributes(in []xml.Attr, cleanup *SVGCleanup) ([]attribute, []string, error) {
 	var out []attribute
 	var paints []string
 	set := func(name, value string) {
@@ -228,6 +344,13 @@ func cleanAttributes(in []xml.Attr) ([]attribute, []string, error) {
 		name := a.Name.Local
 		if a.Name.Space == "xmlns" || (a.Name.Space == "" && name == "xmlns") {
 			continue // namespace declarations are rewritten
+		}
+		if activeSVGAttribute(a) {
+			return nil, nil, fmt.Errorf("SVG attribute %s is not supported in static logos", name)
+		}
+		if nonDrawingAttribute(a) {
+			cleanup.removedAttribute(a)
+			continue
 		}
 		if a.Name.Space != "" || name == "href" || (!svgAttributes[name] && !presentation[name] && name != "style") {
 			return nil, nil, fmt.Errorf("SVG attribute %s is not supported in static logos", name)
