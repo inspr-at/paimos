@@ -220,9 +220,10 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	 WHERE w.node_id=agent_runs.work_order_id AND (w.kind<>'review' OR $4::bool) AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
 	 AND (queue_node_id IS NULL OR ((queue_target_agent_id IS NOT NULL OR queue_routed_at IS NOT NULL)
 	 AND EXISTS(SELECT 1 FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id AND ticket.deleted_at IS NULL AND ticket.state='open')))
-	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,queue_rank NULLS LAST,
+	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,
+	 CASE WHEN queue_target_agent_id IS NOT NULL THEN queue_at END DESC,queue_rank NULLS LAST,
 	 (SELECT CASE ticket.fields->>'priority' WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id),
-	 CASE WHEN queue_target_agent_id IS NOT NULL THEN queue_at END DESC,queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
+	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
 	if err != nil {
 		return nil, err
 	}

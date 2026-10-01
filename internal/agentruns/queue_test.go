@@ -194,7 +194,7 @@ func TestTicketQueueTargetedStartNowAndAllowance(t *testing.T) {
 	})
 	shared := f.ticket(t, "open", "urgent", nil)
 	f.addQueue(t, shared, nil)
-	id := f.ticket(t, "open", "low", nil)
+	id := f.ticket(t, "open", "high", nil)
 	target := map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile, "requested_account_id": account}
 	e := f.addQueue(t, id, target)
 	if !e.Queued.Targeted || e.Queued.Position != 1 || !e.Queued.Waiting {
@@ -210,10 +210,15 @@ func TestTicketQueueTargetedStartNowAndAllowance(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET allowance=1000000 WHERE account_id=$1`, account)
 		return err
 	})
-	newer := f.ticket(t, "open", "medium", nil)
+	newer := f.ticket(t, "open", "low", nil)
 	next := f.addQueue(t, newer, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile, "requested_account_id": account})
 	if next.Queued.Position != 1 {
 		t.Fatal("Start now did not become first for agent")
+	}
+	var poll []agentruns.Run
+	f.call(t, f.agent, "GET", "/api/runs/queued", nil, 200, &poll)
+	if len(poll) != 2 || poll[0].ID != next.Run.ID || poll[1].ID != e.Run.ID {
+		t.Fatalf("daemon poll lost Start now precedence: %+v", poll)
 	}
 	f.call(t, f.person, "POST", "/api/queue/next", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}, 200, &picked)
 	if picked.Entry == nil || picked.Entry.NodeID != newer {
