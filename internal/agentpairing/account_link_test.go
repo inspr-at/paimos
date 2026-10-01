@@ -162,7 +162,8 @@ func TestAccountLinkRejectsAnotherInstallationAndRevokedPairing(t *testing.T) {
 	offer := offerLink(t, f, p, key, account)
 	review := reviewLink(t, f, offer)
 	f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
-	f.call("POST", accountLinkPath, map[string]string{"operation": "poll", "account_id": account, "device_proof": p.lifecycle, "request_id": offer.RequestID}, false, key, 410)
+	// Immediate disconnect revokes the runtime key before the endpoint runs.
+	f.call("POST", accountLinkPath, map[string]string{"operation": "poll", "account_id": account, "device_proof": p.lifecycle, "request_id": offer.RequestID}, false, key, 401)
 	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 410)
 }
 func TestAccountLinkSecondPersonAndTenantIsolation(t *testing.T) {
