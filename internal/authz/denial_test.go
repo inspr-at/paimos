@@ -3,11 +3,14 @@
 package authz
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/scopecode"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -48,7 +51,31 @@ func TestDenialLayersAndDisclosureOrder(t *testing.T) {
 	WriteForbidden(w, ErrForbidden)
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	if body["reason_code"] != nil || body["scope"] != nil {
+	if body["reason_code"] != nil || body["scope"] != nil || body["scope_label"] != nil || body["scope_code"] != nil {
 		t.Fatal("generic denial leaked diagnostics")
+	}
+}
+
+func TestMissingScopeNamesLabelAndCodeOnlyAfterAuthentication(t *testing.T) {
+	err := permitEffective(tenant.Principal{Kind: tenant.Agent}, "events.read", Effective{Workspace: Grant{Permissions: []string{"events.read"}}}, Scope{})
+	w := httptest.NewRecorder()
+	WriteForbidden(w, err)
+	var body map[string]string
+	if json.Unmarshal(w.Body.Bytes(), &body) != nil {
+		t.Fatal("invalid response")
+	}
+	if w.Code != 403 || body["scope"] != "events.read" || body["scope_label"] != "See history" || !strings.Contains(body["error"], "events.read (See history)") || body["reason"] != body["error"] {
+		t.Fatalf("missing actionable scope: %s", w.Body.String())
+	}
+	scopes, err := scopecode.Decode(body["scope_code"])
+	if err != nil || len(scopes) != 1 || scopes[0] != "events.read" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("bad scope proposal")
+	}
+	for _, err := range []error{Require(context.Background(), "events.read", Scope{}), &denial{reason: "missing_role_permission"}, &denial{reason: "missing_project_access"}} {
+		w := httptest.NewRecorder()
+		WriteForbidden(w, err)
+		if strings.Contains(w.Body.String(), "scope") || strings.Contains(w.Body.String(), "events.read") {
+			t.Fatal("scope disclosed without scope-only denial")
+		}
 	}
 }

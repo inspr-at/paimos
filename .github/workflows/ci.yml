@@ -195,6 +195,9 @@ jobs:
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
+      - name: Scope code wire and ceiling checks
+        working-directory: web
+        run: node --experimental-strip-types --test tests/scope-code.test.ts tests/access.test.ts
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
@@ -204,6 +207,9 @@ jobs:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
         run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts --workers=2
+      - name: Scope proposals and key management regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
 
   release-check:
     runs-on: ubuntu-latest

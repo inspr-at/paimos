@@ -257,6 +257,12 @@ func TestKeyScopesThroughBearerMiddleware(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &body) != nil || w.Code != 403 || body["reason_code"] != "missing_key_scope" || body["scope"] != "events.read" {
 		t.Fatal("middleware lost scope denial diagnostics")
 	}
+	if body["scope_label"] != "See history" || body["scope_code"] == nil || !strings.Contains(body["error"].(string), "events.read (See history)") {
+		t.Fatal("authenticated scope error lost its label or proposal")
+	}
+	if w := request("GET", "/api/events", false); w.Code != 401 || strings.Contains(w.Body.String(), "scope") {
+		t.Fatal("anonymous caller received a scope diagnostic")
+	}
 	for _, id := range []string{key.ID, "00000000-0000-4000-8000-000000000000"} {
 		w := request("PATCH", "/api/agent-keys/"+id+"/scopes", true)
 		if w.Code != 403 || strings.Contains(w.Body.String(), "reason_code") || strings.Contains(w.Body.String(), id) {

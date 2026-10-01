@@ -4,9 +4,11 @@ package authz
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/scopecode"
 )
 
 // denial reports the authenticated caller's missing layer in one permission
@@ -31,7 +33,15 @@ func WriteForbidden(w http.ResponseWriter, err error) {
 		switch d.reason {
 		case "missing_key_scope":
 			body["scope"] = d.scope
-			body["reason"] = "The key needs scope " + d.scope
+			label := PermissionLabel(d.scope)
+			body["scope_label"] = label
+			message := fmt.Sprintf("This call needs %s (%s)", d.scope, label)
+			if code, err := scopecode.Encode([]string{d.scope}); err == nil {
+				body["scope_code"] = code
+				message += "; paste code " + code + " into Change scopes and review the selection before saving"
+			}
+			body["error"] = message
+			body["reason"] = message
 		case "missing_project_access":
 			body["reason"] = "Your access does not cover this project"
 		case "missing_role_permission":

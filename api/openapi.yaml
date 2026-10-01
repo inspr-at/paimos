@@ -2932,7 +2932,7 @@ paths:
     post:
       operationId: createAgentKey
       summary: Create or rotate an agent key and return its secret once
-      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and expires_at only; the server copies the old key's agent, name and scopes, creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage.
+      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and optional expires_at; the server copies the old key's agent, name and scopes unless rotation_scopes explicitly supplies a replacement scope set. It creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage. Scope codes in the dialogs select a proposed set locally and grant nothing until the person confirms.
       security:
         - session: []
         - agentKey: []
@@ -2948,6 +2948,11 @@ paths:
                   type: string
                   format: uuid
                   description: Key to replace after user confirmation. Mutually exclusive with name, principal_id and scopes. The old key stops working when the replacement is created.
+                rotation_scopes:
+                  type: [array, "null"]
+                  maxItems: 256
+                  items: {type: string}
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -13390,6 +13395,12 @@ components:
         scope:
           type: string
           description: Present only for missing_key_scope after role and project authority have passed in the reported check. A failed target-project retry retains the pre-resolution denial instead. Never includes resource or principal data.
+        scope_label:
+          type: string
+          description: Human label of scope, such as See history. Present only with a missing_key_scope diagnostic; error and reason also name the scope and label.
+        scope_code:
+          type: string
+          description: Non-secret proposal for the missing scope, to paste into a key dialog. aeon-scopes:v1 followed by a colon, sorted comma-separated resource.action groups (actions within a resource joined by +), a colon and eight lowercase hex digits of CRC32-IEEE over all preceding bytes. It grants nothing and is not a credential. Present only with a missing_key_scope diagnostic.
     NodeError:
       type: object
       required: [error]

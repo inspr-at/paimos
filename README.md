@@ -561,6 +561,20 @@ Unknown reason or state tokens from newer daemons remain visible as “Needs att
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 
+### Ticket worker scopes
+
+The ticket-worker set is `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `search.read`, and `events.read`. Propose it with this public code:
+
+```text
+aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d
+```
+
+Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. It never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+
+For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
+
+An authenticated scope-only 403 and `doctor` name the missing scope and its label and show a code to propose it. That single-scope code replaces the dialog selection too; tick any existing permissions you still need before saving. Anonymous, role, and project denials never expose a scope proposal. Codes use explicit sorted identifiers and a v1 CRC32 checksum, so registry additions do not reinterpret an older code. The checksum detects copying mistakes, not trust or approval.
+
 Claude accounts offer **Show Aeon in your Claude status line** in Settings → Accounts.
 Only that explicit opt-in lets the enrolled daemon install `aeon statusline` in
 its private Claude home; an existing user status line is preserved. The command

@@ -136,6 +136,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdStatusline(),
 		rt.cmdAuth(),
 		rt.cmdKeys(),
+		rt.cmdScopes(),
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),
 		rt.cmdOutcome(),
