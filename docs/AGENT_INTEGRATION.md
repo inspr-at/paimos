@@ -252,7 +252,8 @@ source project, including after project moves (AEON-370).
 The ticket list uses that snapshot for Tokens/Cost comparison hovers, preserving
 unknown baselines. Estimates carry `~`; running cells show measured / estimate;
 measured cells show one value with a muted check. Cost is list value, never an
-invoice; reported subscription usage carries a `plan` marker. The former Paid
+invoice; only subscription-only usage carries a `plan` marker. Mixed billing
+totals remain unmarked, and their hovers identify the subscription portion. The former Paid
 column maps to Cost in saved preferences and views. Saved ticks always draw,
 including empty cells with hover reasons; only Automatic hides empty planning
 columns. Phones retain their existing card layout.
@@ -262,7 +263,11 @@ Profile identity takes precedence over normalized model, raw metadata and usage
 fallbacks. Models are ordered by measured session tokens, with deterministic ties;
 each includes session identity, effort, role, running state and reported tokens.
 The Model cell shows the leading used model plus a count of other models, with
-planned versus used per-session details in its hover. Cost and actual billing
+planned versus used details grouped by model in its hover: effort, session count,
+running state and token totals, without session IDs. The planned comparison uses
+the work-start route. Running Tokens/Cost hovers put measured usage before the
+snapshot estimate and its percentage. Column fitting measures visible values,
+and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
