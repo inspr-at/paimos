@@ -332,7 +332,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
-			harness.New(pool),
+			harness.New(pool, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
