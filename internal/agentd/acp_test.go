@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-// This fixture executable speaks vendor ACP frames and makes no model calls.
+type acpHealthAPI struct{ *fakeAPI }
+
+func (*acpHealthAPI) Queued(context.Context) ([]Run, error) { return nil, nil }
+
 func TestACPVersionOnlyProbeNeverEstablishesReadiness(t *testing.T) {
 	for _, name := range []string{Gemini, OpenCode} {
 		t.Run(name, func(t *testing.T) {
@@ -30,10 +33,10 @@ func TestACPVersionOnlyProbeNeverEstablishesReadiness(t *testing.T) {
 				t.Errorf("version-only account probe: %+v", got)
 			}
 			s, api, _ := testSupervisor(t)
-			api.run.Status = "running" // Health-only poll; no queued run launches.
+			s.api = &acpHealthAPI{api} // Health-only poll; no queued run launches.
 			s.accounts[0].Harness = name
 			s.adapters = map[string]Adapter{name: a}
-			if err := s.Poll(t.Context()); err != nil {
+			if err := s.PollOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			for _, now := range []time.Time{time.Now(), time.Now().Add(2 * time.Minute)} {
@@ -51,6 +54,7 @@ func TestACPVersionOnlyProbeNeverEstablishesReadiness(t *testing.T) {
 	}
 }
 
+// This fixture executable speaks vendor ACP frames and makes no model calls.
 func TestACPVendorFixture(t *testing.T) {
 	fixture := os.Getenv("AEON_ACP_FIXTURE")
 	if fixture == "" {

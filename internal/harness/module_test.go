@@ -350,7 +350,7 @@ func TestHistoricalRegistrationAndHeartbeatWithoutRequestContract(t *testing.T) 
 	for _, name := range []string{"codex", "claude", "pi", "cursor", "grok"} {
 		t.Run(name, func(t *testing.T) {
 			lease := "historical-lease-0000000000000000000-" + name
-			w := call(base, map[string]any{"harness": name, "host": "historical-reporter", "harness_session_ref": "historical-vendor-session-" + name, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"status"}}, "")
+			w := call(base, map[string]any{"agent_principal_id": f.agent.ID, "harness": name, "host": "historical-reporter", "harness_session_ref": "historical-vendor-session-" + name, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"status"}}, "")
 			expect(t, w, http.StatusCreated)
 			id := decode(t, w)["id"].(string)
 			w = call(base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
