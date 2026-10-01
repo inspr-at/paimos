@@ -5,7 +5,7 @@ import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
 import { describeComputerStatus } from '../../lib/agentPairing'
 import {
-  daysLabel, nightLabel, reserveLabel, reserveLevel, daysSummary, timeLabel, when, whenFull, workStart,
+  clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type Override, type PoolView,
 } from '../../lib/capacity'
 import { buildComputerCards, middleEllipsis, pacingSummary, readySummary, type AccountLine, type ComputerCard } from '../../lib/computerAccounts'
@@ -17,6 +17,7 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import CapacityGauge from './CapacityGauge.vue'
+import CapacityLearning from './CapacityLearning.vue'
 import CapacityLegend from './CapacityLegend.vue'
 import ConnectedComputers from './ConnectedComputers.vue'
 import HarnessMark from './HarnessMark.vue'
@@ -269,6 +270,14 @@ async function saveKeep(draft: KeepDraft) {
   finally { saving.value = false }
 }
 const endAway = () => void run(() => capacity.endAway(), 'Welcome back. Agents follow your plan again.')
+/** The learned hours as this account's own work week. */
+async function useHours(row: AccountRow) {
+  const hours = row.learning?.suggested_hours
+  if (!mayManage.value || !hours || !row.schedule) return
+  const next = clone(row.schedule)
+  next.week = next.week.map(d => d.on ? { ...d, start: hours.start, end: hours.end } : d)
+  await run(async () => { await putSchedule({ scope: 'account', account_id: row.id, schedule: next }); await agents.afterWrite() }, `Saved ${row.name}'s work hours.`)
+}
 
 // ---------- The one-time plan card ----------
 const cardClosed = ref(false)
@@ -400,7 +409,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
             <div role="cell" class="acct-who">
               <span class="vendor"><HarnessMark :harness="line.harness" :size="16" /></span>
               <div class="who-text">
-                <p class="vendor-name">{{ line.vendor }}</p>
+                <p class="vendor-name">{{ line.vendor }}<span v-if="line.group" class="group" :title="`Kept separate: ${line.group}`"> · {{ line.group }}</span></p>
                 <p class="identity" :title="line.identity">{{ shown(line) }}</p>
               </div>
             </div>
@@ -421,6 +430,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
               </span>
               <span v-else-if="line.capacity.kind === 'offline'" class="quiet">No reading while the computer is offline</span>
               <span v-else class="quiet">{{ line.capacity.text }}</span>
+              <CapacityLearning :learning="line.row.learning" :host="card.name" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(line.row)" @away="openEditor('keep')" />
             </div>
             <div role="cell" class="row-more">
               <button
@@ -605,7 +615,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .acct-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .vendor { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 11px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
 .who-text { min-width: 0; }
-.vendor-name { margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); }
+.vendor-name { margin: 0; overflow: hidden; color: var(--ink); font: 650 15px/1.3 var(--font); text-overflow: ellipsis; white-space: nowrap; }
+.vendor-name .group { color: var(--ink-2); font-weight: 550; }
 .identity { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-ready { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .fix { height: 26px; margin-left: -4px; color: var(--ink-2); font: 500 12px/1 var(--mono); }

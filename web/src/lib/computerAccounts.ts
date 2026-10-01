@@ -7,7 +7,7 @@
 // capacity projection, the pairing list and the person's schedule.
 import { agentUpdateAdvice, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, consumptionLine, estimateLabel, gauge as gaugeOf, hourLabel, pct, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
@@ -36,6 +36,8 @@ export interface AccountLine {
   vendor: string
   /** The full sign-in identity, e.g. admin@augmentoring.com. */
   identity: string
+  /** Its group when kept separate from the vendor's pool ("Client"). */
+  group: string
   readiness: Readiness
   capacity: CapacityCell
   row: AccountRow
@@ -165,7 +167,10 @@ export function capacityCell(row: AccountRow, ready: Readiness, now: number, sha
   const w = row.primary
   if (!w) {
     if (ready.kind === 'offline') return { kind: 'offline' }
-    if (LIMITLESS.includes(row.harness)) return { kind: 'quiet', text: `${HARNESS_NAME[row.harness] ?? row.harness} doesn't report a usage limit` }
+    if (LIMITLESS.includes(row.harness)) {
+      const used = row.learning ? consumptionLine(row.learning) : ''
+      return { kind: 'quiet', text: [`${HARNESS_NAME[row.harness] ?? row.harness} doesn't report a usage limit`, used === 'Learning' ? '' : used].filter(Boolean).join(' · ') }
+    }
     return { kind: 'none' }
   }
   const plan = accountPlan(row, now)
@@ -173,7 +178,7 @@ export function capacityCell(row: AccountRow, ready: Readiness, now: number, sha
   const left = Math.max(0, Math.min(100, w.remaining_percent))
   const stale = w.freshness === 'stale' || w.freshness === 'expired'
   const read = ago(w.reading.read_at, now)
-  const source = ready.kind === 'offline' ? `Last reading ${read}` : stale ? `Reading is old · ${read}` : w.reading.source === 'estimate' ? 'Estimated' : ''
+  const source = ready.kind === 'offline' ? `Last reading ${read}` : stale ? `Reading is old · ${read}` : w.reading.source === 'estimate' ? estimateLabel(w.reading) : ''
   const five = row.five ? Math.round(row.five.remaining_percent) : null
   const override = plan?.override ?? ''
   const until = row.schedule?.override_until
@@ -207,7 +212,7 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
     if (hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
     const shared = row.sameQuotaAs && byId.has(row.sameQuotaAs) && byId.get(row.sameQuotaAs)!.primary ? byId.get(row.sameQuotaAs)! : null
     const sharedWith = shared ? `${shared.name}${shared.host && shared.host !== row.host ? ` on ${shared.host}` : ''}` : ''
-    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
+    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
   }
   const cards: ComputerCard[] = live.map(computer => {
     const own = input.rows.filter(r => owner.get(r.id) === computer)

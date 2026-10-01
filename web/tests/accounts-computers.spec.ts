@@ -5,6 +5,7 @@
 // pacing is one summary button; destructive actions live in row menus.
 // AEON499_SHOTS=<dir> also writes screenshots at 1280 and 390.
 import { mkdirSync } from 'node:fs'
+import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -71,6 +72,8 @@ test('one card per computer: offline says why and the fix, and never calls an ac
   await expect(panel(page).getByText(/ of 6 ready · studio offline$/)).toBeVisible()
   // No trash icon on a row: removal lives in the row menu.
   await expect(panel(page).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
+  const axe = await new AxeBuilder({ page }).include('.ac').analyze()
+  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
   await shot(page, 'desktop-offline-readings')
 })
 
