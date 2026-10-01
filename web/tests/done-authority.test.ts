@@ -47,14 +47,14 @@ test('the ticket ETA reads Done only from the server finished flag', () => {
 })
 
 test('no fallback stands behind the finished flag', () => {
-  for (const file of ['lib/agentSignals.ts', 'lib/agentState.ts', 'lib/liveAgents.ts', 'lib/eta.ts', 'lib/agents.ts']) {
+  for (const file of ['lib/agentSignals.ts', 'lib/agentState.ts', 'lib/liveAgents.ts', 'lib/eta.ts', 'lib/agents.ts', 'lib/agentRows.ts']) {
     assert.doesNotMatch(code(file), /\bfinished\s*(\?\?|\|\|)|\?\?\s*[\w.!()]*\bfinished\b/, `${file} falls back from the finished flag`)
   }
 })
 
 test('the finished flag is a required boolean in every payload type a screen renders', () => {
   for (const [file, declaration] of [
-    ['lib/agents.ts', 'export interface HarnessSession'],
+    ['lib/agentRows.ts', 'export interface HarnessSessionRow'],
     ['lib/liveAgents.ts', 'export interface LiveAgent'],
     ['lib/agentSignals.ts', 'export interface StateEvidence'],
     ['lib/eta.ts', 'export interface TicketEta'],

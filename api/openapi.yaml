@@ -3657,7 +3657,7 @@ paths:
       operationId: listProjectHarnessSessions
       description: Project generations with lineage and caller-specific move permission for the Agents tree.
       responses:
-        '200': {description: Public generations, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
+        '200': {description: Public generations, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
     post:
       operationId: registerHarnessSession
       description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
@@ -3683,7 +3683,7 @@ paths:
       operationId: getHarnessSession
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
-        '200': {description: Session detail, headers: {Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/reparent:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4371,6 +4371,8 @@ paths:
       responses:
         '200':
           description: Session page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
           content:
             application/json:
               schema:
@@ -4492,6 +4494,8 @@ paths:
       responses:
         '200':
           description: Run page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
           content:
             application/json:
               schema:
@@ -4528,6 +4532,8 @@ paths:
       responses:
         '200':
           description: Project message page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
           content:
             application/json:
               schema:
@@ -4582,7 +4588,7 @@ paths:
       security: *auth
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '200': {description: Run, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '404': {$ref: '#/components/responses/Error'}
   /runs/{runId}/claim:
     post:
@@ -4615,7 +4621,7 @@ paths:
       security: *auth
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:
-        '200': {description: Approval requests, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
+        '200': {description: Approval requests, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
     post:
       operationId: proposeApproval
       description: An agent may propose only for itself. Writes approval.proposed event without granting authority.
@@ -4651,7 +4657,7 @@ paths:
       operationId: listModelProfiles
       security: *auth
       responses:
-        '200': {description: Tenant model registry, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
+        '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
     post:
       operationId: createModelProfile
       description: Admin creates an immutable model profile version. Routing policy is a separate ordered ladder.
@@ -4688,7 +4694,7 @@ paths:
       description: Admin view of opaque local accounts and allowance windows; no credential material.
       security: [{session: []}]
       responses:
-        '200': {description: Accounts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
+        '200': {description: Accounts, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
     post:
       operationId: registerAgentAccount
       description: An authenticated daemon with account.manage scope registers an opaque local account key. AEON records the registering agent principal and never accepts credential material.
@@ -6905,8 +6911,9 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.0']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.7']}}
+    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/1.8']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
+    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. A read names the exact snapshot it returns: no event committed while it ran, so it includes every event up to that position and none after. A read that an event interrupted is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
     aithemaDelegated:
       type: http
@@ -10850,6 +10857,7 @@ components:
         activity: {type: string, enum: [unknown, busy, idle, throttled]}
         activity_sequence: {type: integer, format: int64}
         revision: {type: integer, format: int64}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The row''s own revision (AEON-449). Every statement that changes the session bumps it in the same transaction, so of two copies of one session the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a session: lists, detail, mutation results and event snapshots. Unlike revision, which is an optimistic-lock token only some writers advance, it advances on every change, heartbeats included.'}
         heartbeat_at: {type: [string, 'null'], format: date-time}
         stopped_at: {type: [string, 'null'], format: date-time}
         stop_reason: {type: [string, 'null'], description: 'Why the generation closed. heartbeat_lost means the server closed a silent unmanaged session (Lost contact); its worker may still revive it with a heartbeat.'}
@@ -11193,6 +11201,7 @@ components:
         verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
         max_duration_seconds: {type: integer, const: 60, description: Present only for pairing verification.}
         repository_mutation_allowed: {type: boolean}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The run''s own revision (AEON-449). Every statement that changes the run bumps it in the same transaction, so of two copies of one run the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a run: lists, detail, launch and every mutation result. Derived fields such as wait are read beside the row and can change without a new row_version.'}
         id: {type: string, format: uuid}
         work_order_id: {type: string, format: uuid}
         agent_principal_id: {type: string, format: uuid}
