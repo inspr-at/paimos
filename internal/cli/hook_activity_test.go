@@ -12,6 +12,7 @@ import (
 
 func TestHookActivityStaysInItsLivePrivateGeneration(t *testing.T) {
 	setupHookTest(t)
+	t.Setenv("HOME", t.TempDir())
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
