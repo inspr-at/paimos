@@ -278,9 +278,6 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
-	homebrewFormula := agentpairing.NewHomebrewFormula(agentpairing.HomebrewFormulaConfig{})
-	pairingMod.SetHomebrewFormula(homebrewFormula)
-	go homebrewFormula.Watch(ctx)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -385,7 +382,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePageWithFormula(api.Handler(), webFS, cfg.PublicURL, homebrewFormula, cfg.PairingNixGuide),
+		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}
