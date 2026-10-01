@@ -3,13 +3,84 @@
 package db_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
+
+func TestMoreHarnessesValidationReleasesInstallationLocksAndResumes(t *testing.T) {
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	const name = "1088_more_harnesses.sql"
+	interrupted := errors.New("simulated stop after checks installed")
+	err = db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+		if phase == name+"#validate" {
+			return interrupted
+		}
+		return nil
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("installation did not commit separately: %v", err)
+	}
+	var pending int
+	var recorded bool
+	if err := d.App.QueryRow(t.Context(), `SELECT
+        (SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_v2_check' AND NOT convalidated),
+        EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, name).Scan(&pending, &recorded); err != nil || pending != 10 || recorded {
+		t.Fatalf("interrupted installation: pending=%d recorded=%v err=%v", pending, recorded, err)
+	}
+	var writer pgx.Tx
+	err = db.MigrateWithHook(t.Context(), d.App, func(phase string) error {
+		switch phase {
+		case name + "#validate":
+			var err error
+			writer, err = d.App.Begin(t.Context())
+			if err != nil {
+				return err
+			}
+			// This writer remains open across every VALIDATE. It cannot coexist
+			// with installation's ACCESS EXCLUSIVE locks.
+			_, err = writer.Exec(t.Context(), `SET LOCAL lock_timeout='1s'; LOCK TABLE harness_sessions, work_order_reviews IN ROW EXCLUSIVE MODE`)
+			return err
+		case name + "#replace":
+			var validated int
+			if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_v2_check' AND convalidated`).Scan(&validated); err != nil {
+				return err
+			}
+			if writer == nil || validated != 10 {
+				return fmt.Errorf("writer-concurrent validation did not finish: %d", validated)
+			}
+			// Retiring old enums needs a short exclusive DDL lock again.
+			return writer.Rollback(t.Context())
+		}
+		return nil
+	})
+	if writer != nil {
+		defer writer.Rollback(t.Context())
+	}
+	if err != nil || writer == nil {
+		t.Fatalf("resume with writer: %v", err)
+	}
+	var checkpoints int
+	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations WHERE version LIKE $1`, name+"#check-phase:%").Scan(&checkpoints); err != nil || checkpoints != 0 {
+		t.Fatalf("completed migration retained temporary checkpoints: %d %v", checkpoints, err)
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+		t.Fatal("repeat migration:", err)
+	}
+}
 
 func TestMoreHarnessesMigrationPreservesReviewChecks(t *testing.T) {
 	for _, renamed := range []bool{false, true} {
