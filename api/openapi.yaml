@@ -5138,6 +5138,41 @@ paths:
         '403': {description: Worker proof rejected}
         '409': {description: Managed worker required}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /settings/model-provider:
+    get:
+      operationId: getWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Workspace in-app AI is disabled by default. Returns configuration and key presence only, never a credential. Delegated agent harnesses and Aithema retain their separate controls.
+      responses:
+        '200': {description: Workspace provider settings, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Uses revision compare-and-swap. API keys use the existing tenant-bound encrypted vault, never JSON settings or events. Omit api_key to preserve it; empty clears it. Changing base_url clears an omitted key. Saving makes no model request.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProviderWrite'}}}}
+      responses:
+        '200': {description: Saved configuration, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceModelProvider'}}}}
+        '400': {description: Invalid configuration}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Configuration changed; reload before saving}
+        '503': {description: Credential storage unavailable}
+  /settings/model-provider/test:
+    post:
+      operationId: testWorkspaceModelProvider
+      tags: [Settings]
+      description: Person with settings.manage required. Explicitly sends a small synthetic chat prompt to the saved endpoint, even while the provider is disabled. No workspace content is sent. Redirects are refused; request and response size and time are bounded. No provider means no outbound request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
+      responses:
+        '200': {description: Chat endpoint responded, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
+        '400': {description: Invalid request}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Unconfigured or stale configuration}
+        '502': {description: Connection test failed; provider details are never returned}
   /settings/inbox-delivery:
     get:
       operationId: getInboxDeliverySettings
@@ -7978,6 +8013,38 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    WorkspaceModelProviderSettings:
+      type: object
+      required: [enabled, base_url, chat_model, embedding_model, features]
+      properties:
+        enabled: {type: boolean, default: false}
+        base_url: {type: string, maxLength: 2048, description: 'OpenAI-compatible API base, for example http://localhost:11434/v1. Resolved from the Aeon server. No userinfo, query or fragment. Public, loopback and LAN endpoints are supported; link-local, unspecified and multicast addresses are refused.'}
+        chat_model: {type: string, maxLength: 200}
+        embedding_model: {type: string, maxLength: 200, description: Separate embedding model at the same base; must return 1536-dimensional vectors.}
+        features:
+          type: object
+          additionalProperties: false
+          required: [crm_note_rewrite, embeddings]
+          properties:
+            crm_note_rewrite: {type: boolean, default: false, description: Also requires the business_crm plugin and tools.invoke grant; generation creates a draft for human review.}
+            embeddings: {type: boolean, default: false, description: Allows background node indexing and semantic search queries for this workspace.}
+    WorkspaceModelProvider:
+      allOf:
+        - {$ref: '#/components/schemas/WorkspaceModelProviderSettings'}
+        - type: object
+          required: [provider_id, revision, has_api_key]
+          properties:
+            provider_id: {type: string, description: Stable workspace provider identity; empty before first save.}
+            revision: {type: integer, minimum: 0}
+            has_api_key: {type: boolean}
+    WorkspaceModelProviderWrite:
+      allOf:
+        - {$ref: '#/components/schemas/WorkspaceModelProviderSettings'}
+        - type: object
+          required: [expected_revision]
+          properties:
+            expected_revision: {type: integer, minimum: 0}
+            api_key: {type: string, writeOnly: true, maxLength: 16384, description: Optional replacement. Empty clears; omitted preserves unless the base URL changes.}
     AithemaPreviewJWKS:
       type: object
       additionalProperties: false
@@ -12077,7 +12144,7 @@ components:
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
         has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
     TicketPlanning:
-      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Model names come from the model registry at read time and are never stored on the ticket. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
+      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
       type: object
       required: [route, tokens]
       properties:
@@ -12130,6 +12197,7 @@ components:
             plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
           description: 'Epics only: open and done ticket and task children, and how many are estimated.'
           type: object
@@ -12137,6 +12205,35 @@ components:
           properties:
             total: {type: integer, minimum: 0}
             estimated: {type: integer, minimum: 0}
+    TicketEstimateSnapshot:
+      type: object
+      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into the in-progress work bucket in a work episode. Kind state categories take precedence over fixed spellings, as in project work counts. Later estimates, QA, blocked and open transitions do not overwrite or close it. Only done, cancelled or archived work buckets close the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
+      required: [id, started_at, source, estimate_hours, estimated_tokens, route, rate_basis]
+      properties:
+        id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        source: {type: string, enum: [session, status]}
+        estimate_hours: {type: [number, 'null']}
+        estimated_tokens: {type: [integer, 'null']}
+        estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
+        route: {$ref: '#/components/schemas/TicketPlanning/properties/route'}
+        rate_basis:
+          type: object
+          required: [basis, tickets, tokens_per_hour]
+          properties:
+            basis: {type: string, enum: [default, median]}
+            tickets: {type: integer, minimum: 0}
+            tokens_per_hour: {type: integer, minimum: 0}
+            any_route: {type: boolean}
+            tokens_per_hour_exact: {type: string, description: Unrounded tokens per hour used for the snapshot calculation.}
+            list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
+            price_version: {type: [integer, 'null']}
+            input_usd_per_million: {type: [string, 'null']}
+            output_usd_per_million: {type: [string, 'null']}
+            cached_input_usd_per_million: {type: [string, 'null']}
+            cached_mix: {type: number}
+            input_mix: {type: number}
+            output_mix: {type: number}
     TicketEta:
       type: object
       description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
@@ -12847,6 +12944,7 @@ components:
             last_probe_at: {type: [string, 'null'], format: date-time}
             last_probe_ok: {type: [boolean, 'null']}
             created_at: {type: string, format: date-time}
+            billing_mode: {type: string, enum: [unknown, api, subscription], default: unknown, description: Person-declared billing for this account.}
             plan: {type: string}
             host_label: {type: string}
             provider: {type: string, description: Pi provider fixed by the approved local enrollment.}
@@ -12880,6 +12978,7 @@ components:
       additionalProperties: false
       required: [label, plan, host_label, allowed_model_profile_ids]
       properties:
+        billing_mode: {type: string, enum: [unknown, api, subscription], description: 'Person with account.manage only. Omission preserves the saved value; unknown is the initial value. Never inferred from the account label or plan name.'}
         label: {type: string, minLength: 1, maxLength: 128}
         plan: {type: string, maxLength: 128}
         host_label: {type: string, maxLength: 128}
@@ -13051,6 +13150,8 @@ components:
         account_id: {type: string, format: uuid}
         account_key: {type: string}
         account_label: {type: string}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: string}
         daemon_id: {type: string}
         reservations:
           type: array

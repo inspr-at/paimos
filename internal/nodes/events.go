@@ -94,5 +94,5 @@ func (m *Module) writeEvent(ctx context.Context, tx pgx.Tx, e Event) error {
 	if err := m.events.WriteEvent(ctx, tx, e); err != nil {
 		return err
 	}
-	return nil
+	return snapshotNodeChange(ctx, tx, e)
 }

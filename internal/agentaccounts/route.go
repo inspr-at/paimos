@@ -151,7 +151,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if tag.RowsAffected() != 1 {
 		return RouteResult{}, fail(http.StatusConflict, "run is not awaiting an account")
 	}
-	result := RouteResult{AccountID: account.ID, AccountKey: account.AccountKey, AccountLabel: account.Label, DaemonID: account.DaemonID, Reservations: []Reservation{}}
+	result := RouteResult{AccountID: account.ID, AccountKey: account.AccountKey, AccountLabel: account.Label, BillingMode: account.BillingMode, SubscriptionLabel: account.Plan, DaemonID: account.DaemonID, Reservations: []Reservation{}}
 	sort.Slice(windows, func(i, j int) bool {
 		if windows[i].Unit != windows[j].Unit {
 			return windows[i].Unit < windows[j].Unit
@@ -353,7 +353,7 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
-		       a.registered_by_principal_id::text, a.label, w.pairing_verification, w.ends_at, w.allowance
+		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
 		FROM account_reservations r
 		JOIN account_allowance_windows w ON w.tenant_id = r.tenant_id AND w.id = r.window_id
 		JOIN agent_runs owned ON owned.tenant_id=r.tenant_id AND owned.id=r.run_id
@@ -367,9 +367,9 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 	var result RouteResult
 	for rows.Next() {
 		var item Reservation
-		var accountID, key, ownerDaemonID, ownerID, label string
+		var accountID, key, ownerDaemonID, ownerID, label, billing, plan string
 		var window Window
-		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
+		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
 		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
@@ -385,6 +385,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 			result.AccountID = accountID
 			result.AccountKey = key
 			result.AccountLabel = label
+			result.BillingMode, result.SubscriptionLabel = billing, plan
 			result.DaemonID = ownerDaemonID
 		} else if result.AccountID != accountID {
 			return RouteResult{}, false, fail(http.StatusConflict, "run reservations span accounts")
@@ -417,7 +418,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
-		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint
+		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
 		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
 		  AND id::text = ANY($4::text[]) AND state = 'available'
