@@ -1107,6 +1107,10 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		model, effort := s.Model, s.ReasoningEffort
 		if in.Model != nil {
 			model, modelRaw = in.Model, in.Model
+		} else if modelRaw == nil {
+			// Unresolved legacy rows may still hold an effort suffix in model.
+			// Preserve that original string before normalizing the identity.
+			modelRaw = s.Model
 		}
 		if in.ReasoningEffort != nil {
 			effort = in.ReasoningEffort

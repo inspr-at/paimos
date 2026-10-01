@@ -248,7 +248,7 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
 	}
-	if name == "1062_work_classification_model_identity.sql" {
+	if name == "1063_work_classification_model_identity.sql" {
 		if err := backfillWorkMetadata(ctx, tx); err != nil {
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}

@@ -24,7 +24,7 @@ func TestWorkMetadataMigrationBackfillsOnlyUniqueSessions(t *testing.T) {
 	})
 	var tenantIDs, profileIDs []string
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
-		if name != "1062_work_classification_model_identity.sql" {
+		if name != "1063_work_classification_model_identity.sql" {
 			return nil
 		}
 		for i := 0; i < 2; i++ {

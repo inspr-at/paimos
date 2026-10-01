@@ -159,3 +159,49 @@ func TestSessionModelIdentityHeartbeatAndBackfill(t *testing.T) {
 		t.Fatal("new model suffix did not replace the old effort", s)
 	}
 }
+
+func TestSessionModelIdentityEffortOnlyHeartbeatPreservesLegacyRaw(t *testing.T) {
+	f := fixture(t)
+	var profile string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'identity-legacy-heartbeat','1','grok','xai','test-legacy-known','xhigh','standard') RETURNING id::text`, f.person.TenantID).Scan(&profile)
+	})
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	for i, tc := range []struct {
+		name, model, effort, storedRaw, wantRaw, base string
+		profile                                       any
+	}{
+		{"unknown matching effort", "test-legacy-unknown-xhigh", "xhigh", "", "test-legacy-unknown-xhigh", "test-legacy-unknown", nil},
+		{"unknown changed effort", "test-legacy-unknown-xhigh", "high", "", "test-legacy-unknown-xhigh", "test-legacy-unknown", nil},
+		{"known model", "test-legacy-known-xhigh", "xhigh", "", "test-legacy-known-xhigh", "test-legacy-known", profile},
+		{"existing audit string", "test-legacy-unknown-xhigh", "high", "test-legacy-unknown-ultra", "test-legacy-unknown-ultra", "test-legacy-unknown", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lease := fmt.Sprintf("model-identity-legacy-lease-%032d", i)
+			w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "grok", "host": "build-host", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": fmt.Sprintf("model-identity-legacy-ref-%032d", i), "worker_lease": lease, "model": tc.model}, "")
+			expect(t, w, 201)
+			id := decode(t, w)["id"].(string)
+			path := base + "/" + id
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				// Emulate a legacy row left unresolved by the migration.
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET model=$2,reasoning_effort=NULL,model_raw=nullif($3,''),model_profile_id=NULL WHERE id=$1`, id, tc.model, tc.storedRaw)
+				return err
+			})
+			w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "reasoning_effort": tc.effort}, lease)
+			expect(t, w, 200)
+			s := decode(t, w)
+			if s["model"] != tc.base || s["model_raw"] != tc.wantRaw || s["reasoning_effort"] != tc.effort || s["model_profile_id"] != tc.profile {
+				t.Fatalf("effort-only heartbeat lost legacy identity: %#v", s)
+			}
+			// A subsequent ordinary heartbeat and read must retain the audit data.
+			w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2}, lease)
+			expect(t, w, 200)
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			s = decode(t, w)
+			if s["model"] != tc.base || s["model_raw"] != tc.wantRaw || s["reasoning_effort"] != tc.effort || s["model_profile_id"] != tc.profile {
+				t.Fatalf("stored legacy identity changed: %#v", s)
+			}
+		})
+	}
+}
