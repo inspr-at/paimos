@@ -171,6 +171,68 @@ func TestKeyExpiryAndAtomicRotation(t *testing.T) {
 	}
 }
 
+func TestRotationScopeProposalIsAtomicAndCannotExtendRole(t *testing.T) {
+	m, owner := keyFixture(t)
+	old := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "proposal-worker", "scopes": []string{"nodes.read"}}))
+	beforeKeys, beforeEvents := keyCounts(t, m, owner)
+	for _, tc := range []struct {
+		body   map[string]any
+		status int
+	}{
+		{map[string]any{"rotation_scopes": []string{"nodes.read"}, "principal_id": old.PrincipalID}, 400},
+		{map[string]any{"rotate_key_id": old.ID, "rotation_scopes": []string{"keys.manage"}}, 400},
+		{map[string]any{"rotate_key_id": old.ID, "rotation_scopes": []string{"unknown.scope"}}, 400},
+		// Generated private roles also cannot be extended by a pasted proposal.
+		{map[string]any{"rotate_key_id": old.ID, "rotation_scopes": []string{"nodes.write"}}, 403},
+	} {
+		if w := keyRequest(m, owner, tc.body); w.Code != tc.status {
+			t.Fatalf("proposal status = %d, want %d", w.Code, tc.status)
+		}
+		keys, events := keyCounts(t, m, owner)
+		if keys != beforeKeys || events != beforeEvents {
+			t.Fatal("rejected proposal left changes")
+		}
+	}
+	ctx := dbtest.Seed(t.Context())
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission)
+		SELECT tenant_id,role_id,'events.read' FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace'`, old.PrincipalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	limited := keyScopeEditor(t, m, owner, "keys.manage", "nodes.read")
+	beforeKeys, beforeEvents = keyCounts(t, m, owner)
+	if w := keyRequest(m, limited, map[string]any{"rotate_key_id": old.ID, "rotation_scopes": []string{"events.read"}}); w.Code != 403 {
+		t.Fatal("creator ceiling bypassed")
+	}
+	keys, events := keyCounts(t, m, owner)
+	if keys != beforeKeys || events != beforeEvents {
+		t.Fatal("denied actor changed key or audit")
+	}
+	next := decodeKey(t, keyRequest(m, owner, map[string]any{"rotate_key_id": old.ID, "rotation_scopes": []string{"events:read"}}))
+	if !slices.Equal(next.Scopes, []string{"events.read"}) || next.PrincipalID != old.PrincipalID {
+		t.Fatal("replacement did not use explicit proposal")
+	}
+	keys, events = keyCounts(t, m, owner)
+	if keys != beforeKeys+1 || events != beforeEvents+2 {
+		t.Fatal("replacement and revocation were not atomic or changed a role")
+	}
+	listed, err := m.listAgentKeys(ctx, owner.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range listed {
+		if key.ID == old.ID && (key.RevokedAt == nil || !slices.Equal(key.Scopes, old.Scopes)) {
+			t.Fatal("original key was not revoked intact")
+		}
+	}
+	empty := decodeKey(t, keyRequest(m, owner, map[string]any{"rotate_key_id": next.ID, "rotation_scopes": []string{}}))
+	if len(empty.Scopes) != 0 {
+		t.Fatal("explicit empty proposal inherited scopes")
+	}
+}
+
 func TestKeyRotationAuthorizationAndRollback(t *testing.T) {
 	m, owner := keyFixture(t)
 	ctx := dbtest.Seed(t.Context())

@@ -126,7 +126,9 @@ func (rt *runtime) cmdDoctor() *Command {
 			} `json:"principal"`
 		}
 		if err := rt.do(http.MethodGet, "/api/me", nil, &me); err != nil {
-			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: "API key rejected or auth unavailable"})
+			// rt.do has already redacted the configured credential. Keep the
+			// server's scope id, label and code instead of masking the cause.
+			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
 		checks = append(checks, doctorCheck{Name: "auth", Status: "ok", Detail: "user=" + me.Principal.Name})

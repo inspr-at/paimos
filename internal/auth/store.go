@@ -863,6 +863,12 @@ func keySnapshot(rec keyRecord) map[string]any {
 var errKeyRevoked = errors.New("agent key already revoked")
 
 func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id string, expires *time.Time) (keyRecord, error) {
+	return m.rotateAgentKeyWithScopes(ctx, p, id, expires, nil)
+}
+
+// A nil proposal preserves scopes; an explicit set (including empty) changes
+// only the replacement, under the same live creation checks and transaction.
+func (m *Module) rotateAgentKeyWithScopes(ctx context.Context, p tenant.Principal, id string, expires *time.Time, proposed []string) (keyRecord, error) {
 	var replacement keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Match creation/access-management lock order: tenant, then resource.
@@ -881,9 +887,26 @@ func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id stri
 		if old.RevokedAt != nil {
 			return errKeyRevoked
 		}
-		scopes, err := cleanScopes(old.Scopes)
+		source := old.Scopes
+		if proposed != nil {
+			source = proposed
+		}
+		scopes, err := cleanScopes(source)
 		if err != nil {
 			return authz.ErrForbidden
+		}
+		if proposed != nil {
+			// A scope proposal is not approval to extend even an auto-managed
+			// agent role. Require its live ceiling before the creation path.
+			ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: old.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent})
+			if err != nil {
+				return err
+			}
+			for _, scope := range scopes {
+				if !slices.Contains(ceiling, scope) {
+					return authz.ErrForbidden
+				}
+			}
 		}
 		replacement, err = m.createAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires)
 		if err != nil {

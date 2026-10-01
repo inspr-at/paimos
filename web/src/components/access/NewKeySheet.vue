@@ -9,6 +9,7 @@ import { agentLoginCommand } from '../../lib/agentLogin'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AccessSheet from './AccessSheet.vue'
+import ScopeCodeField from './ScopeCodeField.vue'
 import { problem } from './accessText'
 
 // A new key for an agent: what it may call (its scopes; none means nothing) and
@@ -23,15 +24,17 @@ const busy = ref(false)
 const error = ref('')
 const created = ref<AgentKeyCreated | null>(null)
 const access = useAccess()
-const scopes = ref(new Set<string>())
+const scopes = ref(new Set<string>(props.rotateKey?.scopes ?? []))
+const rotationScopesChanged = ref(false)
 const term = ref('')
 // A scope can go on the key when I hold it and the agent's role allows it; the
 // rest show, disabled, with the reason.
 const mine = computed(() => myPermissions())
 const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry))
+const codeCeiling = computed(() => agentScopeCeiling(props.agent, access.roles, access.registry, true))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.
-watch(held, now => { if (props.rotateKey) return; const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
+watch(held, now => { if (props.rotateKey && !rotationScopesChanged.value) return; const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
 const why = (key: string) => !mine.value.has(key) ? 'you do not hold this' : `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
 const available = computed(() => keyScopes(access.registry))
 const groups = computed(() => {
@@ -40,8 +43,17 @@ const groups = computed(() => {
 })
 const presets = computed(() => [{ id: 'coordinator', label: 'Coordinator', scopes: COORDINATOR_SCOPES.filter(k => held.value.has(k) && available.value.some(p => p.key === k)) }])
 const tried = ref(false)
-function toggle(key: string) { const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
-function preset(keys: string[]) { scopes.value = new Set(keys) }
+function toggle(key: string) { if (props.rotateKey) rotationScopesChanged.value = true; const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
+function preset(keys: string[]) { if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = new Set(keys) }
+function applyCode(selected: Set<string>) { if (props.rotateKey) rotationScopesChanged.value = true; scopes.value = selected; term.value = '' }
+function codeUnavailable(key: string): string | undefined {
+  const permission = access.registry.find(p => p.key === key)
+  if (!permission) return 'Unknown in this workspace'
+  if (!permission.agent_grantable) return 'Unavailable to agent keys'
+  if (codeCeiling.value && !codeCeiling.value.has(key)) return `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
+  if (!held.value.has(key)) return why(key)
+  return undefined
+}
 const presetOn = (keys: string[]) => keys.length === scopes.value.size && keys.every(k => scopes.value.has(k))
 const allowed = computed(() => can('keys.manage'))
 const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
@@ -54,7 +66,7 @@ const commandCopied = ref(false)
 const commandFallback = ref(false)
 const loginCommand = agentLoginCommand(window.location.origin)
 const role = computed(() => props.agent.workspace_role?.name)
-const rotationProblem = computed(() => props.rotateKey?.scopes.some(k => !held.value.has(k))
+const rotationProblem = computed(() => props.rotateKey && !rotationScopesChanged.value && props.rotateKey.scopes.some(k => !held.value.has(k))
   ? 'The original scopes exceed what you or this agent’s role may grant. Rotation keeps those scopes, so it cannot continue.' : '')
 function chooseLifetime(event: KeyboardEvent) {
   const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
@@ -69,14 +81,14 @@ async function create() {
   if (busy.value) return
   if (!allowed.value) { error.value = lostPermission('keys.manage'); return }
   tried.value = true
-  if (props.rotateKey ? rotationProblem.value : scopeProblem.value) { document.getElementById('key-scopes')?.focus(); return }
+  if (rotationProblem.value || ((!props.rotateKey || rotationScopesChanged.value) && scopeProblem.value)) { document.getElementById('key-scopes')?.focus(); return }
   // Only scopes I may give go on the key.
-  if (!props.rotateKey && [...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
+  if ((!props.rotateKey || rotationScopesChanged.value) && [...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
   busy.value = true
   error.value = ''
   try {
     const expires = days.value ? expiryAfter(days.value) : null
-    created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires) : await createAgentKey(props.agent, expires, [...scopes.value])
+    created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires, rotationScopesChanged.value ? [...scopes.value] : undefined) : await createAgentKey(props.agent, expires, [...scopes.value])
     emit('created')
     await nextTick()
     document.querySelector<HTMLElement>('.token-copy')?.focus()
@@ -104,7 +116,7 @@ async function copyCommand() {
 <template>
   <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" @close="busy || emit('close')">
     <div v-if="!created" class="body">
-      <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement with the same scopes and revoke the old key immediately when you confirm. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
+      <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement and revoke the old key immediately when you confirm. The same scopes are kept unless you change the selection. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
       <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
       <fieldset class="lifetimes">
         <legend class="label">Expires after</legend>
@@ -113,13 +125,14 @@ async function copyCommand() {
         </div>
       </fieldset>
       <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(expiryAfter(days))}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
+      <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="applyCode" />
       <div v-if="rotateKey" class="rotation-scopes">
-        <p class="label">Scopes kept</p>
+        <p class="label">{{ rotationScopesChanged ? 'Original scopes' : 'Scopes kept' }}</p>
         <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono">{{ scope }}</li></ul>
         <p v-else class="expiry-note">None; this key grants no access.</p>
         <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
       </div>
-      <fieldset v-else id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
+      <fieldset v-if="!rotateKey || rotationScopesChanged" id="key-scopes" class="scopes" tabindex="-1" :disabled="busy || !allowed" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
         <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen</span></legend>
         <div class="presets">
           <label class="search-field find">
