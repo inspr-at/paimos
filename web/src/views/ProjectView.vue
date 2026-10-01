@@ -15,6 +15,7 @@ import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { COST_COLUMNS } from '../lib/planning'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import { toast } from '../lib/toast'
 import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
@@ -67,6 +68,8 @@ const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
+const { showFlowControls } = useDeveloperSettings()
+const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'journey' || showFlowControls.value))
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
@@ -1521,7 +1524,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
         </div>
-        <ProjectTabs :items="PROJECT_SECTIONS" :selected="section" label="Project sections" sections @select="setSection" />
+        <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections @select="setSection" />
       </header>
 
       <ViewBar
@@ -1554,10 +1557,15 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <JourneyView
-        v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
+        v-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
         :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
+      <section v-else-if="journeyActive" class="glass-card flow-disabled" aria-labelledby="flow-disabled-title">
+        <h2 id="flow-disabled-title">Flow controls are a developer feature</h2>
+        <p>They are off by default and have not yet been tested end to end. In the Developer section of Settings, turn on “Show the flow controls (not yet tested end to end)” to open this journey.</p>
+        <RouterLink class="btn" to="/settings/developer#flow-controls">Developer settings</RouterLink>
+      </section>
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
@@ -1707,6 +1715,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 /* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
 .project-head.glimpse-room { padding-bottom: 56px; }
+.flow-disabled { display: grid; justify-items: start; gap: 12px; padding: 24px; }
+.flow-disabled h2 { font-size: 18px; }
+.flow-disabled p { max-width: 65ch; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
