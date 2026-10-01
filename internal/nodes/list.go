@@ -1172,7 +1172,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	etaJoin := ""
 	if sortsBy(q, "eta_ready") || sortsBy(q, "progress") {
-		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
+		etaJoin = ` LEFT JOIN LATERAL aeon_node_eta_progress(f.id) eta ON true ` + eta.CompletionJoin("f.id", "fin")
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {
