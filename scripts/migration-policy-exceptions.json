@@ -7,6 +7,12 @@
       "sourceCommit": "17d9dc7975cfccf77744ed69cb66c9d2e86d68fe",
       "ticket": "AEON-397",
       "reason": "Contract behavior change already merged before policy integration: the replacement reservation guard requires person-confirmed quota_pool_fingerprint instead of self-reported quota_fingerprint. Existing accounts start unconfirmed, so new/reactivated shared-pool holds stop until a person confirms; existing active holds may still release/settle. This is not expand-safe and previous-binary read probes do not prove quota-write compatibility. AEON-415 draft PR #71 exposes this exact-byte exception for coordinator review; owner acceptance of the rollout or a staged follow-up migration is required before release."
+    },
+    {
+      "file": "1062_harness_vendor_ref_family.sql",
+      "sha256": "15fc0dca85a4e03e7f872e3b58ca43bad8d02141cc117a30c4ebc82719219dca",
+      "ticket": "AEON-498",
+      "reason": "Replace the active vendor-reference index transactionally with uniqueness per tenant, agent, harness and vendor_ref_digest. The replacement is created before the old index is dropped; no rows, private digests, leases or RLS policies change. Same-harness active duplicates remain rejected, while different harness families can reuse native values. DROP INDEX is not expand-safe under the migration guard. This draft exception requires coordinator review before merge/release; workers only measure draft CI. Previous-binary compatibility is measured by the existing migration-compat job."
     }
   ]
 }

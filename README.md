@@ -402,6 +402,16 @@ to `harness register` or `harness run-heartbeat`. The predecessor must belong to
 the same principal and project. A handed-over generation cannot revive through
 a late heartbeat.
 
+A Claude coordinator can register Claude children with the same authenticated
+`--agent`, `--parent-session LEAD_UUID` and a distinct private session reference
+and worker lease for each child. Child registration ignores the launcher's
+ambient `CLAUDE_CODE_SESSION_ID`, which belongs to the parent. For a child's own
+native binding, give `harness run-heartbeat` that child's `--source-session UUID`;
+manual registration can use the child's native ID as its private session ref.
+Explicit vendor references remain unique among active generations per agent and
+harness. Registration conflicts name the conflicting field without returning
+private values.
+
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
 from its menu. A person must own both registrations or be an owner/admin in the

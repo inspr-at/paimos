@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 )
 
@@ -253,6 +254,14 @@ func TestRunHeartbeatOwnerExitMarksStopped(t *testing.T) {
 }
 
 func TestCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T) {
+	for _, message := range []string{"active generation conflicts with registration", harness.RegistrationLeaseConflict} {
+		t.Run(message, func(t *testing.T) {
+			testCoordinatorHeartbeatRetriesActiveGeneration(t, message)
+		})
+	}
+}
+
+func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message string) {
 	var calls []hbCall
 	registrations, waits := 0, 0
 	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
@@ -262,7 +271,7 @@ func TestCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T) {
 		registrations++
 		if registrations <= 3 {
 			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"error":"active generation conflicts with registration"}`))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 		} else {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"` + transcriptSessionID + `"}`))
@@ -407,6 +416,10 @@ func TestCoordinatorHeartbeatRetryRejectsOtherFailures(t *testing.T) {
 		{"worker", "worker", transcriptSessionID, "active generation conflicts with registration", 409},
 		{"no native reference", "coordinator", "", "active generation conflicts with registration", 409},
 		{"other conflict", "coordinator", transcriptSessionID, "successor registration conflicts", 409},
+		{"vendor conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent and harness", 409},
+		{"metadata conflict", "coordinator", transcriptSessionID, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata", 409},
+		{"worker lease conflict", "worker", transcriptSessionID, harness.RegistrationLeaseConflict, 409},
+		{"lease conflict without source", "coordinator", "", harness.RegistrationLeaseConflict, 409},
 		{"archived", "coordinator", transcriptSessionID, "archived generation revoked; use a new session reference and worker lease", 409},
 		{"forbidden", "coordinator", transcriptSessionID, "active generation conflicts with registration", 403},
 		{"server error", "coordinator", transcriptSessionID, "active generation conflicts with registration", 500},
