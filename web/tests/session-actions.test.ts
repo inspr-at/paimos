@@ -30,7 +30,7 @@ test('Lost contact is an ended session, never a problem', () => {
   assert.equal(problemReason('ownership_lost'), true)
   const lost = assessAgentState({ phase: 'stopped', activity: 'busy', stopped_at: ago(0), stop_reason: 'heartbeat_lost' }, now)
   assert.deepEqual([lost.state, lost.label], ['stopped', 'Lost contact'])
-  assert.equal(assessAgentState({ phase: 'stopped', activity: 'busy', stopped_at: ago(0), stop_reason: 'process_exited' }, now).label, 'Stopped')
+  assert.equal(assessAgentState({ phase: 'stopped', activity: 'busy', stopped_at: ago(0), stop_reason: 'process_exited' }, now).label, 'Ended')
   assert.equal(stopReasonLabel('heartbeat_lost'), 'Lost contact')
 })
 

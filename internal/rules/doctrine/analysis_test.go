@@ -383,12 +383,27 @@ func TestAnalysisRetriesAnUnrecordedProposal(t *testing.T) {
 	seedAnalysisOutcomes(t, f, owner, "RETRY", "v1", "Missing regression test", "changes", strings.Repeat("c", 64), now.Add(-time.Hour))
 	guard := m.guardMaster
 	m.guardMaster = nil
-	if err := m.analyzeOnce(t.Context(), now); err == nil {
-		t.Fatal("expected the unavailable guard to fail the attempt")
+	if err := m.analyzeOnce(t.Context(), now); err != nil {
+		t.Fatalf("unavailable guard should leave a quiet pending finding: %v", err)
 	}
 	got := readAnalysis(t, f, owner)
 	if len(got) != 1 || got[0].Status != "pending" || inboxProposals(t, f, owner.TenantID) != 0 {
 		t.Fatal("a failed attempt lost its reservation or left a proposal")
+	}
+	if got[0].Reason != "The private instruction check is unavailable; no draft was published." {
+		t.Fatalf("misleading unavailable reason: %q", got[0].Reason)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, owner.TenantID, func(tx pgx.Tx) error {
+		var attempts int
+		if err := tx.QueryRow(t.Context(), `SELECT attempts FROM doctrine_analysis_runs WHERE day=$1::date`, now.Format("2006-01-02")).Scan(&attempts); err != nil {
+			return err
+		}
+		if attempts != 0 {
+			t.Fatalf("unavailable guard consumed %d daily attempts", attempts)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	id := got[0].ID
 	m.guardMaster = guard

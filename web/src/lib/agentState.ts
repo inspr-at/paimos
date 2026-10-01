@@ -4,6 +4,8 @@
 // can be unit tested.
 import { brand } from './brand.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
+import type { HarnessSessionRow } from './agentRows.ts'
+import type { DeepReadonly } from './ledger.ts'
 
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
@@ -12,14 +14,14 @@ export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: '
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
 export type SessionGroup = 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
-export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped' | 'throttled' | 'problem'
+export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'done' | 'stopped' | 'throttled' | 'problem'
 export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string; state: AgentState; reasons?: StateReason[] }
 export const GROUPS: { id: SessionGroup; label: string }[] = [
   { id: 'problem', label: 'Problem' }, { id: 'unresponsive', label: 'No heartbeat' }, { id: 'needs', label: 'Needs something' }, { id: 'awaiting', label: 'Awaiting heartbeat' }, { id: 'throttled', label: 'Throttled' },
-  { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
+  { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Ended' },
 ]
-const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', stopped: 'stopped' }
-const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', stopped: 'stopped' }
+const STATE_GROUP: Record<AgentState, SessionGroup> = { working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', done: 'stopped', stopped: 'stopped' }
+const STATE_TONE: Record<AgentState, LiveTone> = { working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', done: 'done', stopped: 'stopped' }
 export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
   return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
 }
@@ -29,18 +31,33 @@ export function sessionStatus(session: HarnessSession, now: number, needsYou = f
   const run_status = session.run_status !== undefined ? session.run_status : run?.outcome ?? run?.status
   const assessment = assessAgentState({ ...session, run_status }, now, preferences, needsYou)
   const { state, label, reasons } = assessment
-  return { state, label, ...(reasons.length ? { reasons } : {}), group: STATE_GROUP[assessment.state], tone: STATE_TONE[assessment.state] }
+  return { state, label, ...(reasons.length ? { reasons } : {}), group: STATE_GROUP[state], tone: STATE_TONE[state] }
 }
 
-// Mutation/snapshot responses may omit the separately projected state evidence.
-// Preserve known evidence for the same binding, while allowing a new run or stop
-// reason to establish its own state. Older revisions cannot rewind the session.
-export function mergeSessionEvidence(previous: HarnessSession | undefined, incoming: HarnessSession): HarnessSession {
+// Mutation/snapshot responses may omit what only a list or a detail read adds: the
+// separately projected state evidence, the node and agent summaries, the viewer's move
+// permission and the history a detail carries. Preserve known evidence for the same
+// binding, while allowing a new run or stop reason to establish its own state. The
+// ledger decides which answer is newer (ledger.ts), so this only ever receives the
+// newer one.
+export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> | undefined, incoming: HarnessSessionRow): DeepReadonly<HarnessSessionRow> {
   if (!previous) return incoming
-  if (incoming.revision < previous.revision) return previous
-  if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return incoming
+  const carried: Partial<{ -readonly [K in keyof HarnessSessionRow]: DeepReadonly<HarnessSessionRow[K]> }> = {}
+  const carry = <K extends keyof HarnessSessionRow>(key: K, when = true) => { if (when && incoming[key] === undefined && previous[key] !== undefined) carried[key] = previous[key] }
+  carry('project', incoming.project_id === previous.project_id)
+  carry('ticket', incoming.ticket_node_id === previous.ticket_node_id)
+  carry('agent', incoming.agent_principal_id === previous.agent_principal_id)
+  carry('can_reparent')
+  carry('watch')
+  carry('activity_note_id')
+  // History is read with a detail only. It stays until the next detail read replaces it,
+  // so a panel does not blink between a list row and the detail that follows it.
+  carry('metadata_history')
+  carry('activity_history')
+  if (incoming.run_id !== previous.run_id || incoming.stop_reason !== previous.stop_reason) return { ...incoming, ...carried }
   return {
     ...incoming,
+    ...carried,
     has_problem: incoming.has_problem ?? previous.has_problem,
     vendor_limited: incoming.vendor_limited ?? previous.vendor_limited,
     limit_window: incoming.limit_window ?? previous.limit_window,

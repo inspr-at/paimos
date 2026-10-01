@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, shallowRef, type Ref } from 'vue'
+import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import { APIError, StaleRequestError } from './api'
+import { positionOf, type ReadOrder } from './position'
 
 export type PollState = 'idle' | 'ready' | 'forbidden' | 'error'
 export interface RefreshStatus { state: PollState; failures: number; updatedAt: number | null; error: string }
@@ -15,8 +16,16 @@ export function refreshStatus(previous: RefreshStatus, result: { ok: true; at: n
 }
 
 // A read is committed only when it completed in the same visible, awake period.
-// This also prevents an old response from overwriting a newer refresh.
-export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void) {
+// This also prevents an old response from overwriting a newer refresh. With an
+// order (AEON-449), the answer's server position decides too: an answer below a
+// write of this tab is asked for again once, one below a newer answer is dropped.
+// adopt turns the answer into the value to keep at the moment it is applied, so a
+// ledger judges its rows with nothing between that and the assignment. A read of rows
+// that only a ledger may show (AEON-449) must adopt: what it returns is not the data.
+export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?: (value: T) => void, options?: { order?: ReadOrder }): PolledData<T>
+export function usePolledData<R, T>(read: () => Promise<R>, initial: T, onSuccess: ((value: T) => void) | undefined, options: { order?: ReadOrder; adopt: (value: R) => T }): PolledData<T>
+export function usePolledData<R, T>(read: () => Promise<R>, initial: T, onSuccess?: (value: T) => void, options: { order?: ReadOrder; adopt?: (value: R) => T } = {}): PolledData<T> {
+  const { order, adopt } = options
   const data = shallowRef<T>(initial) as Ref<T>
   const status = shallowRef(initialRefreshStatus())
   const stale = computed(() => status.value.failures > 0 && status.value.updatedAt !== null)
@@ -29,21 +38,31 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
   function refresh(): Promise<void> {
     if (flight && flightTurn === generation) return flight
     const turn = generation
-    const started = Date.now()
     flightTurn = turn
     const current: Promise<void> = (async () => {
-      try {
-        const value = await read()
-        if (turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
-        data.value = value
-        onSuccess?.(value)
-        status.value = refreshStatus(status.value, { ok: true, at: Date.now() })
-      } catch (error) {
-        if (error instanceof StaleRequestError || turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
-        status.value = refreshStatus(status.value, {
-          ok: false, error: error instanceof APIError ? `The server answered “${error.message}” (${error.status}).` : error instanceof Error ? error.message : 'Request failed. Please try again.',
-          forbidden: error instanceof APIError && error.status === 403,
-        })
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const started = Date.now()
+        const dropped = () => turn !== generation || Date.now() - started > 30_000 || (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+        try {
+          const ticket = order?.begin()
+          const value = await read()
+          if (dropped()) return
+          const verdict = order && ticket ? order.land(ticket, positionOf(value)) : 'apply'
+          if (verdict === 'stale') continue
+          if (verdict === 'older') return
+          const adopted = adopt ? adopt(value) : value as unknown as T
+          data.value = adopted
+          onSuccess?.(adopted)
+          status.value = refreshStatus(status.value, { ok: true, at: Date.now() })
+          return
+        } catch (error) {
+          if (error instanceof StaleRequestError || dropped()) return
+          status.value = refreshStatus(status.value, {
+            ok: false, error: error instanceof APIError ? `The server answered “${error.message}” (${error.status}).` : error instanceof Error ? error.message : 'Request failed. Please try again.',
+            forbidden: error instanceof APIError && error.status === 403,
+          })
+          return
+        }
       }
     })().finally(() => { if (flight === current) flight = undefined })
     flight = current
@@ -51,6 +70,7 @@ export function usePolledData<T>(read: () => Promise<T>, initial: T, onSuccess?:
   }
   return { data, status, stale, refresh, invalidate }
 }
+export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>; stale: ComputedRef<boolean>; refresh: () => Promise<void>; invalidate: () => void }
 
 // The same lifecycle for every periodic read. Ticks never stack; coming back to
 // a tab or network refreshes immediately, including after a suspended timer.

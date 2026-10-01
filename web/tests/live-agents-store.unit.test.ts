@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getLiveAgents } from '../src/lib/agents'
+import { getLiveAgents } from '../src/lib/agentRows'
 import { useLiveAgents } from '../src/stores/liveAgents'
 import type { LiveAgent } from '../src/lib/liveAgents'
 
-vi.mock('../src/lib/agents', () => ({ getLiveAgents: vi.fn() }))
+vi.mock('../src/lib/agentRows', () => ({ getLiveAgents: vi.fn() }))
 const at = Date.parse('2026-09-26T12:00:00Z')
 const agent = (overrides: Partial<LiveAgent> = {}): LiveAgent => ({
   project_id: 'p1', session_id: 's1', name: 'builder', harness: 'codex', management_mode: 'unmanaged', role: 'worker',

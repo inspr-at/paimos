@@ -7,6 +7,7 @@ import { accessChanged, clearPermissions, refreshPermissions, revokePermissions 
 import { clearSignInReturn } from '../lib/signInReturn'
 import { dropAttachCode } from '../lib/attachLink'
 import { followAuthentication, OIDC_PENDING_KEY } from '../lib/authTabs'
+import { resetPositions } from '../lib/position'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -43,6 +44,7 @@ export const useSession = defineStore('session', () => {
     error.value = ''
     dropAttachCode()
     revokePermissions()
+    resetPositions()
   }
 
   async function refresh() {
@@ -70,6 +72,7 @@ export const useSession = defineStore('session', () => {
       if (same) void accessChanged()
       else {
         clearPermissions()
+        resetPositions()
         if (session.identity) void refreshPermissions()
       }
       devMode.value = session.devMode

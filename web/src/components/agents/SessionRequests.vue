@@ -1,15 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { api, APIError } from '../../lib/api'
+import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import { fetchAccountCatalog, effortLabel, type AgentAccountCatalog } from '../../lib/accountCascade'
 import type { HarnessSession, SessionChangeRequest } from '../../lib/agents'
+import { readSessionRequests, sendSessionRequest } from '../../lib/agentRows'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ session: HarnessSession; now: number }>()
 const identity = useSession()
+const agents = useAgents()
 const uid = useId()
 const disclosure = ref<HTMLDetailsElement>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('harness.control', props.session.project_id))
@@ -27,23 +30,16 @@ const recent = computed(() => {
   const sorted = [...controls.value].sort((a, b) => b.sequence - a.sequence)
   return [...sorted.filter(c => c.state !== 'completed'), ...sorted.filter(c => c.state === 'completed').slice(0, 3)]
 })
-const path = `/projects/${encodeURIComponent(props.session.project_id)}/harness-sessions/${encodeURIComponent(props.session.id)}`
 let revision = 0
 let disposed = false, timer: ReturnType<typeof setTimeout> | undefined
 let retry: { signature: string; id: string } | undefined
 const abort = new AbortController()
 
-async function json<T>(url: string, body?: unknown): Promise<T> {
-  const response = await api(url, { signal: abort.signal, ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
-  const data = await response.json()
-  if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
-  return data as T
-}
 async function refresh() {
   const observedRevision = revision
   try {
-    const detail = await json<{ controls?: SessionChangeRequest[] }>(path)
-    if (!disposed && observedRevision === revision) { controls.value = (detail.controls ?? []).filter(c => c.kind === 'rename_request' || c.kind === 'model_request'); statusError.value = '' }
+    const requests = await readSessionRequests(props.session.project_id, props.session.id, abort.signal)
+    if (!disposed && observedRevision === revision) { controls.value = requests.filter(c => c.kind === 'rename_request' || c.kind === 'model_request'); statusError.value = '' }
   } catch { if (!disposed) statusError.value = 'Request status could not be refreshed.' }
   finally { if (!disposed) timer = setTimeout(refresh, 5000) }
 }
@@ -77,7 +73,11 @@ async function submit() {
   if (retry?.signature !== signature) retry = { signature, id: crypto.randomUUID() }
   busy.value = true; revision++; error.value = ''
   try {
-    const control = await json<SessionChangeRequest>(`${path}/requests`, { ...body, request_id: retry.id })
+    const response = await sendSessionRequest(props.session.project_id, props.session.id, { ...body, request_id: retry.id }, abort.signal)
+    const data = await response.json()
+    if (!response.ok) throw new APIError(response.status, data.error || `Request failed (${response.status})`)
+    const control = data as SessionChangeRequest
+    void agents.afterWrite()
     if (!disposed) {
       revision++
       controls.value = [...controls.value.filter(c => c.id !== control.id), control]

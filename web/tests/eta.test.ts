@@ -62,3 +62,26 @@ test('progress names the percent and, when the estimate is stale, when it was re
   assert.equal(progressReportedAt({ progress_pct: 10, live_stale: true, live_reported_at: '2026-09-28T11:00:00Z', eta_stale: true }), '2026-09-28T11:00:00Z')
   assert.equal(progressReportedAt({ progress_pct: 10 }), null)
 })
+
+test('at 100% nothing is overdue or stale; only the server completion evidence reads Done (AEON-437)', () => {
+  const late = { at: '2026-09-28T13:00:00Z', kind: 'Ready' as const, by: 'Beau', reported_at: '2026-09-28T12:00:00Z', stale: true }
+  const finished = formatEta({ ready: late, progress: 100, stale: true, finished: { at: '2026-09-28T12:00:00Z', by: 'Beau' } }, 'relative', now, 'Europe/Vienna')
+  assert.equal(finished?.done, true)
+  assert.equal(finished?.text, null)
+  assert.equal(finished?.overdue, false)
+  assert.equal(finished?.stale, false)
+  assert.equal(finished?.tip, 'All work reported by Beau at 14:00')
+  assert.equal(formatEta({ progress: 100, finished: {} }, 'relative', now)?.tip, 'All work reported')
+  // The server keeps no estimate for a finished ticket, so the evidence alone is enough to show Done.
+  assert.equal(formatEta(etaFromTicket({ finished: true, finished_at: '2026-09-28T12:00:00Z', finished_by: 'Ada', progress_pct: 100 }), 'relative', now, 'Europe/Vienna')?.tip, 'All work reported by Ada at 14:00')
+  assert.equal(formatEta(etaFromTicket({ finished: true }), 'relative', now)?.done, true)
+  // 100% without that evidence is a full percent, never Done, with or without a working session:
+  // a yielded or stopping session is not a working one, yet it is not gone either.
+  for (const has_working_session of [true, false, undefined]) {
+    const open = formatEta(etaFromTicket({ eta_ready_at: late.at, progress_pct: 100, has_working_session }), 'relative', now, 'Europe/Vienna')
+    assert.deepEqual([open?.done, open?.progress, open?.text, open?.overdue, open?.stale, open?.tip], [false, '100%', null, false, false, '100% done'])
+  }
+  const behind = formatEta({ ready: late, progress: 99 }, 'relative', now, 'Europe/Vienna')
+  assert.deepEqual([behind?.done, behind?.overdue, behind?.text], [false, true, 'overdue 15 min'])
+  assert.equal(formatEta(etaFromSession({ eta_ready_at: late.at, progress_pct: 100 }), 'relative', now)?.done, false)
+})

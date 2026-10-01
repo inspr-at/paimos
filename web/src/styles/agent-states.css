@@ -60,3 +60,5 @@
 .agent-indicator-art:is(.problem, .unresponsive) { --signal: var(--agent-state-color, var(--agent-standard-problem)); }
 .agent-indicator-art:is(.idle, .stale, .stopped) { --signal: var(--agent-state-color, var(--agent-standard-inactive)); filter: grayscale(1); }
 .agent-indicator-art .agent-state-mark { color: var(--signal); }
+/* A finished session draws its ring whole: a complete circle, not a sweep (AEON-437). */
+.agent-indicator-art.done .ring-sweep { stroke-dasharray: 100 0; transform: rotate(-90deg); }

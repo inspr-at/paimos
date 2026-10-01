@@ -756,6 +756,73 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 	}
 }
 
+// AEON-437: reported progress never moves a live session down the lead order. A
+// worker at 100% that went quiet has no recorded exit, so it is still awaiting a
+// heartbeat or unresponsive, and a pending approval on its run still makes it
+// wait: both lead over a fresh working session, exactly as under 100%.
+func TestListLeadIgnoresReportedProgress(t *testing.T) {
+	p := newPrincipal(t, "assignee-full-progress")
+	project := kindBySlug(t, p, "project")
+	ticketKind := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Full progress"}`)
+	makeTicket := func(key string) nodeJSON {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"kind_id": ticketKind.ID, "key": key, "title": key, "state": "new", "parent_id": root.ID})
+		return mustNode(t, p, string(raw))
+	}
+	ada := insertNamedAgent(t, p.TenantID, "Ada")
+	person := insertPerson(t, p.TenantID, "Nia")
+	stamp := func(node, label string, progress int, created, heartbeat time.Duration) string {
+		t.Helper()
+		id := insertLiveSessionStamp(t, p.TenantID, root.ID, ada, node, "claude", "worker", label, "working", "busy", time.Now().UTC().Add(-created), time.Now().UTC().Add(-heartbeat))
+		if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=$2 WHERE id=$1::uuid`, id, progress); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	quiet, silent, approval := makeTicket("FULL-1"), makeTicket("FULL-2"), makeTicket("FULL-3")
+	// Past the red threshold (10 minutes) at 100%: unresponsive, as at 99%.
+	stamp(silent.ID, "Silent", 100, 40*time.Minute, 12*time.Minute)
+	stamp(silent.ID, "Fresh", 30, time.Minute, time.Second)
+	// Past the yellow threshold (3 minutes) at 100%: awaiting a heartbeat.
+	stamp(quiet.ID, "Quiet", 100, time.Minute, 4*time.Minute)
+	stamp(quiet.ID, "Live", 30, 2*time.Minute, time.Second)
+	// A pending approval on the quiet worker's run: waiting, which outranks working.
+	waiting := stamp(approval.ID, "Needy", 100, time.Minute, 4*time.Minute)
+	stamp(approval.ID, "Busy", 30, 2*time.Minute, time.Second)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		var run, order string
+		if err := tx.QueryRow(t.Context(), `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).Scan(&run, &order); err != nil {
+			return err
+		}
+		for _, statement := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'FWO-1',id,'Order',$3 FROM node_kinds WHERE slug='work_order'`, []any{p.TenantID, order, root.ID}},
+			{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, []any{p.TenantID, order, person.ID}},
+			{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,status) VALUES($1,$2,$3,$4,'running')`, []any{p.TenantID, run, order, ada}},
+			{`UPDATE harness_sessions SET run_id=$2 WHERE id=$1`, []any{waiting, run}},
+			{`INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,run_id,scope,resource_kind,resource_id,rationale,expires_at)
+				VALUES($1,$2,$2,$3,'nodes.write','node',$4,'Needs a person',now()+interval '1 hour')`, []any{p.TenantID, ada, run, root.ID}},
+		} {
+			if _, err := tx.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{silent.Key: "Silent", quiet.Key: "Quiet", approval.Key: "Needy"}
+	for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+		if item.LeadWorker == nil || item.LeadWorker.Name != want[item.Key] {
+			t.Fatalf("%s lead %#v, want %s", item.Key, item.LeadWorker, want[item.Key])
+		}
+	}
+}
+
 // Equal start and heartbeat, session ids withheld: the lead name on the row
 // is the name the sort uses. Swapping hidden labels and principal names does
 // not change a guest's order or key.

@@ -115,7 +115,7 @@ func TestIntakePreservesPersonEdits(t *testing.T) {
 	grantIntake(t, database.App, fx.tenantA, fx.agent, fx.person, fx.projectA)
 	beforeDrafts := count(t, database, `SELECT count(*) FROM intake_drafts`)
 	beforeEvents := count(t, database, `SELECT count(*) FROM events WHERE tenant_id = $1 AND type = 'intake.draft_proposed'`, fx.tenantA)
-	if w := fx.post(t, mux, fx.agent, fx.token, "/intake/drafts", fx.brief("00000000-0000-0000-0000-000000000099", "", 0, "missing-source", "Brief", draftToken)); w.Code != http.StatusConflict {
+	if w := fx.post(t, mux, fx.agent, fx.token, "/intake/drafts", fx.brief("00000000-0000-0000-0000-000000000099", "", 0, "missing-source", "Brief", draftToken)); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("bad citation %d %s", w.Code, w.Body.String())
 	}
 	if count(t, database, `SELECT count(*) FROM intake_drafts`) != beforeDrafts || count(t, database, `SELECT count(*) FROM events WHERE tenant_id = $1 AND type = 'intake.draft_proposed'`, fx.tenantA) != beforeEvents {

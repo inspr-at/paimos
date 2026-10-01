@@ -134,12 +134,13 @@ export interface LiveAgentMock {
   phase: 'starting' | 'working' | 'stopping' | 'yielded' | 'stopped'; activity: 'busy' | 'unknown' | 'idle' | 'throttled'
   ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string | null
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; needs_attention?: boolean; has_problem?: boolean
+  progress_pct?: number | null; finished: boolean
 }
 // One live agent on the fixture clock: started `minutes` ago, heartbeat half a minute ago.
 export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, 'project_id'>, minutes = 12): LiveAgentMock {
   return {
     harness: 'claude', management_mode: 'unmanaged', role: 'worker', phase: 'working', activity: 'busy', ticket: null,
-    since: new Date(now - minutes * 60_000).toISOString(), heartbeat_at: new Date(now - 30_000).toISOString(), ...fields,
+    since: new Date(now - minutes * 60_000).toISOString(), heartbeat_at: new Date(now - 30_000).toISOString(), finished: false, ...fields,
   }
 }
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
@@ -164,7 +165,8 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
     children_count: data.nodes.filter(n => n.parent_id === node.id).length,
     project: { id: project.id, key: project.key, title: project.title },
     epic: epicAbove(node, data),
-    ...(node.eta ? { eta: node.eta } : {}),
+    // The server always states finished on an estimate; false unless a spec sets it.
+    ...(node.eta ? { eta: { finished: false, ...node.eta } } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
     ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),

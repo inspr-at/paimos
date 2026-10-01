@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { parseJson } from './json.ts'
 import { api } from './api.ts'
 
 export type WatchConsentMode = 'aeon' | 'local_auth'
@@ -45,7 +46,7 @@ export async function attachAction(path: string, body?: object, signal?: AbortSi
 export function watchText(raw: string): string | null {
   if (raw.length > 100_000) return null
   try {
-    const value: unknown = JSON.parse(raw)
+    const value: unknown = parseJson(raw)
     if (typeof value !== 'string' || new TextEncoder().encode(value).length > 16_384 || /[\p{Cc}\p{Cf}]/u.test(value.replace(/[\n\t]/g, ''))) return null
     return value
   } catch { return null }

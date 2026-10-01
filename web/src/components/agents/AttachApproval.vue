@@ -7,10 +7,12 @@ import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attach
 import { attachAction, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
+import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 
 const identity = useSession()
+const agents = useAgents()
 // A decision changes what /agents lists as waiting; the page refreshes it.
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
@@ -98,11 +100,14 @@ function lookup() {
 function decide(revoke = false) {
   if (!allowed.value || !review.value || busy.value || (!revoke && !labelsReady.value)) return Promise.resolve()
   const current = review.value
-  return decisions.run(({ after, signal }) => {
+  return decisions.run(({ after: forDialog, signal }) => {
     busy.value = true; error.value = ''
-    return after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
-      review.value = result; emit('changed')
-    })
+    return link.run(({ after }) => after(attachAction(`/${encodeURIComponent(current.request_id)}/${revoke ? 'revoke' : 'approve'}`, revoke ? {} : { request_digest: current.request_digest, ...(current.consent_digest ? { consent_digest: current.consent_digest } : {}) }, signal), result => {
+      // The accepted write refreshes the canonical lists for this person even
+      // when the dialog closed during decoding; only a live dialog uses its body.
+      void agents.afterWrite()
+      return forDialog(result, current => { review.value = current; emit('changed') })
+    }))
   }, {
     failed: e => { error.value = e instanceof Error ? e.message : 'Could not update this watch.' },
     settled: () => { busy.value = false },

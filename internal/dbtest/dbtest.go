@@ -14,11 +14,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,7 +52,10 @@ type DB struct {
 	err   error
 }
 
-// Open creates a database for t and drops it when t finishes.
+var cleanupFailures atomic.Uint64
+
+// Open creates a database for t and drops it when t finishes. Cleanup failures
+// fail local tests; CI logs and counts them because its Postgres is disposable.
 func Open(t testing.TB) *DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -60,11 +65,24 @@ func Open(t testing.TB) *DB {
 		t.Fatalf("dbtest: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := opened.Close(); err != nil {
-			t.Errorf("dbtest cleanup: %v", err)
-		}
+		reportCleanup(t, opened.Close())
 	})
 	return opened
+}
+
+func reportCleanup(t interface {
+	Logf(string, ...any)
+	Errorf(string, ...any)
+}, err error) {
+	if err == nil {
+		return
+	}
+	n := cleanupFailures.Add(1)
+	if os.Getenv("CI") != "" {
+		t.Logf("dbtest cleanup (failure %d): %v", n, err)
+	} else {
+		t.Errorf("dbtest cleanup (failure %d): %v", n, err)
+	}
 }
 
 // Seed marks ctx as a test fixture writer. Project row-level security shows a
@@ -237,37 +255,49 @@ func (d *DB) close() error {
 	if d.maint == "" || d.Name == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	conn, err := pgx.Connect(ctx, d.maint)
-	if err != nil {
-		return fmt.Errorf("reconnect to drop %s: %w", d.Name, err)
-	}
-	defer conn.Close(ctx)
+	return d.dropResources(ctx, 10*time.Second, pgx.Connect)
+}
 
-	var dropDB error
-	for attempt := 0; attempt < 8; attempt++ {
-		_, _ = conn.Exec(ctx, `
-			SELECT pg_terminate_backend(pid)
-			FROM pg_stat_activity
-			WHERE datname = $1 AND pid <> pg_backend_pid()`, d.Name)
-		_, dropDB = conn.Exec(ctx, `DROP DATABASE IF EXISTS `+quoteIdent(d.Name))
-		if dropDB == nil {
-			break
+// Use a new maintenance connection on every attempt: pgx may close it when a
+// command times out. IF EXISTS also handles a drop that completed on the server
+// just as its client deadline expired. Retry both resources, in dependency order,
+// within an overall budget shared by normal cleanup and the template watcher.
+func (d *DB) dropResources(ctx context.Context, attemptTimeout time.Duration,
+	connect func(context.Context, string) (*pgx.Conn, error),
+) error {
+	var last error
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		last = func() error {
+			conn, err := connect(attemptCtx, d.maint)
+			if err != nil {
+				return fmt.Errorf("reconnect to drop %s: %w", d.Name, err)
+			}
+			defer conn.Close(attemptCtx)
+			if _, err := conn.Exec(attemptCtx, `DROP DATABASE IF EXISTS `+quoteIdent(d.Name)+` WITH (FORCE)`); err != nil {
+				return fmt.Errorf("drop database %s: %w", d.Name, err)
+			}
+			if d.Role != "" {
+				if _, err := conn.Exec(attemptCtx, `DROP ROLE IF EXISTS `+quoteIdent(d.Role)); err != nil {
+					return fmt.Errorf("drop role %s: %w", d.Role, err)
+				}
+			}
+			return nil
+		}()
+		cancel()
+		if last == nil {
+			return nil
 		}
-		time.Sleep(time.Duration(attempt+1) * 40 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	var dropRole error
-	if d.Role != "" {
-		_, dropRole = conn.Exec(ctx, `DROP ROLE IF EXISTS `+quoteIdent(d.Role))
-	}
-	if dropDB != nil {
-		return fmt.Errorf("drop database %s: %w", d.Name, dropDB)
-	}
-	if dropRole != nil {
-		return fmt.Errorf("drop role %s: %w", d.Role, dropRole)
-	}
-	return nil
+	return fmt.Errorf("cleanup %s exhausted budget: %w", d.Name, errors.Join(ctx.Err(), last))
 }
 
 func maintenanceURL() (*url.URL, string, error) {

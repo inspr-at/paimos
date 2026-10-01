@@ -32,6 +32,19 @@ func TestReservedRunRechecksFence(t *testing.T) {
 	if code != 409 {
 		t.Errorf("route replay status=%d; want 409 after member removal", code)
 	}
+	if scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, run) != 0 ||
+		scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, run) != 0 ||
+		scalar(t, admin, `SELECT sum(reserved) FROM account_allowance_windows WHERE account_id=$1`, first.ID) != 0 {
+		t.Fatal("moved queued run retained its reservation or slot")
+	}
+	// A later request can use the current group member. Returning to the old
+	// account reuses a released window without minting a second hold.
+	mustRoute(t, mod, runner, token, run, "daemon-a", []Account{second}, map[string]int64{"requests": 1})
+	callStatus(t, mod, &admin, "", "PATCH", "/api/agent-accounts/groups/"+group.ID, encoded(t, map[string]any{"account_ids": []string{first.ID}}), 200, nil)
+	got := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{first, second}, map[string]int64{"requests": 1})
+	if got.AccountID != first.ID || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, run) != 1 {
+		t.Fatal("queued reroute did not reserve the current member exactly once")
+	}
 }
 func TestSharedQuotaReservations(t *testing.T) {
 	reset(t)
@@ -40,7 +53,7 @@ func TestSharedQuotaReservations(t *testing.T) {
 	first := groupAccount(t, mod, admin, runner, token, "first", "daemon-a", "First", "studio")
 	second := groupAccount(t, mod, admin, runner, token, "second", "daemon-b", "Second", "laptop")
 	seed(t, admin, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,max_parallel_runs=4`, strings.Repeat("ab", 32)); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1,max_parallel_runs=4`, strings.Repeat("ab", 32)); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `DELETE FROM account_allowance_windows`)
@@ -70,7 +83,7 @@ func TestSharedQuotaVendorDenial(t *testing.T) {
 	first := groupAccount(t, mod, admin, runner, token, "first", "daemon-a", "First", "studio")
 	second := groupAccount(t, mod, admin, runner, token, "second", "daemon-b", "Second", "laptop")
 	seed(t, admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1`, strings.Repeat("ab", 32))
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1`, strings.Repeat("ab", 32))
 		return err
 	})
 	now := time.Now().UTC()
@@ -124,7 +137,7 @@ func sharedFixture(t *testing.T) (tenant.Principal, tenant.Principal, string, st
 		groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Second", "laptop"),
 	}
 	seed(t, admin, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,max_parallel_runs=4`, strings.Repeat("ab", 32)); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1,max_parallel_runs=4`, strings.Repeat("ab", 32)); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `DELETE FROM account_allowance_windows`)

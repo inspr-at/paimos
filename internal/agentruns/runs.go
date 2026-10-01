@@ -31,6 +31,7 @@ type Run struct {
 	MaxDurationSeconds        int                         `json:"max_duration_seconds,omitempty"`
 	VerificationPolicy        string                      `json:"verification_policy,omitempty"`
 	RepositoryMutationAllowed bool                        `json:"repository_mutation_allowed"`
+	RowVersion                int64                       `json:"row_version,omitempty"`
 	ID                        string                      `json:"id"`
 	OrderID                   string                      `json:"work_order_id"`
 	AgentID                   string                      `json:"agent_principal_id"`
@@ -117,13 +118,15 @@ func (m *module) Mount(mux *http.ServeMux) {
 	}
 }
 
+// row_version is the run's own revision (AEON-449): a trigger bumps it inside every
+// statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review')`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
@@ -324,6 +327,14 @@ func claimPermission(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run) 
 	return nil
 }
 
+func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, reason string) (any, error) {
+	if err := agentaccounts.Release(ctx, tx, p, v.ID, "", ""); err != nil {
+		return nil, err
+	}
+	// Returning the failure as the response commits the release before the 409.
+	return workorders.Fail(http.StatusConflict, reason), nil
+}
+
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		Daemon       string   `json:"daemon_id"`
@@ -393,17 +404,18 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
   SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
    ON ledger.tenant_id=door.tenant_id AND ledger.harness=door.harness
-   AND door.quota_fingerprint<>'' AND ledger.quota_fingerprint=door.quota_fingerprint
+   AND door.quota_pool_fingerprint<>'' AND ledger.quota_pool_fingerprint=door.quota_pool_fingerprint
   WHERE door.id=$2::uuid AND ledger.id=w.account_id
    AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
   AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
-	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
+	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID)
 	if err != nil {
 		return nil, err
 	}
 	count := 0
 	valid := true
+	quotaValid := true
 	active := true
 	for rows.Next() {
 		var id, state string
@@ -413,7 +425,8 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, err
 		}
 		count++
-		valid = valid && seen[id] && quotaMatches
+		valid = valid && seen[id]
+		quotaValid = quotaValid && quotaMatches
 		active = active && state == "active" && current
 	}
 	rows.Close()
@@ -421,6 +434,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if !valid || count != len(seen) {
+		return nil, workorders.Fail(409, "reservation set mismatch")
+	}
+	if !quotaValid {
+		if v.Status == "queued" && v.Purpose == "managed" {
+			return releaseObsoleteClaim(ctx, tx, p, v, "quota_pool_changed")
+		}
 		return nil, workorders.Fail(409, "reservation set mismatch")
 	}
 	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
@@ -436,6 +455,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
 	}
 	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
+			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
+		}
 		return nil, workorders.Fail(409, "reserved capacity is not eligible")
 	}
 	if o.Assignee != nil && *o.Assignee != v.AgentID {
