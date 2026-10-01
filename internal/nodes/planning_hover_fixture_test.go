@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 
@@ -29,20 +30,28 @@ func TestPlanningListHoverFixture(t *testing.T) {
 		estimated bool
 	}{{"HOVER-1", false, 0, false}, {"HOVER-2", false, 0, false},
 		{"HOVER-3", true, 1_000_000, false}, {"HOVER-4", true, 1_000_000, false},
-		{"HOVER-5", true, 0, false}, {"HOVER-6", false, 0, true}} {
+		{"HOVER-5", true, 0, false}, {"HOVER-6", false, 0, true},
+		{"HOVER-7", true, 1_000_000, false}, {"HOVER-8", true, 1_000_000, false}} {
 		fields := map[string]any{}
 		if tc.estimated {
 			fields["estimate_hours"] = .48
 		}
 		n := w.node(t, tc.key, "ticket", w.root.ID, "open", fields)
 		if tc.reported {
-			w.session(t, n.ID, "cursor", "grok-4.7", "xhigh", "grok-4.7", 60, tc.input, 0, 0, "api", "")
+			billing, plan := "api", ""
+			if tc.key == "HOVER-8" {
+				billing, plan = "subscription", "Pro"
+			}
+			w.session(t, n.ID, "cursor", "grok-4.7", "xhigh", "grok-4.7", 60, tc.input, 0, 0, billing, plan)
 		}
-		usageModel := ""
+		usageModel, billing := "", "api"
 		if tc.key == "HOVER-3" {
 			usageModel = "grok-4.7"
+		} else if tc.key == "HOVER-7" {
+			// Real reported usage without either a list price or known billing.
+			usageModel, billing = "unpriced-model", "unknown"
 		}
-		w.session(t, n.ID, "cursor", "grok-4.7", "xhigh", usageModel, 1, 100_000, 0, 0, "api", "")
+		w.session(t, n.ID, "cursor", "grok-4.7", "xhigh", usageModel, 1, 100_000, 0, 0, billing, "")
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		// One live session per ticket except HOVER-2, which has stopped without
@@ -59,10 +68,46 @@ func TestPlanningListHoverFixture(t *testing.T) {
 	}
 	status, body := call(t, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&kind=ticket&sort=key", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
-	if len(page.Items) != 6 || page.Items[0].Planning.Tokens.Unreported != 1 ||
-		page.Items[0].Planning.Cost == nil || !page.Items[0].Planning.Cost.ListUnpriced ||
-		page.Items[2].Planning.Tokens.Sessions != 2 || page.Items[2].Planning.Tokens.Running != 1 {
-		t.Fatalf("fixture did not exercise the server's unreported and running projections: %s", body)
+	if len(page.Items) != 8 {
+		t.Fatalf("fixture row count: %d", len(page.Items))
+	}
+	for _, item := range page.Items {
+		p := item.Planning
+		if p == nil || p.Cost == nil {
+			t.Fatalf("%s missing planning or cost", item.Key)
+		}
+		if item.Key == "HOVER-7" {
+			if p.Tokens.Unreported != 0 || !p.Cost.ListUnpriced || !p.Cost.PaidUnknown ||
+				!slices.Equal(p.Cost.BillingModes, []string{"api", "unknown"}) ||
+				p.Cost.ListSpent == nil || *p.Cost.ListSpent != "2.000000" {
+				t.Fatalf("real unpriced usage lost its warnings: %+v", p)
+			}
+			continue
+		}
+		if p.Cost.ListUnpriced || p.Cost.PaidUnknown {
+			t.Fatalf("%s session without usage changed billing flags: %+v", item.Key, p.Cost)
+		}
+		if item.Key == "HOVER-3" {
+			if p.Tokens.Sessions != 2 || p.Tokens.Running != 1 || p.Tokens.Unreported != 0 {
+				t.Fatalf("measured fixture live/total counts: %+v", p.Tokens)
+			}
+		} else if p.Tokens.Unreported != 1 {
+			t.Fatalf("%s should retain one unreported session: %+v", item.Key, p.Tokens)
+		}
+		switch item.Key {
+		case "HOVER-1", "HOVER-2", "HOVER-6":
+			if p.Cost.ListSpent != nil || len(p.Cost.BillingModes) != 0 {
+				t.Fatalf("%s usage-less fixture invented billing: %+v", item.Key, p.Cost)
+			}
+		case "HOVER-3", "HOVER-4", "HOVER-5":
+			if !slices.Equal(p.Cost.BillingModes, []string{"api"}) {
+				t.Fatalf("%s API usage billing: %+v", item.Key, p.Cost)
+			}
+		case "HOVER-8":
+			if !slices.Equal(p.Cost.BillingModes, []string{"subscription"}) || !slices.Equal(p.Cost.Plans, []string{"Pro"}) {
+				t.Fatalf("unreported session changed subscription billing: %+v", p.Cost)
+			}
+		}
 	}
 	if *capturePlanningListFixture {
 		t.Logf("PLANNING_LIST_FIXTURE=%s", base64.StdEncoding.EncodeToString(body))

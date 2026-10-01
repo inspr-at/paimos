@@ -64,8 +64,11 @@ test('server list response preserves exact usage-less and mixed-session hovers',
   await assertTip('HOVER-3', 'c-tokens', 'Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
   for (const [key, spent, input, value] of [['HOVER-4', '1M', '1,000,000', '$2.00'], ['HOVER-5', '0', '0', '$0']] as const) {
     await assertTip(key, 'c-tokens', `Measured so far ${spent} · Cursor grok-4.7\n1 session running · input ${input} (0 cached) · output 0\n1 session has no usage report yet`)
-    await assertTip(key, 'c-list-cost', `Measured so far ${value}\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record`)
+    await assertTip(key, 'c-list-cost', `Measured so far ${value}\nAPI-billed · at list prices`)
   }
+  await assertTip('HOVER-7', 'c-list-cost', 'Measured so far $2.00\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record')
+  await assertTip('HOVER-8', 'c-list-cost', 'Measured so far $2.00\nIncluded in your plan · at list prices\nSubscription: not charged per use\nPro')
+  await expect(row(page, 'HOVER-8').locator('.c-list-cost .plan-chip')).toHaveText('plan')
 })
 
 test('approved cells show estimates, running figures, measured checks and session models', async ({ page }) => {

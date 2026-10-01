@@ -25,7 +25,7 @@ describe('server list payload planning hovers', () => {
   it('has no cost lower bound until a list value is measured', () => {
     for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) {
       const r = serverRow(key)
-      expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: true })
+      expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: false, paid_unknown: false, billing_modes: [] })
       expect(listCostCell(r)).toMatchObject({ state: 'none', tip: 'Billing not reported yet' })
     }
   })
@@ -34,18 +34,28 @@ describe('server list payload planning hovers', () => {
     expect(r.planning!.tokens).toMatchObject({ sessions: 2, running: 1, unreported: 0 })
     expect(tokensCell(r).tip).toBe('Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
   })
-  it('keeps partial-report and lower-bound warnings for measured usage, including zero', () => {
+  it('keeps the missing token report separate from priced API billing, including zero', () => {
     for (const key of ['HOVER-4', 'HOVER-5']) {
       const r = serverRow(key)
       expect(tokensCell(r).tip.split('\n').slice(1)).toEqual([
         `1 session running · input ${key === 'HOVER-4' ? '1,000,000' : '0'} (0 cached) · output 0`,
         '1 session has no usage report yet',
       ])
-      expect(listCostCell(r).tip.split('\n').slice(-2)).toEqual([
-        'Part of this has no list price, so it is a lower bound',
-        'Part of this has no billing on record',
-      ])
+      expect(r.planning!.cost).toMatchObject({ list_unpriced: false, paid_unknown: false, billing_modes: ['api'] })
+      expect(listCostCell(r).tip).toBe(`Measured so far ${key === 'HOVER-4' ? '$2.00' : '$0'}\nAPI-billed · at list prices`)
     }
+  })
+  it('keeps lower-bound and unknown-billing warnings for actual unpriced usage', () => {
+    const r = serverRow('HOVER-7')
+    expect(r.planning!.tokens).toMatchObject({ spent: 1_100_000, unreported: 0, sessions: 2, running: 1 })
+    expect(r.planning!.cost).toMatchObject({ list_spent: '2.000000', list_unpriced: true, paid_unknown: true, billing_modes: ['api', 'unknown'] })
+    expect(listCostCell(r).tip).toBe('Measured so far $2.00\nAPI-billed · Billing not reported yet · at list prices\nPart of this has no list price, so it is a lower bound\nPart of this has no billing on record')
+  })
+  it('preserves the subscription marker beside an unreported session', () => {
+    const r = serverRow('HOVER-8')
+    expect(r.planning!.tokens).toMatchObject({ spent: 1_000_000, unreported: 1, sessions: 2, running: 1 })
+    expect(r.planning!.cost).toMatchObject({ list_unpriced: false, paid_unknown: false, billing_modes: ['subscription'], plans: ['Pro'] })
+    expect(listCostCell(r)).toMatchObject({ plan: true, tip: 'Measured so far $2.00\nIncluded in your plan · at list prices\nSubscription: not charged per use\nPro' })
   })
 })
 
