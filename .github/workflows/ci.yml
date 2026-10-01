@@ -158,14 +158,14 @@ jobs:
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
       - working-directory: web
         run: npm run lint
-      # AEON-488: the dock adapter and both version/header browser regressions
+      # AEON-488: the dock adapter, version/header and release-entry regressions
       # run on hosted CI, keeping browser suites off the operator workstation.
       - working-directory: web
         run: npx vitest run tests/version-crossfade.unit.test.ts --maxWorkers=1
       - working-directory: web
         run: npx playwright install --with-deps chromium
       - working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/version-reveal.spec.ts --workers=1
+        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
       - working-directory: web
         run: npm run build
 

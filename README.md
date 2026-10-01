@@ -1021,10 +1021,12 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
-The release history leads with the live codename in light display type with the
-heading's spacing, above one glass dock holding live status and the Pretty
-version. Its separators use the theme's muted ink; resting hours and minutes
-use primary ink at the renderer's 80% weight for AA contrast in both themes.
+The release history's Highlights eyebrow reads “PAIMOS AEON · Release” (or the
+configured wordmark); generation and release counts stay in Details. The live
+codename leads in light display type with the heading's spacing, above one
+glass dock holding live status and the Pretty version. Its separators use the
+theme's muted ink; resting hours and minutes use primary ink at the renderer's
+80% weight for AA contrast in both themes.
 Hover or keyboard focus crossfades the renderer's characters to the full canonical version over
 one second; reduced motion switches instantly. Click or Enter copies the exact
 canonical value, including `.0.0`, and announces “Version copied”. This character

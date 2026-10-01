@@ -89,7 +89,7 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases.find(r => r.version === history.current)!.codename })).toBeVisible()
   // AEON-488: the title is the live release's codename under a product eyebrow, with one status line.
   const live = history.releases.find(r => r.version === history.current)!
-  await expect(sheet(page).locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Releases')
+  await expect(sheet(page).locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Release')
   await expect(sheet(page).getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
   await expect(sheet(page).locator('.head .status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
   await expect(sheet(page).locator('.detail .live-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · (published|tagged) /)

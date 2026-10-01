@@ -79,7 +79,7 @@ async function expectFullHistory(page: Page) {
   await page.waitForLoadState('networkidle')
   await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
   // AEON-488: the eyebrow names the product; the title is the live release's codename.
-  await expect(history.locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Releases')
+  await expect(history.locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Release')
   await expect(history.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
   return history

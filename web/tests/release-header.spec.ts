@@ -224,14 +224,25 @@ test('resting Pretty hours and minutes clear AA contrast in both themes and afte
   for (const colorScheme of ['light', 'dark', 'light'] as const) {
     await page.emulateMedia({ colorScheme })
     await expect(button).toHaveAttribute('data-version-view', 'pretty')
-    const ink = await button.evaluate(el => getComputedStyle(el).color)
-    colors.push(ink)
-    const foreground = ink.match(/[\d.]+/g)!.map(Number)
+    const ink = colorScheme === 'light' ? 'rgb(32, 60, 61)' : 'rgb(237, 244, 240)'
+    // A live theme change replaces renderer segments. Read their computed ink
+    // and opacity in one browser task from the stable button, after it settles.
+    let rendered = { ink: '', time: [] as { color: string; opacity: string }[] }
+    await expect.poll(async () => {
+      rendered = await button.evaluate(el => ({
+        ink: getComputedStyle(el).color,
+        time: [...el.querySelectorAll('.version-pretty > .hh, .version-pretty > .mi')].map(segment => {
+          const style = getComputedStyle(segment)
+          return { color: style.color, opacity: style.opacity }
+        }),
+      }))
+      return rendered
+    }).toEqual({ ink, time: [{ color: ink, opacity: '0.8' }, { color: ink, opacity: '0.8' }] })
+    colors.push(rendered.ink)
     const background = colorScheme === 'light' ? [251, 250, 246] : [24, 48, 52]
-    for (const segment of await time.all()) {
-      await expect(segment).toHaveCSS('color', ink)
-      await expect(segment).toHaveCSS('opacity', '0.8')
-      const opacity = Number(await segment.evaluate(el => getComputedStyle(el).opacity))
+    for (const segment of rendered.time) {
+      const foreground = segment.color.match(/[\d.]+/g)!.map(Number)
+      const opacity = Number(segment.opacity)
       const composited = background.map((channel, index) => Math.round(foreground[index]! * opacity + channel * (1 - opacity)))
       expect(composited).toEqual(colorScheme === 'light' ? [76, 98, 98] : [194, 205, 202])
       const values = [luminance(composited), luminance(background)].sort((a, b) => b - a)
