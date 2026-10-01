@@ -153,7 +153,7 @@ func runWebSelection(t *testing.T, scenario webScenario) webResult {
 	launcher := `const { spawnSync } = require('node:child_process');
 const result = spawnSync(process.env.STUB, process.argv.slice(2), { stdio: 'inherit' });
 if (result.error) throw result.error;
-process.exit(result.status === null ? 1 : result.status);
+process.exitCode = result.status === null ? 1 : result.status;
 `
 	write("web/node_modules/@playwright/test/cli.js", launcher)
 	manifest, err := json.Marshal(map[string]string{"node_modules/@playwright/test/cli.js": fmt.Sprintf("%x", sha256.Sum256([]byte(launcher)))})
@@ -515,8 +515,7 @@ func TestWebSelectionRejectsPlaywrightLauncherReplacement(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			got := runWebSelection(t, webScenario{event: "pull_request", path: "web/tests/new.spec.ts", mutation: phase + "-launcher"})
 			calls := map[string]int{"before": 0, "list": 1, "run": 2}[phase]
-			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls ||
-				!(strings.Contains(got.output, "Playwright code changed after seal") || strings.Contains(got.output, "UI check rejected process.exit")) {
+			if got.err == nil || strings.Count(got.calls, "CALL\n") != calls || !strings.Contains(got.output, "Playwright code changed after seal") {
 				t.Fatalf("returning forged JSON from a replaced launcher must fail: %+v", got)
 			}
 		})
