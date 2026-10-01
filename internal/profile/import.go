@@ -157,7 +157,11 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 		}
 		var principalID string
 		err = db.InTenant(ctx, job.Pool, tenantID, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT DISTINCT coalesce(p.linked_to,p.id)::text FROM principals p LEFT JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND p.kind='person' AND lower(coalesce(i.email,p.email,''))=lower($2)`, tenantID, email)
+			rows, err := tx.Query(ctx, `SELECT DISTINCT coalesce(p.linked_to,p.id)::text
+				FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
+				WHERE p.tenant_id=$1 AND p.kind='person'
+				  AND translate(coalesce(i.email,p.email,''),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+				      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')`, tenantID, email)
 			if err != nil {
 				return err
 			}
