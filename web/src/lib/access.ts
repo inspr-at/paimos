@@ -2,6 +2,7 @@
 // Access: people, invites, roles, project access, agents and the access audit
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
+import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
@@ -130,7 +131,7 @@ export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(ke
 export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
 export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}) })
 // One confirmed request commits the replacement and revocation together.
-export const rotateAgentKey = (keyId: string, expiresAt: string | null) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt })
+export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
 
 export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now = Date.now()): { label: string; soon: boolean } {
   if (!key.expires_at) return { label: 'Never', soon: false }
@@ -167,33 +168,27 @@ export const scopeLabel = (key: string) => permissionLabel(key)
 export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefix.slice(-8)}_…` : `aeon_${prefix}_…`
 // The most a new key for this agent may carry besides my own permissions: an
 // agent on a shared role (built-in or custom) is capped by that role; an agent
-// with no role, or with the role the server keeps for it alone, is not
-// (internal/auth ensureAgentBinding). null means no cap from the role.
-export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = []): Set<string> | null {
+// with no role, or with the role the server keeps for it alone, may configure
+// that role during creation. Codes and rotation respect existing roles only.
+// null means creation may configure a role; it never applies to rotation.
+export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], respectPrivateRole = false): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
   if (!role && agent.project_roles?.length) {
     const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
     return new Set(agent.project_roles.flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k)))
   }
-  if (!role) return agent.workspace_role ? new Set() : null
-  if (!role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
+  if (!role) return agent.workspace_role || respectPrivateRole ? new Set() : null
+  if (!respectPrivateRole && !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
   return new Set(role.permissions)
 }
 
 // ---------- Permissions in words ----------
-const RESOURCE: Record<string, string> = {
-  nodes: 'work', comments: 'comments', knowledge: 'knowledge', kinds: 'ticket types', settings: 'workspace settings', members: 'members',
-  roles: 'roles', audit: 'the access log', keys: 'agent keys', approvals: 'agent approvals', agents: 'agents', quotes: 'quotes',
-  hours: 'hours', customers: 'customers', portal: 'the customer portal', workspace: 'the workspace', releases: 'releases', journey: 'the journey',
-  authz: 'their own access', account: 'agent accounts', harness: 'harness sessions', run: 'runs', runs: 'runs', work_orders: 'work orders',
-  stage: 'stages', stage_handoffs: 'stage handoffs', inbox: 'messages', models: 'models', plugins: 'plugins', imports: 'imports', intake: 'intake',
-  requirements: 'requirements', project_groups: 'project groups', profile: 'their own profile', crm: 'CRM', cost_units: 'cost units',
-  tags: 'tags', relations: 'links between tickets', attachments: 'attachments', views: 'saved views', events: 'history', search: 'search', ownership: 'ownership',
-}
-const ACTION: Record<string, string> = { read: 'See', write: 'Edit', manage: 'Manage', delete: 'Delete', issue: 'Issue', approve: 'Approve', decide: 'Decide on', log: 'Log', run: 'Run', create: 'Create' }
+const RESOURCE: Record<string, string> = permissionWords.resources
+const ACTION: Record<string, string> = permissionWords.actions
+
 // "members.manage" -> "Manage members"; "nodes.read" -> "See work".
 export function permissionLabel(key: string): string {
-  if (key === 'harness.watch') return 'View live conversations'
+  if (key in permissionWords.special) return (permissionWords.special as Record<string, string>)[key]!
   const [resource, ...rest] = key.split('.')
   const action = rest.join('.')
   const noun = RESOURCE[resource!] ?? resource!.replace(/_/g, ' ')
