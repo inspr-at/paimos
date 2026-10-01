@@ -139,11 +139,97 @@ func TestLegacyCodexStateDoesNotRecount(t *testing.T) {
 }
 
 func codexTotalsLine(input, output int64, reasoning string) string {
+	return codexCachedTotalsLine(input, output, 0, reasoning)
+}
+
+func codexCachedTotalsLine(input, output, cached int64, reasoning string) string {
 	r := ""
 	if reasoning != "" {
 		r = `,"reasoning_output_tokens":` + reasoning
 	}
-	return fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"output_tokens":%d,"cached_input_tokens":0%s}}}}`+"\n", input, output, r)
+	return fmt.Sprintf(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"output_tokens":%d,"cached_input_tokens":%d%s}}}}`+"\n", input, output, cached, r)
+}
+
+// Cached growth may exceed new inclusive input while fitting the model's
+// cumulative input. Scanning must retain it until the report is prepared.
+func TestCodexCachedGrowthSurvivesSingleScan(t *testing.T) {
+	path := filepath.Join(fenceHome(t), "sessions", "rollout-cache-growth.jsonl")
+	fenceWrite(t, path, codexContext("model-a")+codexCachedTotalsLine(10000, 100, 0, "")+codexCachedTotalsLine(12000, 110, 10000, ""))
+	sums, _, _, _, cursor, err := scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := sums["model-a"]; a.input != 12000 || a.output != 110 || a.cached != 10000 {
+		t.Fatalf("cached input was lost despite fitting cumulative input: %+v", a)
+	}
+	if cursor == nil || cursor.Input != 12000 || cursor.Cached != 10000 {
+		t.Fatalf("vendor baseline: %+v", cursor)
+	}
+}
+
+// With no accepted report, all valid cached growth can be posted. Once an
+// uncached total has been accepted, reports must preserve that server floor.
+func TestCodexCachedReportsPreserveAcceptedUncachedInput(t *testing.T) {
+	for _, oneScan := range []bool{true, false} {
+		t.Run(fmt.Sprintf("oneScan=%t", oneScan), func(t *testing.T) {
+			var calls []hbCall
+			var accepted map[string]any
+			srv := hbServer(t, &calls, func(r *http.Request, b map[string]any, w http.ResponseWriter) bool {
+				if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/usage") {
+					return false
+				}
+				input, cached := numField(b, "input_tokens"), numField(b, "cached_input_tokens")
+				if cached > input || (accepted != nil && (cached < numField(accepted, "cached_input_tokens") || input-cached < numField(accepted, "input_tokens")-numField(accepted, "cached_input_tokens"))) {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"error":"invalid cached input transition"}`))
+					return true
+				}
+				accepted = b
+				return false
+			})
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir := fenceHome(t)
+			path := filepath.Join(dir, "sessions", "rollout-cache-report.jsonl")
+			fenceWrite(t, path, codexContext("model-a")+codexCachedTotalsLine(10000, 100, 0, ""))
+			opts := heartbeatTestOptions(dir)
+			opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+			session := openUsageSession(t, rt, opts)
+			report := func() {
+				t.Helper()
+				if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+					t.Fatalf("report: %v stderr %s", err, stderr.String())
+				}
+				if len(session.disk.PendingUsage) != 0 || stderr.Len() != 0 {
+					t.Fatalf("report skipped or rejected: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
+				}
+			}
+			if !oneScan {
+				report()
+			}
+			appendFile(t, path, codexCachedTotalsLine(12000, 110, 10000, ""))
+			report()
+			wantCached := float64(10000)
+			if !oneScan {
+				wantCached = 2000
+			}
+			if accepted == nil || numField(accepted, "input_tokens") != 12000 || numField(accepted, "cached_input_tokens") != wantCached {
+				t.Fatalf("cache aggregation or uncached floor: %v", usagePosts(calls))
+			}
+			// A later valid increase and an unchanged-log replay must work with
+			// the accepted counters and the unmodified vendor cursor.
+			appendFile(t, path, codexCachedTotalsLine(14000, 120, 11000, ""))
+			report()
+			if numField(accepted, "input_tokens") != 14000 || numField(accepted, "cached_input_tokens") != wantCached+1000 || session.disk.UsageCodex.Cached != 11000 {
+				t.Fatalf("later growth: %v cursor=%+v", usagePosts(calls), session.disk.UsageCodex)
+			}
+			before := len(usagePosts(calls))
+			report()
+			if len(usagePosts(calls)) != before {
+				t.Fatal("unchanged cached total reported twice")
+			}
+		})
+	}
 }
 
 // Round 3 review case: A reports 100 output without reasoning, then B's
@@ -210,6 +296,77 @@ func TestCodexReasoningSurvivesUnknownStretchInOneScan(t *testing.T) {
 	}
 	if cursor == nil || cursor.Reasoning != 90 {
 		t.Fatalf("final cursor: %+v", cursor)
+	}
+	// A lower reappearing total cannot move the high-water mark backwards
+	// and make subsequent recovery look like newly consumed reasoning.
+	body = codexContext("model-b") + codexTotalsLine(100, 100, "20") + codexTotalsLine(150, 110, "") + codexTotalsLine(200, 120, "15")
+	for _, step := range []struct {
+		line string
+		want int64
+	}{
+		{"", 20},
+		{codexTotalsLine(250, 140, "18"), 20},
+		{codexTotalsLine(300, 150, "25"), 25},
+	} {
+		body += step.line
+		fenceWrite(t, path, body)
+		sums, _, _, _, cursor, err = scanUsageWindowState(context.Background(), path, "", 0, 1<<20, nil, false, "codex", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b := sums["model-b"]; !b.reasoningKnown || b.reasoning != step.want || cursor.Reasoning != step.want || !cursor.ReasoningKnown {
+			t.Fatalf("lower re-baseline added recovery as new reasoning: sum=%+v cursor=%+v want=%d", b, cursor, step.want)
+		}
+	}
+}
+
+// A reasoning revision below the session high-water mark is unknown for a
+// new model. Only a later rise above that mark is safely attributable.
+func TestCodexReasoningRevisionLeavesNewModelUnknown(t *testing.T) {
+	for _, oneScan := range []bool{true, false} {
+		t.Run(fmt.Sprintf("oneScan=%t", oneScan), func(t *testing.T) {
+			var calls []hbCall
+			srv := hbServer(t, &calls, nil)
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir := fenceHome(t)
+			path := filepath.Join(dir, "sessions", "rollout-reasoning-revision.jsonl")
+			fenceWrite(t, path, codexContext("model-a")+codexTotalsLine(100, 10, "5"))
+			opts := heartbeatTestOptions(dir)
+			opts.Harness, opts.UsageSource, opts.UsageFile, opts.Transcript = "codex", "codex", path, ""
+			session := openUsageSession(t, rt, opts)
+			report := func() {
+				t.Helper()
+				if err := rt.reportHeartbeatUsage(context.Background(), transcriptProjectID, opts, session); err != nil {
+					t.Fatalf("report: %v stderr %s", err, stderr.String())
+				}
+			}
+			if !oneScan {
+				report()
+			}
+			appendFile(t, path, codexContext("model-b")+codexTotalsLine(150, 20, "4"))
+			report()
+			a, b := usageByModel(session.disk.Usage, "model-a"), usageByModel(session.disk.Usage, "model-b")
+			if a == nil || a.Reasoning == nil || *a.Reasoning != 5 || b == nil || b.Input != 50 || b.Output != 10 || b.Reasoning != nil {
+				t.Fatalf("downward reasoning became a known zero for the new model: %v", usagePosts(calls))
+			}
+			for _, post := range usagePosts(calls) {
+				if post["model"] == "model-b" {
+					if _, exists := post["reasoning_tokens"]; exists {
+						t.Fatalf("unknown reasoning sent as known: %v", post)
+					}
+				}
+			}
+			appendFile(t, path, codexTotalsLine(200, 30, "6"))
+			report()
+			b = usageByModel(session.disk.Usage, "model-b")
+			if b == nil || b.Input != 100 || b.Output != 20 || b.Reasoning == nil || *b.Reasoning != 1 {
+				t.Fatalf("growth above high-water mark: %v", usagePosts(calls))
+			}
+			if len(session.disk.PendingUsage) != 0 || stderr.Len() != 0 {
+				t.Fatalf("report skipped or rejected: pending=%+v stderr=%s", session.disk.PendingUsage, stderr.String())
+			}
+		})
 	}
 }
 
