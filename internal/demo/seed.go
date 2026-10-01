@@ -29,6 +29,8 @@ type seeder struct {
 	scribeKey string
 	clerk     tenant.Principal
 	clerkKey  string
+	scout     tenant.Principal
+	scoutKey  string
 	kinds     map[string]string
 	ids       map[string]string
 	lumenID   string
@@ -102,6 +104,12 @@ func (s *seeder) run() error {
 		return err
 	}
 	if err := s.work(); err != nil {
+		return err
+	}
+	if err := s.pendingJourney(); err != nil {
+		return err
+	}
+	if err := s.step("work"); err != nil {
 		return err
 	}
 	if err := s.hours(); err != nil {

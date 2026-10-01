@@ -259,3 +259,24 @@ for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
     if (process.env.HARNESS_STATUS_SHOTS) await computers.screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `pairing-reasons-${width}-${theme}.png`), animations: 'disabled' })
   })
 }
+
+for (const width of [1600, 390]) test(`computer compatibility advice at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 })
+  await mockWork(page, fixtures())
+  const advice = 'Update aeon-agentd to at least 261001072608.0.0.'
+  const report = { ...computerReport(), agent_compatibility: { status: 'compatible', action: '' } }
+  await mockPairing(page, {}, report)
+  await page.goto('/agents')
+  const computers = page.getByRole('region', { name: 'Connected computers' })
+  await expect(computers.locator('.agent-update')).toHaveCount(0)
+  for (const status of ['update_required', 'protocol_mismatch']) {
+    Object.assign(report.agent_compatibility, { status, action: advice })
+    await page.getByRole('button', { name: 'Refresh computers' }).click()
+    await expect(computers.locator('.agent-update')).toHaveText(advice)
+    await expect(computers.locator('.status')).toHaveText('Connected')
+  }
+  Object.assign(report.agent_compatibility, { status: 'unknown', action: '' })
+  await page.getByRole('button', { name: 'Refresh computers' }).click()
+  await expect(computers.locator('.agent-update')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})

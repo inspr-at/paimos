@@ -477,20 +477,33 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (key.revoked_at || key.expires_at && Date.parse(key.expires_at) <= now) return fail(route, 409, 'conflict', 'Key is revoked or expired.')
       const agent = world.agents.find(a => a.principal_id === key.principal_id)
       const role = world.roles.find(r => r.id === agent?.workspace_role)
-      const grantable = REGISTRY.filter(p => p.agent_grantable && mine(world).has(p.key) && role?.permissions.includes(p.key)).map(p => p.key)
-      if (method === 'GET') return route.fulfill({ json: { key, grantable_scopes: grantable } })
+      const eligible = REGISTRY.filter(p => p.agent_grantable && mine(world).has(p.key)).map(p => p.key)
+      const grantable = eligible.filter(p => role?.permissions.includes(p))
+      const roleGrantable = need('roles.manage') && role && !role.builtin ? eligible.filter(p => !role.permissions.includes(p)) : []
+      const before = { ...key, scopes: [...key.scopes] }
+      const pruned = key.scopes.filter(k => !REGISTRY.some(p => p.key === k))
+      const cleaned = key.scopes.filter(k => !pruned.includes(k))
+      if (method === 'GET') {
+        if (pruned.length) { key.scopes = cleaned; event('agent_key.scopes_changed', before, { ...key, pruned_scopes: pruned }) }
+        return route.fulfill({ json: { key, grantable_scopes: grantable, agent_role: role ? { ...role, member_count: world.agents.filter(a => a.workspace_role === role.id).length + world.people.filter(p => p.workspace_role === role.id).length + world.bindings.filter(b => b.role_id === role.id).length } : null, role_grantable_scopes: roleGrantable } })
+      }
       if (method === 'PATCH') {
         if (world.slow) await new Promise(resolve => setTimeout(resolve, world.slow))
-        const before = { ...key, scopes: [...key.scopes] }
         const added = body.add as string[] ?? []
         const removed = body.remove as string[] ?? []
-        const after = [...new Set([...key.scopes.filter(k => !removed.includes(k)), ...added])]
-        if (after.some(k => !grantable.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed current permissions.')
+        const extension = body.role_extension as { role_id: string; add: string[] } | undefined
+        const roleBefore = role ? { ...role, permissions: [...role.permissions] } : null
+        if (extension && (!need('roles.manage') || !role || role.builtin || role.id !== extension.role_id || extension.add.some(k => !added.includes(k) || !eligible.includes(k)))) return fail(route, 403, 'forbidden', 'Role extension denied.')
+        const roleAfter = [...new Set([...(role?.permissions ?? []), ...(extension?.add ?? [])])]
+        const after = [...new Set([...cleaned.filter(k => !removed.includes(k)), ...added])]
+        if (after.some(k => !eligible.includes(k) || !roleAfter.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed live grants.')
         key.scopes = after
-        event('agent_key.scopes_changed', before, { ...key })
+        if (extension && role) role.permissions = roleAfter
+        event('agent_key.scopes_changed', { ...before, ...(extension ? { role: roleBefore } : {}) }, { ...key, ...(extension && role ? { role: { ...role, permissions: [...role.permissions] } } : {}), ...(pruned.length ? { pruned_scopes: pruned } : {}) })
         return route.fulfill({ json: key })
       }
     }
+
     const keyMatch = /^\/api\/agent-keys\/([^/]+)$/.exec(path)
     if (keyMatch && method === 'DELETE') {
       const key = world.keys.find(k => k.id === keyMatch[1])

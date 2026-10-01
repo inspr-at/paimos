@@ -713,7 +713,16 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 			VALUES($1::uuid,$2,$3,'Permissions assigned to this agent') RETURNING id::text`, creator.TenantID, roleKey, "Agent "+name).Scan(&roleID); err != nil {
 			return err
 		}
+		// Model discovery is part of every generated agent role. It does not
+		// add a key scope or bypass the key creator's live ceiling.
+		rolePermissions := []string{"models.read"}
 		for key := range requested {
+			if !slices.Contains(rolePermissions, key) {
+				rolePermissions = append(rolePermissions, key)
+			}
+		}
+		slices.Sort(rolePermissions)
+		for _, key := range rolePermissions {
 			if !workspaceRolePermission(scopes, key) {
 				continue
 			}
@@ -727,7 +736,7 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 			return err
 		}
 		_, err = events.Append(ctx, tx, actor, events.Change{Type: "authz.agent_binding_created",
-			After: map[string]any{"principal_id": agentID, "role_id": roleID, "permissions": scopes}})
+			After: map[string]any{"principal_id": agentID, "role_id": roleID, "permissions": rolePermissions}})
 		return err
 	}
 	agent := tenant.Principal{ID: agentID, TenantID: creator.TenantID, Kind: tenant.Agent}

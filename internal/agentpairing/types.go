@@ -21,6 +21,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -70,6 +71,7 @@ type deviceRequest struct {
 	ExistingProof string `json:"existing_lifecycle_secret,omitempty"`
 }
 type SetupProgress struct {
+	AgentRelease    *agentcompat.Release                `json:"agent_release,omitempty"`
 	HarnessDetails  map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses map[string]string                   `json:"harness_statuses,omitempty"`
 	State           string                              `json:"state"`
@@ -113,6 +115,8 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	AgentRelease              agentcompat.Release                 `json:"agent_release"`
+	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`
 	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses           map[string]string                   `json:"harness_statuses,omitempty"`
 	VerificationCapabilities  map[string]VerificationCapability   `json:"verification_capabilities"`

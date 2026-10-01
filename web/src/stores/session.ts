@@ -17,6 +17,7 @@ export class SignInError extends Error {
 export const useSession = defineStore('session', () => {
   const identity = ref<Identity | null>(null)
   const devMode = ref(false)
+  const oidcDisplayName = ref('')
   const error = ref('')
   const requiresSignIn = ref(false)
   let epoch = 0
@@ -47,17 +48,24 @@ export const useSession = defineStore('session', () => {
     resetPositions()
   }
 
+  function readSignInConfig(session: Awaited<ReturnType<typeof getSession>>) {
+    devMode.value = session.devMode
+    // A blocked tab can receive a local, bodyless 401. Keep the last public
+    // provider name; a server-provided empty string explicitly clears it.
+    if (session.oidcDisplayName !== undefined) oidcDisplayName.value = session.oidcDisplayName
+  }
+
   async function refresh() {
     const started = epoch
     error.value = ''
     try {
       const session = await getSession()
       // An initial 401 invalidates this tab inside api() before it returns. Its
-      // public dev-mode flag is still needed to render development sign-in.
-      if (requiresSignIn.value && !session.identity && tabs.current()) devMode.value = session.devMode
+      // public sign-in configuration is still needed to render sign-in.
+      if (requiresSignIn.value && !session.identity && tabs.current()) readSignInConfig(session)
       // A late /me answer cannot restore a session after a 401 or sign-out.
       if (started !== epoch || !tabs.current()) return
-      if (requiresSignIn.value) { devMode.value = session.devMode; return }
+      if (requiresSignIn.value) { readSignInConfig(session); return }
       const before = identity.value
       identity.value = session.identity
       if (session.identity) {
@@ -75,7 +83,7 @@ export const useSession = defineStore('session', () => {
         resetPositions()
         if (session.identity) void refreshPermissions()
       }
-      devMode.value = session.devMode
+      readSignInConfig(session)
       if (session.identity) void restoreTheme()
     } catch {
       if (started !== epoch || !tabs.current()) return
@@ -129,5 +137,5 @@ export const useSession = defineStore('session', () => {
     requiresSignIn.value = false
   }
 
-  return { identity, devMode, error, requiresSignIn, refresh, invalidate, signOut, devLogin, beginSignIn, authenticationCurrent }
+  return { identity, devMode, oidcDisplayName, error, requiresSignIn, refresh, invalidate, signOut, devLogin, beginSignIn, authenticationCurrent }
 })

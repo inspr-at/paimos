@@ -6,6 +6,11 @@
 // GET /api/me emits Aeon-Contract: me/1.0 without changing the strict JSON
 // body. Additive optional response fields require a minor bump; breaking
 // changes require a major bump. internal/reportercontract pins its schema.
+// Scope management rechecks keys.manage under the tenant/key lock. A confirmed
+// role_extension additionally requires roles.manage, the current custom agent
+// workspace role and permissions held by editor and original creator. Role and
+// key changes share one transaction and one audit event. Management reads and
+// edits prune unknown stored scopes with audit evidence; known scopes stay.
 //
 // KX1 key expiry/rotation uses the existing New(cfg, pool) httpapi.Module;
 // no new plugin manifest or coordinator wiring is needed. POST /api/agent-keys

@@ -62,3 +62,50 @@ func TestVaultStoredAttributesOnLegacySecItemPath(t *testing.T) {
 		t.Fatal("missing account looked like a stored item")
 	}
 }
+
+func TestVaultAccessShape(t *testing.T) {
+	for scenario, tc := range []struct {
+		name string
+		want int
+	}{
+		{"production reference", 1},
+		{"affected Darwin 27 item with owner Any and ChangeACL", 1},
+		{"extra matching application entry", 0},
+		{"simple NULL applications granting Any", 0},
+		{"foreign requirement", 0},
+		{"non-root owner UID", 0},
+		{"group owner type", 0},
+		{"missing non-simple owner grant", 0},
+		{"changed non-simple authorizations", 0},
+		{"nonzero application prompt", 0},
+		{"extra simple entry without authorizations", 0},
+		{"missing application grant", 0},
+		{"extra integrity entry", 0},
+		{"extra non-simple entry", 0},
+		{"non-simple authorization sets in a different order", 0},
+		{"owner Any subject changed to current UID", 0},
+		{"owner Any subject replaced with ANY", 0},
+		{"owner Any subject replaced with a process threshold", 0},
+		{"partition list includes another team", 0},
+		{"partition list includes apple-tool", 0},
+		{"partition list includes unsigned", 0},
+		{"process selector allows honor-root mask", 0},
+		{"process subject delegates", 0},
+		{"process selector version differs", 0},
+		{"process selector matches GID", 0},
+		{"exact team partition in binary plist format", 1},
+		{"persisted item lacks a partition entry", 0},
+		{"persisted item has two partition entries", 0},
+		{"partition contains only another team", 0},
+		{"malformed partition payload", 0},
+		{"simple partition display label without native payload", 0},
+		{"partition contains duplicate expected teams", 0},
+		{"partition payload has extra dictionary keys", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := vaultAccessShapeFixture(scenario); got != tc.want {
+				t.Fatalf("access verdict %d, want %d (negative means fixture setup failed)", got, tc.want)
+			}
+		})
+	}
+}

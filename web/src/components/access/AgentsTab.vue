@@ -69,7 +69,7 @@ async function revoke(key: AgentKey) {
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
 const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
-async function scopesSaved() { await loadKeys(); toast('Key scopes updated') }
+async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key scopes updated') }
 const newKey = ref<Agent | null>(null)
 const rotateKey = ref<AgentKey | undefined>()
 function showKeySheet(agent: Agent, key?: AgentKey) { firstKey.value = agent.key_count === 0; rotateKey.value = key; newKey.value = agent }
