@@ -222,10 +222,12 @@ test('a stale plan write restores the list and says so', async ({ page }) => {
   await expect(page.getByRole('checkbox', { name: 'PHAROS-14 in the release' })).not.toBeChecked()
 })
 
-test('an agent principal reads the journey but cannot move it', async ({ page }) => {
-  const { calls } = await open(page, 'plan', '/p/PHAROS?view=journey', { kind: 'agent' })
-  await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
-  await expect(page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('button', { name: /start build/i })).toBeDisabled()
+test('an agent principal cannot opt into the person-only flow UI', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const calls = await mockJourney(page, journeyWorld('plan'), { kind: 'agent' })
+  await page.goto('/p/PHAROS/journey')
+  await expect(page.getByRole('heading', { name: 'Flow controls are a developer feature' })).toBeVisible()
+  await expect(page.locator('.journey-view, .journey-chip')).toHaveCount(0)
   expect(calls.filter(c => c.method !== 'GET')).toHaveLength(0)
 })
 

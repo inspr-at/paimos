@@ -25,6 +25,13 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+The flow UI is hidden by default. People working on Paimos itself can enable
+**Show the flow controls (not yet tested end to end)** under **Settings →
+Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
+preference reveals the footer flow pill, Journey tab, stages and release walker;
+it does not grant action permissions. Journey bookmarks explain the opt-in while
+it is off. Turning it off removes the flow UI again.
+
 If a standing candidate or deployment gate expires or is revoked before
 deployment finishes, Journey offers renewal on the Deploy stage. An agent
 requests a fresh release-bound approval; its person decider applies it with
