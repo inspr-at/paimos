@@ -115,7 +115,7 @@ func init() {
 		return
 	}
 	if err := cleanupTemplate(os.Stdin); err != nil {
-		fmt.Fprintf(os.Stderr, "dbtest template cleanup: %v\n", err)
+		fmt.Fprintf(os.Stderr, "dbtest template cleanup (failure %d): %v\n", cleanupFailures.Add(1), err)
 		os.Exit(1)
 	}
 	os.Exit(0)

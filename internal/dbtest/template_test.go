@@ -113,6 +113,13 @@ func TestTemplateCleanupWaitsForLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The binary-exit watcher must force-drop a template even if a connection
+	// outside its pools lingers after the lease ends.
+	lingering, err := pgx.Connect(t.Context(), d.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lingering.Close(context.Background())
 	t.Cleanup(func() {
 		if err := d.Close(); err != nil {
 			t.Error(err)
