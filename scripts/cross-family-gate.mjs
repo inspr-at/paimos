@@ -61,11 +61,15 @@ function unchangedMerge(git, commit, parents) {
   }
 }
 
-export async function checkPullRequest({ pr, repository, config, mainSha, git, statuses }) {
+function validatePull(pr, repository, config) {
   if (!Number.isSafeInteger(pr?.number) || pr.number < 1 || pr.state !== "open" ||
       pr.base?.ref !== config.base_branch || pr.base?.repo?.full_name !== repository) {
     throw new Error("pull request is not open against the configured repository/main");
   }
+}
+
+export async function checkPullRequest({ pr, repository, config, mainSha, git, statuses }) {
+  validatePull(pr, repository, config);
   const head = sha(pr.head?.sha);
   git.ensure(head);
   const mainCommits = new Set(git.firstParents(sha(mainSha)));
@@ -108,15 +112,17 @@ export function resolveMergeGroup({ group, pulls, git, config, repository }) {
     if (parents.length !== 2) throw new Error("unresolved merge-group commit (merge commits required)");
     const matches = pulls.filter((pr) => pr.state === "open" && pr.base?.ref === config.base_branch &&
       pr.base?.repo?.full_name === repository && pr.head?.sha === parents[1]);
-    if (matches.length !== 1 || selected.some((pr) => pr.number === matches[0].number)) {
-      throw new Error("merge group contains an unresolved, changed or ambiguous PR head");
+    if (matches.length === 0) {
+      throw new Error("merge group contains an unresolved or changed PR head");
     }
     unchangedMerge(git, current, parents);
-    selected.push(matches[0]);
+    // Several open PRs (including forks) may name the same immutable commit.
+    // Check its verdict once, but revalidate every matching PR before passing.
+    selected.push(matches);
     current = sha(parents[0]);
   }
   if (current !== base || selected.length === 0) throw new Error("empty or incomplete merge group");
-  return selected.reverse();
+  return [...new Map(selected.reverse().flat().map((pr) => [pr.number, pr])).values()];
 }
 
 export function githubAPI({ repository, token, fetchImpl = fetch }) {
@@ -174,8 +180,15 @@ export async function checkEvent({ eventName, event, config, repository, git, ap
   }
   git.ensure(mainSha);
   const results = [];
+  const checkedHeads = new Map();
   for (const pr of pulls) {
-    results.push(await checkPullRequest({ pr, repository, config, mainSha, git, statuses: api.statuses }));
+    validatePull(pr, repository, config);
+    let result = checkedHeads.get(pr.head.sha);
+    if (!result) {
+      result = await checkPullRequest({ pr, repository, config, mainSha, git, statuses: api.statuses });
+      checkedHeads.set(pr.head.sha, result);
+    }
+    results.push({ ...result, number: pr.number });
     const latest = await api.pull(pr.number);
     if (latest.state !== "open" || latest.head?.sha !== pr.head.sha ||
         latest.base?.ref !== config.base_branch || latest.base?.repo?.full_name !== repository) {

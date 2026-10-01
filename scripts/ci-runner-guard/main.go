@@ -151,6 +151,14 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 	}
 	for id, value := range mapping(workflow["jobs"]) {
 		job := mapping(value)
+		jobName, _ := job["name"].(string)
+		if strings.EqualFold(strings.TrimSpace(id), "gate/cross-family") ||
+			strings.EqualFold(strings.TrimSpace(jobName), "gate/cross-family") {
+			reject("gate/cross-family is reserved to the external App, never an Actions job")
+		}
+		if name != "cross-family-preview.yml" && (id == "policy-preview" || jobName == "gate/policy-preview") {
+			reject("gate/policy-preview is reserved to cross-family-preview.yml")
+		}
 		if _, exists := job["concurrency"]; exists {
 			reject(fmt.Sprintf("job %q must not override workflow-level concurrency", id))
 		}
@@ -165,6 +173,10 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
 			reject(err.Error())
 		}
+	} else if name == "cross-family-preview.yml" {
+		if err := checkGatePreview(workflow); err != nil {
+			reject(err.Error())
+		}
 	} else if hasEvent(workflow["on"], "pull_request") {
 		pr := mapping(mapping(workflow["on"])["pull_request"])
 		_, paths := pr["paths"]
@@ -174,6 +186,28 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	}
 	return problems
+}
+
+func checkGatePreview(workflow map[string]any) error {
+	expected := map[string]any{"pull_request": nil, "merge_group": map[string]any{"types": []any{"checks_requested"}}}
+	if !reflect.DeepEqual(mapping(workflow["on"]), expected) {
+		return fmt.Errorf("gate preview must run only on unfiltered PR and merge-group check requests")
+	}
+	jobs := mapping(workflow["jobs"])
+	job := mapping(jobs["policy-preview"])
+	if len(jobs) != 1 || job == nil || job["name"] != "gate/policy-preview" {
+		return fmt.Errorf("gate preview must retain its diagnostic identity")
+	}
+	for _, key := range []string{"if", "needs", "continue-on-error"} {
+		if _, exists := job[key]; exists {
+			return fmt.Errorf("gate preview must not set %s", key)
+		}
+	}
+	if !reflect.DeepEqual(mapping(workflow["permissions"]), map[string]any{"contents": "read"}) ||
+		!reflect.DeepEqual(mapping(job["permissions"]), map[string]any{"contents": "read", "statuses": "read", "pull-requests": "read"}) {
+		return fmt.Errorf("gate preview token must be read-only")
+	}
+	return nil
 }
 
 func validPaths(value any) bool {
