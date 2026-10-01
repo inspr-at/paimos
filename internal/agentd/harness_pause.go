@@ -7,18 +7,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
+// HarnessPause is the heartbeat projection consumed by the daemon. Keeping
+// this transport type here avoids a dependency on the server's HTTP module.
+type HarnessPause struct {
+	ControlID  string    `json:"control_id"`
+	State      string    `json:"state"`
+	DeadlineAt time.Time `json:"deadline_at"`
+}
+
 type pauseHeartbeatAPI interface {
-	HeartbeatHarnessPause(context.Context, HarnessSession, string) (*harness.Pause, error)
+	HeartbeatHarnessPause(context.Context, HarnessSession, string) (*HarnessPause, error)
 }
 
 // Only an authenticated heartbeat can offer this cooperative stop. It goes
 // through the existing generation-fenced inbox path, including its durable
 // at-most-once input receipt. It cannot become interrupt/stop signal authority.
-func (s *Supervisor) deliverHarnessPause(ctx context.Context, entry *owned, pause *harness.Pause) error {
+func (s *Supervisor) deliverHarnessPause(ctx context.Context, entry *owned, pause *HarnessPause) error {
 	entry.mu.Lock()
 	capable := entry.inboxCapable
 	entry.mu.Unlock()

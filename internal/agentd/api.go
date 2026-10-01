@@ -19,7 +19,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -234,7 +233,7 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	return err
 }
 
-func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*harness.Pause, error) {
+func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
 	sequence := s.ActivitySequence
 	if sequence == 0 {
 		sequence = 1
@@ -257,7 +256,7 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
 	var out struct {
-		Pause *harness.Pause `json:"pause"`
+		Pause *HarnessPause `json:"pause"`
 	}
 	err := r.harnessWorker(ctx, s, "/heartbeat", body, &out)
 	return out.Pause, err

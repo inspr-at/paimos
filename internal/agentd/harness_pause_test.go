@@ -10,12 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/harness"
 )
 
 func TestRemoteHeartbeatExposesDurablePause(t *testing.T) {
-	pause := harness.Pause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}
+	pause := HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/heartbeat") {
 			t.Error("wrong route")
@@ -32,10 +30,10 @@ func TestRemoteHeartbeatExposesDurablePause(t *testing.T) {
 
 type pauseTestAPI struct {
 	*fakeAPI
-	pause *harness.Pause
+	pause *HarnessPause
 }
 
-func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*harness.Pause, error) {
+func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
 	return a.pause, a.fakeAPI.HeartbeatHarness(ctx, s, phase)
 }
 
@@ -44,7 +42,7 @@ func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
-	s.api = &pauseTestAPI{fakeAPI: a, pause: &harness.Pause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}}
+	s.api = &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}}
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)

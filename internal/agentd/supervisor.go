@@ -22,7 +22,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -1905,7 +1904,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 			}
 		}
 		entry.mu.Unlock()
-		var pause *harness.Pause
+		var pause *HarnessPause
 		var err error
 		if api, ok := s.api.(pauseHeartbeatAPI); ok {
 			pause, err = api.HeartbeatHarnessPause(ctx, session, phase)
