@@ -322,6 +322,79 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	}
 }
 
+func TestWorkflowVolatileIdentityLint(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("workflow lint requires python3")
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct{ Name, Run string }
+		}
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var script string
+	for _, step := range workflow.Jobs["go-static"].Steps {
+		if step.Name == "Forbid volatile CI identity reads in Go tests" {
+			script = step.Run
+		}
+	}
+	if script == "" {
+		t.Fatal("missing volatile identity lint in required static job")
+	}
+	check := func(t *testing.T, path, source string, wantOK bool) {
+		t.Helper()
+		dir := t.TempDir()
+		file := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if (err == nil) != wantOK {
+			t.Fatalf("lint success=%t, want %t: %s", err == nil, wantOK, out)
+		}
+	}
+	t.Run("stable-environment", func(t *testing.T) {
+		check(t, "fixture_test.go", `package fixture; var value = os.Getenv("AEON_TEST_DATABASE_URL")`, true)
+	})
+	for _, suffix := range []string{"SHA", "RUN_ID", "RUN_NUMBER", "RUN_ATTEMPT"} {
+		name := "GITHUB_" + suffix
+		t.Run(suffix+"-multiline", func(t *testing.T) {
+			check(t, "nested/fixture_test.go", "package fixture\nvar value = os.LookupEnv(\n\""+name+"\",\n)\n", false)
+		})
+		t.Run(suffix+"-constant", func(t *testing.T) {
+			check(t, "fixture_test.go", "package fixture\nconst key = \""+name+"\"\nvar value = os.Getenv(key)\n", false)
+		})
+	}
+	// The narrowly allowed release binding must not exempt other reads in
+	// that file, or the same literal in any other test file.
+	binding := `package fixture; var binding = "--source-digest \"$` + "GITHUB_" + `SHA\""`
+	const releaseTest = "scripts/releaseworkflow/workflow_test.go"
+	t.Run("release-contract", func(t *testing.T) {
+		check(t, releaseTest, binding, true)
+	})
+	t.Run("release-file-read", func(t *testing.T) {
+		check(t, releaseTest, binding+"\nvar value = os.Getenv(\"GITHUB_"+"SHA\")\n", false)
+	})
+	t.Run("other-file-binding", func(t *testing.T) {
+		check(t, "fixture_test.go", binding, false)
+	})
+}
+
 func TestParseFileRejectsBadShard(t *testing.T) {
 	if _, err := parseFile("9 1 p\n", hostedShardCount); err == nil {
 		t.Fatal("expected shard rejection")
