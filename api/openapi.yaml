@@ -4778,10 +4778,10 @@ paths:
   /harness-sessions/pause:
     post:
       operationId: pauseAllHarnessSessions
-      description: Person-only harness.control. Up to 200 owned (or administered) generations across visible authorized projects; repeat when more is true. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
+      description: Person-only harness.control. Up to 200 owned (or administered) pause-capable generations across visible authorized projects; repeat when more is true. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
       responses:
-        '200': {description: Durable transitions, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}, more: {type: boolean}}}}}}
+        '200': {description: Durable transitions and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
         '403': {description: Person and authorized project access required}
   /harness-sessions/resume:
     post:
@@ -4835,10 +4835,10 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: pauseProjectHarnessSessions
-      description: Applies to up to 200 eligible generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Resume returns durable launch recipes; each successor registers with fresh private proofs and succeeds_session_id.
+      description: Applies to up to 200 pause-capable generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
       responses:
-        '200': {description: Controlled generations, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}, more: {type: boolean}}}}}}
+        '200': {description: Controlled and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
         '403': {description: Scope or coordinator proof rejected}
   /projects/{projectId}/harness-sessions/resume:
     parameters:
@@ -12374,6 +12374,24 @@ components:
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
         coordinator_session_id: {type: string, format: uuid}
         except: {type: array, maxItems: 200, items: {type: string, format: uuid}}
+    HarnessPauseBatchResult:
+      type: object
+      required: [items, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessSession'}}
+        more: {type: boolean, description: More pause-capable generations remain; repeat the request. Skipped generations do not consume this limit.}
+        skipped: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessPauseSkippedSession'}}
+        skipped_more: {type: boolean, description: More unsupported generations were omitted from the bounded skipped report.}
+    HarnessPauseSkippedSession:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, reason]
+      description: A controlled managed generation that lacks inbox delivery. No pause or control is created; the session remains running. Only public identifiers and its optional display label are returned.
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        display_label: {type: string, maxLength: 128}
+        reason: {type: string, enum: [inbox_delivery_unavailable]}
     HarnessPausePlan:
       type: object
       additionalProperties: false

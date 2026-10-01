@@ -480,10 +480,17 @@ func (m *Module) transitionPauseBatch(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	return m.transitionPauseBatchInput(r, tx, p, resume, in, 200)
+	return m.transitionPauseBatchInput(r, tx, p, resume, in, 200, 200)
 }
 
-func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.Principal, resume bool, in pauseRequest, limit int) (any, error) {
+type pauseSkippedSession struct {
+	ID           string  `json:"id"`
+	ProjectID    string  `json:"project_id"`
+	DisplayLabel *string `json:"display_label,omitempty"`
+	Reason       string  `json:"reason"`
+}
+
+func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.Principal, resume bool, in pauseRequest, limit, skipLimit int) (any, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -502,8 +509,15 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	if resume {
 		filter = `stopped_at IS NOT NULL AND stop_reason='paused' AND pause_record->>'state'='paused'`
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND archived_at IS NULL AND `+filter+`
- AND (owner_principal_id=$2::uuid OR $3 OR parent_id=$4::uuid) AND NOT(id=ANY($5::uuid[])) ORDER BY id LIMIT $6 FOR UPDATE`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, limit+1)
+	selection := ` FROM harness_sessions WHERE project_id=$1 AND archived_at IS NULL AND ` + filter + `
+ AND (owner_principal_id=$2::uuid OR $3 OR parent_id=$4::uuid) AND NOT(id=ANY($5::uuid[]))`
+	capable := ""
+	if !resume {
+		// Unsupported managed workers must not roll back other pauses or
+		// occupy the first page forever when the caller repeats a batch.
+		capable = ` AND (management<>'managed' OR 'inbox'=ANY(capabilities))`
+	}
+	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+selection+capable+` ORDER BY id LIMIT $6 FOR UPDATE`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +555,34 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 			items = append(items, out)
 		}
 	}
-	return map[string]any{"items": items, "more": more}, nil
+	result := map[string]any{"items": items, "more": more}
+	if !resume {
+		rows, err := tx.Query(r.Context(), `SELECT id::text,project_id::text,display_label`+selection+`
+ AND management='managed' AND NOT('inbox'=ANY(capabilities)) ORDER BY id LIMIT $6`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, skipLimit+1)
+		if err != nil {
+			return nil, err
+		}
+		skipped := []pauseSkippedSession{}
+		for rows.Next() {
+			s := pauseSkippedSession{Reason: "inbox_delivery_unavailable"}
+			if err := rows.Scan(&s.ID, &s.ProjectID, &s.DisplayLabel); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			skipped = append(skipped, s)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		result["skipped_more"] = len(skipped) > skipLimit
+		if len(skipped) > skipLimit {
+			skipped = skipped[:skipLimit]
+		}
+		result["skipped"] = skipped
+	}
+	return result, nil
 }
 
 func (m *Module) pauseAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -590,22 +631,32 @@ func (m *Module) transitionAllPauses(r *http.Request, tx pgx.Tx, p tenant.Princi
 		return nil, err
 	}
 	items := []any{}
+	skipped := []pauseSkippedSession{}
+	skippedMore := false
 	more := false
 	for _, id := range projects {
 		projectRequest := r.Clone(r.Context())
 		projectRequest.SetPathValue("projectId", id)
-		result, e := m.transitionPauseBatchInput(projectRequest, tx, p, resume, in, 200-len(items))
+		result, e := m.transitionPauseBatchInput(projectRequest, tx, p, resume, in, 200-len(items), 200-len(skipped))
 		if e != nil {
 			return nil, e
 		}
 		batch := result.(map[string]any)
 		items = append(items, batch["items"].([]any)...)
+		if !resume {
+			skipped = append(skipped, batch["skipped"].([]pauseSkippedSession)...)
+			skippedMore = skippedMore || batch["skipped_more"].(bool)
+		}
 		if batch["more"].(bool) {
 			more = true
 			break
 		}
 	}
-	return map[string]any{"items": items, "more": more}, nil
+	result := map[string]any{"items": items, "more": more}
+	if !resume {
+		result["skipped"], result["skipped_more"] = skipped, skippedMore
+	}
+	return result, nil
 }
 
 // A paused worker is the sole extension to the coordinator predecessor rule.

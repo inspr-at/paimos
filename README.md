@@ -512,9 +512,15 @@ Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
 an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.
 Agentd forwards a heartbeat pause through its existing generation-fenced inbox
 when the adapter supports input, with the ordinary durable input receipt.
-Managed sessions must advertise `inbox`; otherwise pause returns 409 without
-creating a request. Cursor and Grok daemon runs currently lack that input path;
-their unmanaged CLI heartbeat sessions can still receive pause requests.
+Managed sessions must advertise `inbox`; otherwise an individual pause returns
+409 without creating a request. Project and person-wide pause-all leave these
+sessions running, continue pausing capable sessions, and report the skipped
+session's `id`, `project_id`, optional `display_label` and reason
+`inbox_delivery_unavailable` in `skipped`. Reports are capped at 200 per call;
+`skipped_more` indicates omitted reports. Skips do not consume the 200-pause
+limit or set `more`, so repeating a batch can reach later capable sessions.
+Cursor and Grok daemon runs currently lack that input path; their unmanaged
+CLI heartbeat sessions can still receive pause requests.
 
 An overdue requested or planned pause becomes `cancelled` on the database clock.
 Heartbeat, session/control reads, new pause requests and the periodic sweep

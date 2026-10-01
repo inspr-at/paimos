@@ -227,6 +227,122 @@ func TestPauseRejectsManagedSessionsWithoutInboxDelivery(t *testing.T) {
 	}
 }
 
+func TestPauseAllSkipsManagedSessionsWithoutInbox(t *testing.T) {
+	for _, scope := range []string{"project", "person"} {
+		t.Run(scope, func(t *testing.T) {
+			f := fixture(t)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			bodies := []map[string]any{pauseRegistration(f), pauseRegistration(f)}
+			bodies[0]["management_mode"], bodies[0]["advertised_capabilities"] = "managed", []string{"stop", "inbox"}
+			bodies[0]["display_label"] = "Inbox batch worker"
+			bodies[1]["harness"], bodies[1]["management_mode"], bodies[1]["advertised_capabilities"] = "cursor", "managed", []string{"stop"}
+			bodies[1]["display_label"] = "Cursor batch worker"
+			ids := []string{}
+			for _, body := range bodies {
+				w := f.call(f.person, "POST", base, body, "")
+				expect(t, w, 201)
+				id := decode(t, w)["id"].(string)
+				ids = append(ids, id)
+				f.beat(t, id, body["worker_lease"].(string), 1, nil)
+			}
+			path := base + "/pause"
+			if scope == "person" {
+				path = "/api/harness-sessions/pause"
+			}
+			w := f.call(f.person, "POST", path, map[string]any{}, "")
+			expect(t, w, 200)
+			result := decode(t, w)
+			items, skipped := result["items"].([]any), result["skipped"].([]any)
+			if len(items) != 1 || items[0].(map[string]any)["id"] != ids[0] || result["more"] != false || result["skipped_more"] != false {
+				t.Fatalf("capable pause missing or batch incomplete: %v", result)
+			}
+			if len(skipped) != 1 {
+				t.Fatalf("skipped sessions: %v", skipped)
+			}
+			if s := skipped[0].(map[string]any); len(s) != 4 || s["id"] != ids[1] || s["project_id"] != f.project || s["display_label"] != "Cursor batch worker" || s["reason"] != "inbox_delivery_unavailable" {
+				t.Fatalf("skip report must contain only public identity and reason: %v", s)
+			}
+			for _, body := range bodies {
+				if strings.Contains(w.Body.String(), body["worker_lease"].(string)) || strings.Contains(w.Body.String(), body["harness_session_ref"].(string)) {
+					t.Fatal("pause batch exposed private proofs")
+				}
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				for i, id := range ids {
+					var state, phase string
+					var running bool
+					var controls, pauseEvents int
+					if err := tx.QueryRow(t.Context(), `SELECT coalesce(pause_record->>'state',''),phase,stopped_at IS NULL,
+ (SELECT count(*) FROM harness_controls WHERE session_id=$1),
+ (SELECT count(*) FROM events WHERE type='harness.pause_requested' AND after->>'id'=$1)
+ FROM harness_sessions WHERE id=$1`, id).Scan(&state, &phase, &running, &controls, &pauseEvents); err != nil {
+						return err
+					}
+					wantState, wantControls := "requested", 1
+					if i == 1 {
+						wantState, wantControls = "", 0
+					}
+					if state != wantState || controls != wantControls || pauseEvents != wantControls || phase != "working" || !running {
+						t.Errorf("session %s: state=%s controls=%d events=%d phase=%s running=%t", id, state, controls, pauseEvents, phase, running)
+					}
+				}
+				return nil
+			})
+			w = f.call(f.person, "POST", path, map[string]any{}, "")
+			expect(t, w, 200)
+			if replay := decode(t, w); len(replay["items"].([]any)) != 0 || len(replay["skipped"].([]any)) != 1 || replay["more"] != false {
+				t.Fatalf("batch replay stalled or duplicated a pause: %v", replay)
+			}
+			w = f.call(f.person, "POST", path, map[string]any{"except": []string{ids[1]}}, "")
+			expect(t, w, 200)
+			if len(decode(t, w)["skipped"].([]any)) != 0 {
+				t.Fatal("excluded session was reported as skipped")
+			}
+			control := items[0].(map[string]any)["pause"].(map[string]any)["control_id"].(string)
+			finishPaused(t, f, base+"/"+ids[0], bodies[0]["worker_lease"].(string), control)
+			if got := f.beat(t, ids[1], bodies[1]["worker_lease"].(string), 2, nil); got["pause"] != nil || got["stopped_at"] != nil || got["phase"] != "working" {
+				t.Fatal("skipped Cursor session did not remain running")
+			}
+		})
+	}
+}
+
+func TestPauseAllSkipReportsAreBoundedWithoutStarvingOtherProjects(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	body := pauseRegistration(f)
+	body["harness"], body["management_mode"], body["advertised_capabilities"] = "cursor", "managed", []string{"stop"}
+	w := f.call(f.person, "POST", base, body, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,capabilities,ref_digest,lease_digest,owner_principal_id)
+ SELECT tenant_id,project_id,agent_principal_id,harness,host,management,role,capabilities,
+ sha256(convert_to('skip-ref-'||n::text,'UTF8')),sha256(convert_to('skip-lease-'||n::text,'UTF8')),owner_principal_id
+ FROM harness_sessions CROSS JOIN generate_series(1,200) n WHERE id=$1`, id)
+		return err
+	})
+	other := uid()
+	f.addNode(t, other, "PAUSE-OTHER", "project", "", "Other project")
+	for _, projectID := range []string{f.project, other} {
+		capable := pauseRegistration(f)
+		delete(capable, "ticket_node_id")
+		delete(capable, "work_shape")
+		w = f.call(f.person, "POST", "/api/projects/"+projectID+"/harness-sessions", capable, "")
+		expect(t, w, 201)
+	}
+	w = f.call(f.person, "POST", base+"/pause", map[string]any{}, "")
+	expect(t, w, 200)
+	if got := decode(t, w); len(got["items"].([]any)) != 1 || len(got["skipped"].([]any)) != 200 || got["skipped_more"] != true || got["more"] != false {
+		t.Fatalf("project skip bound hid a capable session: %v", got)
+	}
+	w = f.call(f.person, "POST", "/api/harness-sessions/pause", map[string]any{}, "")
+	expect(t, w, 200)
+	if got := decode(t, w); len(got["items"].([]any)) != 1 || len(got["skipped"].([]any)) != 200 || got["skipped_more"] != true || got["more"] != false {
+		t.Fatalf("person skip bound hid another project's capable session: %v", got)
+	}
+}
+
 func TestPauseStateMachineSurvivesRestartAndResumesWorker(t *testing.T) {
 	f := fixture(t)
 	body := pauseRegistration(f)
@@ -362,8 +478,29 @@ func TestPauseAuthorizationOwnerScopeAndProvenCoordinator(t *testing.T) {
 	expect(t, w, 201)
 	sibling := base + "/" + decode(t, w)["id"].(string)
 	expect(t, f.call(f.agent, "POST", sibling+"/pause", map[string]any{"coordinator_session_id": parent}, parentBody["worker_lease"].(string)), 403)
+	// Skip reporting uses the same proven-child boundary as pause writes,
+	// even when the agent happens to have an admin role.
+	var unsupportedChild string
+	for _, child := range []bool{true, false} {
+		body := pauseRegistration(f)
+		body["harness"], body["management_mode"], body["advertised_capabilities"] = "cursor", "managed", []string{"stop"}
+		if child {
+			body["parent_harness_session_id"] = parent
+		}
+		w = f.call(f.person, "POST", base, body, "")
+		expect(t, w, 201)
+		if child {
+			unsupportedChild = decode(t, w)["id"].(string)
+		}
+	}
+	w = f.call(f.agent, "POST", base+"/pause", map[string]any{"coordinator_session_id": parent}, parentBody["worker_lease"].(string))
+	expect(t, w, 200)
+	if got := decode(t, w); len(got["items"].([]any)) != 0 || len(got["skipped"].([]any)) != 1 || got["skipped"].([]any)[0].(map[string]any)["id"] != unsupportedChild {
+		t.Fatal("coordinator batch reported an unrelated session")
+	}
 	f.agent.Scopes = []string{"harness.worker"}
 	expect(t, f.call(f.agent, "POST", path+"/pause", map[string]any{"coordinator_session_id": parent}, parentBody["worker_lease"].(string)), 403)
+	expect(t, f.call(f.agent, "POST", base+"/pause", map[string]any{"coordinator_session_id": parent}, parentBody["worker_lease"].(string)), 403)
 }
 
 func TestPauseBatchExclusionsAndResumeRegistration(t *testing.T) {
