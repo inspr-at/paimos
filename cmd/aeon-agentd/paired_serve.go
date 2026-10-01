@@ -169,6 +169,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
 		slog.Warn("attach disabled; restart agentd after updating agentd or Aeon to retry", "error", err)
+		watches = agentd.DisabledAttachManager(err)
 	}
 	if watches != nil {
 		defer func() {
