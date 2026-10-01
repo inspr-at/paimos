@@ -260,6 +260,31 @@ jobs:
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/model-provider.spec.ts --workers=1
 
+  status-autopilot-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: node --experimental-strip-types --test tests/status-autopilot.test.ts
+      - working-directory: web
+        run: npx playwright install --with-deps chromium
+      - working-directory: web
+        env:
+          STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
+        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts --workers=1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: status-autopilot-screenshots
+          path: ${{ runner.temp }}/status-autopilot-shots
+
   # AEON-415: previous-release compatibility uses hosted Linux on every CI event.
   migration-compat:
     permissions:

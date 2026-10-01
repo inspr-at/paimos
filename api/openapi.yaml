@@ -6,6 +6,99 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/status-autopilot:
+    get:
+      operationId: getStatusAutopilot
+      summary: Read workspace status autopilot and live rule limits
+      security: [{session: []}, {apiKey: []}]
+      responses:
+        '200':
+          description: Default On; seven deterministic rules. Triage autopilot is separate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+    put:
+      operationId: putStatusAutopilot
+      summary: Save status autopilot as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/StatusAutopilotSettings'}
+                - type: object
+                  required: [expected_revision]
+                  properties:
+                    expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved settings and new revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
+        '400': {description: Rules must contain all seven keys; day limits are integers from 1 to 365}
+        '403': {description: Person with workspace settings.manage required}
+        '409': {description: Settings changed since they were read}
+  /projects/{projectId}/status-autopilot:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectStatusAutopilot
+      summary: Read a project's status autopilot override
+      security: [{session: []}, {apiKey: []}]
+      responses:
+        '200':
+          description: Effective setting and inheritance
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '404': {description: Project not visible}
+    put:
+      operationId: putProjectStatusAutopilot
+      summary: Save Inherit, On or Off for a project
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, expected_revision]
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [inherit, on, off]}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Saved override
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '403': {description: Person with workspace settings.manage required}
+        '404': {description: Project not visible}
+        '409': {description: Override changed since it was read}
+  /status-autopilot/changes:
+    get:
+      operationId: listStatusAutopilotChanges
+      summary: Recent automatic changes with reasons and Undo state
+      security: [{session: []}, {apiKey: []}]
+      parameters:
+        - {name: node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: suggestions, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Latest 50 visible changes; suggestions selects current triage and cancellation suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StatusAutopilotChange'}
   /from-classic/api/{legacyPath}:
     servers:
       - url: /
@@ -8008,6 +8101,54 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    StatusAutopilotRule:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean, default: true}
+        days: {type: integer, minimum: 1, maximum: 365, description: Absent on publish}
+    StatusAutopilotSettings:
+      type: object
+      required: [enabled, rules, revision]
+      properties:
+        enabled: {type: boolean, default: true}
+        revision: {type: integer, minimum: 0, readOnly: true}
+        rules:
+          type: object
+          additionalProperties: false
+          required: [new, backlog, blocked, progress, done, publish, accept]
+          properties:
+            new: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untriaged 7 days to triage list}
+            backlog: {$ref: '#/components/schemas/StatusAutopilotRule', description: Untouched 90 days to cancellation suggestion}
+            blocked: {$ref: '#/components/schemas/StatusAutopilotRule', description: Reminder after 14 days}
+            progress: {$ref: '#/components/schemas/StatusAutopilotRule', description: No session or branch or PR activity for 3 days to Open}
+            done: {$ref: '#/components/schemas/StatusAutopilotRule', description: Merged but not released for 14 days to missed-release flag}
+            publish: {$ref: '#/components/schemas/StatusAutopilotRule', description: On release publish to Delivered}
+            accept: {$ref: '#/components/schemas/StatusAutopilotRule', description: Delivered 30 days without objection to Accepted}
+    StatusAutopilotOverride:
+      type: object
+      required: [mode, effective_enabled, revision]
+      properties:
+        mode: {type: string, enum: [inherit, on, off], default: inherit}
+        effective_enabled: {type: boolean}
+        revision: {type: integer, minimum: 0}
+    StatusAutopilotChange:
+      type: object
+      required: [event_id, node_id, key, title, actor, rule, reason, from, to, at, undone, undoable]
+      properties:
+        event_id: {type: integer}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        actor: {type: string, const: Status autopilot}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string}
+        at: {type: string, format: date-time}
+        undone: {type: boolean}
+        undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -13727,6 +13868,7 @@ components:
       type: object
       required: [id, at, type, author]
       properties:
+        automatic_change: {$ref: '#/components/schemas/StatusAutopilotChange'}
         id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
         at: {type: string, format: date-time}
         type: {type: string, enum: [comment, change, created]}

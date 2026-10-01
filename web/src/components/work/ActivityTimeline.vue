@@ -6,6 +6,7 @@ import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import AutomaticChangeRow from './AutomaticChangeRow.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -43,7 +44,7 @@ const emptyLine = computed(() => {
 })
 function isAutomatic(entry: TimelineEntry) { return entry.author.automatic === true }
 function changesOf(entry: TimelineEntry) { return entry.kind === 'changes' ? entry.changes : [] }
-function actorLabel(entry: TimelineEntry) { return isAutomatic(entry) ? `${brand.value.short_name} (automatic)` : entry.author.name }
+function actorLabel(entry: TimelineEntry) { if (entry.author.job === 'status-autopilot') return 'Status autopilot'; return isAutomatic(entry) ? `${brand.value.short_name} (automatic)` : entry.author.name }
 function actorTip(entry: TimelineEntry) {
   if (!isAutomatic(entry)) return undefined
   const parts = [entry.author.job, entry.author.reason].filter((part): part is string => !!part)
@@ -99,7 +100,11 @@ defineExpose({ isDirty })
     <ol v-else class="timeline">
       <template v-for="entry in visible" :key="entry.id">
         <!-- Comment, possibly led by an agent work marker -->
-        <template v-if="entry.kind === 'comment'">
+        <li v-if="entry.kind === 'automatic'" class="entry">
+          <span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span>
+          <AutomaticChangeRow :change="entry.change" @undone="emit('retry')" />
+        </li>
+        <template v-else-if="entry.kind === 'comment'">
           <li v-if="marker(entry) && editingId !== entry.id" class="entry marker">
             <span class="node agent" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
             <div class="marker-body">
