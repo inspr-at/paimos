@@ -9,7 +9,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: every state agrees across /agents, detail, cards and list rows`, async ({ page }) => {
     const { agents } = await mockStateColours(page, theme)
     await page.goto('/agents')
-    await page.getByRole('button', { name: /^Stopped/ }).click()
+    await page.getByRole('button', { name: /^Ended/ }).click()
     for (const [index, state] of states.entries()) {
       const row = page.locator(`[data-row="s:${agents.sessions[index]!.id}"]`)
       await expect(row).toHaveAttribute('data-state', state)
@@ -102,7 +102,7 @@ test('per-viewer palettes, opacity and heartbeat thresholds persist and reach ev
   const colours = await page.locator('.state-preview .agent-state-label').evaluateAll(labels => labels.slice(0, 4).map(label => getComputedStyle(label).color))
   expect(new Set(colours).size).toBe(1)
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
 })
 

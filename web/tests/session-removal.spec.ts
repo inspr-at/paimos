@@ -94,7 +94,7 @@ test('stopped rows carry a bin; their menu offers only what works', async ({ pag
   const stopped = data.sessions.find(s => s.phase === 'stopped' && s.ticket_node_id)!
   Object.assign(stopped, { display_label: 'ghost-worker' })
   await page.goto('/agents')
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, stopped.id).getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
   await row(page, stopped.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
   // No Interrupt or Stop and no disabled excuses: only actions that work.
@@ -151,7 +151,7 @@ test('agents never receive Remove controls', async ({ page }) => {
   await page.keyboard.press('Escape')
   // A stopped row offers an agent no bin and no Remove.
   const stopped = data.sessions.find(s => s.phase === 'stopped')!
-  await page.getByRole('button', { name: /^Stopped/ }).click()
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, stopped.id).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
 })
 

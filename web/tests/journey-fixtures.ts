@@ -187,7 +187,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     // The agent asking for the gates: one Claude session, so it has a name.
     if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [{
       id: '5e000000-0000-4000-8000-000000000001', project_id: PROJECT, agent_principal_id: AGENT, run_id: null, ticket_node_id: 'n-1', harness: 'claude', host: 'camy',
-      parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'coordinator', advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1,
+      parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'coordinator', advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, finished: false,
       work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.2), created_at: ago(60), stopped_at: null, stop_reason: null,
       project: { id: PROJECT, key: 'PRJ-17', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' },
     }], next_cursor: null } })

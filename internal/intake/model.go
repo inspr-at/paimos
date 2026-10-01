@@ -77,35 +77,38 @@ type suggestionView struct {
 }
 
 type draftWrite struct {
-	Kind            string            `json:"kind"`
-	RequirementKind *string           `json:"requirement_kind"`
-	TargetNodeID    *string           `json:"target_node_id"`
-	Title           string            `json:"title"`
-	Body            string            `json:"body"`
-	Extensions      json.RawMessage   `json:"extensions,omitempty"`
-	DocumentBytes   *string           `json:"document_bytes,omitempty"`
-	BaseEventID     *int64            `json:"base_event_id"`
-	Citations       []citationWrite   `json:"citations"`
-	Suggestions     []suggestionWrite `json:"ticket_suggestions"`
-	IdempotencyKey  string            `json:"idempotency_key"`
+	RequesterPrincipalID *string           `json:"requester_principal_id,omitempty"`
+	Kind                 string            `json:"kind"`
+	RequirementKind      *string           `json:"requirement_kind"`
+	TargetNodeID         *string           `json:"target_node_id"`
+	Title                string            `json:"title"`
+	Body                 string            `json:"body"`
+	Extensions           json.RawMessage   `json:"extensions,omitempty"`
+	DocumentBytes        *string           `json:"document_bytes,omitempty"`
+	BaseEventID          *int64            `json:"base_event_id"`
+	Citations            []citationWrite   `json:"citations"`
+	Suggestions          []suggestionWrite `json:"ticket_suggestions"`
+	IdempotencyKey       string            `json:"idempotency_key"`
 }
 
 type draftView struct {
-	Kind            string           `json:"kind"`
-	RequirementKind *string          `json:"requirement_kind,omitempty"`
-	TargetNodeID    *string          `json:"target_node_id,omitempty"`
-	Title           string           `json:"title"`
-	Body            string           `json:"body"`
-	Extensions      json.RawMessage  `json:"extensions,omitempty"`
-	DocumentBytes   *string          `json:"document_bytes,omitempty"`
-	BaseEventID     int64            `json:"base_event_id"`
-	Citations       []citationWrite  `json:"citations"`
-	Suggestions     []suggestionView `json:"ticket_suggestions"`
-	IdempotencyKey  string           `json:"idempotency_key"`
-	ID              string           `json:"id"`
-	Status          string           `json:"status"`
-	ProposedAt      time.Time        `json:"proposed_at"`
-	AcceptedAt      *time.Time       `json:"accepted_at"`
+	RequesterPrincipalID *string          `json:"requester_principal_id,omitempty"`
+	SupersedesDraftID    *string          `json:"supersedes_draft_id,omitempty"`
+	Kind                 string           `json:"kind"`
+	RequirementKind      *string          `json:"requirement_kind,omitempty"`
+	TargetNodeID         *string          `json:"target_node_id,omitempty"`
+	Title                string           `json:"title"`
+	Body                 string           `json:"body"`
+	Extensions           json.RawMessage  `json:"extensions,omitempty"`
+	DocumentBytes        *string          `json:"document_bytes,omitempty"`
+	BaseEventID          int64            `json:"base_event_id"`
+	Citations            []citationWrite  `json:"citations"`
+	Suggestions          []suggestionView `json:"ticket_suggestions"`
+	IdempotencyKey       string           `json:"idempotency_key"`
+	ID                   string           `json:"id"`
+	Status               string           `json:"status"`
+	ProposedAt           time.Time        `json:"proposed_at"`
+	AcceptedAt           *time.Time       `json:"accepted_at"`
 }
 
 type acceptWrite struct {

@@ -10,6 +10,10 @@ withDefaults(defineProps<{ state: AgentState; cx?: number; eyeY?: number; mouthY
       <path v-for="x in [-spread, spread]" :key="x" :d="`M${x - 1} -1l2 2m-2 0 2-2`" />
       <path :d="`M-2 ${mouthY - eyeY}h4`" />
     </template>
+    <template v-else-if="state === 'done'">
+      <path v-for="x in [-spread, spread]" :key="x" :d="`M${x - 1.2} .5q1.2-1.7 2.4 0`" />
+      <path :d="`M-2 ${mouthY - eyeY - .4}q2 2.2 4 0`" />
+    </template>
     <template v-else-if="state === 'problem'">
       <path v-for="x in [-spread, spread]" :key="x" :d="`M${x} -.4v1.5M${x - 1.2} -2l2.4 ${x < 0 ? 1 : -1}`" />
       <path class="frown" :d="`M-2.5 ${mouthY - eyeY + .6}q2.5-2.5 5 0`" />

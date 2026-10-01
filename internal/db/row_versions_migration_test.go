@@ -31,7 +31,7 @@ func TestRowVersionValidationRunsAfterDDLLocksRelease(t *testing.T) {
 			return d.App.QueryRow(t.Context(), `SELECT
                 (SELECT relfilenode FROM pg_class WHERE oid='harness_sessions'::regclass),
                 (SELECT relfilenode FROM pg_class WHERE oid='agent_runs'::regclass)`).Scan(&sessionFile, &runFile)
-		case "1054_row_versions_validate.sql":
+		case "1058_row_versions_validate.sql":
 			var pending int
 			var afterSession, afterRun uint32
 			if err := d.App.QueryRow(t.Context(), `SELECT

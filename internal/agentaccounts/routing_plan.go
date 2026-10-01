@@ -90,7 +90,7 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 func fingerprintPrimary(picks []ranked) map[string]int {
 	primary := map[string]int{}
 	for i, p := range picks {
-		fp := p.account.QuotaFingerprint
+		fp := p.account.QuotaPoolFingerprint
 		if fp == "" {
 			continue
 		}
@@ -169,7 +169,7 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 		primary := fingerprintPrimary(picks)
 		for i, p := range picks {
 			routing := CapacityRouting{Rank: i + 1, AvailableSlots: p.slots, ResetsAt: p.reset, CapPercent: p.cap}
-			if fp := p.account.QuotaFingerprint; fp != "" && primary[fp] != i {
+			if fp := p.account.QuotaPoolFingerprint; fp != "" && primary[fp] != i {
 				routing.AvailableSlots = 0
 				routing.SameQuotaAs = picks[primary[fp]].account.ID
 			}

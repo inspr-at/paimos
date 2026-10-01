@@ -47,7 +47,7 @@ export interface HarnessSessionRow {
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle' | 'throttled'
-  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number
+  run_status?: string | null; needs_attention?: boolean; has_problem?: boolean; finished: boolean; attention_reasons?: AttentionReason[]; activity_sequence: number; revision: number
   // The row's own revision: bumped by the server inside every statement that changes
   // the row, so the larger of two copies is the newer. Always sent; optional here only
   // so a fixture may omit it (such a row can never replace one that has it).

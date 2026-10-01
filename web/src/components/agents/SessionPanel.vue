@@ -213,7 +213,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">
           <span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ view.session.stopped_at ? 'Ran' : 'Running' }} {{ elapsed(view.session, now) }}</span>
-          <template v-if="view.session.stopped_at"> · {{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
+          <template v-if="view.session.stopped_at"> · {{ view.status.state === 'done' ? 'Done' : stopReasonLabel(view.session.stop_reason) || 'Ended' }} {{ relativeTime(view.session.stopped_at, { now }) }}</template>
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>

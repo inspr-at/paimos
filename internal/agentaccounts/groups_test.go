@@ -66,7 +66,7 @@ func TestSharedQuotaCountsOnce(t *testing.T) {
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("ab", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$2 WHERE id=$1 OR id=$3`, first.ID, fp, second.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$2,quota_pool_fingerprint=$2 WHERE id=$1 OR id=$3`, first.ID, fp, second.ID)
 		return err
 	})
 	var plan []accountCapacity
@@ -125,7 +125,7 @@ func TestUseAccountPayloadHasNoPath(t *testing.T) {
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("cd", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$2 WHERE id=$1 OR id=$3`, first.ID, fp, second.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$2,quota_pool_fingerprint=$2 WHERE id=$1 OR id=$3`, first.ID, fp, second.ID)
 		return err
 	})
 	var body []byte

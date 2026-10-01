@@ -22,9 +22,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool *pgxpool.Pool
+	// versionNow supplies the batch publication clock. Request and
+	// transaction deadlines always use the real clock.
+	versionNow func() time.Time
+}
 
-func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
+func New(pool *pgxpool.Pool) httpapi.Module {
+	return &Module{pool: pool, versionNow: time.Now}
+}
 
 type endpoint func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 

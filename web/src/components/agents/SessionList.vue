@@ -59,7 +59,7 @@ const forest = computed(() => orderForest(sessionForest(showRemoved.value ? prop
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
 type Bucket = 'attention' | 'live' | 'stopped'
-const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Stopped' }]
+const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
