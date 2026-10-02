@@ -117,7 +117,14 @@ let foldHadFocus = false
 function foldNeeds(el: Element, done: () => void) {
   const card = el as HTMLElement
   foldHadFocus = card.contains(document.activeElement)
-  if (reducedMotion() || !card.parentElement) { done(); return }
+  // The app owns this fold; native anchoring must not correct its scroll offset.
+  const scroller = card.closest<HTMLElement>('main'), anchor = scroller?.style.overflowAnchor ?? ''
+  if (scroller) scroller.style.overflowAnchor = 'none'
+  const remove = () => {
+    done()
+    requestAnimationFrame(() => { if (scroller) scroller.style.overflowAnchor = anchor })
+  }
+  if (reducedMotion() || !card.parentElement) { remove(); return }
   const px = (value: string) => parseFloat(value) || 0
   const style = getComputedStyle(card)
   const edges = px(style.borderTopWidth) + px(style.borderBottomWidth) + px(style.paddingTop) + px(style.paddingBottom)
@@ -125,7 +132,7 @@ function foldNeeds(el: Element, done: () => void) {
   Object.assign(card.style, { height: `${card.offsetHeight}px`, minHeight: '0', overflow: 'clip' })
   void card.offsetHeight
   Object.assign(card.style, { transition: 'height .28s cubic-bezier(.4, 0, .2, 1), margin-bottom .28s cubic-bezier(.4, 0, .2, 1), opacity .2s ease', height: '0px', marginBottom: `${-(gap + edges)}px`, opacity: '0' })
-  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); done() }
+  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); remove() }
   const ended = (event: TransitionEvent) => { if (event.target === card && event.propertyName === 'height') finish() }
   const timer = setTimeout(finish, 450)
   card.addEventListener('transitionend', ended)
