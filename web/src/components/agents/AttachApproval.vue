@@ -13,6 +13,7 @@ import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 
 const identity = useSession()
 const agents = useAgents()
@@ -41,7 +42,6 @@ const paper = ref<HTMLElement>()
 const round = ref<AttachReview[]>([])
 const roundIndex = ref(0)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform)
-const submitKey = computed(() => !review.value ? (mac ? '⌘↵' : 'Ctrl+↵') : '↵')
 const review = ref<AttachReview | null>(null)
 const outcome = computed(() => review.value ? attachOutcome(review.value, props.now) : null)
 const pending = computed(() => outcome.value === 'waiting')
@@ -218,7 +218,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
           <span class="desk-status" aria-live="polite">{{ !pending && review ? stamp : '' }}</span>
           <div class="desk-acts at-top">
             <button type="button" class="desk-btn ghost" :disabled="busy" @click="skip">Skip <kbd class="keycap">S</kbd></button>
-            <button type="button" class="desk-btn primary" :disabled="!canSubmit" @click="submit"><AppIcon :name="review ? 'check' : 'arrow'" :size="15" /><span>{{ busy ? 'Saving…' : !review ? 'Find request' : roundIndex + 1 < round.length ? 'Decide & next' : 'Decide' }}</span><kbd class="keycap">{{ submitKey }}</kbd></button>
+            <button type="button" class="desk-btn primary" :disabled="!canSubmit" @click="submit"><AppIcon :name="review ? 'check' : 'arrow'" :size="15" /><span>{{ busy ? 'Saving…' : !review ? 'Find request' : roundIndex + 1 < round.length ? 'Decide & next' : 'Decide' }}</span><KeyCap v-if="!review" k="mod" /><KeyCap k="enter" /></button>
           </div>
           <button class="desk-x" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button>
         </header>
@@ -243,7 +243,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
                 <p class="memo-q">Attach {{ harness }} on {{ review.snapshot.host }}{{ metadataOnly ? ', status only' : ' and share its conversation' }}</p>
                 <dl class="memo-meta"><dt>Project</dt><dd :title="review.snapshot.project_id">{{ labelsReady ? project : 'Loading…' }}</dd><dt>Ticket</dt><dd :title="review.snapshot.ticket_id">{{ labelsReady ? ticket : 'Loading…' }}</dd><dt>Started</dt><dd>{{ review.snapshot.process.started }}, in your terminal</dd><dt>Expires</dt><dd><time :class="{ soon }" :datetime="review.expires_at">{{ pending ? `Expires in ${expiry}` : stamp }}</time></dd></dl>
                 <p v-if="pending" class="memo-mean park"><AppIcon name="clock" :size="14" /><span><strong>Your terminal waits for this.</strong> {{ copy.linkHelp }}</span></p>
-                <p class="memo-mean"><AppIcon name="shield" :size="14" /><span>Requested by a process on {{ review.snapshot.host }}. <strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong> Aeon cannot see who typed the command.</span></p>
+                <p class="memo-mean"><AppIcon name="shield" :size="14" /><span>Requested by a process on {{ review.snapshot.host }}. <strong>{{ metadataOnly ? 'Only allow if you started this attach yourself.' : 'Only allow if you started this watch yourself.' }}</strong> {{ brand.short_name }} cannot see who typed the command.</span></p>
               </div>
               <div class="stamp-slot" aria-hidden="true"><span class="stamp" :class="{ empty: stamp === 'Your call', neutral: stamp === 'Expired' || stamp === 'Cancelled', declined: stamp === 'Declined' }">{{ stamp }}</span></div>
             </header>
@@ -281,7 +281,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
           <button type="button" class="desk-btn ghost" :disabled="busy" @click="skip">Skip</button>
           <button type="button" class="desk-btn primary" :disabled="!canSubmit" @click="submit"><AppIcon :name="review ? 'check' : 'arrow'" :size="15" /><span>{{ busy ? 'Saving…' : !review ? 'Find request' : roundIndex + 1 < round.length ? 'Decide & next' : 'Decide' }}</span></button>
         </div>
-        <p class="desk-hint"><span><kbd class="keycap">1</kbd> <kbd class="keycap">2</kbd> choose</span><span><kbd class="keycap">{{ submitKey }}</kbd> {{ review ? 'decide' : 'find request' }}</span><span><kbd class="keycap">S</kbd> skip</span><span><kbd class="keycap">esc</kbd> leave field, then close</span></p>
+        <p class="desk-hint"><span><kbd class="keycap">1</kbd> <kbd class="keycap">2</kbd> choose</span><span><KeyCap v-if="!review" k="mod" /><KeyCap k="enter" /> {{ review ? 'decide' : 'find request' }}</span><span><kbd class="keycap">S</kbd> skip</span><span><kbd class="keycap">esc</kbd> leave field, then close</span></p>
       </div>
     </dialog>
   </template>
