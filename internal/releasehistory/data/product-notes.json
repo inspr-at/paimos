@@ -4177,24 +4177,24 @@
     "261002081219.0.0": {
       "release_channel": "stable",
       "release_sequence": 119,
-      "snapshot_sha256": "d1a0a2ee1050509fc41ed940196ed12ed1baf52ce4dd2701651df69a6c7ab88d",
-      "captured_at": "2026-10-02T08:13:15Z",
+      "snapshot_sha256": "fb1e34da624ec1dd2317b4a8b96ec595837f8a4716bd5f3ec6f623826979aa5f",
+      "captured_at": "2026-10-02T08:20:19Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-452",
           "pill_en": "More agent harnesses",
           "pill_de": "Mehr Agenten-Harnesses",
-          "benefit_en": "Use Gemini and open models alongside Claude, Codex, Cursor and Grok, from the same workspace.",
-          "benefit_de": "Nutze Gemini und offene Modelle neben Claude, Codex, Cursor und Grok, im selben Arbeitsbereich.",
+          "benefit_en": "Use Gemini CLI and OpenCode alongside Claude, Codex, Cursor and Grok in the same workspace.",
+          "benefit_de": "Gemini CLI und OpenCode lassen sich neben Claude, Codex, Cursor und Grok im selben Arbeitsbereich nutzen.",
           "group": "features"
         },
         {
           "key": "AEON-472",
           "pill_en": "Link accounts in seconds",
           "pill_de": "Konten im Nu verknüpfen",
-          "benefit_en": "Linking an agent account to a person now takes one short code typed in the agent window and one confirmation in Paimos.",
-          "benefit_de": "Ein Agent-Konto einer Person zuzuordnen braucht jetzt nur einen kurzen Code im Agent-Fenster und eine Bestätigung in Paimos.",
+          "benefit_en": "The agent window shows one short code. Type it in Paimos and confirm the named account.",
+          "benefit_de": "Das Agenten-Fenster zeigt einen kurzen Code. Diesen in Paimos eingeben und das genannte Konto bestätigen.",
           "group": "features"
         },
         {
@@ -4233,8 +4233,8 @@
           "key": "AEON-533",
           "pill_en": "No surprise status changes",
           "pill_de": "Keine überraschenden Statuswechsel",
-          "benefit_en": "For the first day after an upgrade, automatic status changes are only proposed, so an owner can review and apply them before the autopilot acts on its own.",
-          "benefit_de": "Am ersten Tag nach einem Upgrade werden automatische Statuswechsel nur vorgeschlagen, damit ein Owner sie prüfen und übernehmen kann, bevor der Autopilot selbst handelt.",
+          "benefit_en": "For 24 hours after an upgrade, automatic status changes are only proposed. An owner can confirm earlier; after that, the autopilot acts on its own again.",
+          "benefit_de": "In den ersten 24 Stunden nach einem Upgrade werden automatische Statuswechsel nur vorgeschlagen. Inhaber können früher bestätigen; danach handelt der Autopilot wieder selbst.",
           "group": "features"
         },
         {
