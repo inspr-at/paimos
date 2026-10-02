@@ -182,6 +182,63 @@ func TestExactAPIScopedSearchIncludesNestedLaterPages(t *testing.T) {
 	}
 }
 
+func TestExactAPIScopedSearchHasMoreRequiresScopedMatch(t *testing.T) {
+	for _, extraMatch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("extra-match-%t", extraMatch), func(t *testing.T) {
+			rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/kinds":
+					fmt.Fprint(w, `{"items":[{"id":"project-kind","slug":"project"},{"id":"ticket-kind","slug":"ticket"}]}`)
+				case "/api/nodes":
+					fmt.Fprintf(w, `{"items":[{"id":%q,"key":"PRJ-1","kind_id":"project-kind","fields":{"project_key":"AEON"}}]}`, transcriptProjectID)
+				case "/api/search":
+					if r.URL.Query().Get("cursor") == "" {
+						fmt.Fprintf(w, `{"items":[{"node":{"id":"target","key":"AEON-1","kind_id":"ticket-kind","parent_id":%q}}],"next_cursor":"next"}`, transcriptProjectID)
+					} else if extraMatch {
+						fmt.Fprintf(w, `{"items":[{"node":{"id":"second","key":"AEON-2","kind_id":"ticket-kind","parent_id":%q}}]}`, transcriptProjectID)
+					} else {
+						fmt.Fprint(w, `{"items":[{"node":{"id":"other","key":"OTHER-1","kind_id":"ticket-kind"}}]}`)
+					}
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			})
+			result, err := rt.searchIssuesResult("target", "AEON", "", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Issues) != 1 || result.Issues[0].IssueKey != "AEON-1" || result.HasMore != extraMatch {
+				t.Fatalf("incorrect scoped continuation: %+v", result)
+			}
+		})
+	}
+}
+
+func TestExactAPICommentRetainsCanonicalKey(t *testing.T) {
+	rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/kinds":
+			fmt.Fprint(w, `{"items":[{"id":"ticket-kind","slug":"ticket"}]}`)
+		case "/api/nodes":
+			fmt.Fprint(w, `{"items":[]}`)
+		case "/api/node-keys/OLD-1":
+			fmt.Fprint(w, `{"id":"target","key":"AEON-1","kind_id":"ticket-kind"}`)
+		case "/api/nodes/target/comments":
+			fmt.Fprint(w, `{"id":"comment"}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	if err := rt.commentIssue("OLD-1", "Comment"); err != nil {
+		t.Fatal(err)
+	}
+	if output := rt.stdout.(*bytes.Buffer).String(); !strings.Contains(output, "commented on AEON-1") {
+		t.Fatalf("comment lost canonical key: %s", output)
+	}
+}
+
 func TestExactAPIMCPToolsReachHTTP(t *testing.T) {
 	var calls []transcriptRequest
 	isolate(t)

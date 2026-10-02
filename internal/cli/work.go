@@ -666,37 +666,42 @@ func requireIssueFamilyTarget(kinds kindTable, to string) error {
 	return nil
 }
 
-func (rt *runtime) commentIssueResult(ref, body string) (map[string]any, error) {
+type issueCommentResult struct {
+	Comment  map[string]any
+	IssueKey string
+}
+
+func (rt *runtime) commentIssueResult(ref, body string) (issueCommentResult, error) {
 	if strings.HasPrefix(strings.TrimSpace(ref), "id:") {
-		return nil, usagef("id:<n> is a classic numeric id; pass the issue key")
+		return issueCommentResult{}, usagef("id:<n> is a classic numeric id; pass the issue key")
 	}
 	n, err := rt.nodeByKey(ref)
 	if err != nil {
-		return nil, err
+		return issueCommentResult{}, err
 	}
 	kinds, err := rt.loadKinds()
 	if err != nil {
-		return nil, err
+		return issueCommentResult{}, err
 	}
 	if !issueKinds[kinds.slug(n.KindID)] {
-		return nil, rt.fail(fmt.Errorf("issue %q not found", ref), "")
+		return issueCommentResult{}, rt.fail(fmt.Errorf("issue %q not found", ref), "")
 	}
 	var comment map[string]any
 	if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/comments", map[string]any{"body_markdown": body}, &comment); err != nil {
-		return nil, err
+		return issueCommentResult{}, err
 	}
-	return comment, nil
+	return issueCommentResult{comment, n.Key}, nil
 }
 
 func (rt *runtime) commentIssue(ref, body string) error {
-	comment, err := rt.commentIssueResult(ref, body)
+	result, err := rt.commentIssueResult(ref, body)
 	if err != nil {
 		return err
 	}
 	if rt.jsonOut {
-		return rt.printJSON(comment)
+		return rt.printJSON(result.Comment)
 	}
-	fmt.Fprintf(rt.stdout, "✓ commented on %s\n", ref)
+	fmt.Fprintf(rt.stdout, "✓ commented on %s\n", result.IssueKey)
 	return nil
 }
 
@@ -1087,7 +1092,7 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 			}
 			seenCursors[*page.NextCursor] = true
 		}
-		for i, hit := range page.Items {
+		for _, hit := range page.Items {
 			if !issueKinds[kinds.slug(hit.Node.KindID)] {
 				continue
 			}
@@ -1098,11 +1103,11 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 			if !matched {
 				continue
 			}
-			result.Issues = append(result.Issues, rt.viewIssue(hit.Node, kinds))
 			if len(result.Issues) == limit {
-				result.HasMore = i+1 < len(page.Items) || (page.NextCursor != nil && *page.NextCursor != "")
+				result.HasMore = true
 				return result, nil
 			}
+			result.Issues = append(result.Issues, rt.viewIssue(hit.Node, kinds))
 		}
 		if page.NextCursor == nil || *page.NextCursor == "" {
 			return result, nil

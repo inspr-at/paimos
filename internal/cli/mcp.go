@@ -188,7 +188,9 @@ func addWorkTool[In any](s *mcp.Server, rt *runtime, name, description string, _
 			}
 			result, err = work.createIssueResult(issueInput{Project: args.Project, Title: args.Title, Type: args.Type, Status: args.Status, Description: args.Description, Tags: tags})
 		case issueCommentArgs:
-			result, err = work.commentIssueResult(args.Ref, args.Body)
+			var comment issueCommentResult
+			comment, err = work.commentIssueResult(args.Ref, args.Body)
+			result = comment.Comment
 		case knowledgeListArgs:
 			var kinds kindTable
 			var nodes []apiNode
