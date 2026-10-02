@@ -41,6 +41,13 @@ func TestEnclaveCreateRefusesAnExistingTag(t *testing.T) {
 	if got := enclaveCreateDisposition(-25299); got != -25299 {
 		t.Fatalf("duplicate status changed to %d", got)
 	}
+	// A denied or unreadable item must not become an absent key, which would
+	// let setup proceed with a fresh key or downgrade to Aeon approval.
+	for _, status := range []int{-25293, -25308, -50} {
+		if got := enclaveCreateDisposition(status); got != status {
+			t.Fatalf("lookup failure %d changed to %d", status, got)
+		}
+	}
 }
 
 func TestVaultStoredAttributesOnLegacySecItemPath(t *testing.T) {
