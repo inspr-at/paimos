@@ -57,12 +57,10 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 	alias := insertPerson(t, w.admin.TenantID, "Linked viewer")
 	d := insertPerson(t, w.admin.TenantID, "Other assignee")
 	operator := tenant.Principal{ID: w.agent, TenantID: w.admin.TenantID, Kind: tenant.Agent}
+	dbtest.BindRole(t, testDB, operator.TenantID, operator.ID, "admin")
 	var grok string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE principals SET linked_to=$2 WHERE id=$1`, alias.ID, w.admin.ID); err != nil {
-			return err
-		}
-		if err := dbtest.BindLegacyRoles(t.Context(), tx, operator.TenantID, operator.ID, []string{"admin"}); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'grok-pref-high','1','grok','xai','grok-4.7','high','strong') RETURNING id::text`, w.admin.TenantID).Scan(&grok); err != nil {

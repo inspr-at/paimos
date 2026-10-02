@@ -180,12 +180,16 @@ type planSortRate struct {
 	Role      string   `json:"role"`
 	Placement string   `json:"placement"`
 	Person    string   `json:"person"`
+	Project   string   `json:"project"`
+	Kind      string   `json:"kind"`
+	Bucket    string   `json:"bucket"`
+	Residency string   `json:"residency"`
 	Tokens    float64  `json:"tokens_per_hour"`
 	List      *float64 `json:"list_per_hour"`
 	Paid      *float64 `json:"paid_per_hour"`
 }
 
-// preparePlanningSort resolves each role once and stores the rates the list
+// preparePlanningSort resolves each placement and stores the rates the list
 // statement multiplies. The sort key itself is SQL over the filtered rows, so
 // a tokens or cost sort does not build a planning view per matching row.
 func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
@@ -225,12 +229,21 @@ func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []pl
 		viewer = *person
 	}
 	rates := []planSortRate{{Role: "", Person: viewer, Tokens: anyRoute.tokensPerHour, List: anyRoute.listPerHour}}
+	placements := map[string]planRow{}
+	for _, seed := range seeds {
+		placements[seed.placementKey()] = seed
+	}
 	for key, route := range routes {
 		if route.view == nil {
 			continue
 		}
 		c := pl.calibration(route)
-		rate := planSortRate{Placement: key, Tokens: c.tokensPerHour, List: c.listPerHour}
+		seed := placements[key]
+		kind := seed.area
+		if kind == "" {
+			kind = "other"
+		}
+		rate := planSortRate{Placement: key, Project: seed.project, Person: seed.person, Kind: kind, Bucket: seed.bucket, Role: seed.role, Residency: seed.residency, Tokens: c.tokensPerHour, List: c.listPerHour}
 		switch billing[route.view.Harness].mode {
 		case "subscription":
 			zero := 0.0
@@ -1111,7 +1124,7 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
             LEFT JOIN plan_rates spec ON spec.placement = raw.placement AND raw.placement <> ''
             LEFT JOIN plan_rates anyr ON anyr.placement = ''`
 	return `, ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, plan_rates AS (
-        SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, placement text, person text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
+        SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, placement text, project text, person text, kind text, bucket text, residency text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
     ), plan_sub AS MATERIALIZED (
         ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`) + `
     ), plan_placements AS MATERIALIZED (
