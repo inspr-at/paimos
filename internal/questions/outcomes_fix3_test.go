@@ -235,7 +235,10 @@ func TestFix3TransientDoctrineFailuresRetryWithoutNewDecision(t *testing.T) {
 			target, transport := fix3PublicTarget(t, f, f.d.App)
 			in := input()
 			in.Doctrine = target
-			q := f.outcome(t, f.ask(t, in), "doctrine", "- 🟡 Keep commits small and review changes before shipping. Run tests.")
+			asked := f.ask(t, in)
+			// A neutral explicit reason keeps random UUID bytes in the fallback
+			// explanation from accidentally matching the public identity guard.
+			q := question(t, request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+asked.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: asked.Revision, Outcome: "doctrine", Answer: "- 🟡 Keep commits small and review changes before shipping. Run tests.", Reason: "Review the tested rule before shipping."}), 200)
 			calls := transport.calls.Load()
 			if code == "stale_source" {
 				f.m.doctrine = &fix3RefreshAdapter{DoctrineAdapter: f.m.doctrine, f: f, source: target.SourceID}

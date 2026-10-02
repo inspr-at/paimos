@@ -196,7 +196,29 @@ func TestConcurrentDuplicateMembershipsAndFanout(t *testing.T) {
 			p = f.otherAgent
 		}
 		replayed := question(t, request(t.Context(), f.mux, p, "POST", "/api/projects/"+f.project+"/questions", in), 200)
-		if replayed.ID != id || replayed.Answer.Answer != "Use local storage." || len(replayed.Askers) != 4 || len(replayed.Pending) != 8 {
+		owned := map[string]bool{}
+		for _, a := range replayed.Askers {
+			if a.PrincipalID != p.ID {
+				t.Fatal("replay exposed another principal's membership")
+			}
+			owned[a.ID] = true
+		}
+		var deliveries []Pending
+		outcomes := 0
+		for _, e := range replayed.Pending {
+			if e.Kind == "outcome" {
+				outcomes++
+				if e.AskerID != "" || e.ID != outcomeRow(t, q).ID {
+					t.Fatal("replay changed the shared outcome identity")
+				}
+				continue
+			}
+			if !owned[e.AskerID] {
+				t.Fatal("replay exposed another principal's delivery")
+			}
+			deliveries = append(deliveries, e)
+		}
+		if replayed.ID != id || replayed.Answer.Answer != "Use local storage." || len(replayed.Askers) != 4 || len(deliveries) != 8 || outcomes != 1 || len(replayed.Pending) != 9 {
 			t.Fatal("replay leaked other asker routes or changed fan-out")
 		}
 	}
@@ -257,9 +279,30 @@ func TestAlwaysReuseImmediateAtomicAndRetrySafe(t *testing.T) {
 	if w := request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", conflict); w.Code != 409 || f.reuseCount(t, q) != 1 {
 		t.Fatal("conflicting replay changed approved answer count")
 	}
-	// Actual post-dispatch corrections remain explicitly P3-owned.
-	if w := request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: 2, OptionID: "b", Outcome: "once"}); w.Code != 409 {
-		t.Fatal("post-delivery correction bypassed P3")
+	// P3 now owns actual post-dispatch corrections. Require its lineage, full
+	// fan-out and grace, while preserving rejection of a stale source revision.
+	corrected := question(t, request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: 2, OptionID: "b", Outcome: "once"}), 200)
+	if corrected.Revision != 3 || corrected.Answer.Replaces != source.Answer.ID || len(corrected.Pending) != 5 || f.reuseCount(t, source) != 1 {
+		t.Fatal("post-delivery correction lost P3 lineage or fan-out")
+	}
+	for _, e := range corrected.Pending {
+		if e.Revision != 3 || e.State != "pending" || e.DeliverAfter != corrected.Answer.DeliverAfter {
+			t.Fatal("correction bypassed the revision-bound grace")
+		}
+	}
+	current := question(t, request(t.Context(), f.mux, f.otherAgent, "GET", "/api/questions/"+q.ID, nil), 200)
+	if current.Askers[0].FromRecord == nil || *current.Askers[0].FromRecord != *reuse || current.Answer.Answer != "Use remote storage." {
+		t.Fatal("correction changed immutable reuse provenance")
+	}
+	var delivered, active int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_pending WHERE question_id=$1 AND revision=2 AND state='delivered' AND effect_ref='fixture-delivery'`, q.ID).Scan(&delivered); err != nil || delivered != 2 {
+		t.Fatal("correction rewrote delivered history", err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_decisions WHERE question_id=$1 AND state='active'`, q.ID).Scan(&active); err != nil || active != 0 {
+		t.Fatal("correction retained superseded reuse authority", err)
+	}
+	if w := request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: 2, OptionID: "b", Outcome: "once"}); w.Code != 409 || !strings.Contains(w.Body.String(), `"code":"revision_conflict"`) {
+		t.Fatal("stale post-delivery correction bypassed P3 revision checks")
 	}
 }
 

@@ -265,6 +265,7 @@ func TestFix2QuestionListLoadsPermissionsOnceWithoutDoctrineRendering(t *testing
 	f := deliveryFixtureFor(t)
 	in := input()
 	in.Doctrine = f.doctrineTarget(t)
+	in.SuggestedOutcome = "doctrine"
 	for range 5 {
 		in.RequestID = uid()
 		f.ask(t, in)
