@@ -406,6 +406,20 @@ func TestControlledDoctrineGuardCounts(t *testing.T) {
 	checkDoctrineGuard(t, pubDocs, privDocs)
 }
 
+func TestDefaultDoctrineGuardIgnoresUnrelatedCheckouts(t *testing.T) {
+	// These deliberately unusable checkouts must never be consulted by a
+	// default run. Removing the opt-in gate makes gitTexts fail here.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AEON_TEST_DOCTRINE_CHECKOUTS", "")
+	for _, name := range []string{"inspr-modules", "inspr-doctrine-private"} {
+		if err := os.MkdirAll(filepath.Join(home, "Code", name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("survey stays opt-in", TestCheckedOutDoctrineGuardCounts)
+}
+
 // Survey a developer's mutable checkouts only when explicitly requested.
 // Counts are observations, never historical acceptance thresholds.
 func TestCheckedOutDoctrineGuardCounts(t *testing.T) {

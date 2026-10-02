@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -253,83 +254,64 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 }
 
-// Hold two actual requests before releasing any: saturation is an observed
-// interleaving, rather than a guess based on server sleeps or arrival gaps.
+// Quiescence proves every competing goroutine reached its request or the cap.
+// Held transports make saturation deterministic, independent of network timing.
 func TestSourceRequestCapAndDelay(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	var active, peak atomic.Int32
-	entered := make(chan struct{}, 8)
-	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := active.Add(1)
-		defer active.Add(-1)
-		for {
-			old := peak.Load()
-			if n <= old || peak.CompareAndSwap(old, n) {
-				break
-			}
-		}
-		entered <- struct{}{}
-		select {
-		case <-release:
-		case <-r.Context().Done():
-			return
-		}
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-	// Release held handlers before Server.Close, including on a failed barrier.
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
-	file := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	source, err := NewHTTPSource(server.URL, file, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := source.Configure(2, 0); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for n := 0; n < 8; n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var rows []Record
-			if err := source.get(ctx, "/probe", &rows); err != nil {
-				t.Error(err)
+	synctest.Test(t, func(t *testing.T) {
+		var active, peak atomic.Int32
+		entered := make(chan struct{}, 8)
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
 			}
 		}()
-	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	for n := 0; n < 2; n++ {
-		select {
-		case <-entered:
-		case <-ctx.Done():
-			t.Fatal("request cap never admitted two held requests")
+		base, _ := url.Parse("https://source.example.test")
+		source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			n := active.Add(1)
+			defer active.Add(-1)
+			for {
+				old := peak.Load()
+				if n <= old || peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			entered <- struct{}{}
+			<-release
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+		})}}
+		if err := source.Configure(2, 0); err != nil {
+			t.Fatal(err)
 		}
-	}
-	close(release)
-	select {
-	case <-done:
-	case <-ctx.Done():
-		t.Fatal("source requests never finished")
-	}
-	if got := peak.Load(); got > 2 {
-		t.Fatalf("request cap exceeded: %d", got)
-	}
-	if len(entered) != 6 {
-		t.Fatalf("completed request count = %d, want 8", len(entered)+2)
-	}
+		var wg sync.WaitGroup
+		for n := 0; n < 8; n++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var rows []Record
+				if err := source.get(t.Context(), "/probe", &rows); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+		synctest.Wait()
+		if got := len(entered); got != 2 {
+			t.Fatalf("admitted held requests = %d, want 2", got)
+		}
+		if active.Load() != 2 {
+			t.Fatalf("held active requests = %d, want 2", active.Load())
+		}
+		close(release)
+		wg.Wait()
+		if got := peak.Load(); got > 2 {
+			t.Fatalf("request cap exceeded: %d", got)
+		}
+		if len(entered) != 8 {
+			t.Fatalf("completed request count = %d, want 8", len(entered))
+		}
+	})
 }
 
 type sourceRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -337,42 +319,35 @@ type sourceRoundTripFunc func(*http.Request) (*http.Response, error)
 func (f sourceRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestSourceDispatchDelayUsesInjectedClock(t *testing.T) {
-	origin := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	now := origin
-	var starts []time.Time
-	var waits []time.Duration
-	base, _ := url.Parse("https://source.example.test")
-	source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		starts = append(starts, now)
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
-	})}, now: func() time.Time { return now }, wait: func(ctx context.Context, d time.Duration) error {
-		waits = append(waits, d)
-		now = now.Add(d)
-		return nil
-	}}
-	const delay = 15 * time.Millisecond
-	if err := source.Configure(2, delay); err != nil {
-		t.Fatal(err)
-	}
-	for n := 0; n < 8; n++ {
-		var rows []Record
-		if err := source.get(t.Context(), "/probe", &rows); err != nil {
+	// synctest injects the standard library clock; the production timer and
+	// transport dispatches are exercised without real elapsed-time thresholds.
+	synctest.Test(t, func(t *testing.T) {
+		origin := time.Now()
+		var starts []time.Time
+		base, _ := url.Parse("https://source.example.test")
+		source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			starts = append(starts, time.Now())
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+		})}}
+		const delay = 15 * time.Millisecond
+		if err := source.Configure(2, delay); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if len(starts) != 8 || len(waits) != 7 {
-		t.Fatalf("starts=%d waits=%d", len(starts), len(waits))
-	}
-	for n, at := range starts {
-		if want := origin.Add(time.Duration(n) * delay); !at.Equal(want) {
-			t.Fatalf("dispatch %d=%s, want %s", n, at, want)
+		for n := 0; n < 8; n++ {
+			var rows []Record
+			if err := source.get(t.Context(), "/probe", &rows); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	for _, wait := range waits {
-		if wait != delay {
-			t.Fatalf("requested wait=%s, want %s", wait, delay)
+		if len(starts) != 8 {
+			t.Fatalf("dispatches=%d, want 8", len(starts))
 		}
-	}
+		for n, at := range starts {
+			if want := origin.Add(time.Duration(n) * delay); !at.Equal(want) {
+				t.Fatalf("dispatch %d=%s, want %s", n, at, want)
+			}
+		}
+	})
 }
 
 func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {

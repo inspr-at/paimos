@@ -86,8 +86,6 @@ type HTTPSource struct {
 	limit       chan struct{}
 	mu          sync.Mutex
 	nextRequest time.Time
-	now         func() time.Time
-	wait        func(context.Context, time.Duration) error
 }
 
 // NewHTTPSource reads the bearer token once from a path. Errors never contain
@@ -127,24 +125,7 @@ func (s *HTTPSource) Configure(concurrency int, delay time.Duration) error {
 		return errors.New("concurrency must be positive and delay nonnegative")
 	}
 	s.concurrency, s.delay, s.limit = concurrency, delay, make(chan struct{}, concurrency)
-	if s.now == nil {
-		s.now = time.Now
-	}
-	if s.wait == nil {
-		s.wait = waitSourceDelay
-	}
 	return nil
-}
-
-func waitSourceDelay(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
@@ -155,14 +136,18 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 		return fmt.Errorf("source GET %s: %w", path, ctx.Err())
 	}
 	s.mu.Lock()
-	wait := s.nextRequest.Sub(s.now())
+	wait := time.Until(s.nextRequest)
 	if wait > 0 {
-		if err := s.wait(ctx, wait); err != nil {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
 			s.mu.Unlock()
-			return fmt.Errorf("source GET %s: %w", path, err)
+			return fmt.Errorf("source GET %s: %w", path, ctx.Err())
 		}
 	}
-	s.nextRequest = s.now().Add(s.delay)
+	s.nextRequest = time.Now().Add(s.delay)
 	s.mu.Unlock()
 	u := *s.base
 	parts := strings.SplitN(path, "?", 2)
