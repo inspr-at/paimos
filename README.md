@@ -289,7 +289,8 @@ independently of page size; coverage above 1000 projects returns an explicit 422
 The current Agents badge continues to count the approvals and held requests its
 panel can display. Agents does not poll the unused desk projection before the
 P6/P8 cutover, so failures in that future source do not affect its refresh state.
-Morning briefing retains actionable approvals with their scope labels/rationale and held requests with their project/body and app Source links.
+Morning briefing retains actionable approvals with their scope labels/rationale
+and held requests with their project/body and app Source links.
 P6/P8 must switch desk, badge and briefing together when the complete desk UI and
 question deep links are available; ordinary questions currently remain in the
 server projection, without generating pushes.
