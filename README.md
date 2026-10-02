@@ -2382,6 +2382,8 @@ Corrections replace only the exact tracked criterion; edited or removed criteria
 remain untouched and appear in `effect_data.review_required` on the new effect.
 Missing, moved or otherwise non-editable prior tickets also require review;
 their criteria stay untouched while the rest of the correction applies.
+Carried reviews retain each distinct kind and reference. Refreshing a review's
+reason on a later correction preserves the reason on superseded effect revisions.
 Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
 tldr_de?}` on the question or person decision. It creates only a pending AEON-444
 inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
