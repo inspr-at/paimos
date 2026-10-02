@@ -152,7 +152,7 @@ onMounted(load)
       <div class="foot">
         <div class="actions">
           <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save">{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}<kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
+          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label">{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
         </div>
       </div>
     </template>
@@ -174,6 +174,9 @@ onMounted(load)
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
 .actions { display: flex; justify-content: end; gap: 8px; }
+.actions .primary { min-width: 0; }
+.action-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.actions .keycap { flex-shrink: 0; }
 .role-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .role-confirm h3 { font-size: 13px; font-weight: 600; }
 .failure .btn, .scope-toggle { justify-self: start; }
