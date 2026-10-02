@@ -117,6 +117,11 @@ func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
 		return nil, ErrUnavailable
 	}
 	out := &Credits{ObservedAt: time.Now().UTC(), Usage: body.Data.Usage, Limit: body.Data.Limit, Remaining: body.Data.Remaining}
+	// /key describes a key cap, never the account's total balance. A null cap
+	// has no measurable remaining credit, even if a stray field was returned.
+	if out.Limit == nil {
+		out.Remaining = nil
+	}
 	if !out.Valid() {
 		return nil, ErrUnavailable
 	}

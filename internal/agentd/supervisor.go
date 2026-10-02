@@ -43,6 +43,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
+	// Now supplies the capacity scheduler clock; deadlines still use contexts.
+	Now func() time.Time
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
 	PollDiagnostic func(string)
@@ -132,56 +134,63 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
-	startedAt           time.Time
-	capacityStartedAt   time.Time
-	capacityAccountID   string
-	quotaKey            []byte // Tenant HMAC key, memory only; never passed to a child.
-	signalsPublished    map[string]AccountSignals
-	statuslineMu        sync.Mutex
-	statuslinePlans     map[string]statuslinePlan
-	statuslineEnabled   map[string]bool
-	capacityInterval    time.Duration
-	capacityLast        map[string]time.Time
-	capacitySaved       map[string]time.Time
-	capacityAttempt     map[string]time.Time
-	capacityCapturing   bool
-	maxTokens, maxTurns int64
-	profilePermissions  map[string]bool
-	harnessFailed       map[string]bool
-	dispatchMu          contextMutex
-	state               *agentsetup.Store
-	closing             bool
-	blockedAccounts     map[string]bool
-	probedAccounts      map[string]bool
-	accountBilling      map[string]string
-	probePendingSince   map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
-	pollDiagnostic      func(string)
-	pollDiagnosticMu    sync.Mutex
-	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
-	loginRequired       map[string]bool
-	signInUnverified    map[string]bool
-	probeFailureReasons map[string]string // Bounded local causes, protected by mu.
-	harnessHoldReasons  map[string]string
-	dependencyReasons   map[string]string
-	harnessHolds        map[string]string
-	dependencyErrors    map[string]string
-	mu                  sync.Mutex
-	api                 API
-	journal             *localjournal.Journal[Record]
-	lock                *os.File
-	adapters            map[string]Adapter
-	runs                map[string]*owned
-	tenantID            string
-	principalID         string
-	daemonID            string
-	generation          string
-	workspace           string
-	estimates           map[string]int64
-	accounts            []EnrolledAccount
-	heartbeatInterval   time.Duration
-	maxRunDuration      time.Duration
-	prepareScratch      func(string) (string, error)
-	newHarnessID        func() (string, error)
+	capacityNow            func() time.Time
+	capacityWake           chan struct{}
+	capacityCheckMu        sync.Mutex
+	capacityChecks         map[string]capacityCheckState
+	capacityCheckHeartbeat map[string]bool
+	capacityCheckConnected map[string]bool
+	capacityCheckRefresh   map[string]bool
+	startedAt              time.Time
+	capacityStartedAt      time.Time
+	capacityAccountID      string
+	quotaKey               []byte // Tenant HMAC key, memory only; never passed to a child.
+	signalsPublished       map[string]AccountSignals
+	statuslineMu           sync.Mutex
+	statuslinePlans        map[string]statuslinePlan
+	statuslineEnabled      map[string]bool
+	capacityInterval       time.Duration
+	capacityLast           map[string]time.Time
+	capacitySaved          map[string]time.Time
+	capacityAttempt        map[string]time.Time
+	capacityCapturing      bool
+	maxTokens, maxTurns    int64
+	profilePermissions     map[string]bool
+	harnessFailed          map[string]bool
+	dispatchMu             contextMutex
+	state                  *agentsetup.Store
+	closing                bool
+	blockedAccounts        map[string]bool
+	probedAccounts         map[string]bool
+	accountBilling         map[string]string
+	probePendingSince      map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
+	pollDiagnostic         func(string)
+	pollDiagnosticMu       sync.Mutex
+	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	loginRequired          map[string]bool
+	signInUnverified       map[string]bool
+	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
+	harnessHoldReasons     map[string]string
+	dependencyReasons      map[string]string
+	harnessHolds           map[string]string
+	dependencyErrors       map[string]string
+	mu                     sync.Mutex
+	api                    API
+	journal                *localjournal.Journal[Record]
+	lock                   *os.File
+	adapters               map[string]Adapter
+	runs                   map[string]*owned
+	tenantID               string
+	principalID            string
+	daemonID               string
+	generation             string
+	workspace              string
+	estimates              map[string]int64
+	accounts               []EnrolledAccount
+	heartbeatInterval      time.Duration
+	maxRunDuration         time.Duration
+	prepareScratch         func(string) (string, error)
+	newHarnessID           func() (string, error)
 	// lifetime is the daemon context. Cancelling it ends a clean Codex idle
 	// wait so shutdown does not sit out the wake window. A busy turn is left
 	// to finish; the idle wait is not armed again afterwards.
@@ -238,6 +247,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if c.CapacityInterval == 0 {
 		c.CapacityInterval = 5 * time.Minute
+	}
+	if c.Now == nil {
+		c.Now = time.Now
 	}
 	if c.CapacityInterval < time.Second {
 		return nil, errors.New("invalid capacity interval")
@@ -330,6 +342,11 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+	s.capacityNow = c.Now
+	s.capacityWake = make(chan struct{}, 1)
+	if err := s.loadCapacityChecks(); err != nil {
+		return nil, err
+	}
 	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
 	for _, account := range s.accounts {
 		s.probePendingSince[account.ID] = s.startedAt
@@ -560,7 +577,8 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			delete(s.dependencyErrors, account.ID)
 			delete(s.dependencyReasons, account.ID)
 		}
-		s.blockedAccounts[account.ID] = err != nil || !available
+		captureFailure := s.capacityChecks[account.ID].LastResult
+		s.blockedAccounts[account.ID] = err != nil || !available || captureFailure == "identity_mismatch" || captureFailure == "authentication_failed"
 		s.probedAccounts[account.ID] = err == nil && available
 		delete(s.probePendingSince, account.ID)
 		// Only a confirmed sign-out asks the person to sign in again; a hold or a
@@ -589,6 +607,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 		}
 		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile) || errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
+		s.capacityProbeConnection(account.ID, err == nil && available)
 		if probeErr != nil {
 			failures = append(failures, errors.New("harness failed to start"))
 		}

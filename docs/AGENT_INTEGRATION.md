@@ -833,14 +833,35 @@ This is a capability inventory, not a claim that a login is valid or quota is
 available; a missing observation stays missing. Older daemons without the
 inventory report unavailable rather than an empty successful discovery.
 
-Idle capture follows fresh harness readings and never interrupts a live managed
-run. The default interval is five minutes (`serve --capacity-interval`); failures
-never become a zero-percent reading. Existing Codex app-server readings and
-Claude in-run stream readings remain the source paths from AEON-297.
+Idle checks run at startup, every five minutes (`serve --capacity-interval`), on
+fact expiry/reset, reconnect and Check now. One capture owns the local slot at
+a time and never interrupts a live managed run. Operations have a ten-second
+deadline and bounded owned-process cleanup; unconfirmed cleanup retains the
+local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
+every 30 minutes; the retry deadline survives restart. Check now can request one
+capture before that deadline. Lost manual completions replay the same revision
+and check ID without another capture. A restarted daemon sends a plain heartbeat
+before handling checks, and drops old-generation or expired requests. Consent
+and binding are checked again after capture; the final server write enforces
+revocation. Unknown usage never introduces a start limit; identity mismatch
+remains a hard failure. Recovery execution belongs to admission, not this loop.
+
+Codex idle launch is disabled until release-owned qualification covers the exact
+executable, pinned Node, startup hooks, inherited configuration/tools and process
+termination. A successful fake protocol does not qualify a live executable.
+Qualified captures use only initialize → initialized → account/read →
+account/rateLimits/read, with identity matched before quota is read. Claude idle
+get_usage also remains disabled until qualified. Codex run events and Claude run
+events/statusline continue supplying readings; missing measurements stay unknown.
+Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
+remaining credit unknown, and an unavailable measurement does not invalidate a
+locally configured key. No /credits request or management key is introduced;
+null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
 
 | Harness | Private home binding | Idle fallback |
 | --- | --- | --- |
-| Codex | Registry `home` → `CODEX_HOME` | `account/read` identity check, then `account/rateLimits/read` |
+| Codex | Registry `home` → `CODEX_HOME` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified |
+| Pi (OpenRouter) | Approved local profile | Key cap from `/key`; total balance stays unknown |
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |

@@ -92,3 +92,17 @@ func TestKeyProjectionAndNoRedirect(t *testing.T) {
 		})
 	}
 }
+
+func TestNullKeyCapDoesNotImplyBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/key" {
+			t.Error("broader management credential endpoint requested")
+		}
+		fmt.Fprint(w, `{"data":{"usage":2,"limit":null,"limit_remaining":0}}`)
+	}))
+	defer server.Close()
+	credits, err := (Client{Base: server.URL}).CheckKey(t.Context(), "synthetic-key-value")
+	if err != nil || credits.Limit != nil || credits.Remaining != nil || credits.Usage == nil || *credits.Usage != 2 {
+		t.Fatal("null cap became credit evidence")
+	}
+}

@@ -292,6 +292,12 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 			err = launcherReady(ctx, a.Path, node.Path, piprobe.Environment(home, node.Path))
 			if err == nil {
 				credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+				// A transport/measurement failure says nothing about the locally
+				// configured key's validity. Keep execution health independent;
+				// typed idle checks report the measurement failure separately.
+				if errors.Is(err, openrouter.ErrUnavailable) {
+					err = nil
+				}
 			}
 		} else {
 			provider, err = piprobe.Provider(ctx, a.Path, home, expected, node.Path)
