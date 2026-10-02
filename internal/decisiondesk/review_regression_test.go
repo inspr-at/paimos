@@ -58,7 +58,7 @@ func TestUndecidableQuestionDoesNotStarveAuthorizedQuestion(t *testing.T) {
 	first := f.ask(t, f.otherProject, "paused", []string{otherTicket})
 	second := f.ask(t, f.project, "paused", []string{f.ticket})
 	var role string
-	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'read-question','Read question') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'read_question','Read question') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 		t.Fatal(err)
 	}
 	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'questions.read')`, f.person.TenantID, role)
@@ -86,7 +86,7 @@ func TestUndecidableQuestionDoesNotStarveAuthorizedQuestion(t *testing.T) {
 func TestScopeDeniedApprovalReceivesTerminalSkippedClaim(t *testing.T) {
 	f := setup(t)
 	var role string
-	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'notify-decider','Notify decider') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'notify_decider','Notify decider') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 		t.Fatal(err)
 	}
 	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'approvals.decide')`, f.person.TenantID, role)
@@ -181,17 +181,11 @@ func TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit(t *testing.T) {
 	f := setup(t)
 	f.ask(t, f.project, "paused", []string{f.ticket})
 	item := f.page(t, f.reader, 100, nil).Items[0]
-	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Unrelated project' FROM node_kinds k CROSS JOIN generate_series(1,1000) WHERE k.tenant_id=$1 AND k.slug='project'`, f.person.TenantID)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	f.addUnrelatedProjects(t)
 	if won, err := f.claim(t, f.reader, item); err != nil || !won {
 		t.Fatalf("source claim unnecessarily depends on tenant projection: %t %v", won, err)
 	}
-	err = db.InTenant(db.AllProjects(t.Context(), "current source regression"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(t.Context(), "current source regression"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		current, err := CurrentTx(t.Context(), tx, f.reader, item)
 		if err == nil && !current {
 			t.Fatal("authorized current source was lost")
@@ -201,10 +195,38 @@ func TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (f *fixture) addUnrelatedProjects(t *testing.T) {
+	t.Helper()
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Unrelated project' FROM node_kinds k CROSS JOIN generate_series(1,1000) WHERE k.tenant_id=$1 AND k.slug='project'`, f.person.TenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoverageFailureExplainsLimit(t *testing.T) {
+	f := setup(t)
+	f.addUnrelatedProjects(t)
 	r := httptest.NewRequest("GET", "/api/decision-desk/projection", nil).WithContext(tenant.WithPrincipal(t.Context(), f.reader))
 	w := httptest.NewRecorder()
 	f.mux.ServeHTTP(w, r)
 	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "coverage exceeds 1000 projects") {
 		t.Fatalf("coverage failure is opaque: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProjectionApprovalLabelRetainsScopeWithoutRationale(t *testing.T) {
+	f := setup(t)
+	approval := f.approval(t, f.ticket, time.Now().Add(time.Hour))
+	page := f.page(t, f.person, 100, nil)
+	if len(page.Items) != 1 || page.Items[0].ID != approval {
+		t.Fatal("approval fixture was lost")
+	}
+	if !strings.Contains(page.Items[0].Title, "nodes.write") || strings.Contains(page.Items[0].Title, "Private rationale") {
+		t.Fatalf("approval label lost safe scope context: %q", page.Items[0].Title)
 	}
 }

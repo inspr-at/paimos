@@ -83,7 +83,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
     '../lib/decisionDesk': { loadDeskProjection: async () => {
       paths.push('/decision-desk/projection?limit=100')
       if (options.pendingFailure) throw new APIError(500, 'failed')
-      const items = options.fullQueue ? [{ id: 'question', kind: 'question', title: 'Ordinary question', held: false, href: '/agents?needs=q:question', source: '/api/questions/question' }] : []
+      const items = options.noDecide ? [{ id: 'cannot-decide', kind: 'approval', title: 'Change tickets', held: true, href: '/agents?needs=a:cannot-decide', source: '/agents?needs=a:cannot-decide' }] : options.fullQueue ? [{ id: 'question', kind: 'question', title: 'Ordinary question', held: false, href: '/agents?needs=q:question', source: '/api/questions/question' }] : []
       return { items, counts: { open: options.fullQueue ? 401 : 0, held: 0, chores: 0 }, truncated: !!options.fullQueue }
     } },
     '../components/AppIcon.vue': { __esModule: true, default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
@@ -165,7 +165,6 @@ it('keeps a pending-only detail failure separate from completed logs', async () 
   expect((await mount({ fullQueue: true, detailsFailure: true })).saves).toHaveLength(1)
 })
 
-
 it('keeps unsupported questions out of the briefing until the desk cutover', async () => {
  const { root, paths } = await mount({ fullQueue: true })
  expect(textOf(root)).toContain('Needs you now')
@@ -178,11 +177,14 @@ it('keeps unsupported questions out of the briefing until the desk cutover', asy
 it('never recommends a readable approval the person cannot decide', async () => {
  const { root } = await mount({ noDecide: true })
  expect(textOf(root)).not.toContain('Review me')
+  expect(textOf(root)).not.toContain('Change tickets')
  expect(flatten(root).some(el => el.props['aria-label'] === 'Recommended next step')).toBe(false)
 })
 it('preserves held request body, project label and an app Source link', async () => {
  const { root } = await mount({ humanRequest: true })
  expect(textOf(root)).toContain('Human check · allowed')
  expect(textOf(root)).toContain('Check the merge result')
- expect(flatten(root).filter(el => el.tag === 'a' && textOf(el) === 'Source').every(el => String(el.props.href).startsWith('/agents?needs='))).toBe(true)
+ const sources = flatten(root).filter(el => el.tag === 'a' && textOf(el) === 'Source')
+  expect(sources.length).toBeGreaterThan(0)
+  expect(sources.every(el => String(el.props.href).startsWith('/agents?needs='))).toBe(true)
 })

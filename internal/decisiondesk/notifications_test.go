@@ -175,6 +175,13 @@ func TestHeldRequestCanonicalizationDoesNotRepeatNotice(t *testing.T) {
 	if len(before.Items) != 1 || before.Items[0].ID != held.ID || !before.Items[0].Held {
 		t.Fatal("missing native held request")
 	}
+	var projectKey string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, f.project).Scan(&projectKey); err != nil {
+		t.Fatal(err)
+	}
+	if before.Items[0].Title != "Human request · "+projectKey {
+		t.Fatalf("held request label lost project: %q", before.Items[0].Title)
+	}
 	if won, err := f.claim(t, f.person, before.Items[0]); err != nil || !won {
 		t.Fatal("initial held notice missing", err)
 	}
