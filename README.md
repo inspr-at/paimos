@@ -1508,6 +1508,8 @@ may read, including the project permission and scoped ownership checks.
 
 ## Web workspace
 
+**Settings → Access → Access log** reads the newest 2,000 access changes and says when older changes are omitted. The API keeps its existing ascending `after` pagination; `GET /api/audit?category=access&order=desc` returns newest first, with `next_before` for older pages through `before`. Each page is bounded to 50 events.
+
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
 menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no

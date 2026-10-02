@@ -2871,7 +2871,9 @@ paths:
       summary: Access changes, with names resolved
       parameters:
         - {name: category, in: query, required: true, schema: {type: string, enum: [access]}}
-        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Return events with id greater than this cursor}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: Event id order; asc preserves the existing oldest-first contract}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Return events with id greater than this cursor; only for asc order}
+        - {name: before, in: query, schema: {type: integer, minimum: 0}, description: Return events with id less than this cursor; only for desc order}
       responses:
         '200':
           description: One page of access events
@@ -10569,7 +10571,8 @@ components:
       required: [items, next_after]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/AccessAuditEvent'}}
-        next_after: {type: [integer, 'null']}
+        next_after: {type: [integer, 'null'], description: Cursor for the next asc page; null in desc order}
+        next_before: {type: [integer, 'null'], description: Cursor for the next desc page; present in desc order, null when complete}
     AccessAuditEvent:
       type: object
       required: [id, type, at, actor, subject, project, data]
