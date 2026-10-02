@@ -269,9 +269,7 @@ func TestBStaleKeyCapPersistsAcrossNullChecks(t *testing.T) {
 		t.Helper()
 		bAt(t, &f, at, "g1")
 		fact := ReadinessFactWrite{ResourceID: resource, WindowKey: window, Source: "provider", ObservedAt: at, CreditState: "unknown", Remaining: left}
-		if left != nil {
-			fact.ReadingAt = &at
-		}
+		fact.ReadingAt = &at // A captured null-cap response is still no room evidence.
 		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}}), 200, nil)
 	}
 	report(now, "key_cap", &zero)
@@ -340,7 +338,7 @@ func TestBUnresolvedBalanceSharesRecoveryAcrossPeople(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("readiness projection status %d", code)
 	}
-	if strings.Contains(body, "money_402") || strings.Contains(body, resource) {
+	if strings.Contains(string(body), "money_402") || strings.Contains(string(body), resource) {
 		t.Fatal("shared balance detail crossed the other owner's privacy")
 	}
 	callStatus(t, second.mod, &peer, "", "POST", "/api/agent-accounts/"+other.ID+"/check", requestBody("early", 0), 202, nil)

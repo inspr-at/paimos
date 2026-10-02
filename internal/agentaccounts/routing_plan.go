@@ -314,15 +314,32 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 // bounded backoff. This value is frozen on the stopped run, so polling cannot
 // slide a long-reset handoff into the short-wait branch.
 func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID, runID string, now time.Time) (time.Time, bool, error) {
-	// A stop without a reading from this run retains its bounded backoff;
-	// another run's older reading is not evidence for this stop's reset.
-	var until *time.Time
-	err := tx.QueryRow(ctx, `SELECT max(resets_at) FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2`, accountID, now, runID).Scan(&until)
+	// Retry advice follows the same persisted resource waits as reservation;
+	// another daemon poll cannot restart a one-hour timer or shorten backoff.
+	a, err := getAccount(ctx, tx, accountID)
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	if until != nil {
-		return *until, true, nil
+	facts, err := admissionFacts(ctx, tx, a, now)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var until time.Time
+	known := true
+	for _, f := range facts {
+		if f.StopKind == "named_reset" && f.ResetsAt != nil && f.ResetsAt.After(now) {
+			if f.ResetsAt.After(until) {
+				until = *f.ResetsAt
+			}
+		} else if recoverableFact(f) && f.NextAttemptAt != nil {
+			known = false
+			if f.NextAttemptAt.After(until) {
+				until = *f.NextAttemptAt
+			}
+		}
+	}
+	if !until.IsZero() {
+		return until, known, nil
 	}
 	return now.Add(vendorStopBackoff), false, nil
 }

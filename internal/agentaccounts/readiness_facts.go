@@ -199,8 +199,8 @@ func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFa
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         ON CONFLICT(tenant_id,resource_id,window_key) DO UPDATE SET
         reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,source=EXCLUDED.source,observed_at=EXCLUDED.observed_at,
-        reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.used_percent ELSE EXCLUDED.used_percent END,
-        remaining=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.remaining ELSE EXCLUDED.remaining END,credit_state=CASE WHEN EXCLUDED.reading_at IS NULL AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
+        reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=COALESCE(EXCLUDED.used_percent,account_readiness_facts.used_percent),
+        remaining=COALESCE(EXCLUDED.remaining,account_readiness_facts.remaining),credit_state=CASE WHEN NOT $17 AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
         resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
         stop_kind=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.stop_kind ELSE EXCLUDED.stop_kind END,
         denial_reason=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.denial_reason ELSE EXCLUDED.denial_reason END,

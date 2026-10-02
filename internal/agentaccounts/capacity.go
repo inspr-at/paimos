@@ -825,9 +825,6 @@ func applyCapacityPacing(ctx context.Context, tx pgx.Tx, a Account, windows []Wi
 			continue
 		}
 		ws := s
-		if synthetic(*w) {
-			ws.Reserve, ws.ReservePercent = capacity.ReserveOff, 0
-		}
 		v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute), ResetsAt: w.EndsAt, ReadAt: *w.capacityReadAt, UsedPercent: float64(w.Used), Source: w.capacitySource}
 		p, _, err := readingPacing(ctx, tx, w.AccountID, v, now, ws)
 		if err != nil {
