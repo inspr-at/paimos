@@ -77,6 +77,7 @@ func fix3Pi(t *testing.T, api *checkFixtureAPI, clock *checkClock, handler http.
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	a := NewPiAdapter(path, map[string]string{"local": home})
+	a.probes = map[string]piProbeResult{}
 	a.SetExpectedProviders(map[string]string{"local": "openrouter"})
 	a.OpenRouter = openrouter.Client{Base: server.URL}
 	api.account.Harness = Pi
