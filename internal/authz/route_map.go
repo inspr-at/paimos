@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // PublicRoute marks a matched route that is public. Unknown routes have no
@@ -13,11 +15,23 @@ import (
 // refresh uses the same marker, so it cannot disagree with authorization.
 const PublicRoute = "public"
 
+// AuthenticatedRoute requires a principal resolved by authentication, without
+// a role or key scope. It is reserved for the caller's own identity endpoint.
+const AuthenticatedRoute = "authenticated"
+
 // RoutePermissions declares the permission for each registered API pattern.
 // Customer quote routes accept one of two permissions; the quote handler also
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/queue/{nodeId}/readiness":                                       "nodes.read",
+	"POST /api/queue/{nodeId}/estimate":                                       "nodes.read",
+	"GET /api/queue":                                                          "nodes.read",
+	"POST /api/queue":                                                         "nodes.read",
+	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
+	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
+	"POST /api/queue/reset":                                                   "nodes.read",
+	"POST /api/queue/next":                                                    "nodes.read",
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",
@@ -183,14 +197,17 @@ var RoutePermissions = map[string]string{
 	"GET /api/inbox/stream":                                                  "inbox.read",
 	"GET /api/inbox/targets":                                                 "inbox.read",
 	"GET /api/kinds":                                                         "nodes.read",
+	"GET /api/status/help":                                                   "nodes.read",
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",
 	"GET /api/knowledge/learnings":                                           "knowledge.read",
 	"GET /api/knowledge/resolve":                                             "knowledge.read",
 	"GET /api/knowledge/{id}":                                                "knowledge.read",
-	"GET /api/me":                                                            "profile.read|profile.portal_read",
+	"GET /api/me":                                                            AuthenticatedRoute,
 	"GET /api/me/greeting":                                                   "profile.read|profile.portal_read",
+	"GET /api/me/host-labels":                                                "harness.read",
+	"PUT /api/me/host-labels":                                                "harness.read",
 	"GET /api/me/permissions":                                                "authz.read",
 	"GET /api/me/profile":                                                    "profile.read|profile.portal_read",
 	"GET /api/members":                                                       "members.read",
@@ -499,6 +516,11 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/brand/logo/{variant}":                                                    "settings.manage",
 	"DELETE /api/settings/brand/logo/{variant}":                                                 "settings.manage",
 	"GET /api/brand/logo/{variant}":                                                             "profile.read|profile.portal_read",
+	"GET /api/settings/status-autopilot":                                                        "nodes.read",
+	"PUT /api/settings/status-autopilot":                                                        "settings.manage",
+	"GET /api/projects/{projectId}/status-autopilot":                                            "nodes.read",
+	"PUT /api/projects/{projectId}/status-autopilot":                                            "settings.manage",
+	"GET /api/status-autopilot/changes":                                                         "nodes.read",
 	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/settings/heartbeat-lost":                                                          "settings.manage",
 	"PUT /api/nodes/{nodeId}/live-eta":                                                          "harness.worker",
@@ -521,7 +543,8 @@ func PatternIsPublic(pattern string) bool {
 }
 
 // RequirePattern denies missing declarations. A public declaration leaves the
-// route's own capability or login checks in place. Quote portal declarations
+// route's own capability or login checks in place. An authenticated declaration
+// requires the trusted principal set by authentication. Quote portal declarations
 // allow either staff or customer authority; the handler checks ownership.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	declaration, ok := PermissionForPattern(pattern)
@@ -530,6 +553,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	}
 	if declaration == PublicRoute {
 		return nil
+	}
+	if declaration == AuthenticatedRoute {
+		if p, ok := tenant.PrincipalFrom(ctx); ok && p.ID != "" && p.TenantID != "" {
+			return nil
+		}
+		return ErrForbidden
 	}
 	var denialErr error = ErrForbidden
 	for _, permission := range strings.Split(declaration, "|") {

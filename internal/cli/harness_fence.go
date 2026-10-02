@@ -26,8 +26,13 @@ const (
 	harnessCodexIndex
 	// harnessGrokUsage is <GROK_HOME>/sessions/<enc-cwd>/<session>/usage.json.
 	harnessGrokUsage
+	// harnessGrokSummary supplies only created_at for usage discovery.
+	harnessGrokSummary
 	// harnessCursorUsage is the launcher's stream-json copy <state>/cursor.jsonl.
 	harnessCursorUsage
+	// Metadata captures named exactly after the new vendor, never vendor auth/database files.
+	harnessGeminiUsage
+	harnessOpenCodeUsage
 	// harnessAgentStatus is <worktree>/.agent-status.json.
 	harnessAgentStatus
 	// harnessExplicitStatus is an explicitly selected non-credential JSON file.
@@ -46,6 +51,10 @@ func harnessKindForSource(source string) (harnessFileKind, bool) {
 		return harnessGrokUsage, true
 	case "cursor":
 		return harnessCursorUsage, true
+	case "gemini":
+		return harnessGeminiUsage, true
+	case "opencode":
+		return harnessOpenCodeUsage, true
 	default:
 		return 0, false
 	}
@@ -97,10 +106,17 @@ func resolveHarnessPath(kind harnessFileKind, path string) (string, bool) {
 	case harnessGrokUsage:
 		depth, ok = depthBelow(parts, "sessions")
 		ok = ok && depth >= 1 && depth <= 4 && base == "usage.json"
+	case harnessGrokSummary:
+		depth, ok = depthBelow(parts, "sessions")
+		ok = ok && depth == 3 && base == "summary.json"
 	case harnessCodexIndex:
 		ok = base == "session_index.jsonl"
 	case harnessCursorUsage:
 		ok = base == "cursor.jsonl"
+	case harnessGeminiUsage:
+		ok = base == "gemini.jsonl"
+	case harnessOpenCodeUsage:
+		ok = base == "opencode.jsonl"
 	case harnessAgentStatus:
 		ok = base == ".agent-status.json"
 	case harnessExplicitStatus:

@@ -137,7 +137,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				agentpairing.WriteError(w, err)
 				return
 			}
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || r.URL.Path == "/api/me" && !agentHasScope(p.Scopes, scope) {
+			if scope, controlled := coreAgentScope(r); !controlled || scope == "" {
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
 				} else {
@@ -149,47 +149,45 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		if (kind == credSession || kind == credAgent) && protectedRequest(r) {
 			// SEC4's route table remains the outer agent allowlist. The binding
 			// and the exact route permission are checked inside the tenant.
-			if kind != credAgent || r.Method != http.MethodGet || r.URL.Path != "/api/me" {
-				ctx := authz.BindPool(r.Context(), m.pool)
-				scope := projectScope(r)
-				permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
-				// The workspace binding decides first; it is the whole answer for
-				// every workspace member. A caller without it may still act through
-				// a project binding, in the project the route targets (ADR-003 P2).
-				if errors.Is(permissionErr, authz.ErrForbidden) && scope.ProjectID == "" {
-					resolved, ok, err := authz.ResolveRouteScope(ctx, m.pool, r.Pattern, r.URL.Path)
-					if err != nil {
-						permissionErr = err
-					} else if ok {
-						scope = resolved
-						// A failed project retry must keep the original denial:
-						// its diagnostic must not reveal that the target exists.
-						if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
-							permissionErr = resolvedErr
-						}
+			ctx := authz.BindPool(r.Context(), m.pool)
+			scope := projectScope(r)
+			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+			// The workspace binding decides first; it is the whole answer for
+			// every workspace member. A caller without it may still act through
+			// a project binding, in the project the route targets (ADR-003 P2).
+			if errors.Is(permissionErr, authz.ErrForbidden) && scope.ProjectID == "" {
+				resolved, ok, err := authz.ResolveRouteScope(ctx, m.pool, r.Pattern, r.URL.Path)
+				if err != nil {
+					permissionErr = err
+				} else if ok {
+					scope = resolved
+					// A failed project retry must keep the original denial:
+					// its diagnostic must not reveal that the target exists.
+					if resolvedErr := authz.RequirePattern(ctx, r.Pattern, scope); !errors.Is(resolvedErr, authz.ErrForbidden) {
+						permissionErr = resolvedErr
 					}
 				}
-				ctx = authz.WithRouteScope(ctx, scope)
-				if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
-					parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-					if len(parts) == 5 && parts[2] == p.ID {
-						permissionErr = authz.Require(ctx, "profile.portal_read", authz.Scope{})
-					}
-				}
-				if err := permissionErr; err != nil {
-					if errors.Is(err, authz.ErrForbidden) {
-						if receiptRoute(r) {
-							writeReceiptNotFound(w)
-						} else {
-							authz.WriteForbidden(w, err)
-						}
-					} else {
-						writeInternal(w)
-					}
-					return
-				}
-				r = r.WithContext(ctx)
 			}
+			ctx = authz.WithRouteScope(ctx, scope)
+			if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
+				parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+				if len(parts) == 5 && parts[2] == p.ID {
+					permissionErr = authz.Require(ctx, "profile.portal_read", authz.Scope{})
+				}
+			}
+			if err := permissionErr; err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					if receiptRoute(r) {
+						writeReceiptNotFound(w)
+					} else {
+						authz.WriteForbidden(w, err)
+					}
+				} else {
+					writeInternal(w)
+				}
+				return
+			}
+			r = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -450,6 +448,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.create", true
 		}
 		return scope("work_orders")
+	case "queue":
+		if read {
+			return "nodes.read", true
+		}
+		return "work_orders.read", true
 	case "runs":
 		if read {
 			return "run.read", true

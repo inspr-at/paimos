@@ -162,6 +162,7 @@ export interface PairingView {
   verification_capabilities?: VerificationCapabilities
   verification_helper_version?: string
   agent_compatibility?: AgentCompatibility
+  agent_release?: { version: string }
 }
 
 export interface AgentCompatibility {
@@ -965,7 +966,7 @@ const SETUP_ERROR_COPY: Record<string, string> = {
 }
 
 function harnessDisplayName(harness: string): string {
-  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi' } as Record<string, string>)[harness] ?? harness
+  return ({ claude: 'Claude', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', pi: 'pi', gemini: 'Gemini CLI', opencode: 'OpenCode' } as Record<string, string>)[harness] ?? harness
 }
 
 function verificationRefusalText(item: { harness: string; verification_reason?: string }): string {
@@ -1024,7 +1025,7 @@ function harnessCode(value: unknown): string | undefined {
 const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
 
 function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
-  if (!['claude', 'codex', 'cursor', 'grok', 'pi'].includes(harness)) return
+  if (!['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode'].includes(harness)) return
   // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
   if (PIN_REASONS.includes(reason ?? '')) {
     return harness === 'claude'
@@ -1033,7 +1034,7 @@ function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undef
   }
   if (reason === 'binding_missing') return { kind: 'add_harness', command: `aeon-agentd add-harness --harness ${harness}` }
   if (['harness_failed', 'cli_unavailable', 'profile_permissions', 'probe_timeout', 'probe_failed', 'capacity_timeout'].includes(reason ?? '')) return { kind: 'restart', command: 'aeon-agentd setup' }
-  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
+  if (reason === 'login_required') return { kind: 'login', command: harness === 'claude' ? 'claude auth login' : harness === 'pi' ? 'pi' : harness === 'gemini' ? 'gemini' : harness === 'opencode' ? 'opencode auth login' : `${harness === 'cursor' ? 'cursor-agent' : harness} login` }
 }
 
 /** The repair kind and exact command for one reason; exported for the shared-vocabulary test. */
@@ -1680,7 +1681,7 @@ function parseView(data: unknown): PairingView {
     view.harness_statuses = {}
     // Keep future code tokens visible without inventing readiness. Never carry
     // arbitrary diagnostics into the public computer projection.
-    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode']) {
       const status = harnessCode(statuses[harness])
       if (status) view.harness_statuses[harness] = status
     }
@@ -1688,7 +1689,7 @@ function parseView(data: unknown): PairingView {
   if (record.harness_details != null) {
     const details = asRecord(record.harness_details, 'harness_details')
     view.harness_details = {}
-    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi']) {
+    for (const harness of ['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode']) {
       const raw = details[harness]
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const item = raw as Record<string, unknown>
@@ -1726,6 +1727,11 @@ function parseView(data: unknown): PairingView {
     if (!['compatible', 'update_required', 'protocol_mismatch', 'unknown'].includes(status)) invalid('agent_compatibility.status')
     if (typeof result.action !== 'string' || result.action.length > 500) invalid('agent_compatibility.action')
     view.agent_compatibility = { status: status as AgentCompatibility['status'], action: result.action }
+  }
+  // Advisory: the helper's own version, shown beside the computer's name (AEON-499).
+  if (record.agent_release && typeof record.agent_release === 'object' && !Array.isArray(record.agent_release)) {
+    const version = (record.agent_release as Record<string, unknown>).version
+    if (typeof version === 'string' && /^[\w.+-]{1,64}$/.test(version)) view.agent_release = { version }
   }
   return view
 }

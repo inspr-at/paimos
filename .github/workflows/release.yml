@@ -329,6 +329,9 @@ jobs:
     needs: [image-platform]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Coordinator-provisioned environment restricted to trusted v* releases.
+    # Its App proposes pins on nixcfg only; the coordinator reviews and deploys.
+    environment: release-pinning
     permissions:
       contents: write
       packages: write
@@ -337,6 +340,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       digest: ${{ steps.push.outputs.digest }}
+      pin_evidence: ${{ steps.pin.outputs.pin_evidence }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -397,6 +401,7 @@ jobs:
           node scripts/release-image-index.mjs verify "$RUNNER_TEMP/image-index.json"
           docker buildx imagetools create --tag "ghcr.io/inspr-at/aeon:${VERSION}" \
             --metadata-file "$RUNNER_TEMP/image-index-metadata.json" "${sources[@]}"
+          echo "pushed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           digest="$(jq -er '."containerimage.descriptor".digest' "$RUNNER_TEMP/image-index-metadata.json")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           docker buildx imagetools inspect --raw "ghcr.io/inspr-at/aeon@$digest" > "$RUNNER_TEMP/published-index.json"
@@ -433,6 +438,31 @@ jobs:
             echo
             echo "ghcr.io/inspr-at/aeon@${DIGEST}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Optional proposal: failures remain visible without blocking agent assets.
+      # --write is an explicit coordinator opt-in; otherwise produce a dry run.
+      - name: Propose verified nixcfg deployment pin
+        id: pin
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          AEON_PIN_BOT_ENABLED: ${{ vars.AEON_PIN_BOT_ENABLED }}
+          AEON_PIN_APP_ID: ${{ secrets.AEON_PIN_APP_ID }}
+          AEON_PIN_APP_KEY: ${{ secrets.AEON_PIN_APP_KEY }}
+          INDEX_PUSHED_AT: ${{ steps.push.outputs.pushed_at }}
+        run: |
+          set -euo pipefail
+          args=(scripts/release-pin-pr.mjs)
+          if [ "$AEON_PIN_BOT_ENABLED" = true ]; then
+            args+=(--write)
+          fi
+          if ! node "${args[@]}"; then
+            echo '::warning::Deployment pin proposal failed; release assets will still be built.'
+            echo 'Deployment pin proposal failed; release assets will still be built.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
   assets:
     needs: [agentd-darwin, image]
@@ -500,6 +530,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.image.outputs.version }}
           DIGEST: ${{ needs.image.outputs.digest }}
+          PIN_EVIDENCE: ${{ needs.image.outputs.pin_evidence }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
@@ -511,7 +542,9 @@ jobs:
             "Verify SHA256SUMS before installing." \
             "" \
             "Container: ghcr.io/inspr-at/aeon:${VERSION}" \
-            "Digest: ${DIGEST}")"
+            "Digest: ${DIGEST}" \
+            "" \
+            "$PIN_EVIDENCE")"
           gh release create "$tag" \
             dist/paimos-agentd-darwin-arm64 \
             dist/paimos-agentd-darwin-amd64 \

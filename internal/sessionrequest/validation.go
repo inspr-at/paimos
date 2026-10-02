@@ -6,6 +6,8 @@ package sessionrequest
 import (
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 var (
@@ -28,6 +30,11 @@ func ValidModel(harness, model, effort string) bool {
 		return effort == "low" || effort == "medium" || effort == "high" || effort == "xhigh"
 	case "cursor":
 		return effort == "default" || effort == "low" || effort == "medium" || effort == "high" || effort == "xhigh"
+	case "gemini":
+		_, err := harnesslaunch.GeminiBudgetForModel(model, effort)
+		return err == nil
+	case "opencode":
+		return strings.Contains(model, "/") && len(effort) <= 32 && modelPattern.MatchString(effort)
 	default:
 		return false
 	}

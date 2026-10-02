@@ -63,7 +63,7 @@ func ValidRepository(s string) bool {
 	return true
 }
 func ValidFamily(s string) bool {
-	return s == "openai" || s == "anthropic" || s == "xai" || s == "cursor"
+	return s == "openai" || s == "anthropic" || s == "xai" || s == "cursor" || s == "google" || s == "local"
 }
 
 // Parse accepts only the final nonempty verdict line. Earlier verdicts in

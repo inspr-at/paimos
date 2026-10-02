@@ -17,10 +17,10 @@ test('statuses read the same in every spelling and carry product labels', () => 
   assert.equal(statusMeta('open').closed, false)
   assert.equal(statusMeta('blocked').label, 'Blocked')
   assert.equal(statusMeta('blocked').closed, false)
-  assert.ok(statusMeta('open').order < statusMeta('new').order)
+  assert.ok(statusMeta('new').order < statusMeta('backlog').order && statusMeta('backlog').order < statusMeta('open').order)
   assert.ok(statusMeta('blocked').order > statusMeta('backlog').order)
   assert.ok(statusMeta('blocked').order < statusMeta('in_progress').order)
-  assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'blocked', 'in-progress', 'qa', 'accepted', 'delivered', 'done', 'cancelled'])
+  assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'open', 'blocked', 'in-progress', 'qa', 'done', 'delivered', 'accepted', 'cancelled', 'archived'])
   assert.equal(statusOptions([]).find(o => o.meta.key === 'progress')!.value, 'in_progress')
 })
 
@@ -84,7 +84,7 @@ test('list state round-trips through the URL and maps onto the list API', () => 
 
 test('facet options merge spellings and count once', () => {
   const status = facetOptions('status', { 'in-progress': 9, new: 1, backlog: 8 })
-  assert.deepEqual(status.slice(0, 4).map(o => [o.value, o.count]), [['new', 1], ['backlog', 8], ['blocked', 0], ['in-progress', 9]])
+  assert.deepEqual(status.slice(0, 5).map(o => [o.value, o.count]), [['new', 1], ['backlog', 8], ['open', 0], ['blocked', 0], ['in-progress', 9]])
   const people = facetOptions('assignee', { none: 3, b: 1, a: 5 }, [], new Map([['a', 'Ana'], ['b', 'Ben']]), 'b')
   assert.deepEqual(people.map(o => o.label), ['Unassigned', 'Ben', 'Ana'])
   assert.equal(totalFrom({ kind: { epic: 2, ticket: 19, task: 5 } }), 26)
@@ -97,9 +97,9 @@ function row(id: string, state: string, kind = 'ticket', parent: ListItem['paren
 
 test('status order and grouping follow the workflow, epics collect their tickets', () => {
   const rows = [row('a', 'qa'), row('b', 'in-progress'), row('c', 'new'), row('d', 'backlog'), row('e', 'done'), row('f', 'accepted'), row('g', 'delivered'), row('h', 'in_progress')]
-  assert.deepEqual(orderByStatus(rows).map(r => r.id), ['c', 'd', 'b', 'h', 'a', 'f', 'g', 'e'])
+  assert.deepEqual(orderByStatus(rows).map(r => r.id), ['c', 'd', 'b', 'h', 'a', 'e', 'g', 'f'])
   assert.deepEqual(orderByStatus([row('k', 'blocked'), row('d', 'backlog'), row('b', 'in-progress')]).map(r => r.id), ['d', 'k', 'b'])
-  assert.deepEqual(groupRows(rows, 'status', { 'in-progress': 4 }).map(g => [g.label, g.total]), [['New', 1], ['Backlog', 1], ['In progress', 4], ['QA', 1], ['Accepted', 1], ['Delivered', 1], ['Done', 1]])
+  assert.deepEqual(groupRows(rows, 'status', { 'in-progress': 4 }).map(g => [g.label, g.total]), [['New', 1], ['Backlog', 1], ['In progress', 4], ['QA', 1], ['Done', 1], ['Delivered', 1], ['Accepted', 1]])
   const epic = row('e', 'backlog', 'epic')
   const ticket = row('t', 'new', 'ticket', { id: 'e', key: 'E', title: 'e', kind_slug: 'epic' })
   const task = row('k', 'qa', 'task', { id: 't', key: 'T', title: 't', kind_slug: 'ticket' })

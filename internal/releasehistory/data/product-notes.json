@@ -3682,6 +3682,497 @@
           "group": "features"
         }
       ]
+    },
+    "261001205522.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 116,
+      "snapshot_sha256": "28476f0ca8f9abb1997e42cb22f0282c4abf519b76a5403e820dabd07b276850",
+      "captured_at": "2026-10-01T21:11:15Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-491",
+          "pill_en": "Local AI models",
+          "pill_de": "Lokale KI-Modelle",
+          "benefit_en": "In-app AI can run on your own local model, for example Ollama.",
+          "benefit_de": "Die KI in der App kann auf Ihrem eigenen lokalen Modell laufen, etwa Ollama.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-493",
+          "pill_en": "No outbound calls",
+          "pill_de": "Keine ausgehenden Verbindungen",
+          "benefit_en": "Aeon makes no calls to outside servers, and the agent tells you exactly when it needs an update.",
+          "benefit_de": "Aeon ruft keine externen Server auf, und der Agent sagt genau, wann er ein Update braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-499",
+          "pill_en": "Clear account status",
+          "pill_de": "Klarer Kontostatus",
+          "benefit_en": "You see at a glance which computer and which account can work right now, and what to do if not.",
+          "benefit_de": "Sie sehen auf einen Blick, welcher Computer und welches Konto jetzt arbeiten kann, und was sonst zu tun ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-500",
+          "pill_en": "Calmer everyday interface",
+          "pill_de": "Ruhigere Alltagsoberfläche",
+          "benefit_en": "Features that are not fully tested stay hidden unless you deliberately turn them on in Developer settings.",
+          "benefit_de": "Nicht vollständig getestete Funktionen bleiben verborgen, bis Sie sie bewusst in den Entwicklereinstellungen einschalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-503",
+          "pill_en": "Estimates from measurements",
+          "pill_de": "Schätzungen aus Messwerten",
+          "benefit_en": "Estimates and ETAs are based on how long similar work actually took with each model.",
+          "benefit_de": "Schätzungen und Restzeiten beruhen darauf, wie lange ähnliche Arbeit mit jedem Modell tatsächlich gedauert hat.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-504",
+          "pill_en": "Runs on ARM servers",
+          "pill_de": "Läuft auf ARM-Servern",
+          "benefit_en": "You can run Aeon on ARM servers and Apple-silicon machines without emulation.",
+          "benefit_de": "Sie können Aeon ohne Emulation auf ARM-Servern und Apple-Silicon-Rechnern betreiben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-505",
+          "pill_en": "Clear approval feedback",
+          "pill_de": "Klare Freigabe-Rückmeldung",
+          "benefit_en": "When you approve or deny an agent request, you see it confirmed and the list settles smoothly.",
+          "benefit_de": "Wenn Sie eine Agentenanfrage freigeben oder ablehnen, sehen Sie die Bestätigung, und die Liste ordnet sich ruhig neu.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-509",
+          "pill_en": "One-step session attach",
+          "pill_de": "Sitzung mit einem Schritt",
+          "benefit_en": "Linking a running agent session to its ticket takes one click and a Touch ID, with no typed ids or copied links.",
+          "benefit_de": "Eine laufende Agentensitzung wird mit einem Klick und Touch ID ihrem Ticket zugeordnet, ohne IDs abzutippen oder Links zu kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-510",
+          "pill_en": "Common SVG logos upload",
+          "pill_de": "Übliche SVG-Logos funktionieren",
+          "benefit_en": "Logos exported from Figma, Illustrator or Inkscape upload as they are, while the logo upload still blocks anything that could run code.",
+          "benefit_de": "Aus Figma, Illustrator oder Inkscape exportierte Logos lassen sich direkt hochladen; alles, was Code ausführen könnte, bleibt weiterhin gesperrt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-511",
+          "pill_en": "Estimates versus real numbers",
+          "pill_de": "Schätzung oder echter Wert",
+          "benefit_en": "Every token, cost and model value in the ticket list shows whether it is an estimate or measured, and a hover shows the other value and how far the estimate was off.",
+          "benefit_de": "Jeder Token-, Kosten- und Modellwert in der Ticketliste zeigt, ob er geschätzt oder gemessen ist; beim Überfahren sehen Sie den anderen Wert und die Abweichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-512",
+          "pill_en": "Demo shows agent history",
+          "pill_de": "Demo zeigt Agentenverlauf",
+          "benefit_en": "The demo's showcase ticket shows people and agents working in one history.",
+          "benefit_de": "Das Vorzeigeticket der Demo zeigt Menschen und Agenten in einem gemeinsamen Verlauf.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-513",
+          "pill_en": "Graph focus everywhere",
+          "pill_de": "Graph-Fokus überall",
+          "benefit_en": "Focus on the ticket graph works in every browser and can be opened directly from a link.",
+          "benefit_de": "Der Fokus auf den Ticket-Graphen funktioniert in jedem Browser und lässt sich direkt per Link öffnen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-514",
+          "pill_en": "Live list stays current",
+          "pill_de": "Liste bleibt aktuell",
+          "benefit_en": "The ticket list shows what your agents are doing right now, without reloading the page.",
+          "benefit_de": "Die Ticketliste zeigt ohne Neuladen, was Ihre Agenten gerade tun.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-516",
+          "pill_en": "Easier least-privilege keys",
+          "pill_de": "Einfachere sichere Schlüssel",
+          "benefit_en": "Creating a key for an agent that only works on tickets takes one preset and a suggested role, with every permission searchable by name or id.",
+          "benefit_de": "Ein Schlüssel für einen Agenten, der nur an Tickets arbeitet, entsteht mit einer Vorlage und einer vorgeschlagenen Rolle; jede Berechtigung ist nach Name oder Kennung durchsuchbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-519",
+          "pill_en": "Doctor passes project agents",
+          "pill_de": "Doctor für jeden Agenten",
+          "benefit_en": "Agents limited to one project pass the health check instead of reporting a false permission error.",
+          "benefit_de": "Agenten mit Zugriff auf nur ein Projekt bestehen die Prüfung, statt einen falschen Berechtigungsfehler zu melden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-521",
+          "pill_en": "Tracker updates itself",
+          "pill_de": "Tracker pflegt sich selbst",
+          "benefit_en": "After each release, shipped tickets close themselves, month-old deliveries are accepted, and stale tickets are flagged with a reason.",
+          "benefit_de": "Nach jedem Release schließen sich ausgelieferte Tickets selbst, Lieferungen nach einem Monat gelten als abgenommen, und veraltete Tickets werden mit Begründung markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-523",
+          "pill_en": "Classic colleagues can join",
+          "pill_de": "Classic-Kollegen kommen rein",
+          "benefit_en": "Colleagues who used classic PMA can be invited and sign in, and their earlier history shows under their name.",
+          "benefit_de": "Kolleginnen und Kollegen aus dem klassischen PMA lassen sich einladen und anmelden; ihr bisheriger Verlauf erscheint unter ihrem Namen.",
+          "group": "features"
+        }
+      ]
+    },
+    "261001230453.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 117,
+      "snapshot_sha256": "f1fef76d6242745e04d903f317e47abc9ef14dfa0aab28ca9a543853f2890db9",
+      "captured_at": "2026-10-01T23:30:53Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-491",
+          "pill_en": "Local AI models",
+          "pill_de": "Lokale KI-Modelle",
+          "benefit_en": "In-app AI can run on your own local model, for example Ollama.",
+          "benefit_de": "Die KI in der App kann auf Ihrem eigenen lokalen Modell laufen, etwa Ollama.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-493",
+          "pill_en": "No outbound calls",
+          "pill_de": "Keine ausgehenden Verbindungen",
+          "benefit_en": "Aeon makes no calls to outside servers, and the agent tells you exactly when it needs an update.",
+          "benefit_de": "Aeon ruft keine externen Server auf, und der Agent sagt genau, wann er ein Update braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-499",
+          "pill_en": "Clear account status",
+          "pill_de": "Klarer Kontostatus",
+          "benefit_en": "You see at a glance which computer and which account can work right now, and what to do if not.",
+          "benefit_de": "Sie sehen auf einen Blick, welcher Computer und welches Konto jetzt arbeiten kann, und was sonst zu tun ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-500",
+          "pill_en": "Calmer everyday interface",
+          "pill_de": "Ruhigere Alltagsoberfläche",
+          "benefit_en": "Features that are not fully tested stay hidden unless you deliberately turn them on in Developer settings.",
+          "benefit_de": "Nicht vollständig getestete Funktionen bleiben verborgen, bis Sie sie bewusst in den Entwicklereinstellungen einschalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-503",
+          "pill_en": "Estimates from measurements",
+          "pill_de": "Schätzungen aus Messwerten",
+          "benefit_en": "Estimates and ETAs are based on how long similar work actually took with each model.",
+          "benefit_de": "Schätzungen und Restzeiten beruhen darauf, wie lange ähnliche Arbeit mit jedem Modell tatsächlich gedauert hat.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-504",
+          "pill_en": "Runs on ARM servers",
+          "pill_de": "Läuft auf ARM-Servern",
+          "benefit_en": "You can run Aeon on ARM servers and Apple-silicon machines without emulation.",
+          "benefit_de": "Sie können Aeon ohne Emulation auf ARM-Servern und Apple-Silicon-Rechnern betreiben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-505",
+          "pill_en": "Clear approval feedback",
+          "pill_de": "Klare Freigabe-Rückmeldung",
+          "benefit_en": "When you approve or deny an agent request, you see it confirmed and the list settles smoothly.",
+          "benefit_de": "Wenn Sie eine Agentenanfrage freigeben oder ablehnen, sehen Sie die Bestätigung, und die Liste ordnet sich ruhig neu.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-509",
+          "pill_en": "One-step session attach",
+          "pill_de": "Sitzung mit einem Schritt",
+          "benefit_en": "Linking a running agent session to its ticket takes one click and a Touch ID, with no typed ids or copied links.",
+          "benefit_de": "Eine laufende Agentensitzung wird mit einem Klick und Touch ID ihrem Ticket zugeordnet, ohne IDs abzutippen oder Links zu kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-510",
+          "pill_en": "Common SVG logos upload",
+          "pill_de": "Übliche SVG-Logos funktionieren",
+          "benefit_en": "Logos exported from Figma, Illustrator or Inkscape upload as they are, while the logo upload still blocks anything that could run code.",
+          "benefit_de": "Aus Figma, Illustrator oder Inkscape exportierte Logos lassen sich direkt hochladen; alles, was Code ausführen könnte, bleibt weiterhin gesperrt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-511",
+          "pill_en": "Estimates versus real numbers",
+          "pill_de": "Schätzung oder echter Wert",
+          "benefit_en": "Every token, cost and model value in the ticket list shows whether it is an estimate or measured, and a hover shows the other value and how far the estimate was off.",
+          "benefit_de": "Jeder Token-, Kosten- und Modellwert in der Ticketliste zeigt, ob er geschätzt oder gemessen ist; beim Überfahren sehen Sie den anderen Wert und die Abweichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-512",
+          "pill_en": "Demo shows agent history",
+          "pill_de": "Demo zeigt Agentenverlauf",
+          "benefit_en": "The demo's showcase ticket shows people and agents working in one history.",
+          "benefit_de": "Das Vorzeigeticket der Demo zeigt Menschen und Agenten in einem gemeinsamen Verlauf.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-513",
+          "pill_en": "Graph focus everywhere",
+          "pill_de": "Graph-Fokus überall",
+          "benefit_en": "Focus on the ticket graph works in every browser and can be opened directly from a link.",
+          "benefit_de": "Der Fokus auf den Ticket-Graphen funktioniert in jedem Browser und lässt sich direkt per Link öffnen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-514",
+          "pill_en": "Live list stays current",
+          "pill_de": "Liste bleibt aktuell",
+          "benefit_en": "The ticket list shows what your agents are doing right now, without reloading the page.",
+          "benefit_de": "Die Ticketliste zeigt ohne Neuladen, was Ihre Agenten gerade tun.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-515",
+          "pill_en": "Release pill back right",
+          "pill_de": "Release-Anzeige wieder rechts",
+          "benefit_en": "The running release, its version and how many releases are new sit together again at the bottom right.",
+          "benefit_de": "Aktuelles Release, Version und Anzahl neuer Releases stehen wieder gemeinsam unten rechts.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-516",
+          "pill_en": "Easier least-privilege keys",
+          "pill_de": "Einfachere sichere Schlüssel",
+          "benefit_en": "Creating a key for an agent that only works on tickets takes one preset and a suggested role, with every permission searchable by name or id.",
+          "benefit_de": "Ein Schlüssel für einen Agenten, der nur an Tickets arbeitet, entsteht mit einer Vorlage und einer vorgeschlagenen Rolle; jede Berechtigung ist nach Name oder Kennung durchsuchbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-517",
+          "pill_en": "Paste scopes, not guesswork",
+          "pill_de": "Scopes per Code einfügen",
+          "benefit_en": "An agent tells you exactly which permissions it needs as one code you paste into the key dialog, and errors name any permission still missing.",
+          "benefit_de": "Ein Agent nennt die nötigen Berechtigungen als einen Code zum Einfügen in den Schlüsseldialog, und Fehlermeldungen nennen fehlende Berechtigungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-519",
+          "pill_en": "Doctor passes project agents",
+          "pill_de": "Doctor für jeden Agenten",
+          "benefit_en": "Agents limited to one project pass the health check instead of reporting a false permission error.",
+          "benefit_de": "Agenten mit Zugriff auf nur ein Projekt bestehen die Prüfung, statt einen falschen Berechtigungsfehler zu melden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-521",
+          "pill_en": "Tracker updates itself",
+          "pill_de": "Tracker pflegt sich selbst",
+          "benefit_en": "After each release, shipped tickets close themselves, month-old deliveries are accepted, and stale tickets are flagged with a reason.",
+          "benefit_de": "Nach jedem Release schließen sich ausgelieferte Tickets selbst, Lieferungen nach einem Monat gelten als abgenommen, und veraltete Tickets werden mit Begründung markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-523",
+          "pill_en": "Classic colleagues can join",
+          "pill_de": "Classic-Kollegen kommen rein",
+          "benefit_en": "Colleagues who used classic PMA can be invited and sign in, and their earlier history shows under their name.",
+          "benefit_de": "Kolleginnen und Kollegen aus dem klassischen PMA lassen sich einladen und anmelden; ihr bisheriger Verlauf erscheint unter ihrem Namen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-526",
+          "pill_en": "Releases finish reliably",
+          "pill_de": "Releases laufen zuverlässig durch",
+          "benefit_en": "A release always produces its agent downloads and notes, even when the optional deployment pin proposal fails.",
+          "benefit_de": "Ein Release erzeugt immer seine Agenten-Downloads und Notizen, auch wenn der optionale Vorschlag für den Deployment-Pin scheitert.",
+          "group": "features"
+        }
+      ]
+    },
+    "261002004358.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 118,
+      "snapshot_sha256": "8ae53a67b9ef9e774126c2db1d78dff7989ae9ae872509be983cbe69148bb3d6",
+      "captured_at": "2026-10-02T01:02:33Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-491",
+          "pill_en": "Local AI models",
+          "pill_de": "Lokale KI-Modelle",
+          "benefit_en": "In-app AI can run on your own local model, for example Ollama.",
+          "benefit_de": "Die KI in der App kann auf Ihrem eigenen lokalen Modell laufen, etwa Ollama.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-493",
+          "pill_en": "No outbound calls",
+          "pill_de": "Keine ausgehenden Verbindungen",
+          "benefit_en": "Aeon makes no calls to outside servers, and the agent tells you exactly when it needs an update.",
+          "benefit_de": "Aeon ruft keine externen Server auf, und der Agent sagt genau, wann er ein Update braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-499",
+          "pill_en": "Clear account status",
+          "pill_de": "Klarer Kontostatus",
+          "benefit_en": "You see at a glance which computer and which account can work right now, and what to do if not.",
+          "benefit_de": "Sie sehen auf einen Blick, welcher Computer und welches Konto jetzt arbeiten kann, und was sonst zu tun ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-500",
+          "pill_en": "Calmer everyday interface",
+          "pill_de": "Ruhigere Alltagsoberfläche",
+          "benefit_en": "Features that are not fully tested stay hidden unless you deliberately turn them on in Developer settings.",
+          "benefit_de": "Nicht vollständig getestete Funktionen bleiben verborgen, bis Sie sie bewusst in den Entwicklereinstellungen einschalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-503",
+          "pill_en": "Estimates from measurements",
+          "pill_de": "Schätzungen aus Messwerten",
+          "benefit_en": "Estimates and ETAs are based on how long similar work actually took with each model.",
+          "benefit_de": "Schätzungen und Restzeiten beruhen darauf, wie lange ähnliche Arbeit mit jedem Modell tatsächlich gedauert hat.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-504",
+          "pill_en": "Runs on ARM servers",
+          "pill_de": "Läuft auf ARM-Servern",
+          "benefit_en": "You can run Aeon on ARM servers and Apple-silicon machines without emulation.",
+          "benefit_de": "Sie können Aeon ohne Emulation auf ARM-Servern und Apple-Silicon-Rechnern betreiben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-505",
+          "pill_en": "Clear approval feedback",
+          "pill_de": "Klare Freigabe-Rückmeldung",
+          "benefit_en": "When you approve or deny an agent request, you see it confirmed and the list settles smoothly.",
+          "benefit_de": "Wenn Sie eine Agentenanfrage freigeben oder ablehnen, sehen Sie die Bestätigung, und die Liste ordnet sich ruhig neu.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-509",
+          "pill_en": "One-step session attach",
+          "pill_de": "Sitzung mit einem Schritt",
+          "benefit_en": "Linking a running agent session to its ticket takes one click and a Touch ID, with no typed ids or copied links.",
+          "benefit_de": "Eine laufende Agentensitzung wird mit einem Klick und Touch ID ihrem Ticket zugeordnet, ohne IDs abzutippen oder Links zu kopieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-510",
+          "pill_en": "Common SVG logos upload",
+          "pill_de": "Übliche SVG-Logos funktionieren",
+          "benefit_en": "Logos exported from Figma, Illustrator or Inkscape upload as they are, while the logo upload still blocks anything that could run code.",
+          "benefit_de": "Aus Figma, Illustrator oder Inkscape exportierte Logos lassen sich direkt hochladen; alles, was Code ausführen könnte, bleibt weiterhin gesperrt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-511",
+          "pill_en": "Estimates versus real numbers",
+          "pill_de": "Schätzung oder echter Wert",
+          "benefit_en": "Every token, cost and model value in the ticket list shows whether it is an estimate or measured, and a hover shows the other value and how far the estimate was off.",
+          "benefit_de": "Jeder Token-, Kosten- und Modellwert in der Ticketliste zeigt, ob er geschätzt oder gemessen ist; beim Überfahren sehen Sie den anderen Wert und die Abweichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-512",
+          "pill_en": "Demo shows agent history",
+          "pill_de": "Demo zeigt Agentenverlauf",
+          "benefit_en": "The demo's showcase ticket shows people and agents working in one history.",
+          "benefit_de": "Das Vorzeigeticket der Demo zeigt Menschen und Agenten in einem gemeinsamen Verlauf.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-513",
+          "pill_en": "Graph focus everywhere",
+          "pill_de": "Graph-Fokus überall",
+          "benefit_en": "Focus on the ticket graph works in every browser and can be opened directly from a link.",
+          "benefit_de": "Der Fokus auf den Ticket-Graphen funktioniert in jedem Browser und lässt sich direkt per Link öffnen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-514",
+          "pill_en": "Live list stays current",
+          "pill_de": "Liste bleibt aktuell",
+          "benefit_en": "The ticket list shows what your agents are doing right now, without reloading the page.",
+          "benefit_de": "Die Ticketliste zeigt ohne Neuladen, was Ihre Agenten gerade tun.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-515",
+          "pill_en": "Release pill back right",
+          "pill_de": "Release-Anzeige wieder rechts",
+          "benefit_en": "The running release, its version and how many releases are new sit together again at the bottom right.",
+          "benefit_de": "Aktuelles Release, Version und Anzahl neuer Releases stehen wieder gemeinsam unten rechts.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-516",
+          "pill_en": "Easier least-privilege keys",
+          "pill_de": "Einfachere sichere Schlüssel",
+          "benefit_en": "Creating a key for an agent that only works on tickets takes one preset and a suggested role, with every permission searchable by name or id.",
+          "benefit_de": "Ein Schlüssel für einen Agenten, der nur an Tickets arbeitet, entsteht mit einer Vorlage und einer vorgeschlagenen Rolle; jede Berechtigung ist nach Name oder Kennung durchsuchbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-517",
+          "pill_en": "Paste scopes, not guesswork",
+          "pill_de": "Scopes per Code einfügen",
+          "benefit_en": "An agent tells you exactly which permissions it needs as one code you paste into the key dialog, and errors name any permission still missing.",
+          "benefit_de": "Ein Agent nennt die nötigen Berechtigungen als einen Code zum Einfügen in den Schlüsseldialog, und Fehlermeldungen nennen fehlende Berechtigungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-519",
+          "pill_en": "Doctor passes project agents",
+          "pill_de": "Doctor für jeden Agenten",
+          "benefit_en": "Agents limited to one project pass the health check instead of reporting a false permission error.",
+          "benefit_de": "Agenten mit Zugriff auf nur ein Projekt bestehen die Prüfung, statt einen falschen Berechtigungsfehler zu melden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-521",
+          "pill_en": "Tracker updates itself",
+          "pill_de": "Tracker pflegt sich selbst",
+          "benefit_en": "After each release, shipped tickets close themselves, month-old deliveries are accepted, and stale tickets are flagged with a reason.",
+          "benefit_de": "Nach jedem Release schließen sich ausgelieferte Tickets selbst, Lieferungen nach einem Monat gelten als abgenommen, und veraltete Tickets werden mit Begründung markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-523",
+          "pill_en": "Classic colleagues can join",
+          "pill_de": "Classic-Kollegen kommen rein",
+          "benefit_en": "Colleagues who used classic PMA can be invited and sign in, and their earlier history shows under their name.",
+          "benefit_de": "Kolleginnen und Kollegen aus dem klassischen PMA lassen sich einladen und anmelden; ihr bisheriger Verlauf erscheint unter ihrem Namen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-526",
+          "pill_en": "Releases finish reliably",
+          "pill_de": "Releases laufen zuverlässig durch",
+          "benefit_en": "A release always produces its agent downloads and notes, even when the optional deployment pin proposal fails.",
+          "benefit_de": "Ein Release erzeugt immer seine Agenten-Downloads und Notizen, auch wenn der optionale Vorschlag für den Deployment-Pin scheitert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-527",
+          "pill_en": "Release images build reliably",
+          "pill_de": "Release-Images bauen zuverlässig",
+          "benefit_en": "Every release produces its server image even when the web app shares data files with the server.",
+          "benefit_de": "Jedes Release erzeugt sein Server-Image, auch wenn die Web-App Datendateien mit dem Server teilt.",
+          "group": "features"
+        }
+      ]
     }
   }
 }

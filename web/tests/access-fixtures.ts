@@ -30,7 +30,10 @@ export const REGISTRY = [
   P('nodes.read', 'Work', 'See projects, tickets and their history', 'low'),
   P('nodes.write', 'Work', 'Create and edit tickets, move them and change their status', 'medium'),
   P('nodes.delete', 'Work', 'Delete tickets and projects', 'high'),
+  P('comments.read', 'Work', 'Read ticket comments', 'low'),
   P('comments.write', 'Work', 'Comment on tickets', 'low'),
+  P('events.read', 'History', 'Read ticket activity and history', 'low'),
+  P('search.read', 'Search', 'Search projects and tickets you may read', 'low'),
   P('knowledge.read', 'Knowledge', 'Read runbooks, guidelines and memories', 'low'),
   P('knowledge.write', 'Knowledge', 'Write and change knowledge entries', 'medium'),
   P('quotes.read', 'Business', 'See quotes and customers', 'low'),
@@ -51,7 +54,7 @@ export const REGISTRY = [
   P('portal.quotes', 'Customer portal', 'See and accept their own quotes', 'low', false),
 ]
 const ALL = REGISTRY.map(p => p.key)
-const MEMBER = ['nodes.read', 'nodes.write', 'comments.write', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
+const MEMBER = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
 export interface MockRole { id: string; key: string; name: string; description: string; builtin: boolean; permissions: string[]; based_on: string | null }
 const builtin = (key: string, name: string, description: string, permissions: string[]): MockRole => ({ id: `role-${key}`, key, name, description, builtin: true, permissions, based_on: null })
 export function roles(): MockRole[] {
@@ -72,7 +75,7 @@ export interface AccessWorld {
   roles: MockRole[]
   people: { principal_id: string; name: string; avatar_url: string | null; email: string | null; status: 'active' | 'deactivated'; identity: 'inspr_id' | null; workspace_role: string | null; aliases: { principal_id: string; name: string; source: 'classic' }[]; classic_role: string | null; last_active_at: string | null }[]
   agents: { description?: string; principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean; status?: 'active' | 'deactivated'; connected_computer?: boolean; paired_computer?: boolean }[]
-  imported: { principal_id: string; name: string; classic_role: string | null }[]
+  imported: { principal_id: string; name: string; classic_role: string | null; email?: string }[]
   bindings: { principal_id: string; project_id: string; role_id: string }[]
   invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
   keys: { id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
@@ -254,7 +257,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     if (path === '/api/members' && method === 'GET') {
       if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members to see who is here.')
       // Like internal/authz/members.go: imported classic identities appear in people as well as in imported.
-      const importedPeople = world.imported.map(i => ({ principal_id: i.principal_id, name: i.name, avatar_url: null, has_avatar: false, email: null, status: 'active', identity: null, workspace_role: null, project_roles: [], aliases: [], classic_role: i.classic_role, last_active_at: null, last_owner: false }))
+      const importedPeople = world.imported.map(i => ({ principal_id: i.principal_id, name: i.name, avatar_url: null, has_avatar: false, email: i.email ?? null, status: 'active', identity: null, workspace_role: null, project_roles: [], aliases: [], classic_role: i.classic_role, last_active_at: null, last_owner: false }))
       return route.fulfill({ json: { people: [...world.people.map(person), ...importedPeople], agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported, owner_count: activeOwners().length, provisioner: world.provisioner ? { name: world.provisioner } : null } })
     }
     const roleOf = /^\/api\/members\/([^/]+)\/workspace-role$/.exec(path)
@@ -338,7 +341,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       const email = String(body.email ?? '').trim().toLowerCase()
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(route, 400, 'invalid', 'Enter an email address', 'email')
       if (body.workspace_role_id === 'role-guest') return fail(route, 400, 'project_only_role', 'Guest is a project role; grant it on a project instead', 'workspace_role_id')
-      if (world.people.some(p => p.email === email && p.status === 'active')) return fail(route, 409, 'already_member', 'This person is already an active member', 'email')
+      if (world.people.some(p => p.email === email && p.status === 'active' && p.identity)) return fail(route, 409, 'already_member', 'This person is already an active member', 'email')
       if (world.invites.some(i => i.email === email && i.status === 'pending')) return fail(route, 409, 'pending', `There is already a pending invite for ${email}. Revoke it first to send a new link.`, 'email')
       const days = Number(body.expires_in_days ?? 14)
       if (!(days >= 1 && days <= 90)) return fail(route, 400, 'invalid', 'Expiry must be between 1 and 90 days', 'expires_in_days')
@@ -451,7 +454,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (!agentRow) return route.fulfill({ status: 404, json: { error: 'agent not found' } })
       if (agentRow.service) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if ((agentRow.status ?? 'active') === 'deactivated') return route.fulfill({ status: 409, json: { error: 'agent is deactivated; reactivate it first' } })
-      const scopes = old ? [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
+      const scopes = old ? Array.isArray(body.rotation_scopes) ? [...body.rotation_scopes as string[]] : [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
       if (scopes.length > 256 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
       // Never more than the creator holds, nor (on a shared role) than the agent's role.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)

@@ -104,7 +104,7 @@ async function submit() {
           <label>Base commit<input v-model="base" autocomplete="off" placeholder="Full commit hash" required maxlength="64" /></label>
           <label>Head commit<input v-model="head" autocomplete="off" placeholder="Full commit hash" required maxlength="64" /></label>
           <label>Author run (optional)<input v-model="authorRun" autocomplete="off" placeholder="Managed run ID" /></label>
-          <label v-if="!authorRun">Author family<select v-model="authorFamily" required><option value="" disabled>Choose the author</option><option value="openai">Codex</option><option value="anthropic">Claude</option><option value="xai">Grok</option><option value="cursor">Cursor</option></select></label>
+          <label v-if="!authorRun">Author family<select v-model="authorFamily" required><option value="" disabled>Choose the author</option><option value="openai">Codex</option><option value="anthropic">Claude</option><option value="xai">Grok</option><option value="cursor">Cursor</option><option value="google">Google</option><option value="local">Local</option></select></label>
           <label>Pull request (optional)<input v-model="pullRequest" inputmode="numeric" autocomplete="off" placeholder="Number" /></label>
         </fieldset>
         <button type="submit" class="submit" :disabled="!valid || sending">{{ sending ? 'Requesting…' : 'Request review' }}</button>

@@ -34,13 +34,14 @@ const router = useRouter()
 const manageKeys = computed(() => session.identity?.principal.kind === 'person' && can('keys.manage'))
 const creatingAgent = ref(false)
 const firstKey = ref(false)
+const firstKeyPreset = ref('')
 watch([() => route.query.new, manageKeys], ([requested, allowed]) => { if (requested === '1' && allowed) creatingAgent.value = true }, { immediate: true })
 function closeAgent() { creatingAgent.value = false; if (route.query.new) { const query = { ...route.query }; delete query.new; void router.replace({ query }) } }
-async function agentCreated(agent: Agent) {
+async function agentCreated(agent: Agent, presetId: string) {
   closeAgent()
   // Let the old sheet return focus before the key sheet takes it.
   await nextTick()
-  firstKey.value = true; rotateKey.value = undefined; newKey.value = agent
+  firstKey.value = true; firstKeyPreset.value = presetId; rotateKey.value = undefined; newKey.value = agent
   open.value = new Set(open.value).add(agent.principal_id)
   void access.load(true)
 }
@@ -72,7 +73,7 @@ const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
 async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key scopes updated') }
 const newKey = ref<Agent | null>(null)
 const rotateKey = ref<AgentKey | undefined>()
-function showKeySheet(agent: Agent, key?: AgentKey) { firstKey.value = agent.key_count === 0; rotateKey.value = key; newKey.value = agent }
+function showKeySheet(agent: Agent, key?: AgentKey) { firstKey.value = agent.key_count === 0; firstKeyPreset.value = ''; rotateKey.value = key; newKey.value = agent }
 async function created() { await Promise.all([loadKeys(), access.load(true)]); if (newKey.value) open.value = new Set(open.value).add(newKey.value.principal_id) }
 const picker = ref<{ agent: Agent; anchor: HTMLElement } | null>(null)
 const busy = ref(false)
@@ -235,7 +236,7 @@ onMounted(loadKeys)
     />
     <EditKeyScopesSheet v-if="editing" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
     <NewAgentSheet v-if="creatingAgent" @close="closeAgent" @created="agentCreated" />
-    <NewKeySheet v-if="newKey" :first-key="firstKey" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
+    <NewKeySheet v-if="newKey" :first-key="firstKey" :preferred-preset="firstKeyPreset" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
   </div>
 </template>
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { DeployTarget } from './deployTarget'
+import { watchStreamHealth } from './streamHealth.ts'
 // The agents workspace HTTP surface for a person's session: harness sessions and
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
@@ -88,6 +89,9 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   // started at, so a row is merged by them wherever it ends up (AEON-449).
   return stamp(await response.json() as T, response, start)
 }
+export interface HostLabel { host: string; label: string }
+export const listHostLabels = () => request<HostLabel[]>('/me/host-labels')
+export const setHostLabel = (host: string, label: string | null) => request<HostLabel>('/me/host-labels', 'PUT', { host, label })
 const enc = encodeURIComponent
 
 const query = (params: Record<string, string | number | boolean | undefined>) => {
@@ -143,19 +147,35 @@ export const message = (error: unknown) => error instanceof Error ? error.messag
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'control_requested', 'control_claimed', 'control_completed']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed']
 const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
 export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
-export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}): () => void {
+export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
-  const stream = new EventSource('/api/events/stream')
-  stream.onopen = () => { connection(true); changed(); delivery() }
-  stream.onerror = () => connection(false)
-  for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) stream.addEventListener(name, changed)
-  for (const name of DELIVERY_EVENTS) stream.addEventListener(name, () => delivery())
-  return () => stream.close()
+  let stream: EventSource
+  let stopped = false
+  const health = watchStreamHealth(() => {
+    stream.close()
+    connection(false)
+    recover(); delivery()
+    connect()
+  })
+  function connect() {
+    const source = stream = new EventSource('/api/events/stream?after=latest')
+    const current = (run: () => void) => () => { if (!stopped && stream === source) { health.heard(); run() } }
+    source.onopen = current(() => { connection(true); changed(); delivery() })
+    source.onerror = () => { if (!stopped && stream === source) connection(false) }
+    source.addEventListener('stream.ping', current(() => {}))
+    source.addEventListener('stream.ready', current(() => {}))
+    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(changed))
+    // Heartbeats prove liveness without invalidating the 20-second live feed poll.
+    source.addEventListener('harness.heartbeat', current(() => { if (telemetry) changed() }))
+    for (const name of DELIVERY_EVENTS) source.addEventListener(name, current(delivery))
+  }
+  connect()
+  return () => { stopped = true; health.stop(); stream.close() }
 }
 
 export const approveAccountCapacity = (id: string) => request<void>(`/agent-accounts/${enc(id)}/capacity/approve`, 'POST', {})

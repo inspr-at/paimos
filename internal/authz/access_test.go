@@ -38,6 +38,13 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 				return err
 			}
 		}
+		// The duplicate-member check applies to a real sign-in member, not a
+		// legacy person without an identity.
+		if _, err := tx.Exec(ctx, `WITH signin AS (
+			INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','ada-owner','ada@example.com') RETURNING id)
+			UPDATE principals SET identity_id=(SELECT id FROM signin) WHERE tenant_id=$1::uuid AND id=$2::uuid`, tid, owner.ID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO personal_profiles(tenant_id,principal_id,avatar_original_hash,avatar_hashes) VALUES($1::uuid,$2::uuid,$3,'{"32":"abc"}'::jsonb)`, tid, owner.ID, strings.Repeat("ab", 32)); err != nil {
 			return err
 		}

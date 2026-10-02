@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/1.9",
-    "sha256": "712a321ff9c974d0aa96a5df5ee72dd71fcf0d58d528921257bfebd8f922beb5",
+    "version": "harness-session/2.0",
+    "sha256": "56b33c04245c015f6d38211a7dce4668e5a52211315025bc9e1420d14ac0ed82",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -839,6 +839,11 @@
               "string",
               "null"
             ]
+          },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
           },
           "commits": {
             "items": {
@@ -1014,13 +1019,22 @@
           "finished": {
             "type": "boolean"
           },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "gemini",
+              "opencode",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },
@@ -1527,6 +1541,11 @@
               "null"
             ]
           },
+          "command": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$",
+            "type": "string"
+          },
           "commits": {
             "items": {
               "properties": {
@@ -1701,13 +1720,22 @@
           "finished": {
             "type": "boolean"
           },
+          "generator": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$",
+            "type": "string"
+          },
           "harness": {
             "enum": [
               "codex",
               "claude",
               "pi",
               "cursor",
-              "grok"
+              "grok",
+              "gemini",
+              "opencode",
+              "media",
+              "terminal"
             ],
             "type": "string"
           },

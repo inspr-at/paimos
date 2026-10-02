@@ -199,27 +199,22 @@ test('phones show the name without horizontal scroll', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
-test('the footer names the running release; hover reveals its version without moving anything', async ({ page }) => {
+test('the footer shows both codename and Pretty version; hover reveals seconds', async ({ page }) => {
   await mockWork(page, fixtures())
   const history = presentedHistory()
-  await mockReleases(page, history)
-  await page.route('**/api/version', route => route.fulfill({ json: { version: history.current, scheme: 'inspr-calver-3', codename: CODENAMES[5] } }))
+  await mockReleases(page, history, { codename: CODENAMES[5] })
   await page.goto('/')
-  const pill = page.locator('footer.app-footer .footer-name')
-  const name = pill.locator('.rn-name')
-  await expect(name).toHaveText(CODENAMES[5])
+  const pill = page.locator('footer.app-footer .version-pill')
+  await expect(page.locator('footer.app-footer .footer-name')).toHaveText('PAIMOS AEON')
+  await expect(pill.locator('.footer-codename')).toHaveText(CODENAMES[5])
   await expect(pill).toHaveAccessibleName(new RegExp(`${CODENAMES[5]}, version ${history.current.replace(/\./g, '\\.')}`))
-  // No release number anywhere in the pill's text.
-  expect(await pill.innerText()).not.toMatch(/Release \d|\b\d+\.\d+\b/)
-  const before = (await pill.boundingBox())!
+  const version = pill.locator('.calendar-version')
+  await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await pill.hover()
-  await expect(pill.locator('.rn-stamp')).toHaveCSS('opacity', '1')
-  await expect(pill.locator('.rn-stamp .calendar-version')).toContainText(/^\d\d·\d\d·\d\d \d\d:\d\d/)
-  const after = (await pill.boundingBox())!
-  expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1)
+  await expect(version).toHaveAttribute('data-version-view', 'revealed')
+  await expect(pill.locator('.footer-codename')).toBeVisible()
   await page.mouse.move(5, 5)
-  await expect(pill.locator('.rn-stamp')).toHaveCSS('opacity', '0')
-  // The pill still opens the release history.
+  await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await pill.click()
   await expect(sheet(page)).toBeVisible()
 })
@@ -234,7 +229,7 @@ async function openNamed(page: Page) {
   await mockReleases(page, history, { codename: CODENAMES[5] })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-  await expect(page.locator('footer.app-footer .footer-name .rn-name')).toHaveText(CODENAMES[5])
+  await expect(page.locator('footer.app-footer .version-pill .footer-codename')).toHaveText(CODENAMES[5])
   return history
 }
 const accountMenu = async (page: Page) => {
@@ -275,12 +270,10 @@ test('the account menu names the release; focus reveals its version, and the ite
   await expect(item.locator('.rn-stamp')).toHaveCSS('opacity', '1')
 })
 
-test('the footer and detail describe their stamp; the list version names its independent copy action', async ({ page }) => {
+test('the footer names the release; the detail stamp and independent list copy remain accessible', async ({ page }) => {
   const history = await openNamed(page)
-  const pill = page.locator('footer.app-footer .footer-name')
-  await expect(pill).toHaveAccessibleDescription(STAMP)
-  // The name inside the control is not the described element.
-  await expect(pill.locator('.release-name')).not.toHaveAttribute('aria-describedby', /.+/)
+  const pill = page.locator('footer.app-footer .version-pill')
+  await expect(pill).toHaveAccessibleName(new RegExp(`${CODENAMES[5]}, version`))
   await pill.click()
   await expect(sheet(page)).toBeVisible()
   const row = options(page).nth(0)
@@ -297,7 +290,8 @@ test('the footer and detail describe their stamp; the list version names its ind
 
 test('a description the control already had stays beside the stamp, and goes with the name', async ({ page }) => {
   await openNamed(page)
-  const pill = page.locator('footer.app-footer .footer-name')
+  const menu = await accountMenu(page)
+  const pill = menu.getByRole('menuitem', { name: / — Copy version$/ })
   const stampId = await pill.evaluate(el => el.getAttribute('aria-describedby'))
   expect(stampId).toMatch(/\S+/)
   await pill.evaluate(el => el.setAttribute('aria-describedby', 'owner-hint'))

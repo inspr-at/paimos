@@ -60,7 +60,7 @@ func enrollmentReadiness(v View, local LocalStatus) LocalStatus {
 }
 
 func harnessName(h string) string {
-	return map[string]string{"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok", "pi": "pi"}[h]
+	return map[string]string{"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok", "pi": "pi", "gemini": "Gemini CLI", "opencode": "OpenCode"}[h]
 }
 
 func readinessAction(v View, local LocalStatus) (string, string) {

@@ -83,6 +83,40 @@ func ParseHeartbeatLine(source, fallback string, line []byte) (HeartbeatLine, bo
 		return parseCodexHeartbeat(fields, fallback)
 	case "cursor":
 		return parseCursorHeartbeat(fields, fallback)
+	case "gemini", "opencode":
+		fields, id, err := unwrapRecord(fields)
+		if err != nil {
+			return HeartbeatLine{}, false, nil
+		}
+		rec, outcome, err := classifyACP(source, fields)
+		if err != nil || outcome != outcomeUse {
+			return HeartbeatLine{}, false, nil
+		}
+		model := rec.model
+		if model == "" {
+			model = fallback
+		}
+		model, err = canonicalModel(model)
+		if err != nil {
+			return HeartbeatLine{}, false, nil
+		}
+		if rec.id != "" && id != "" {
+			return HeartbeatLine{}, false, nil
+		}
+		if rec.id != "" {
+			id = rec.id
+		}
+		snap := rec.delta
+		absolute := rec.cumulative != nil
+		if absolute {
+			snap = rec.cumulative
+		} else if id == "" {
+			return HeartbeatLine{}, false, nil
+		}
+		if snap == nil {
+			return HeartbeatLine{}, false, nil
+		}
+		return HeartbeatLine{Model: model, Input: snap.input, Output: snap.output, Cached: snap.cached, Reasoning: snap.reasoning, ReasoningKnown: snap.reasoningKnown, ID: id, Absolute: absolute}, true, nil
 	default:
 		return HeartbeatLine{}, false, nil
 	}
@@ -168,7 +202,12 @@ func CursorPromptUsage(fields map[string]json.RawMessage, model string) (UsageRe
 	if err != nil || !snap.inputKnown || !snap.cachedKnown {
 		return UsageReport{}, false
 	}
-	return CountReport(model, snap.input, snap.output, snap.cached, true)
+	report, ok := CountReport(model, snap.input, snap.output, snap.cached, true)
+	if ok && snap.reasoningKnown {
+		reasoning := snap.reasoning
+		report.ReasoningTokens = &reasoning
+	}
+	return report, ok
 }
 
 // ParseGrokUsage reads a rewritten usage.json snapshot. Per-model counters win

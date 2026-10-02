@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api.ts'
 
-export type ReviewFamily = 'openai' | 'anthropic' | 'xai' | 'cursor'
+export type ReviewFamily = 'openai' | 'anthropic' | 'xai' | 'cursor' | 'google' | 'local'
 export interface ReviewFinding { severity: 'critical' | 'high' | 'medium' | 'low'; file: string; line: number; message: string }
 export interface TicketReview {
   work_order_id: string; request_id: string; ticket_node_id: string; repository: string
@@ -30,7 +30,7 @@ async function reviewRequest<T>(nodeId: string, method: string, body?: ReviewReq
 }
 export const listReviews = (id: string, signal?: AbortSignal) => reviewRequest<TicketReview[]>(id, 'GET', undefined, signal)
 export const requestReview = (id: string, body: ReviewRequest, signal?: AbortSignal) => reviewRequest<TicketReview>(id, 'POST', body, signal)
-export const familyName = (family: ReviewFamily) => ({ openai: 'Codex', anthropic: 'Claude', xai: 'Grok', cursor: 'Cursor' })[family]
+export const familyName = (family: ReviewFamily) => ({ openai: 'Codex', anthropic: 'Claude', xai: 'Grok', cursor: 'Cursor', google: 'Google', local: 'Local' })[family]
 export function reviewLabel(review: TicketReview): string {
   if (review.gate_open) return 'Passed'
   if (review.result.verdict === 'changes' && review.status === 'completed') return 'Changes needed'

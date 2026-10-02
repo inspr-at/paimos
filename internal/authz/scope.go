@@ -26,11 +26,16 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/queue":                              true,
+	"GET /api/me/host-labels":                     true,
+	"PUT /api/me/host-labels":                     true,
 	"GET /api/me/security/session-watching":       true,
 	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
 	"GET /api/usage/dashboard":                    true,
+	"GET /api/settings/status-autopilot":          true,
+	"GET /api/status-autopilot/changes":           true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,
@@ -49,6 +54,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/views":                              true,
 	"GET /api/views/{viewId}":                     true,
 	"GET /api/kinds":                              true,
+	"GET /api/status/help":                        true,
 	"GET /api/kinds/{kindId}":                     true,
 	"GET /api/me":                                 true,
 	"GET /api/brand/logo/{variant}":               true,
@@ -68,6 +74,9 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/queue":                                true,
+	"POST /api/queue/reset":                          true,
+	"POST /api/queue/next":                           true,
 	"GET /api/rules/layers":                          true,
 	"POST /api/rules/layers":                         true,
 	"GET /api/rules/sets":                            true,

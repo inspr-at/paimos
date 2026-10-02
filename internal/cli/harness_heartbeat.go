@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -86,11 +87,14 @@ type heartbeatOptions struct {
 	Project           string
 	Agent             string
 	Harness           string
+	Generator         string
+	CommandLabel      string
 	Host              string
 	Label             string
 	Model             string
 	Effort            string
 	AccountLabel      string
+	HarnessVersion    string
 	Brief             string
 	Worktree          string
 	Branch            string
@@ -110,6 +114,7 @@ type heartbeatOptions struct {
 	UsageSource       string
 	UsageFile         string
 	UsageID           string
+	UsageStartedAt    time.Time // Registered generation start; never a CLI assertion.
 	CodexHome         string
 	GrokHome          string
 	AccountID         string
@@ -139,12 +144,15 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
-			fs.string(&o.Harness, "harness", 0, "adapter family")
+			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
 			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
 			fs.string(&o.Effort, "effort", 0, "reasoning effort, or AEON_EFFORT when omitted")
 			fs.string(&o.AccountLabel, "account-label", 0, "subscription or account display name (never a credential)")
+			fs.string(&o.HarnessVersion, "harness-version", 0, "harness version (defaults to a bounded local --version probe)")
 			fs.string(&o.Brief, "brief", 0, "short prompt file name or ticket key")
 			fs.string(&o.Worktree, "worktree", 0, "worktree path")
 			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
@@ -162,7 +170,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
@@ -201,10 +209,10 @@ func (o *heartbeatOptions) normalize() {
 	if o.Activity == "" {
 		o.Activity = "busy"
 	}
-	if strings.TrimSpace(o.Model) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Model) == "" {
 		o.Model = os.Getenv("AEON_MODEL")
 	}
-	if strings.TrimSpace(o.Effort) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Effort) == "" {
 		o.Effort = os.Getenv("AEON_EFFORT")
 	}
 	if o.CodexIndex == "" {
@@ -250,19 +258,36 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" || !agentNameRE.MatchString(o.Agent) || !modelHarnesses[o.Harness] {
-		return usagef("--project, --agent and --harness are required")
+	if strings.TrimSpace(o.Project) == "" {
+		return usagef("--project is required")
+	}
+	if !agentNameRE.MatchString(o.Agent) {
+		return usagef("--agent must be a valid agent name")
+	}
+	if err := runkind.Validate(o.Harness, o.Generator, o.CommandLabel); err != nil {
+		return usagef("%s", err)
+	}
+	if runkind.Process(o.Harness) {
+		if o.Parent == "" || o.Ticket == "" {
+			return usagef("--harness %s requires --parent-session and --ticket", o.Harness)
+		}
+		if o.Role != "worker" {
+			return usagef("--role must be worker for media and terminal runs")
+		}
+		if o.Model != "" || o.Effort != "" {
+			return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+		}
 	}
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
 	if !heartbeatPhases[o.Phase] {
-		return usagef("invalid --phase")
+		return usagef("--phase must be starting, working, yielded or stopping")
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
 	} else if !heartbeatActs[o.Activity] {
-		return usagef("invalid --activity")
+		return usagef("--activity must be busy, idle or throttled")
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
@@ -274,7 +299,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("invalid parent session")
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
-		return usagef("invalid management or role")
+		return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 	}
 	if o.Host == "" {
 		host, err := os.Hostname()
@@ -307,7 +332,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("--subscription-label requires subscription billing")
 	}
 	switch o.UsageSource {
-	case "", "claude", "codex", "cursor", "grok":
+	case "", "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usagef("invalid --usage-source")
 	}
@@ -517,7 +542,7 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 	if session.disk.Terminal && !owed && !session.disk.Closed {
 		return
 	}
-	target, targetErr := resolveHeartbeatUsage(o)
+	target, targetErr := resolveSessionHeartbeatUsage(o, session)
 	if targetErr != nil {
 		fmt.Fprintf(rt.stderr, "heartbeat: usage source rejected\n")
 		_ = saveHeartbeatSession(session)
@@ -575,11 +600,11 @@ func (rt *runtime) drainHeartbeatUsage(ctx context.Context, o heartbeatOptions, 
 
 // heartbeatUsageDue is true when this beat can owe a usage post. A resolved
 // Grok, Codex, or Cursor log counts even when --transcript is empty.
-func heartbeatUsageDue(o heartbeatOptions) bool {
+func heartbeatUsageDue(o heartbeatOptions, session *heartbeatSession) bool {
 	if o.Transcript != "" {
 		return true
 	}
-	target, err := resolveHeartbeatUsage(o)
+	target, err := resolveSessionHeartbeatUsage(o, session)
 	return err != nil || target.Path != ""
 }
 
@@ -819,10 +844,13 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	putText(body, "generator", o.Generator, true)
+	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
+	putText(body, "harness_version", harnessVersionOrProbe(ctx, o.Harness, o.HarnessVersion), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
@@ -1053,7 +1081,8 @@ func bindHeartbeatWorktree(ctx context.Context, o heartbeatOptions, disk *heartb
 		return
 	}
 	disk.BoundWorktree = filepath.Clean(o.Worktree)
-	disk.StartedUnix = time.Now().Unix()
+	disk.RegisteredAt = time.Now().UTC()
+	disk.StartedUnix = disk.RegisteredAt.Unix()
 	if head, err := gitHEAD(ctx, o.Worktree); err == nil {
 		disk.StartRev = head
 		disk.CommitCursor = head
@@ -1212,7 +1241,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if len(commits) > 0 {
 		session.disk.CommitCursor = commits[len(commits)-1].SHA
 	}
-	if heartbeatUsageDue(o) {
+	if heartbeatUsageDue(o, session) {
 		if uerr := rt.reportHeartbeatUsage(ctx, projectID, o, session); uerr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

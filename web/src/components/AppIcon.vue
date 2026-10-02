@@ -12,7 +12,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -23,6 +23,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
     <path v-else-if="name === 'moon'" d="M13.6 9.6A5.9 5.9 0 0 1 6.4 2.4a6 6 0 1 0 7.2 7.2Z" />
     <template v-else-if="name === 'users'"><circle cx="6.2" cy="5.6" r="2.4" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2s4.4 1.6 4.4 4.2M10.4 3.4a2.1 2.1 0 1 1 .9 4M12 9.6c1.4.4 2.4 1.6 2.4 3.6" /></template>
+    <template v-else-if="name === 'person-check'"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></template>
     <template v-else-if="name === 'user'"><circle cx="8" cy="5.4" r="2.6" /><path d="M2.8 14c0-2.9 2.3-4.6 5.2-4.6s5.2 1.7 5.2 4.6" /></template>
     <path v-else-if="name === 'chevron'" d="m4.5 6.3 3.5 3.5 3.5-3.5" />
     <path v-else-if="name === 'chevron-right'" d="m6.3 4.5 3.5 3.5-3.5 3.5" />

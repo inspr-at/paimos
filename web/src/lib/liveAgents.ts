@@ -38,6 +38,10 @@ export interface LivePage { items: LiveAgent[]; at: string; fresh_seconds: numbe
 export const LIVE_POLL_MS = 20_000
 export const LIVE_FRESH_MS = 120_000
 
+// Session snapshots that can change a ticket's workers, ETA or completion.
+// The stream carries the old and new bindings; clients re-read authorized views.
+export const TICKET_SESSION_EVENTS = ['registered', 'bound', 'heartbeat', 'yielded', 'stopped', 'stop_confirmed', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over'].map(kind => `harness.${kind}`)
+
 // The server's clock is the one that counts: skew is how far this browser is ahead.
 export const skewOf = (page: Pick<LivePage, 'at'>, receivedAt: number) => {
   const at = Date.parse(page.at)
@@ -69,7 +73,7 @@ export function leadWorkerKey(agent: Pick<LiveAgent, 'session_id' | 'harness' | 
   return ['v', agent.harness, since].join('\u0001')
 }
 
-const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok'])
+const LEAD_HARNESS = new Set<LiveAgent['harness']>(['codex', 'claude', 'pi', 'cursor', 'grok', 'gemini', 'opencode'])
 
 // Assignee cell order: the server's lead first, then the other live workers.
 // A lead the feed has not listed yet still shows, under its projected name.

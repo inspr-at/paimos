@@ -51,7 +51,7 @@ func (rt *runtime) cmdSkillRender() *Command {
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agentFlag, "agent", 0, "agent name, when not passed as <agent>")
-			fs.string(&harness, "harness", 0, "claude-code, codex, grok, pi, or cursor (default claude-code)")
+			fs.string(&harness, "harness", 0, "claude-code, codex, grok, pi, cursor, gemini, or opencode (default claude-code)")
 			fs.string(&outPath, "out", 0, "output file (default: the adapter path under --workspace)")
 			fs.string(&workspace, "workspace", 0, "workspace root for the adapter path (default: working directory)")
 			fs.bool(&checkOnly, "check", 0, "compare the existing file; exit 1 on drift, 2 when the header is missing")
@@ -165,8 +165,12 @@ func renderHarness(harness string, canonical []byte) (content, suggested string,
 		return renderNative(".pi", canonical)
 	case "cursor":
 		return renderNative(".cursor", canonical)
+	case "gemini":
+		return renderNative(".gemini", canonical)
+	case "opencode":
+		return renderNative(".opencode", canonical)
 	default:
-		return "", "", fmt.Errorf("unknown harness %q (expected claude-code, codex, grok, pi, or cursor)", harness)
+		return "", "", fmt.Errorf("unknown harness %q (expected claude-code, codex, grok, pi, cursor, gemini, or opencode)", harness)
 	}
 }
 
@@ -727,6 +731,8 @@ func renderRulesThroughHarness(m rules.Merged) (skillRender, error) {
 	name := "AGENTS.md"
 	if m.Context.Harness == "claude-code" {
 		name = "CLAUDE.md"
+	} else if m.Context.Harness == "gemini" {
+		name = "GEMINI.md"
 	}
 	return skillRender{Body: m.Body, SuggestedPath: name, Rev: m.SHA256}, nil
 }

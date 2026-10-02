@@ -17,7 +17,7 @@ import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
 
-export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode' | 'media' | 'terminal'
 export interface MetadataChange {
   field: 'display_label' | 'model' | 'reasoning_effort'
   previous_value: string | null
@@ -37,6 +37,7 @@ export interface HarnessSessionRow {
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string
+  generator?: string | null; command?: string | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]
@@ -139,7 +140,10 @@ export const readSessionRequests = async (projectId: string, sessionId: string, 
   (await call<{ controls?: SessionChangeRequest[] }>(`/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}`, 'GET', undefined, signal)).body.controls ?? []
 // Agents working right now in every visible project, in one read (AEON-184). A
 // privacy-filtered projection for the Projects page, never merged with session rows.
-export const getLiveAgents = async () => (await call<LivePage>('/harness-sessions/live?include_inactive=true')).body
+export const getLiveAgents = async () => {
+  const answer = await call<LivePage>('/harness-sessions/live?include_inactive=true')
+  return stampAt(answer.body, { position: answer.position, start: answer.start })
+}
 
 // ---------- Writes ----------
 export const removeSession = async (session: { id: string; project_id: string }, reason: string) => {
