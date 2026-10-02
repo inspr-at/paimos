@@ -5137,7 +5137,7 @@ paths:
         '201': {description: Pending change or cancelled pending change, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
         '400': {description: Invalid tier or missing price}
         '403': {description: Person with harness.control required}
-        '409': {description: Read-only session, changed revision/ownership or request ID reused with a different body}
+        '409': {description: 'Read-only session, changed revision/ownership or request ID reused with a different body'}
   /projects/{projectId}/harness-sessions/{sessionId}/tier/report:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
