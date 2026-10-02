@@ -7096,6 +7096,13 @@ paths:
         '200': {description: Account availability, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: 'Stale readiness check or binding. On the first report after a daemon generation change, the heartbeat commits and the stale check and its facts are rejected; refresh pending work before retrying.'
+          headers:
+            X-Aeon-Write-Committed:
+              schema: {type: boolean}
+              description: 'True only when the heartbeat committed despite rejecting the old-generation readiness completion.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
@@ -10615,10 +10622,11 @@ components:
         usage_provisional_sessions: {type: integer, minimum: 0, description: Sessions with a provisional usage report; their figures may still change.}
     UsageAllowance:
       type: object
-      description: Windows are withheld unless current account privacy permits quota detail; accounts retain labels and state only. Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
+      description: Windows are withheld unless current account privacy permits quota detail; accounts retain labels and state only. At most 1024 active windows are considered; truncated marks omitted windows and their accounts. Partial means visible windows are incomplete because others were withheld or truncated. Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
       required: [state, windows]
       properties:
-        state: {type: string, enum: [visible, withheld, none]}
+        state: {type: string, enum: [visible, partial, withheld, none]}
+        truncated: {type: boolean, description: 'More than 1024 active windows exist; returned windows and account identities are bounded and incomplete. Independent of privacy withholding.'}
         accounts:
           type: array
           maxItems: 1024
@@ -10633,6 +10641,7 @@ components:
               account_state: {type: string}
         windows:
           type: array
+          maxItems: 1024
           items:
             type: object
             required: [account_id, label, harness, account_state, window_id, unit, allowance, used, reserved, pace_model, burst_ratio, starts_at, ends_at, provisional, pace_cap, headroom, hard_remaining]
@@ -12930,7 +12939,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, unavailable]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -14655,7 +14664,7 @@ components:
         last_probe_at: {type: [string, 'null'], format: date-time}
         last_probe_ok: {type: [boolean, 'null']}
         available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
-        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models, unavailable]}}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
         remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
         default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
         windows:

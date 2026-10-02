@@ -297,6 +297,12 @@ type probeWrite struct {
 	Failure string `json:"failure,omitempty"`
 }
 
+// committedProbeError rejects a stale completion after a successful heartbeat.
+// The handler must commit the transaction before exposing this rejection.
+type committedProbeError struct{ rejection *httpError }
+
+func (e *committedProbeError) Error() string { return e.rejection.Error() }
+
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
 		return Account{}, fail(http.StatusNotFound, "account not found")
@@ -351,11 +357,11 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
 	}
+	var completionErr *committedProbeError
 	if in.Readiness != nil {
 		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
-			return Account{}, fail(409, "readiness daemon generation changed")
-		}
-		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			completionErr = &committedProbeError{rejection: &httpError{status: 409, code: "stale_binding", msg: "heartbeat committed; readiness daemon generation changed; refresh pending work"}}
+		} else if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
 			return Account{}, err
 		}
 	}
@@ -377,6 +383,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
 		return Account{}, err
+	}
+	if completionErr != nil {
+		return after, completionErr
 	}
 	return after, nil
 }

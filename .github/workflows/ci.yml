@@ -347,9 +347,9 @@ jobs:
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
 
-      - name: Morning briefing regressions
+      - name: Usage dashboard and morning briefing regressions
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
+        run: npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
