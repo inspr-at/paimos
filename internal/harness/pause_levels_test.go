@@ -82,7 +82,9 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"})
 	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"})
 	expect(t, f.call(f.agent, "POST", finishing+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "eta_ready_at": time.Now().Add(5 * time.Minute).Format(time.RFC3339Nano)}, finishingLease), 200)
-	deadline := time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano)
+	// Force sub-microsecond input so retry coverage does not depend on host clock
+	// precision (Darwin often supplies only microseconds, unlike Linux CI).
+	deadline := time.Now().Add(15 * time.Minute).UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond).Format(time.RFC3339Nano)
 	body := map[string]any{"deadline_at": deadline, "reason": "Leaving", "note": "Continue tomorrow"}
 	w := f.call(f.person, "PUT", "/api/me/leaving-at", body, "")
 	expect(t, w, 200)
@@ -106,6 +108,12 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	if decode(t, w)["request_id"] != id {
 		t.Fatal("deadline retry created another request")
 	}
+	for _, item := range decode(t, w)["items"].([]any) {
+		s := item.(map[string]any)
+		if s["pause"].(map[string]any)["control_id"] != plans[s["id"].(string)]["control_id"] {
+			t.Fatal("deadline retry replaced a pause control")
+		}
+	}
 	finishPaused(t, f, finishing, finishingLease, plans[key(finishing)]["control_id"].(string))
 	w = f.call(f.person, "DELETE", "/api/me/leaving-at", nil, "")
 	expect(t, w, 200)
@@ -121,6 +129,47 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	}
 	expect(t, f.call(f.agent, "PUT", "/api/me/leaving-at", body, ""), 403)
 	expect(t, f.call(f.person, "PUT", "/api/me/leaving-at", map[string]any{"deadline_at": time.Now().Add(-time.Second)}, ""), 400)
+}
+
+func TestLeavingAtDeadlinePrecisionAndReplacement(t *testing.T) {
+	f := fixture(t)
+	path, _ := registerPauseWorker(t, f, []string{"pause"})
+	deadline := time.Now().Add(15 * time.Minute).UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
+	put := func(at time.Time) map[string]any {
+		t.Helper()
+		w := f.call(f.person, "PUT", "/api/me/leaving-at", map[string]any{"deadline_at": at.Format(time.RFC3339Nano)}, "")
+		expect(t, w, 200)
+		return decode(t, w)
+	}
+	first := put(deadline)
+	want := deadline.Truncate(time.Microsecond)
+	stored, err := time.Parse(time.RFC3339Nano, first["deadline_at"].(string))
+	if err != nil || !stored.Equal(want) {
+		t.Fatalf("stored deadline %v, want %v (parse error: %v)", stored, want, err)
+	}
+	w := f.call(f.person, "GET", path, nil, "")
+	expect(t, w, 200)
+	if decode(t, w)["pause"].(map[string]any)["deadline_at"] != first["deadline_at"] {
+		t.Fatal("session and person deadlines differ")
+	}
+	// A retry may carry the original input, the returned deadline, a different
+	// zone, or nanoseconds within the same stored microsecond.
+	for _, at := range []time.Time{deadline, want, deadline.In(time.FixedZone("offset", 2*60*60)), want.Add(999 * time.Nanosecond)} {
+		if put(at)["request_id"] != first["request_id"] {
+			t.Fatalf("equivalent deadline %v replaced the request", at)
+		}
+	}
+	if put(want.Add(time.Microsecond))["request_id"] == first["request_id"] {
+		t.Fatal("different stored deadline did not replace the request")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var requested, cancelled int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='harness.leaving_requested'),count(*) FILTER(WHERE type='harness.leaving_cancelled') FROM events`).Scan(&requested, &cancelled)
+		if requested != 2 || cancelled != 1 {
+			t.Errorf("deadline audit requested=%d cancelled=%d, want 2 and 1", requested, cancelled)
+		}
+		return err
+	})
 }
 
 func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {

@@ -357,6 +357,9 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
+	// Match Postgres timestamp precision before retry comparison and scheduling;
+	// otherwise the persisted deadline differs from the same nanosecond input.
+	in.Deadline = in.Deadline.UTC().Truncate(time.Microsecond)
 	request := pauseRequest{Reason: in.Reason, Note: in.Note}
 	if err := request.validate(); err != nil {
 		return nil, err
