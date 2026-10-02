@@ -95,7 +95,7 @@ func TestPlanningLearningEpicExcludesDefaultChildren(t *testing.T) {
 	missing := w.node(t, "PARTIAL-3", "ticket", epic.ID, "open", map[string]any{"route_role": "build", "area": "frontend", "estimate_hours": 9})
 	// Also a default-only ticket with a tiny size: it must still sort last.
 	tiny := placementNode(t, w, "PARTIAL-4", map[string]any{"route_role": "build", "area": "frontend", "estimate_hours": 0.001})
-	for _, sort := range []string{"tokens", "-tokens", "list_cost", "-list_cost"} {
+	for _, sort := range []string{"tokens", "-tokens", "list_cost", "-list_cost", "paid", "-paid"} {
 		path := "/api/nodes?within=" + w.root.ID + "&state=open&sort=" + sort
 		page := listPage(t, w.admin, path)
 		for i, item := range page.Items {
@@ -170,8 +170,10 @@ func TestPlanningLearningEpicKeepsAllUncalibratedEvidence(t *testing.T) {
 }
 
 // Every added session is independently complete before changing exactly one
-// exclusion dimension, so an incomplete run cannot explain the assertion.
-func TestPlanningLearningExcludesMixedModelsPlacementsAndSource(t *testing.T) {
+// exclusion dimension. Cross-project workers are otherwise fully measured but
+// cannot satisfy source_project = outcome_project; that invariant also makes
+// the distinct-source HAVING guard redundant for individually complete workers.
+func TestPlanningLearningExcludesMixedModelsPlacementsAndCrossProjectWorkers(t *testing.T) {
 	for _, dimension := range []string{"model", "placement", "source"} {
 		t.Run(dimension, func(t *testing.T) {
 			w := planningSetup(t)
@@ -200,6 +202,17 @@ func TestPlanningLearningExcludesMixedModelsPlacementsAndSource(t *testing.T) {
 				}
 				if err != nil {
 					return err
+				}
+				if dimension == "source" {
+					var sources, mismatches int
+					if err := tx.QueryRow(t.Context(), `SELECT count(DISTINCT s.project_id),count(*) FILTER (WHERE s.project_id<>o.project_id)
+ FROM harness_sessions s JOIN outcome_events o ON o.ticket_node_id=s.ticket_node_id AND o.kind='ticket_done'
+ WHERE s.ticket_node_id=$1`, first.ID).Scan(&sources, &mismatches); err != nil {
+						return err
+					}
+					if sources != 2 || mismatches != 1 {
+						t.Fatalf("distinct-source fixture: sources=%d outcome mismatches=%d", sources, mismatches)
+					}
 				}
 				var complete int
 				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_sessions s JOIN agent_runs r ON r.id=s.run_id JOIN harness_session_usage u ON u.session_id=s.id WHERE s.ticket_node_id=$1 AND r.active_ms>0 AND r.status='completed' AND s.stopped_at IS NOT NULL AND NOT u.provisional AND u.input_tokens>0`, first.ID).Scan(&complete); err != nil {

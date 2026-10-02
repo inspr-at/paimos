@@ -23,6 +23,21 @@ test('placement provenance labels a pin, latest, and Automatic without changing 
   assert.match(modelCell(row({ route: { ...route, set_by: 'default' } })).tip, /Default preference · Automatic/)
 })
 
+test('frozen default estimates have one uncalibrated basis line', () => {
+  for (const spent of [null, 1_000_000]) for (const basisText of [undefined, 'uncalibrated: documented planning fallback (n=4)', 'uncalibrated: documented planning fallback (n=4); history truncated']) {
+    const r = row({ route, tokens: tokens(spent, 99_000_000), cost: cost({ list_spent: spent === null ? null : '2', list_estimated: '999' }) })
+    r.planning!.estimate_snapshot = { id: 'frozen', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 2, estimated_tokens: 10_000_000, estimated_cost_usd: '20', route, rate_basis: { basis: 'default', tickets: 4, tokens_per_hour: 5_000_000, basis_text: basisText } }
+    for (const cell of [tokensCell(r), listCostCell(r)]) {
+      const basis = cell.tip.split('\n').filter(line => /uncalibrated|insufficient model history|default .*until/i.test(line))
+      assert.equal(basis.length, 1, cell.tip)
+      assert.match(basis[0]!, /^Uncalibrated · /)
+      if (basisText) assert.equal(basis[0], `Uncalibrated · ${basisText}`)
+      assert.match(cell.tip, /Estimate taken when work started/)
+      assert.notEqual(cell.estimated, '')
+    }
+  }
+})
+
 test('dense figures', () => {
   assert.equal(formatTokenCount(940), '940')
   assert.equal(formatTokenCount(9_120), '9.12k')
