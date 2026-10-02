@@ -36,6 +36,30 @@ scripts/             release checks
 10. **Classic Paimos is retired.** The cutover is done (2026-09-26, AEON-43); its removal is tracked in AEON-261. Never build on classic or bring it back; old pm.barta.cm links resolve through `/from-classic`. pm.augmentoring.com (business trust context) follows each live-verified Aeon release via the documented PMA bump flow only (agm-nixcfg pin, backup first, tickets in the pma tracker, never PPM); no other changes there (Markus, 2026-09-30).
 11. **No colored edge accents in the UI.** Never mark selection, emphasis or state with a colored bar or thick border on the left or top edge of a row, card, callout, toast or panel; it is the classic AI-generated UI tell. Use a subtle full tint, a hairline outline or ring, elevation, or type weight instead (Markus, 2026-09-24).
 
+## Code health (AEON-574)
+
+These rules prevent recurring AEON-545 audit findings. They govern this repo; shared doctrine changes remain proposals until approved and published. Layout follows Markus's refined AEON-541 rule.
+
+1. **Authorize inside the write.** Re-check the current target's permissions with `RequireTx` inside the final mutation transaction, under the lock that serialises access changes. An earlier transaction or a check before a network read is insufficient. Example: attachment uploads could commit after `attachments.write` was revoked (S1-005, `internal/attachments/module.go`).
+2. **One global lock order.** Acquire tenant row → tree → node/record rows → blob locks → event counter last. Take all blob locks in one batch sorted by tenant + hash; never append an event and then acquire another lock in that transaction. Prefer `FOR NO KEY UPDATE` for fences that must allow FK share locks. Example: message sends and webhook workers took target and event-counter locks in opposite orders (S3-001, `internal/inbox/message.go`, `target.go`, `wake.go`).
+3. **Bound inputs before work.** Give every request body, list, page, decode, diff and external response explicit size and time bounds before expensive work; list endpoints use bounded keyset pagination. Example: compressed avatar byte limits still allowed 100 million decoded pixels and gigabyte-scale allocation (S1-006, `internal/profile/avatar.go`).
+4. **Bind web actions to the record on screen.** Capture the record id and revision when the user acts. Async results, Undo, drafts and confirmations re-check that identity and discard stale responses; reset per-person state on identity changes. Example: confirming deletion of ticket A could delete newly selected ticket B (S8-007, `TicketWorkspace.vue`, `useTicket.ts`).
+5. **Report honest results.** A failed or partial write, search, sync or delivery must not report success; expose truncation and partial results. Example: workspace timing controls displayed new values even when their PUT failed (S8-011, `WorkspaceSection.vue`).
+6. **Tests prove their claim.** Establish interleavings with barriers and time with injected clocks, rather than sleeps or elapsed-time thresholds; timeouts only guard against hangs. Fixtures retain the data being asserted, and assertions reject the wrong failure reason. Example: event-counter and long-poll tests could pass without their competing operations overlapping (S3-021, `internal/events/events_test.go`, `internal/inbox/inbox_test.go`).
+7. **Controls never move.** Prefer a top-anchored frame with controls above content that grows downward; short content stays short, without padded fixed heights. Use a pinned footer and scrolling body for long content or full-height phone sheets. Selectors keep fixed row heights, with details in a reserved slot below; verify control bounding boxes across options and series items. Example: the AEON-541 Decision Desk “keep as” selector and “Decide & next” action shifted as content changed (Markus's layout report; not a numbered AEON-545 finding).
+
+### Coordinator review checklist
+
+Use these seven checks in the consolidated cross-family gate; package workers do not run model reviews themselves (rule 9).
+
+- [ ] Authorization is re-checked with `RequireTx` against the current target under the access-change lock in the final write transaction.
+- [ ] Locks follow tenant → tree → rows → sorted blob batch → event counter last, with no later lock acquisition and FK-compatible fences.
+- [ ] Size and time bounds precede body/list/page/decode/diff/external-response work; list endpoints use bounded keyset pagination.
+- [ ] Actions capture record id/revision; async results, Undo, drafts and confirmations reject stale identity; person changes reset owned state.
+- [ ] Failed and partial writes, searches, syncs and deliveries surface errors; truncation and partial results are explicit.
+- [ ] Barriers/clocks prove the claimed interleaving/time; fixtures preserve asserted data; assertions cannot pass for a different failure.
+- [ ] Bounding-box checks keep actions and selectors still through options/series; downward growth keeps short frames short, without padded fixed heights.
+
 ## Style
 
 - Go: standard library first, small packages, explicit errors, context everywhere, no global state except in `main`.

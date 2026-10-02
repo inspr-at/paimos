@@ -1,0 +1,94 @@
+{
+  "ticket": "AEON-574",
+  "state": "prepared",
+  "active": false,
+  "inbox_submission": "blocked",
+  "blocker": "The assigned ppm worker key cannot read the pinned doctrine (GET /api/rules/doctrine: 403 permission denied) or its inbox (GET /api/rules/doctrine/inbox: 403 agent key scope required). No pinned rule identities or inbox proposal ids have been resolved.",
+  "repository": "inspr-at/inspr-modules",
+  "path": "docs/AGENTS-DOMAIN-DEV.md",
+  "submission_instructions": [
+    "An authorized coordinator must read GET /api/rules/doctrine and the inbox first to resolve the current pin, rule keys, source digests and any existing proposals.",
+    "The AEON-319/444 inbox edits one existing rule in the same section; it cannot insert new standalone rules. For each draft, select a suitable unlocked rule and merge the addition and checklist into its full source, preserving its existing marker and requirements. If no suitable rule exists, leave that draft pending a person-owned additive doctrine PR rather than overwriting unrelated rules.",
+    "Submit the resolved text with doctrine propose --repo inspr-modules --path docs/AGENTS-DOMAIN-DEV.md --rule-key KEY --rule-sha SHA --file FILE --ticket AEON-574 --why WHY --tldr TLDR, retaining the returned proposal id and pending state on the ticket.",
+    "Do not write to foreign repositories, publish rules, activate the prepared bootstrap or claim that these drafts are in the inbox. Markus owns approval; the coordinator owns subsequent PR and release gates."
+  ],
+  "drafts": [
+    {
+      "rule": 1,
+      "title": "Authorize inside the write",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Re-check current target permissions inside the final mutation transaction, using the transaction-aware authorization helper under the lock that serialises access changes. An earlier transaction or a check before a network read is insufficient.",
+      "checklist": "Authorization is re-checked against the current target under the access-change lock inside the final write transaction.",
+      "tldr": "Re-check permissions under the access-change lock inside the final write transaction.",
+      "why": "Prevent authorization races after permission revocation or target moves; in Aeon the helper is RequireTx. AEON-545 finding S1-005: attachment uploads could commit after attachments.write was revoked."
+    },
+    {
+      "rule": 2,
+      "title": "One global lock order",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Use one global lock order: tenant row, tree, node/record rows, blob locks, then the event counter last. Take all blob locks in one batch sorted by tenant and hash. Never append an event and then acquire another lock in the same transaction. Prefer FOR NO KEY UPDATE for fences that must allow foreign-key share locks.",
+      "checklist": "Locks follow tenant, tree, rows, sorted blob batch, event counter last; no later lock acquisition, and fences allow foreign-key share locks.",
+      "tldr": "Take resource locks in one order and sorted batches; the event counter is always last.",
+      "why": "Prevent inverted lock dependencies. AEON-545 finding S3-001: message sends and webhook workers took target and event-counter locks in opposite orders."
+    },
+    {
+      "rule": 3,
+      "title": "Bound inputs before work",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Give every request body, list, page, decode, diff and external response explicit size and time bounds before expensive work. List endpoints use bounded keyset pagination; compressed-byte limits alone do not bound decoded work.",
+      "checklist": "Size and time bounds precede body, list, page, decode, diff and external-response work; list endpoints use bounded keyset pagination.",
+      "tldr": "Bound size and time before expensive work, including decoded data and paginated lists.",
+      "why": "Prevent resource exhaustion through small but expensive inputs. AEON-545 finding S1-006: compressed avatar byte limits still allowed 100 million decoded pixels and gigabyte-scale allocation."
+    },
+    {
+      "rule": 4,
+      "title": "Bind actions to the record on screen",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Capture the record id and revision when the user acts. Async results, Undo, drafts and confirmations re-check that identity and discard stale responses. Reset per-person state when identity changes.",
+      "checklist": "Actions capture record id/revision; async results, Undo, drafts and confirmations reject stale identity; person changes reset owned state.",
+      "tldr": "Keep actions and async results attached to the captured record and person.",
+      "why": "Prevent a delayed action from affecting a newly selected record. AEON-545 finding S8-007: confirming deletion of ticket A could delete newly selected ticket B."
+    },
+    {
+      "rule": 5,
+      "title": "Report honest results",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Never report success for a failed or partial write, search, sync or delivery. Surface errors, truncation and partial results explicitly.",
+      "checklist": "Failed and partial writes, searches, syncs and deliveries surface errors; truncation and partial results are explicit.",
+      "tldr": "Surface failures and partial results instead of displaying success.",
+      "why": "Prevent reliance on changes that were never persisted. AEON-545 finding S8-011: workspace timing controls displayed new values even when their PUT failed."
+    },
+    {
+      "rule": 6,
+      "title": "Tests prove their claim",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Establish interleavings with barriers and time with injected clocks, rather than sleeps or elapsed-time thresholds; timeouts only guard against hangs. Fixtures retain the data being asserted, and assertions reject the wrong failure reason.",
+      "checklist": "Barriers and clocks prove the claimed interleaving and time; fixtures preserve asserted data; assertions cannot pass for a different failure.",
+      "tldr": "Prove the intended behavior with deterministic coordination and assertions that reject false positives.",
+      "why": "Prevent tests that pass without exercising their claimed concurrency. AEON-545 finding S3-021: event-counter and long-poll tests could pass without their competing operations overlapping."
+    },
+    {
+      "rule": 7,
+      "title": "Controls never move",
+      "rule_key": null,
+      "rule_sha256": null,
+      "inbox_id": null,
+      "addition": "Keep actions and selectors in place while choosing. Prefer a top-anchored frame with controls above content that grows downward; short content stays short, without padded fixed heights. Use a pinned footer and scrolling body for long content or full-height phone sheets. Selectors keep fixed row heights with details in a reserved slot below. Verify control bounding boxes across options and series items.",
+      "checklist": "Bounding-box checks keep actions and selectors still through options and series; downward growth keeps short frames short, without padded fixed heights.",
+      "tldr": "Keep controls still; let content grow downward without padding short frames to fixed heights.",
+      "why": "Preserve pointer position through repeated choices. AEON-541's layout report described the Decision Desk keep-as selector and Decide-and-next action shifting as content changed. This is the approved companion layout rule, not a numbered AEON-545 finding."
+    }
+  ]
+}
