@@ -510,7 +510,9 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errClosed)
 		return
 	}
-	remote, e := m.providers[id].Fetch(r.Context(), ref, in.ExternalID)
+	fetchCtx, fetchCancel := context.WithTimeout(r.Context(), 8*time.Second)
+	remote, e := m.providers[id].Fetch(fetchCtx, ref, in.ExternalID)
+	fetchCancel()
 	if e != nil {
 		writeErr(w, errConflict)
 		return
