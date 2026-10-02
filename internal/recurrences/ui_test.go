@@ -38,11 +38,33 @@ func projectPrincipal(f *fixture, role string) tenant.Principal {
 
 func TestUIProjectScopedRecurrenceHistoryAndRetirement(t *testing.T) {
 	f := setup(t)
-	r := f.create(f.input())
+	in := f.input()
+	tag := f.node("tag", nil, "Workspace health")
+	in.Template.Tags = []string{tag}
+	r := f.create(in)
 	f.manual(r.ID, "first")
 	f.manual(r.ID, "skip")
 	reader := projectPrincipal(f, "viewer")
 	manager := projectPrincipal(f, "member")
+	ctx := tenant.WithPrincipal(t.Context(), reader)
+	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE id=$1`, tag).Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			t.Fatal("fixture must keep the workspace tag invisible to the project reader")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated := r.Input
+	updated.Template.Name = "Updated workspace-tagged sweep"
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, struct {
+		Input
+		ExpectedRevision int64 `json:"expected_revision"`
+	}{updated, 1}, 200)
 	var history struct {
 		Items []HistoryEntry `json:"items"`
 	}
@@ -53,13 +75,12 @@ func TestUIProjectScopedRecurrenceHistoryAndRetirement(t *testing.T) {
 	for _, item := range history.Items {
 		types[item.Type] = true
 	}
-	for _, typ := range []string{"recurrence.created", "recurrence.occurred", "recurrence.skipped"} {
+	for _, typ := range []string{"recurrence.created", "recurrence.updated", "recurrence.occurred", "recurrence.skipped"} {
 		if !types[typ] {
 			t.Errorf("project reader cannot see %s", typ)
 		}
 	}
-	f.call(f.p, "DELETE", "/api/recurrences/"+r.ID, map[string]int{"expected_revision": 1}, 204)
-	ctx := tenant.WithPrincipal(t.Context(), reader)
+	f.call(f.p, "DELETE", "/api/recurrences/"+r.ID, map[string]int{"expected_revision": 2}, 204)
 	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='recurrence.deleted' AND after->>'id'=$1`, r.ID).Scan(&count); err != nil {
@@ -81,9 +102,15 @@ func TestUIProjectScopedRecurrenceHistoryAndRetirement(t *testing.T) {
 	if len(page.Items) != 0 {
 		t.Errorf("retired project-scoped list contains %d definitions", len(page.Items))
 	}
-	f.call(reader, "GET", "/api/recurrences/"+r.ID, nil, 404)
-	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]int{"expected_revision": 2}, 404)
-	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "retired"}, 404)
+	t.Run("get", func(t *testing.T) {
+		f.call(reader, "GET", "/api/recurrences/"+r.ID, nil, 404)
+	})
+	t.Run("resume", func(t *testing.T) {
+		f.call(manager, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]int{"expected_revision": 3}, 404)
+	})
+	t.Run("run-now", func(t *testing.T) {
+		f.call(manager, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "retired"}, 404)
+	})
 }
 
 func TestUIRetiredSchedulerClaimIgnoresReactivatedRow(t *testing.T) {
