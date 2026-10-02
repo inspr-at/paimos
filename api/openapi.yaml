@@ -242,7 +242,7 @@ paths:
         '400': {description: Invalid proposal or action}
         '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
         '404': {description: Proposal not visible}
-        '409': {description: Proposal resolved or its ticket, rule or eligibility changed; reload}
+        '409': {description: 'Proposal resolved or its ticket, rule or eligibility changed; reload'}
   /from-classic/api/{legacyPath}:
     servers:
       - url: /
@@ -8369,7 +8369,7 @@ components:
         to: {type: string, description: Proposed status or attention flag}
         at: {type: string, format: date-time}
         changed_since: {type: boolean}
-        applicable: {type: boolean, description: Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.}
+        applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
