@@ -14,7 +14,9 @@ const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, ne
 
 async function open(page: Page, index = 0, locale?: string) {
   const history = presentedHistory(NOW)
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
   if (locale) {
     const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale, greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }

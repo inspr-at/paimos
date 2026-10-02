@@ -5,7 +5,8 @@ import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
 import { codenameOf } from '../../lib/codenames'
-import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { useDeveloperSettings } from '../../lib/developerSettings'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, technicalLine, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
@@ -33,6 +34,7 @@ import { TICKET_PEEK } from '../../lib/ticketPeek'
 const props = defineProps<{ target: string | null }>()
 const emit = defineEmits<{ select: [version: string]; query: [key: 'release_lang' | 'release_view', value: string]; close: []; home: []; navigate: [path: string] }>()
 const store = useReleases()
+const { showReservedVersions } = useDeveloperSettings()
 const version = useVersion()
 const profile = useProfile()
 const session = useSession()
@@ -138,7 +140,10 @@ const onScrollStats = (event: MediaQueryListEvent) => { scrollStats.value = even
 
 const history = computed(() => store.history)
 const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b) => b.version.localeCompare(a.version)))
-const visible = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const eligible = computed(() => visibleReleases(releases.value, showReservedVersions.value))
+// Result counts and statistics describe the full history, even when rows are hidden.
+const matching = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const visible = computed(() => visibleReleases(matching.value, showReservedVersions.value))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
 const indexOf = computed(() => new Map(order.value.map((r, i) => [r.version, i])))
@@ -146,6 +151,7 @@ const byVersion = computed(() => new Map(releases.value.map(r => [r.version, r])
 // Each row's name in the chosen language, with the language it fell back to.
 const rails = computed(() => new Map(visible.value.map(r => [r.version, railLine(r, locale.value)])))
 const selected = computed(() => cursor.value ? byVersion.value.get(cursor.value) ?? null : null)
+const hiddenReserved = computed(() => selected.value?.state === 'reserved' && !showReservedVersions.value)
 const current = computed(() => history.value?.current ?? '')
 // The version this page loaded with. The history's current is the server, which
 // can already be newer while this page is still the old build.
@@ -226,12 +232,18 @@ watch(cursor, async (value, old) => {
   if (detailPane.value && old) detailPane.value.scrollTop = 0
 })
 // A filter that hides the selection moves it to the first match.
-watch(order, list => { if (list.length && cursor.value && !indexOf.value.has(cursor.value) && mode.value === 'browse') cursor.value = list[0].version })
+watch(order, list => { if (list.length && cursor.value && !indexOf.value.has(cursor.value) && mode.value === 'browse' && !hiddenReserved.value) cursor.value = list[0].version })
 
 function step(delta: number) {
   const list = order.value
   if (!list.length) return
-  const at = cursor.value ? indexOf.value.get(cursor.value) ?? -1 : -1
+  const currentVersion = cursor.value
+  const at = currentVersion ? indexOf.value.get(currentVersion) ?? -1 : -1
+  if (at === -1 && currentVersion) {
+    const neighbor = delta > 0 ? list.find(r => r.version < currentVersion) : [...list].reverse().find(r => r.version > currentVersion)
+    if (neighbor) cursor.value = neighbor.version
+    return
+  }
   cursor.value = list[Math.max(0, Math.min(list.length - 1, at === -1 ? 0 : at + delta))].version
 }
 function choose(v: string) {
@@ -246,7 +258,15 @@ async function open() {
 }
 
 // ---------- Compare ----------
+watch(eligible, list => {
+  if (mode.value !== 'compare') return
+  const versions = new Set(list.map(r => r.version))
+  if (compareFrom.value && !versions.has(compareFrom.value)) compareFrom.value = list[0]?.version ?? null
+  if (cursor.value && !versions.has(cursor.value)) cursor.value = list.find(r => r.version !== compareFrom.value)?.version ?? compareFrom.value
+})
 function startCompare() {
+  // A hidden reservation may be open by URL, but it cannot be a picker endpoint.
+  if (!cursor.value || !indexOf.value.has(cursor.value)) cursor.value = order.value[0]?.version ?? null
   if (!cursor.value) return
   mode.value = 'compare'
   compareFrom.value = cursor.value
@@ -445,7 +465,7 @@ const KINDS = [
             <input ref="searchInput" v-model="filter.q" class="field" type="search" placeholder="Search names, changes, tickets" aria-label="Search releases" aria-keyshortcuts="/" @keydown="searchKeys" />
             <kbd v-if="!filter.q" class="keycap slash" aria-hidden="true">/</kbd>
           </label>
-          <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="!releases.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
+          <button type="button" class="btn compare-btn" aria-label="Compare" :aria-pressed="mode === 'compare'" aria-keyshortcuts="c" :disabled="mode !== 'compare' && !visible.length" @click="mode === 'compare' ? exitCompare() : startCompare()">
             <AppIcon name="compare" :size="14" /><span class="btn-text">Compare</span><kbd class="keycap" aria-hidden="true">C</kbd>
           </button>
           <button type="button" class="icon-btn flat help-btn" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" :aria-expanded="help" @click="help = !help"><AppIcon name="keyboard" :size="15" /></button>
@@ -471,7 +491,7 @@ const KINDS = [
               <button type="button" class="toggle" :aria-pressed="filter.tickets" @click="filter.tickets = !filter.tickets"><AppIcon name="ticket" :size="12" />Tickets</button>
             </div>
             <p class="result-count" aria-live="polite">
-              <template v-if="filtering">{{ visible.length }} of {{ releases.length }}</template>
+              <template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template>
               <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
             </p>
           </div>
@@ -551,12 +571,13 @@ const KINDS = [
         <section ref="detailPane" class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'" :inert="covered">
           <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
           <ReleaseCompare
-            v-if="mode === 'compare' && compareFrom" key="compare" :releases="releases" :from="compareFrom" :to="compareTo"
+            v-if="mode === 'compare' && compareFrom" key="compare" :releases="eligible" :from="compareFrom" :to="compareTo"
             :repository="history?.repository ?? ''" :query="filter.q" :lang="lang" :view="view" @swap="swap" @exit="exitCompare"
           />
           <ReleaseDetail
             v-else-if="selected" ref="detail" :key="selected.version" :release="selected" :repository="history?.repository ?? ''"
             :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
+            :hidden-in-history="hiddenReserved"
             :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" :lang="lang" :view="view" @evidence="value => evidence = value"
           />
           <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
