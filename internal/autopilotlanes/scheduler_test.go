@@ -440,3 +440,47 @@ func TestSchedulerContentFreeHiddenBlockerAndRecovery(t *testing.T) {
 		return nil
 	})
 }
+
+func TestRejectedCriteriaStayParkedUntilPersonChangesIntake(t *testing.T) {
+	f := setup(t)
+	l := f.activate(t, f.lane(t, f.project))
+	id, rev := f.ticket(t, f.project, "ticket", map[string]any{})
+	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+l.ID+"/prepare", prepareInput{l.Revision, id, rev}, 202, nil)
+	out := f.scheduleOne(t, l)
+	if out.Dispatch == nil {
+		t.Fatal("no preparation request")
+	}
+	path := "/api/autopilot-dispatches/" + out.Dispatch.ID
+	var draft lanedispatch.Request
+	f.call(t, f.owner, "POST", path+"/preparation", preparationResultInput{1, 2, []string{"Draft"}}, 200, &draft)
+	f.call(t, f.owner, "POST", path+"/accept", acceptInput{draft.Revision, ptr(false)}, 200, &draft)
+	if draft.Phase != "cancelled" {
+		t.Fatal("rejection retained workflow ownership")
+	}
+	if next := f.scheduleOne(t, l); next.Dispatch != nil {
+		t.Fatalf("rejected draft replayed %+v", next)
+	}
+}
+func TestNestedOrdersCannotEscapeLaneOwnership(t *testing.T) {
+	f := setup(t)
+	l := f.activate(t, f.lane(t, f.project))
+	id, _ := f.ticket(t, f.project, "ticket", readyFields())
+	f.queue(t, id)
+	if out := f.scheduleOne(t, l); out.Dispatch == nil {
+		t.Fatal("no lane request")
+	}
+	agent, profile := f.runner(t)
+	var nested string
+	f.tx(t, func(tx pgx.Tx) error {
+		var parent string
+		if err := tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM agent_runs WHERE queue_node_id=$1`, id).Scan(&parent); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Nested order',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work_order' RETURNING id::text`, f.owner.TenantID, parent).Scan(&nested); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, f.owner.TenantID, nested, f.owner.ID)
+		return err
+	})
+	f.call(t, f.owner, "POST", "/api/work-orders/"+nested+"/runs", map[string]string{"agent_principal_id": agent.ID, "model_profile_id": profile}, 409, nil)
+}

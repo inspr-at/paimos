@@ -80,9 +80,14 @@ func Claim(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request) (*Req
 	return &r, err
 }
 
-// OwnedOrder fences direct run creation for a lane's ticket work orders.
+// OwnedOrder fences ticket work orders at any ancestor depth, including nested
+// review/fix orders. A chain beyond the explicit 64-node bound fails closed.
 func OwnedOrder(ctx context.Context, tx pgx.Tx, orderID string) (bool, error) {
 	var owned bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM lane_dispatches d JOIN nodes o ON o.tenant_id=d.tenant_id AND o.parent_id=d.ticket_node_id WHERE o.id=$1 AND d.lane_id IS NOT NULL AND d.phase NOT IN ('completed','cancelled'))`, orderID).Scan(&owned)
+	err := tx.QueryRow(ctx, `WITH RECURSIVE ancestors AS (
+ SELECT id,parent_id,0 AS depth FROM nodes WHERE id=$1
+ UNION ALL SELECT n.id,n.parent_id,a.depth+1 FROM ancestors a JOIN nodes n ON n.id=a.parent_id WHERE a.depth<64
+ ) SELECT EXISTS(SELECT 1 FROM lane_dispatches d JOIN ancestors a ON a.id=d.ticket_node_id WHERE d.lane_id IS NOT NULL AND d.phase NOT IN ('completed','cancelled'))
+ OR EXISTS(SELECT 1 FROM ancestors WHERE depth=64 AND parent_id IS NOT NULL)`, orderID).Scan(&owned)
 	return owned, err
 }

@@ -132,8 +132,8 @@ paths:
         Read-only bounded advisory samples in the shared ticket queue order, with exclusions,
         proposed role-ladder route, uncalibrated estimate basis, next window and missing decisions.
         Does not reserve budget/slots, settle usage, change estimates or launch. Account readiness,
-        locked policy and execution enforcement must be rechecked by AEON-599/600. Release scope
-        reports unavailable until AEON-596 supplies its ordered items. No Status autopilot dependency.
+        locked policy and execution enforcement must be rechecked before launch by AEON-600. Release
+        previews are pending; schedule uses the building release's persisted ordered members. No Status autopilot dependency.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}

@@ -195,7 +195,7 @@ func candidates(ctx context.Context, tx pgx.Tx, l Lane, unowned bool) ([]candida
  LEFT JOIN LATERAL (SELECT a.id,a.created_at FROM autopilot_preparation_requests a JOIN principals requester ON requester.tenant_id=a.tenant_id AND requester.id=a.requested_by_principal_id AND requester.kind='person'
   WHERE a.lane_id=$2 AND a.ticket_node_id=n.id AND a.ticket_revision=n.updated_at AND a.lane_revision=$3 ORDER BY a.created_at,a.id LIMIT 1) pr ON true
  WHERE n.project_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')
- AND (NOT $7::bool OR NOT EXISTS(SELECT 1 FROM lane_dispatches d WHERE d.ticket_node_id=n.id AND d.phase NOT IN ('completed','cancelled') AND (d.lane_id IS NOT NULL OR EXISTS(SELECT 1 FROM agent_runs owned_run WHERE owned_run.id=d.run_id AND owned_run.status NOT IN ('completed','failed','cancelled')))))
+ AND (NOT $7::bool OR (NOT EXISTS(SELECT 1 FROM lane_dispatches rejected WHERE rejected.ticket_node_id=n.id AND rejected.lane_id=$2 AND rejected.phase='cancelled' AND rejected.ticket_revision=n.updated_at AND rejected.lane_revision=$3) AND NOT EXISTS(SELECT 1 FROM lane_dispatches d WHERE d.ticket_node_id=n.id AND d.phase NOT IN ('completed','cancelled') AND (d.lane_id IS NOT NULL OR EXISTS(SELECT 1 FROM agent_runs owned_run WHERE owned_run.id=d.run_id AND owned_run.status NOT IN ('completed','failed','cancelled'))))))
  AND (($4='queued_tickets' AND (p.kind='person' OR pr.id IS NOT NULL)) OR ($4='release' AND j.release_node_id=$5))
  ORDER BY CASE WHEN $4='release' THEN j.walker_position END,
  CASE WHEN $4='queued_tickets' THEN coalesce(q.queue_target_agent_id::text,'') END,

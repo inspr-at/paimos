@@ -24,7 +24,8 @@ import (
 )
 
 // Pause the review after its pairing lock, before workorders.Create takes the
-// tree lock. The queue mutation must wait for pairing without holding the tree.
+// tree lock. The queue mutation must wait at the earlier tenant fence without
+// holding the tree or pairing lock.
 type reviewLockPause struct {
 	first  atomic.Bool
 	locked chan uint32
@@ -92,7 +93,7 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 	}()
 	for {
 		var waiting bool
-		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks held JOIN pg_locks waiting USING(locktype,database,classid,objid,objsubid) WHERE held.pid=$1 AND held.locktype='advisory' AND held.granted AND NOT waiting.granted)`, pid).Scan(&waiting)
+		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,8 +102,8 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("queue did not wait for pairing lock")
-		case <-time.After(10 * time.Millisecond):
+			t.Fatal("queue did not wait for the tenant/pairing fence")
+		default:
 		}
 	}
 	close(pause.resume)

@@ -252,7 +252,7 @@ func TestLanePolicyLifecycleAndTrustBoundaries(t *testing.T) {
 	f.call(t, f.owner, "PATCH", "/api/autopilot-lanes/"+rel.ID, patchInput{ExpectedRevision: rel.Revision, Scope: &Scope{Kind: "release", ReleaseNodeID: &wrongRelease}}, 404, nil)
 	var preview Preview
 	f.call(t, f.owner, "GET", "/api/autopilot-lanes/"+rel.ID+"/preview", nil, 200, &preview)
-	if preview.ExecutionAvailable || len(preview.Items) != 0 || !includes(preview.MissingDecisions, "release_order_integration_pending") {
+	if preview.ExecutionAvailable || len(preview.Items) != 0 || !includes(preview.MissingDecisions, "release_preview_pending") {
 		t.Fatalf("release preview %+v", preview)
 	}
 }
