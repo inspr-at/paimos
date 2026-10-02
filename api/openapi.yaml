@@ -6263,6 +6263,7 @@ paths:
         '400': {description: Invalid or overly broad query}
         '401': {description: Unauthorized}
         '403': {description: Permission denied}
+        '404': {description: Model profile not found}
   /usage/dashboard:
     get:
       operationId: getUsageDashboard

@@ -153,7 +153,7 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
     const level = effortLevel(first.sessions[0]?.effort_level), fullName = fullModelName(first), effort = effortTip(level)
     return { text: shownModelName(first, prefs), effort: level, fullName, provider: first.provider ?? '', harness: first.harness, state: 'measured', more,
       label: `${fullName}, measured${effort ? `, ${effort}` : ''}${more ? `, and ${more} more model${more === 1 ? '' : 's'}` : ''}`,
-      tip: [...(more ? ['Used, per session:', ...usedLines(models)] : [`Used: ${usedLines(models)[0]}`]), planLine(row, models)].join('\n') }
+      tip: [...(more ? ['Used, per session:', ...usedLines(models)] : [`Used: ${usedLines(models)[0]}`]), planLine(row, models), modelDurationLine(row)].filter(Boolean).join('\n') }
   }
   const route = plannedRoute(row)
   if (row.kind_slug !== 'epic' && route) {
@@ -199,7 +199,7 @@ function figure(row: PlanningRow, spent: number | null, est: number | null, form
 }
 function uncalibrated(row: PlanningRow): boolean {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
-  return cal?.level === 'default'
+  return cal?.basis === 'default'
 }
 function uncalibratedLine(row: PlanningRow): string {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
@@ -252,7 +252,9 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push(`${count} session${count === 1 ? '' : 's'} running${models.length === 1 ? ` on ${models[0]!.label}` : ''}`)
   }
   if (spent !== null && tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
-  if (tokens && spent === null && !tokens.sessions && !live && est !== null) { const basis = basisLine(tokens, row); if (basis) lines.push(basis) }
+  if (tokens && est !== null && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
+    const basis = basisLine(tokens, row); if (basis) lines.push(basis)
+  }
   return figure(row, spent, est, formatTokenCount, lines.join('\n'), ' tokens')
 }
 

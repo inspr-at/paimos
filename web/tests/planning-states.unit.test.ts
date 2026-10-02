@@ -173,7 +173,8 @@ describe('approved planning figure states', () => {
     delete r.planning!.tokens.calibration.any_route
     r.planning!.tokens.calibration.basis = 'default'
     r.planning!.tokens.calibration.tokens_per_hour = 5_000_000
-    expect(tokensCell(r).tip).toContain('0.48h at 5M/h: default 5M/h until 5 finished tickets on Codex sol')
+    expect(tokensCell(r).tip).toBe('Uncalibrated · insufficient model history (n=12)')
+    expect(tokensCell(r).estimated).toBe('')
     r.planning!.tokens.calibration.basis = 'median'
     r.planning!.tokens.calibration.tokens_per_hour = 800_000
     r.planning!.tokens.sessions = 1

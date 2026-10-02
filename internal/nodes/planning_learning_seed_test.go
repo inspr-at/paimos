@@ -129,6 +129,41 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	if *view.Snapshot.Hours != 3 || *view.Snapshot.ModelEstimate.Hours != 6 || *view.Snapshot.Tokens != 6_000_000 {
 		t.Fatal("work-start snapshot changed", view.Snapshot)
 	}
+	// A caller who can read nodes workspace-wide still sees learning only
+	// from the project where harness.read is granted.
+	hidden := w
+	hidden.root = w.node(t, "LEARNHIDDEN-1", "project", "", "open", nil)
+	for i := range 5 {
+		seedLearningTicket(t, hidden, i+8, int64(4*3600000), false)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+   SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, w.admin.TenantID, w.viewer.ID, w.root.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scoped := httptest.NewRequest("GET", "/api/usage/model-estimates?profile_id="+profile+"&kind=backend&bucket=complex", nil)
+	scoped = scoped.WithContext(tenant.WithPrincipal(scoped.Context(), w.viewer))
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, scoped)
+	if recorder.Code != 200 {
+		t.Fatalf("project history %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var scopedHistory usagedashboard.ModelEstimateHistory
+	if err := json.Unmarshal(recorder.Body.Bytes(), &scopedHistory); err != nil {
+		t.Fatal(err)
+	}
+	if scopedHistory.Tickets != 5 {
+		t.Fatalf("cross-project samples: %+v", scopedHistory)
+	}
+	foreign := addPrincipal(t, "learning-foreign")
+	cross := scoped.WithContext(tenant.WithPrincipal(scoped.Context(), foreign))
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, cross)
+	if recorder.Code != 404 {
+		t.Fatalf("cross-tenant profile history %d: %s", recorder.Code, recorder.Body.String())
+	}
 	// Visibility is applied before selecting each cell's newest-30 window.
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		samples, err := usagedashboard.LoadLearningSamples(t.Context(), tx, []usagedashboard.LearningCell{{Family: "openai", Line: "astra", Effort: "xhigh", Kind: "backend", Bucket: "complex"}}, "", func(string) bool { return false })
