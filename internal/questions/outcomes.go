@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -171,7 +172,7 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		return err
 	}
 	changes := []events.Change{}
-	data := EffectData{Supersedes: previousID, ReviewRequired: previous.ReviewRequired}
+	data := EffectData{Supersedes: previousID, ReviewRequired: slices.Clone(previous.ReviewRequired)}
 	previousCriterion := previous
 	if previousCriterion.TicketID != "" {
 		editable := check("nodes.write", d.project)
@@ -366,7 +367,7 @@ func doctrineOutcomeError(err error) error {
 
 func (data *EffectData) requireReview(review EffectReview) {
 	for i, existing := range data.ReviewRequired {
-		if existing.Kind == review.Kind {
+		if existing.Kind == review.Kind && existing.Ref == review.Ref {
 			data.ReviewRequired[i] = review
 			return
 		}
