@@ -111,8 +111,9 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
 SELECT (SELECT at FROM clock),totals.open,totals.held,totals.chores,
  coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb) FROM totals`
 
-// ReadTx is the one adapter consumed by the HTTP projection and the existing
-// phone notification worker. It does not acquire source mutation locks.
+// ReadTx serves the canonical HTTP projection for the future desk cutover.
+// NoticesTx reuses its source predicates for the pending phone integration.
+// Neither projection read acquires source mutation locks.
 func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor) (Page, error) {
 	return readProjection(ctx, tx, p, limit, after, false, false)
 }

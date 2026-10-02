@@ -299,8 +299,9 @@ existing AEON-455 phone scheduler. Eligible work has a real unfinished work
 link or a correlated unresolved held request; a parked label alone is insufficient.
 The proposed approval expiry-warning window is 15 minutes, subject to the phone scheduler's quiet hours and escalation.
 Notice scans filter project/workspace decision authority before their limit.
-An approval lacking its native scope authority gets a terminal skipped claim,
-so it cannot block later notices. Final claims take the tenant access fence,
+The scheduler must admit every candidate through ClaimTx before its transport
+check: an approval lacking its native scope authority gets a terminal skipped
+claim and returns false, allowing later scans to advance. Final claims take the tenant access fence,
 tree fence and source row lock, then recheck only that source's current project,
 revision, state and decision authority. Recipient indexes compare native UUIDs.
 Claims persist once per source/revision/recipient across devices and replicas,
