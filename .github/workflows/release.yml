@@ -338,6 +338,7 @@ jobs:
     permissions:
       contents: write
       packages: read
+      attestations: read
     uses: ./.github/workflows/release-completion.yml
     with:
       tag: v${{ needs.image.outputs.version }}

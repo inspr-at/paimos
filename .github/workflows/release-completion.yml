@@ -46,6 +46,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      attestations: read
     outputs:
       source_sha: ${{ steps.prepare.outputs.source_sha }}
       tag: ${{ steps.prepare.outputs.tag }}
@@ -75,6 +76,7 @@ jobs:
     permissions:
       contents: write
       packages: read
+      attestations: read
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +210,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -251,6 +254,7 @@ jobs:
     permissions:
       contents: write
       packages: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

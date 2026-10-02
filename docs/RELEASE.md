@@ -561,8 +561,8 @@ node scripts/release-retry.mjs "$NEW_VERSION" "$UTC_RESERVED_AT" --write
 
 The first command is a plan. Both commands perform complete paginated lookups
 including drafts and fail on lookup errors or an index/release at either old or
-new coordinate, or an already-existing new tag. The second updates only local `version.json` and the public
-notes bundle: it retires the old reservation, retains its capture unchanged,
+new coordinate, or an already-existing new tag. The second updates only local
+`version.json` and the public notes bundle: it retires the old reservation, retains its capture unchanged,
 and clones that exact capture under the new key. It does not refetch ticket
 text, change the reviewed scope, create a tag or write remotely. An untagged
 by-digest platform export alone does not consume the coordinate. Preserve all
@@ -589,7 +589,7 @@ gh attestation verify "oci://ghcr.io/inspr-at/aeon@$DIGEST" \
   --deny-self-hosted-runners
 ```
 
-The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the platform and index jobs. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. Both image jobs retain the existing `contents: write` permission so their immutability lookups can see drafts (GitHub restricts draft listings to push access). Only `assets` creates the draft release; signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
+The attestation action uses the existing `packages`, `attestations` and OIDC write scopes only in the platform and index jobs. Storage-record creation is disabled so no `artifact-metadata` write scope is needed. Both image jobs retain the existing `contents: write` permission so their immutability lookups can see drafts (GitHub restricts draft listings to push access). Completion tokens add only attestation/package read access for independent verification; draft-aware asset reads require contents write, and only `assets` creates or uploads to the draft release. Signing stays in its existing environment. Every action in these image/release workflows is pinned to a commit.
 
 ### Deployment pin proposals (AEON-413)
 
