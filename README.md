@@ -196,6 +196,25 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+The ordinary activity tests check exact pagination through 240 same-ticket
+imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
+imported events, plus the node index definition. They impose no latency budget.
+For a controlled performance check, use an idle dedicated test runner with local
+Postgres and run without the race detector:
+
+```sh
+AEON_TEST_DATABASE_URL="postgres://aeon:aeon@127.0.0.1:55432/aeon?sslmode=disable" \
+AEON_ACTIVITY_IMPORT_SCALE_PROBE=1 \
+go test -count=1 -run '^TestTimelineAtImportScaleLatency$' -v ./internal/activity
+```
+
+This opt-in probe uses the same synthetic fixture, excludes setup, warms up five
+first-page requests, and samples 30 sequential requests with a page size of 20.
+It measures the handler and JSON decoding; the nearest-rank p95 must be below
+100 ms. Median and maximum are logged for diagnosis. It does not measure full
+history traversal or guarantee production latency. Shared or loaded runners
+are unsuitable for interpreting this budget.
+
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
 `go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
@@ -1148,12 +1167,22 @@ token values in tenant configuration, API requests, logs or this repository.
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
 snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+Single, batch and restored rule publications reject credential-shaped text in
+snapshot fields and publication notes with a generic `422 credential_text`.
+The detector is shared with knowledge learnings, whose existing explicit
+false-positive confirmation policy is unchanged.
 Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
 GitHub App is enabled for the workspace. The editor creates a proposal branch
 and PR in the rule's owning public/private repo, changing its source and git
 TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
 against only the changed rule, its TL;DR entry and PR explanation before any
-GitHub call or token mint. Comparison removes every Unicode default-ignorable
+GitHub call or token mint. Both public and private proposals also use the shared
+credential detector (provider/cloud keys, private keys, password assignments,
+Markdown labels, authorization values and URLs with passwords). It checks the
+edited fields and complete outgoing blobs and paths before GitHub receives
+anything; refusals never echo matched values. Raw and case-preserving Unicode
+compatibility checks retain token shapes alongside the existing skeleton check.
+Comparison removes every Unicode default-ignorable
 character, applies NFKD, drops combining marks, folds case and uses a vendored
 Unicode 17.0.0 UTS #39 skeleton. Named Latin small capitals are generated from
 UnicodeData as well; ambiguous compatibility/visual forms fail closed. The
@@ -1191,9 +1220,13 @@ form admits superscripts, fractions and the information symbol while other
 scripts/digits stay refused. Unchanged file content is excluded.
 
 Regenerate the pinned Unicode table with
-`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+`python3 internal/unicodeguard/unicodegen/generate.py`, then `gofmt` the output.
 The generator verifies immutable input digests; builds and runtime are offline.
 Credential-shaped text is refused for either repository, including private.
+The shared publication detector checks raw text, compatibility forms without
+format controls, and case-preserving confusable forms from the same pinned table.
+Rule snapshots (single, batch and restore) use these checks too. Credential
+range offsets for knowledge confirmation still refer to the original text.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID
 and input when retrying a lost response. Short transactions authorize and reserve
@@ -1304,6 +1337,10 @@ out-of-range totals return the stable `400 invalid_budget` error. Lowering a
 budget below published rules still fails with 422. The editor estimates tokens
 at full budget (bytes ÷ 4), adds nonblocking guidance above 64 KB and 128 KB,
 and offers a collapsible English/German Tip for keeping the kernel small.
+Budget fields and save/cancel controls precede expandable guidance, so warnings,
+validation messages and client details grow downward without moving them.
+Use ⌘↵ on macOS or Ctrl+↵ elsewhere to save from a field; Escape leaves the
+field first, then cancels editing on the next press. Browser shortcuts stay native.
 
 CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
 on registration and every heartbeat. The transport ceiling is 512,000 bytes,

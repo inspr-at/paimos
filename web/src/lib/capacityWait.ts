@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state'] as const
+export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency'] as const
 export interface CapacityWait {
   code: typeof WAIT_CODES[number]
   until?: string
@@ -35,6 +35,7 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'approval': return 'Allow agents in Settings / Accounts'
     case 'capacity': return 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
+    case 'residency': return 'Waiting for an account within the allowed providers'
     case 'models': return 'No model is granted for this account'
     // Why and how to resume, not just that it is paused (AEON-402).
     case 'state': return 'Paused in Settings / Accounts; turn “Agents may use it” back on to resume'
