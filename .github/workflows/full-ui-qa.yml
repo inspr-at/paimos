@@ -44,7 +44,9 @@ jobs:
   qa-shard:
     needs: qa-source
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The existing offline audit itself allows 60 minutes. Leave room for
+    # dependency/browser setup and the other tests assigned to that shard.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

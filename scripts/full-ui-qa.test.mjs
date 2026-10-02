@@ -74,6 +74,10 @@ test('full inventory runs in five hosted shards without retries, filters or secr
   assert.match(shard, /if: always\(\)/)
   assert.match(shard, /path: web\/test-results\//)
   assert.match(shard, /retention-days: 7/)
+  const audit = readFileSync(new URL('../web/tests/ui-audit.spec.ts', import.meta.url), 'utf8')
+  const auditTimeoutMs = Number(audit.match(/test.setTimeout\(([\d_]+)\)/)[1].replaceAll('_', ''))
+  const shardTimeoutMs = Number(shard.match(/timeout-minutes: (\d+)/)[1]) * 60_000
+  assert.ok(shardTimeoutMs >= auditTimeoutMs + 15 * 60_000, 'allow the existing audit timeout plus setup and other specs')
 })
 
 test('aggregate check reports source failures and every shard failure or cancellation', () => {

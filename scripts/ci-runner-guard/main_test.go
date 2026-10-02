@@ -36,10 +36,10 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 		{"      fail-fast: false", "      fail-fast: true"},
 		{"shard: [1, 2, 3, 4, 5]", "shard: [1, 2, 3, 4, 5, 6]"},
 		{"always() && needs.qa-source.result != 'skipped'", "success()"},
-		{"    timeout-minutes: 45", "    permissions: {contents: write}\n    timeout-minutes: 45"},
-		{"    timeout-minutes: 45", "    environment: production\n    timeout-minutes: 45"},
-		{"    timeout-minutes: 45", "    continue-on-error: true\n    timeout-minutes: 45"},
-		{"    timeout-minutes: 45", "    env: {KEY: '${{ secrets.APP_KEY }}'}\n    timeout-minutes: 45"},
+		{"    timeout-minutes: 90", "    permissions: {contents: write}\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    environment: production\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    continue-on-error: true\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    env: {KEY: '${{ secrets.APP_KEY }}'}\n    timeout-minutes: 90"},
 	} {
 		t.Run(mutation.new, func(t *testing.T) {
 			changed := strings.Replace(string(body), mutation.old, mutation.new, 1)
