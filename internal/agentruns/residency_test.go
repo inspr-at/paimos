@@ -70,7 +70,7 @@ func TestRunStoresLoosenedResidencyLockTrace(t *testing.T) {
 	ticket := f.ticket(t, "open", "high", nil)
 	project := uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'TRACE-P1','Trace project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'TRACE-1','Trace project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, ticket, project); err != nil {

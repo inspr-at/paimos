@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -49,6 +50,7 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
 				if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Qualified reviewer') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 					return err
 				}
+				dbtest.BindRoleWith(t, tx, p.TenantID, runner, "admin")
 				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
  VALUES($1,'review-error','claude','review-error',$2,'Reviewer',now(),true,'generation',$3) RETURNING id::text`, p.TenantID, runner, p.ID).Scan(&account); err != nil {
 					return err
@@ -79,7 +81,7 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
 				if err := modelprefs.PutRow(t.Context(), tx, p, scope, kindID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "latest", Family: "anthropic", Line: "opus", Effort: "xhigh"}}}); err != nil {
 					return err
 				}
-				q := WorkQuery{Role: "review-gate", AuthorFamily: "openai"}
+				q := WorkQuery{Role: "review-gate", AuthorFamily: "openai", Harness: "claude"}
 				now := time.Now()
 				injected := errors.New("review lookup unavailable")
 				failing := &reviewLookupFailure{Tx: tx, profiles: profiles, err: injected}
@@ -103,7 +105,7 @@ func TestResolveAPIReturnsLoosenedResidencyTrace(t *testing.T) {
 	var project string
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		starter = p
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TRACE-P1','Trace project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TRACE-1','Trace project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
 			return err
 		}
 		eu, any := "eu", "any"
