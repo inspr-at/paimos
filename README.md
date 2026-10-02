@@ -300,6 +300,14 @@ preference reveals the footer flow pill, Journey tab, stages and release walker;
 it does not grant action permissions. Journey bookmarks explain the opt-in while
 it is off. Turning it off removes the flow UI again.
 
+Reserved, never-published versions are hidden in the release history by default.
+**Show reserved versions** under **Settings → Developer**
+(`/settings/developer#reserved-versions`) enables them for that person and
+workspace, including comparison choices and previous/next navigation. Statistics
+and result counts always include reservations; the footer's **N new** count
+includes only visible versions. A direct link still opens a hidden reservation
+with a quiet explanation of the setting.
+
 If a standing candidate or deployment gate expires or is revoked before
 deployment finishes, Journey offers renewal on the Deploy stage. An agent
 requests a fresh release-bound approval; its person decider applies it with

@@ -69,15 +69,15 @@ describe('the seven stats', () => {
   })
 
   it('releases per week average since the first release while the history is shorter than 52 weeks', () => {
-    // 113 published releases in 7 days 21 h 14 min: 100.3 a week.
-    expect(s.perweek.value).toBe('100')
+    // 113 published releases plus one reservation in 7 days 21 h 14 min.
+    expect(s.perweek.value).toBe('101')
     expect(s.perweek.sub).toBe('on average since the first release, 23 Sep')
-    expect(s.perweek.chips).toEqual(['≈ 14 a day', '≈ 5,200 a year at this pace'])
+    expect(s.perweek.chips).toEqual(['≈ 14 a day', '≈ 5,300 a year at this pace'])
     const viz = s.perweek.viz
     expect(viz.kind).toBe('cumulative')
     if (viz.kind === 'cumulative') {
-      expect(viz.points).toEqual([11, 36, 52, 74, 85, 94, 107, 112, 113])
-      expect(viz.total).toBe(113)
+      expect(viz.points).toEqual([11, 36, 52, 74, 85, 94, 107, 113, 114])
+      expect(viz.total).toBe(114)
     }
   })
 
@@ -171,22 +171,22 @@ describe('the seven stats', () => {
   })
 
   it('this week counts since Monday, per day so far, and last week from the first release', () => {
-    expect(s.week.value).toBe('28')
+    expect(s.week.value).toBe('29')
     expect(s.week.sub).toBe('releases since Monday')
-    expect(s.week.chips).toEqual(['7 a day so far', 'last week 85 (from Wed)'])
+    expect(s.week.chips).toEqual(['7.3 a day so far', 'last week 85 (from Wed)'])
     const viz = s.week.viz
     if (viz.kind !== 'week') throw new Error(viz.kind)
-    expect(viz.days.map(d => d.n)).toEqual([9, 13, 5, 1, null, null, null])
+    expect(viz.days.map(d => d.n)).toEqual([9, 13, 6, 1, null, null, null])
     expect(viz.days.findIndex(d => d.today)).toBe(3)
-    expect(viz.aria).toBe('Releases per day this week: Monday 9, Tuesday 13, Wednesday 5, Thursday 1 so far')
+    expect(viz.aria).toBe('Releases per day this week: Monday 9, Tuesday 13, Wednesday 6, Thursday 1 so far')
   })
 
   it('the streak runs every day since the first release, with its releases', () => {
     expect(s.streak.value).toBe('9 days')
-    expect(s.streak.chips).toEqual(['every day since 23 Sep', '113 releases'])
+    expect(s.streak.chips).toEqual(['every day since 23 Sep', '114 releases'])
     const viz = s.streak.viz
     if (viz.kind !== 'streak') throw new Error(viz.kind)
-    expect(viz.days).toEqual([11, 25, 16, 22, 11, 9, 13, 5, 1])
+    expect(viz.days).toEqual([11, 25, 16, 22, 11, 9, 13, 6, 1])
     expect([viz.from, viz.to]).toEqual(['23 Sep', 'today'])
   })
 
@@ -205,17 +205,22 @@ describe('the seven stats', () => {
   it('the busiest day is the peak against the daily average', () => {
     expect(s.busiest.value).toBe('25')
     expect(s.busiest.sub).toBe('releases on Thu, 24 Sep')
-    // Against the pace the other chips use, 14.3 a day.
-    expect(s.busiest.chips).toEqual(['≈ 1.7× the daily average'])
+    // Against the pace the other chips use, including the reservation.
+    expect(s.busiest.chips).toEqual(['1.7× the daily average'])
     const viz = s.busiest.viz
     if (viz.kind !== 'days') throw new Error(viz.kind)
-    expect(viz.days).toEqual([11, 25, 16, 22, 11, 9, 13, 5, 1])
+    expect(viz.days).toEqual([11, 25, 16, 22, 11, 9, 13, 6, 1])
     expect(viz.peak).toBe(1)
     expect(viz.peakLabel).toBe('Thu 24 Sep')
   })
 
-  it('nothing published, no stats', () => {
-    expect(releaseStats([rel(NOW, { state: 'reserved', published_at: null, tagged_at: null })], NOW)).toEqual([])
+  it('reservations count even without published versions, using their reservation time', () => {
+    const releases = [rel(NOW - HOUR, { state: 'reserved', published_at: null, tagged_at: null })]
+    const stats = byKey(releaseStats(releases, NOW))
+    expect(stats.perweek.viz.kind === 'cumulative' && stats.perweek.viz.total).toBe(1)
+    expect(stats.since.sub).toContain('reserved today')
+    expect(cadence(releases, NOW, '7d').total).toBe(1)
+    expect(releaseStats([], NOW)).toEqual([])
   })
 })
 
@@ -224,24 +229,24 @@ describe('cadence over a range', () => {
 
   it('7 days: a bar a day, weekday labels, weekends marked, today last and still filling', () => {
     const c = cadence(releases, NOW, '7d')
-    expect(c.slots.map(x => x.n)).toEqual([16, 22, 11, 9, 13, 5, 1])
+    expect(c.slots.map(x => x.n)).toEqual([16, 22, 11, 9, 13, 6, 1])
     expect(c.slots.map(x => x.label)).toEqual(['Fri 25', 'Sat 26', 'Sun 27', 'Mon 28', 'Tue 29', 'Wed 30', 'Today'])
     expect(c.slots.map(x => x.weekend)).toEqual([false, true, true, false, false, false, false])
     expect(c.slots.at(-1)).toMatchObject({ current: true, full: 'Today', first: 'Name 113 09:56', last: '' })
     expect(c.slots[1]).toMatchObject({ full: 'Sat 26 Sep', first: 'Name 53 01:00', last: 'Name 74 22:00' })
-    expect(c.total).toBe(77)
+    expect(c.total).toBe(78)
     expect(c.peak).toBe(1)
-    // 77 in 6 days 13 hours: 11.8 a day.
+    // 78 in 6 days 13 hours, including the reservation: about 12 a day.
     expect(c.avgLabel).toBe('Ø 12 a day')
-    expect(c.chips).toEqual(['≈ 12 a day', '≈ 4,300 a year at this pace', 'peak 22 · Sat 26 Sep'])
-    expect(c.aria).toBe('77 releases in the last 7 days')
+    expect(c.chips).toEqual(['≈ 12 a day', '≈ 4,400 a year at this pace', 'peak 22 · Sat 26 Sep'])
+    expect(c.aria).toBe('78 releases in the last 7 days')
   })
 
   it('14 days: the days before the first release are named, not zero', () => {
     const c = cadence(releases, NOW, '14d')
     expect(c.slots.filter(x => x.before).map(x => x.label)).toEqual(['Fri 18', 'Sat 19', 'Sun 20', 'Mon 21', 'Tue 22'])
     expect(c.slots[5]).toMatchObject({ before: false, n: 11 })
-    expect(c.total).toBe(113)
+    expect(c.total).toBe(114)
     expect(c.chips).toEqual(['≈ 14 a day since 23 Sep', 'peak 25 · Thu 24 Sep'])
   })
 
@@ -254,17 +259,17 @@ describe('cadence over a range', () => {
   it('90 days: thirteen weeks from Monday, this week last', () => {
     const c = cadence(releases, NOW, '90d')
     expect(c.slots).toHaveLength(13)
-    expect(c.slots.slice(-2).map(x => [x.full, x.n])).toEqual([['Week of 21 Sep', 85], ['This week', 28]])
+    expect(c.slots.slice(-2).map(x => [x.full, x.n])).toEqual([['Week of 21 Sep', 85], ['This week', 29]])
     expect(c.slots.at(-2)).toMatchObject({ first: 'Name 1 (Wed)', last: 'Name 85 (Sun)' })
     expect(c.slots.at(-1)!.last).toBe('Name 113 (today)')
     expect(c.slots.filter(x => x.before)).toHaveLength(11)
-    expect(c.chips).toEqual(['≈ 100 a week since 23 Sep', 'peak 85 · week of 21 Sep'])
+    expect(c.chips).toEqual(['≈ 101 a week since 23 Sep', 'peak 85 · week of 21 Sep'])
   })
 
   it('1 year: twelve months, the current one so far', () => {
     const c = cadence(releases, NOW, '1y')
     expect(c.slots.map(x => x.label)).toEqual(['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'])
-    expect(c.slots.slice(-2).map(x => [x.full, x.n])).toEqual([['September', 112], ['October so far', 1]])
+    expect(c.slots.slice(-2).map(x => [x.full, x.n])).toEqual([['September', 113], ['October so far', 1]])
     expect(c.slots[0]!.full).toBe('November 2025')
     expect(c.chips).toEqual(['≈ 440 a month at this pace', 'first release 23 Sep'])
   })
