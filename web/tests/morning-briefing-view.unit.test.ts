@@ -80,6 +80,12 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
         ] : [], truncated: false } }
       },
     },
+    '../lib/decisionDesk': { loadDeskProjection: async () => {
+      paths.push('/decision-desk/projection?limit=100')
+      if (options.pendingFailure) throw new APIError(500, 'failed')
+      const items = options.fullQueue ? [{ id: 'question', kind: 'question', title: 'Ordinary question', held: false, href: '/agents?needs=q:question', source: '/api/questions/question' }] : []
+      return { items, counts: { open: options.fullQueue ? 401 : 0, held: 0, chores: 0 }, truncated: !!options.fullQueue }
+    } },
     '../components/AppIcon.vue': { __esModule: true, default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
     '../components/work/PlanningCell.vue': { __esModule: true, default: { render: () => Vue.h('span') } },
   }
@@ -104,7 +110,7 @@ it('saves the database snapshot cutoff even when the browser clock is ahead', as
 it('advances completed logs even with 200 pending approvals and human requests', async () => {
   const { saves, paths } = await mount({ fullQueue: true })
   expect(saves).toHaveLength(1)
-  expect(paths.some(path => path.startsWith('/approvals?') && path.includes('pending=true'))).toBe(true)
+  expect(paths.some(path => path.startsWith('/decision-desk/projection'))).toBe(true)
 })
 it('keeps pending-source failure separate from a successfully read log window', async () => {
   expect((await mount({ pendingFailure: true })).saves).toHaveLength(1)
@@ -157,4 +163,11 @@ it('renders measured in visible cost text for screen readers', async () => {
 
 it('keeps a pending-only detail failure separate from completed logs', async () => {
   expect((await mount({ fullQueue: true, detailsFailure: true })).saves).toHaveLength(1)
+})
+
+it('includes an ordinary question with the exact canonical count and source', async () => {
+  const { root } = await mount({ fullQueue: true })
+  expect(textOf(root)).toContain('Ordinary question')
+  expect(textOf(root)).toContain('401')
+  expect(flatten(root).find(el => el.tag === 'a' && el.props.href === '/api/questions/question')).toBeDefined()
 })

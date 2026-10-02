@@ -159,7 +159,30 @@ links appear only after successful reads. Merge facts use changes to a ticket’
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
 do not count as merges. The visit-bounded autopilot log must also load completely
 before the cutoff advances. Journey next actions use one batch snapshot query.
-This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
+The Decision Desk section and the Agents badge use the same server projection:
+`GET /api/decision-desk/projection`. Held approvals sort by expiry, then other
+held work by age, then ordinary open items by age, with source ID ties. Questions
+merged from several askers count once; a question replaces its linked action
+request. Sign-ins remain separate chores. Counts cover all currently readable
+sources independently of page size; failed reads and coverage limits stay visible.
+The briefing preserves server order and links to the exact question/source;
+ordinary questions appear here without a push. Journey/autopilot checks remain
+in a separate section until their desk adapters exist.
+
+AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
+`NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
+existing AEON-455 phone scheduler. Eligible work has a real unfinished work
+link; a parked label alone is insufficient. Approval expiry warnings use a
+15-minute window, subject to the phone scheduler's quiet hours and escalation.
+Claims persist once per source/revision/recipient across devices and replicas.
+An ambiguous transport failure retains its claim and records failure rather
+than repeating a push. Payloads contain only source pointers. Answer commits,
+grace edits, corrections and expiry never emit success notifications; doctrine
+keeps its existing per-person toast claim and has no competing desk push.
+Phone scheduler activation remains dependent on AEON-455 landing on main;
+this package adds no scheduler or competing subscription store.
+
+This slice delivers the in-app briefing; e-mail and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 
