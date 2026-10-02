@@ -14116,6 +14116,21 @@ components:
       type: object
       required: [residency, rows, changes]
       properties:
+        choices:
+          type: array
+          maxItems: 256
+          description: Advisory picker metadata for this level; live routing remains authoritative. Retired versions are hidden, unqualified review harnesses and models without residency routes are disabled.
+          items:
+            type: object
+            required: [profile, line, model_version, retired, review_ladder, review_reason, residency_routes]
+            properties:
+              profile: {$ref: '#/components/schemas/ModelProfile'}
+              line: {type: string}
+              model_version: {type: string}
+              retired: {type: boolean}
+              review_ladder: {type: boolean}
+              review_reason: {type: string}
+              residency_routes: {type: integer, minimum: 0}
         residency:
           allOf:
             - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}

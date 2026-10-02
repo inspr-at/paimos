@@ -110,18 +110,32 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 // model allowance. Capacity is transient and does not change this evidence
 // count. Load account metadata once for the whole editor view.
 func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (int, error) {
-	accounts, err := listAccounts(ctx, tx)
+	counts, err := ResidencyProfileRouteCounts(ctx, tx, profiles, projectID, requirement, now)
 	if err != nil {
 		return 0, err
 	}
-	count := 0
+	total := 0
+	for _, count := range counts {
+		total += count
+	}
+	return total, nil
+}
+
+// ResidencyProfileRouteCounts shares the same account read and harness fences
+// across picker choices. It is advisory evidence, never a reservation decision.
+func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (map[string]int, error) {
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(profiles))
 	byHarness := map[string][]Account{}
 	for profileID, harness := range profiles {
 		candidates, loaded := byHarness[harness]
 		if !loaded {
 			fs, err := loadFences(ctx, tx, harness)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			candidates = applyFence(accounts, fs, projectID)
 			byHarness[harness] = candidates
@@ -132,12 +146,12 @@ func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]str
 			}
 			class, err := ResidencyClass(ctx, tx, a, profileID, now)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			if modelprefs.Strictness(class) >= modelprefs.Strictness(requirement) {
-				count++
+				counts[profileID]++
 			}
 		}
 	}
-	return count, nil
+	return counts, nil
 }

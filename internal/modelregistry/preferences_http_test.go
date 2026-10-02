@@ -390,3 +390,49 @@ func TestPreferenceOpenAPIContract(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPreferencePickerEvidence(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "prefs-picker", "person", "Admin", []string{"admin"})
+	doc := prefDoc(t, admin)
+	view := doc.Views["person"]
+	if view == nil || len(view.Choices) == 0 || len(view.Choices) > 256 {
+		t.Fatal("missing or unbounded picker choices")
+	}
+	total := 0
+	var retiredID string
+	foundUnqualified := false
+	for _, choice := range view.Choices {
+		total += choice.ResidencyRoutes
+		if choice.Profile.Slug == "codex-sol-high" {
+			retiredID = choice.Profile.ID
+			if choice.Line != "sol" || choice.ModelVersion == "" {
+				t.Fatal("picker used catalog revision instead of model version", choice)
+			}
+		}
+		if choice.Profile.Harness == "codex" && choice.ReviewLadder && choice.Profile.Effort == "xhigh" {
+			foundUnqualified = strings.Contains(choice.ReviewReason, "Codex")
+		}
+	}
+	if total != view.Residency.QualifyingRoutes || !foundUnqualified || retiredID == "" {
+		t.Fatal("picker evidence does not match routing or qualification", total, view.Residency.QualifyingRoutes, foundUnqualified)
+	}
+	decode[map[string]any](t, &admin, "POST", "/api/models/"+retiredID+"/retire", `{"reason":"Picker regression"}`, 200)
+	doc = prefDoc(t, admin)
+	foundRetired := false
+	for _, choice := range doc.Views["person"].Choices {
+		if choice.Profile.ID == retiredID {
+			foundRetired = choice.Retired && choice.ResidencyRoutes == 0
+		}
+	}
+	if !foundRetired {
+		t.Fatal("retirement missing from picker evidence")
+	}
+	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person", `{"revision":0,"residency":"eu"}`, 200)
+	doc = prefDoc(t, admin)
+	for _, choice := range doc.Views["person"].Choices {
+		if choice.ResidencyRoutes != 0 {
+			t.Fatal("picker invented EU residency evidence", choice)
+		}
+	}
+}
