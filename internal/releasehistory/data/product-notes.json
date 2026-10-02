@@ -4173,6 +4173,79 @@
           "group": "features"
         }
       ]
+    },
+    "261002081219.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 119,
+      "snapshot_sha256": "d1a0a2ee1050509fc41ed940196ed12ed1baf52ce4dd2701651df69a6c7ab88d",
+      "captured_at": "2026-10-02T08:13:15Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-452",
+          "pill_en": "More agent harnesses",
+          "pill_de": "Mehr Agenten-Harnesses",
+          "benefit_en": "Use Gemini and open models alongside Claude, Codex, Cursor and Grok, from the same workspace.",
+          "benefit_de": "Nutze Gemini und offene Modelle neben Claude, Codex, Cursor und Grok, im selben Arbeitsbereich.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-472",
+          "pill_en": "Link accounts in seconds",
+          "pill_de": "Konten im Nu verknüpfen",
+          "benefit_en": "Linking an agent account to a person now takes one short code typed in the agent window and one confirmation in Paimos.",
+          "benefit_de": "Ein Agent-Konto einer Person zuzuordnen braucht jetzt nur einen kurzen Code im Agent-Fenster und eine Bestätigung in Paimos.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-483",
+          "pill_en": "Large drafts handled",
+          "pill_de": "Große Entwürfe verarbeitet",
+          "benefit_en": "Large Aithema drafts are stored safely in Aeon without hitting message size limits.",
+          "benefit_de": "Große Aithema-Entwürfe werden sicher in Aeon gespeichert, ohne an Größenlimits für Nachrichten zu scheitern.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-488",
+          "pill_en": "Calmer release overview",
+          "pill_de": "Ruhigere Release-Übersicht",
+          "benefit_en": "The release history shows what runs here and how fast we ship, without repeating itself.",
+          "benefit_de": "Die Release-Historie zeigt, was hier läuft und wie schnell wir liefern, ohne sich zu wiederholen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-522",
+          "pill_en": "Queue work for agents",
+          "pill_de": "Arbeit für Agenten einreihen",
+          "benefit_en": "One click puts a ticket in line for the next free agent, and you can see and reorder what agents will work on next.",
+          "benefit_de": "Ein Klick reiht ein Ticket für den nächsten freien Agenten ein; Sie sehen und ordnen, woran Agenten als Nächstes arbeiten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-525",
+          "pill_en": "Live agent activity",
+          "pill_de": "Sehen, was Agenten tun",
+          "benefit_en": "Every running agent shows in a few words what it is doing right now, in the agents table and its details.",
+          "benefit_de": "Jeder laufende Agent zeigt in wenigen Worten, woran er gerade arbeitet, in der Agententabelle und in den Details.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-533",
+          "pill_en": "No surprise status changes",
+          "pill_de": "Keine überraschenden Statuswechsel",
+          "benefit_en": "For the first day after an upgrade, automatic status changes are only proposed, so an owner can review and apply them before the autopilot acts on its own.",
+          "benefit_de": "Am ersten Tag nach einem Upgrade werden automatische Statuswechsel nur vorgeschlagen, damit ein Owner sie prüfen und übernehmen kann, bevor der Autopilot selbst handelt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-534",
+          "pill_en": "No startup deadlocks",
+          "pill_de": "Keine Deadlocks beim Start",
+          "benefit_en": "Background jobs at server start no longer collide and fail.",
+          "benefit_de": "Hintergrundjobs beim Serverstart kollidieren nicht mehr und schlagen nicht fehl.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
