@@ -2,11 +2,13 @@
 package questions
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -15,7 +17,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool *pgxpool.Pool
+	// Production uses the database clock; deterministic tests inject one clock for decisions and dispatch.
+	clock func(context.Context, pgx.Tx) (time.Time, error)
+}
+
+func (m *Module) now(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if m.clock != nil {
+		return m.clock(ctx, tx)
+	}
+	var now time.Time
+	err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	return now, err
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 func (m *Module) Mount(mux *http.ServeMux) {

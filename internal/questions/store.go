@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -42,6 +43,9 @@ func writeCapability(ctx context.Context, tx pgx.Tx) error {
 // Node creation already serializes the tenant tree. Take that lock first on
 // all mutations, then session/question locks, avoiding inverse lock ordering.
 func treeLock(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID)
 	return err
 }
@@ -240,20 +244,20 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 	}
 	if q.Revision > 1 {
 		a := &Answer{}
-		err = tx.QueryRow(ctx, `SELECT node_id::text,revision,option_id,answer,reason,outcome,decided_by::text,created_at,deliver_after FROM desk_answers WHERE tenant_id=$1 AND question_id=$2 AND revision=$3`, p.TenantID, id, q.Revision).Scan(&a.ID, &a.Revision, &a.OptionID, &a.Answer, &a.Reason, &a.Outcome, &a.DecidedBy, &a.CreatedAt, &a.DeliverAfter)
+		err = tx.QueryRow(ctx, `SELECT node_id::text,revision,option_id,answer,reason,outcome,decided_by::text,created_at,deliver_after,coalesce(replaces::text,'') FROM desk_answers WHERE tenant_id=$1 AND question_id=$2 AND revision=$3`, p.TenantID, id, q.Revision).Scan(&a.ID, &a.Revision, &a.OptionID, &a.Answer, &a.Reason, &a.Outcome, &a.DecidedBy, &a.CreatedAt, &a.DeliverAfter, &a.Replaces)
 		if err != nil {
 			return q, err
 		}
 		q.Answer = a
 	}
-	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code FROM desk_pending e
+	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
  WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
 	}
 	for rows.Next() {
 		var e Pending
-		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode); err != nil {
+		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID); err != nil {
 			rows.Close()
 			return q, err
 		}
@@ -333,6 +337,15 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 }
 func (m *Module) decide(ctx context.Context, p tenant.Principal, id string, in DecisionInput) (Question, error) {
 	var q Question
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		q, err = m.decideTx(ctx, tx, p, id, in)
+		return err
+	})
+	return q, err
+}
+func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, in DecisionInput) (Question, error) {
+	var q Question
 	if p.Kind != tenant.Person {
 		return q, fail(403, "person_required", "a signed-in person must decide")
 	}
@@ -340,8 +353,11 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id string, in D
 	if err != nil {
 		return q, err
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = func() error {
 		if err := treeLock(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,55))`, p.TenantID); err != nil {
 			return err
 		}
 		var project string
@@ -388,12 +404,9 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id string, in D
 				return fail(400, "invalid_request", "option_id must name a question option")
 			}
 		}
-		var dispatched bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM desk_pending WHERE tenant_id=$1 AND question_id=$2 AND state='delivered')`, p.TenantID, id).Scan(&dispatched); err != nil {
+		var replaces string
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT r.node_id::text FROM desk_answers r WHERE r.tenant_id=$1 AND r.question_id=$2 AND EXISTS(SELECT 1 FROM desk_pending e WHERE e.tenant_id=r.tenant_id AND e.question_id=r.question_id AND e.revision=r.revision AND e.effect_ref<>'' AND e.kind IN ('inbox','comment')) ORDER BY r.revision DESC LIMIT 1),'')`, p.TenantID, id).Scan(&replaces); err != nil {
 			return err
-		}
-		if dispatched {
-			return fail(409, "correction_unavailable", "a dispatched answer requires the correction adapter")
 		}
 		if err := writeCapability(ctx, tx); err != nil {
 			return err
@@ -403,8 +416,12 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id string, in D
 			return err
 		}
 		rev := q.Revision + 1
-		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,clock_timestamp()+interval '10 seconds')`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome)
+		now, err := m.now(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after,replaces)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome, now.Add(10*time.Second), nullable(replaces))
 		if err != nil {
 			return err
 		}
@@ -429,11 +446,14 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id string, in D
 		if _, err = tx.Exec(ctx, `UPDATE desk_questions SET revision=$3,state='answered',updated_at=clock_timestamp() WHERE tenant_id=$1 AND node_id=$2`, p.TenantID, id, rev); err != nil {
 			return err
 		}
+		if err := settleHeld(ctx, tx, p, q, rev); err != nil {
+			return err
+		}
 		if err := event(ctx, tx, p, id, "question.answered", rev); err != nil {
 			return err
 		}
 		q, err = read(ctx, tx, p, id)
 		return err
-	})
+	}()
 	return q, err
 }

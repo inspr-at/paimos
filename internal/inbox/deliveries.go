@@ -37,9 +37,12 @@ type compatSend struct {
 // CompatMessage holds recipient-visible content. Never put this object in a
 // tenant event: event readers need only the IDs and controlled status fields.
 type CompatMessage struct {
-	RecipientSessionID     *string `json:"recipient_session_id,omitempty"`
-	SenderSessionID        *string `json:"sender_session_id,omitempty"`
-	SenderLabel            string  `json:"sender_label,omitempty"`
+	QuestionID             string     `json:"question_id,omitempty"`
+	AnswerRevision         int64      `json:"answer_revision,omitempty"`
+	DeliverAfter           *time.Time `json:"deliver_after,omitempty"`
+	RecipientSessionID     *string    `json:"recipient_session_id,omitempty"`
+	SenderSessionID        *string    `json:"sender_session_id,omitempty"`
+	SenderLabel            string     `json:"sender_label,omitempty"`
 	frozenSenderLabel      string
 	CreatedAt              time.Time             `json:"created_at"`
 	HumanResolutionOutcome *string               `json:"human_resolution_outcome"`
@@ -147,6 +150,11 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if err := validateCompatSend(&in); err != nil {
 		messagingFailure(w, err)
 		return
+	}
+	if m.heldReply != nil && in.ReplyTo != nil && p.Kind == tenant.Person && len(r.Header.Values("Authorization")) == 0 && r.Header.Get("X-Paimos-Agent-Name") == "" && r.Header.Get("X-Aeon-Agent-Name") == "" {
+		if m.heldReply(w, r, p, project, HeldReplyInput{To: in.To, Body: in.Body, Key: in.Key, Thread: in.ThreadID, Parent: *in.ReplyTo, RecipientSession: in.RecipientSessionID, SenderSession: in.SenderSessionID, Action: in.ActionRequest, ExpectsReply: in.ExpectsReply, Level: in.Level}) {
+			return
+		}
 	}
 	out, err := m.commitMessage(r.Context(), p, project, in)
 	if err != nil {

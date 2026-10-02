@@ -87,7 +87,7 @@ paths:
         '200': {description: Recorded answer with pending delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-        '409': {description: 'code revision_conflict, replay_conflict or correction_unavailable'}
+        '409': {description: 'code revision_conflict or replay_conflict'}
         '422': {description: 'code outcome_unavailable'}
   /decision-desk:
     get:
@@ -8814,6 +8814,7 @@ components:
         decided_by: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
         deliver_after: {type: string, format: date-time}
+        replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -8826,6 +8827,9 @@ components:
         deliver_after: {type: string, format: date-time}
         effect_ref: {type: string}
         error_code: {type: string}
+        receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
+        receipt_failure: {type: string}
+        delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
     Question:
       type: object
       required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
@@ -13165,10 +13169,20 @@ components:
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         resume_requested_at: {type: string, format: date-time}
         successor_session_id: {type: string, format: uuid}
+    DeskAnswerReference:
+      type: object
+      required: [question_id, answer_id, revision]
+      description: Durable answer pointer. Fetch private answer text through the authorized question status API.
+      properties:
+        question_id: {type: string, format: uuid}
+        answer_id: {type: string, format: uuid}
+        revision: {type: integer}
+        replaces: {type: string, format: uuid}
     HarnessContinuation:
       type: object
       required: [succeeds_session_id, handover, brief]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         succeeds_session_id: {type: string, format: uuid}
         handover: {$ref: '#/components/schemas/HarnessHandover'}
         brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
@@ -13198,6 +13212,7 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
         supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
         pause_can_interrupt: {type: boolean, description: 'Harness advertises cooperative interrupt support. Fresh pause_progress.interrupt describes the current operation; false means it reacts after the command.'}
         pause_progress: {$ref: '#/components/schemas/HarnessPauseProgress'}

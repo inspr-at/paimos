@@ -186,9 +186,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		go aithemaHost.Run(ctx)
 	}
 
+	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld))
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -275,6 +276,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
+	go questionsMod.Run(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
 	statusAuto := statusautopilot.New(pool)
@@ -350,7 +352,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
-			questions.New(pool),
+			questionsMod,
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
 			pairingMod,

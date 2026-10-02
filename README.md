@@ -2224,11 +2224,26 @@ Generic node/knowledge CRUD cannot modify question/decision authority.
 Questions and immutable answer revisions use protected nodes plus tenant/project
 projections. Each asker retains input, principal, exact original session, source
 request, reply-root UUID and comment destination (ticket, or question node).
-The reply root is a reserved correlation identity, not yet a public inbox message:
-P3 must bind the answering person and materialize the inbox counterpart before
-using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
-P1 person answers support Once and record revision-bound pending inbox/comment/
-outcome effects with a database-clock ten-second deadline. They do not dispatch
-messages or claim successful delivery. Always/Requirement/Doctrine publication,
-verified handover sources and post-dispatch corrections require the later adapters;
-unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
+The dispatcher materializes each reserved reply root as a held counterpart for
+its answering person. The original request is never released or executed.
+Person answers use a database-clock ten-second grace window; edits restart it.
+A bounded durable dispatcher serializes with edits and commits each asker's inbox
+and comment effects independently. Revisions dispatched before a change remain
+in the log; the new typed correction names its `replaces` answer ID. The inbox
+outbox state `delivered` means dispatched, while `receipt_state` reports `queued`,
+`handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
+
+A signed-in addressed person with inbox management and question permissions can
+use `tell --reply-to` on a held request. This records the answer/outbox and settles
+the request atomically, returning `status: pending`, a question ID, revision and
+deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
+permission approvals keep their existing immediate semantics.
+
+Ended generations retain bounded durable answer references. Only a verified
+same-project/principal continuation receives the latest answer; an absent
+successor stays visibly `successor_pending`. Continuation briefs carry references
+whose private text is resolved through authorized `ask status`, preventing
+harness metadata readers from gaining question content. No old process is woken.
+Always/Requirement/Doctrine effects remain P4-owned and `source_handover_id`
+remains unavailable pending its separate verified ask-source adapter. P3 never
+publishes active Always records. Suggestions for all four outcomes are stored.

@@ -118,6 +118,13 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				}
 				return err
 			}
+			if sent.Status == "pending" && sent.QuestionID != "" {
+				if rt.jsonOut {
+					return rt.printJSON(sent)
+				}
+				_, err = fmt.Fprintf(rt.stdout, "stored: reply pending (10-second edit window)\nquestion: %s\nanswer revision: %d\nstatus: ask status %s\n", sent.QuestionID, sent.AnswerRevision, sent.QuestionID)
+				return err
+			}
 			receipt, receiptErr := rt.tellReceipt(sent.ID)
 			receiptState := "unavailable"
 			if receiptErr == nil {

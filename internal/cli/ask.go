@@ -183,7 +183,21 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 		fmt.Fprintln(rt.stdout, "answer:", q.Answer.Answer)
 	}
 	for _, p := range q.Pending {
-		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, p.State)
+		state := p.State
+		if p.Kind == "inbox" && p.State == "delivered" {
+			state = "dispatched; receipt unavailable"
+			switch p.ReceiptState {
+			case "queued":
+				state = "queued; awaiting receiver"
+			case "handed_off":
+				state = "delivered; receiver confirmed"
+			case "failed":
+				state = "undelivered: " + p.ReceiptFailure
+			}
+		} else if p.ErrorCode != "" {
+			state += ": " + p.ErrorCode
+		}
+		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, state)
 	}
 	return nil
 }

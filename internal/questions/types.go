@@ -60,6 +60,7 @@ type Asker struct {
 	Input         Input     `json:"input"`
 }
 type Answer struct {
+	Replaces     string    `json:"replaces,omitempty"`
 	ID           string    `json:"id"`
 	Revision     int64     `json:"revision"`
 	OptionID     string    `json:"option_id,omitempty"`
@@ -71,14 +72,17 @@ type Answer struct {
 	DeliverAfter time.Time `json:"deliver_after"`
 }
 type Pending struct {
-	ID           string    `json:"id"`
-	AskerID      string    `json:"asker_id,omitempty"`
-	Revision     int64     `json:"revision"`
-	Kind         string    `json:"kind"`
-	State        string    `json:"state"`
-	DeliverAfter time.Time `json:"deliver_after"`
-	EffectRef    string    `json:"effect_ref,omitempty"`
-	ErrorCode    string    `json:"error_code,omitempty"`
+	ReceiptState      string    `json:"receipt_state,omitempty"`
+	ReceiptFailure    string    `json:"receipt_failure,omitempty"`
+	DeliverySessionID string    `json:"delivery_session_id,omitempty"`
+	ID                string    `json:"id"`
+	AskerID           string    `json:"asker_id,omitempty"`
+	Revision          int64     `json:"revision"`
+	Kind              string    `json:"kind"`
+	State             string    `json:"state"`
+	DeliverAfter      time.Time `json:"deliver_after"`
+	EffectRef         string    `json:"effect_ref,omitempty"`
+	ErrorCode         string    `json:"error_code,omitempty"`
 }
 type Question struct {
 	ID               string    `json:"id"`
