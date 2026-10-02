@@ -446,30 +446,7 @@ export function plainSubject(subject: string, tickets: string[] = []) {
   return displayText(text, tickets)
 }
 
-// ---------- Stats ----------
-export interface ReleaseStats { today: number; week: number; last: number | null; median: number | null; cadence: number[] }
-export function stats(releases: Release[], now: number, days = 14): ReleaseStats {
-  const published = releases.filter(r => r.state === 'published' && time(r)).sort((a, b) => time(a) - time(b))
-  const todayKey = dayKey(now)
-  const d = new Date(now)
-  // Calendar arithmetic, not multiples of 24 h, so daylight saving changes do not shift days.
-  const midnight = (back: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime()
-  const monday = midnight((d.getDay() + 6) % 7)
-  const gaps: number[] = []
-  for (let i = 1; i < published.length; i++) gaps.push(time(published[i]) - time(published[i - 1]))
-  gaps.sort((a, b) => a - b)
-  const median = gaps.length ? (gaps.length % 2 ? gaps[(gaps.length - 1) / 2] : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2) : null
-  const cadence = Array.from({ length: days }, (_, i) => {
-    const key = dayKey(midnight(days - 1 - i))
-    return published.filter(r => dayKey(time(r)) === key).length
-  })
-  return {
-    today: published.filter(r => dayKey(time(r)) === todayKey).length,
-    week: published.filter(r => time(r) >= monday).length,
-    last: published.length ? time(published[published.length - 1]) : null,
-    median, cadence,
-  }
-}
+// ---------- Spans ----------
 // "3 h 12 min", "2 days", "45 min".
 export function span(ms: number) {
   const minutes = Math.round(ms / 60_000)

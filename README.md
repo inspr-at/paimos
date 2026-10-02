@@ -408,6 +408,24 @@ checks that have no stored completion. Check and Undo in the ticket use the exis
 preconditions. Part B's automation skips pending checks when moving tickets to
 Delivered or Accepted.
 
+Status autopilot starts new workspaces with automatic rules enabled. Workspaces
+present when migration 1108 runs enter Suggest mode for 24 hours, including
+release publication hooks. Settings → Workspace → Status autopilot → Changes
+lists proposed status moves and attention flags with Apply / Dismiss. Proposals
+leave tickets untouched; Apply checks the current ticket and rule, and Dismiss
+prevents that status episode from returning. An owner can explicitly select
+**Enable automatic changes** to end the upgrade review period early; ordinary
+settings saves and project On do not end it. The worker rescans when the review
+period expires or an owner confirms, including within the same UTC day.
+
+Operators can set `AEON_STATUS_AUTOPILOT=off|suggest|on` (default `on`) before
+starting the server. `off` pauses all unattended status rules, including release
+hooks and attention flags; `suggest` keeps proposals waiting for review without
+an expiry. These server modes cap every workspace and project setting. Explicit
+Apply is available in Suggest mode and forbidden in Off. Invalid values refuse
+startup. An explicitly authorized daemon work claim still starts its ticket;
+it does not become an unattended status proposal.
+
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
@@ -1247,6 +1265,26 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
+The release history's Highlights eyebrow reads “PAIMOS AEON · Release” (or the
+configured wordmark); generation and release counts stay in Details. The live
+codename leads in light display type with the heading's spacing, above one
+glass dock holding live status and the Pretty version. Its separators use the
+theme's muted ink; resting hours and minutes use primary ink at the renderer's
+80% weight for AA contrast in both themes.
+Hover or keyboard focus crossfades the renderer's characters to the full canonical version over
+one second; reduced motion switches instantly. Click or Enter copies the exact
+canonical value, including `.0.0`, and announces “Version copied”. This character
+crossfade is an Aeon presentation layer over the pinned renderer and its shared
+timing and opacity helpers; the vendor bundle remains unchanged.
+
+Release list rows keep the codename and its badges visible while a separate
+Pretty version sits at the right of the heading. That version uses the same
+crossfade and canonical copy feedback as the dock; copying keeps the current
+selection and address. When the heading is too narrow, the version wraps below
+the codename and stays right-aligned. The history uses interactive grid rows so
+the copy button is available to assistive technology; j/k and arrow keys retain
+the selected-row navigation.
+
 The connect screen keeps Connect available when a selection mixes verifiable
 and unverifiable harnesses. Clicking it offers **Connect without verification**
 for the whole selection or **Leave them out** to keep only the verifiable
@@ -1796,3 +1834,76 @@ This is the canonical inventory of server egress; there is no global switch that
 Separate processes have their own explicit destinations: `aeon-agentd` contacts its paired instance and selected model providers; user-run checksum installers and Homebrew fetch release/package assets; build/release/history tooling contacts the forge, registries and configured historical import sources. Those are not server startup workers. Classic migration readers remain historical CLI-only paths; they do not run in the server and Classic Paimos stays retired.
 
 `TestServeShutdownAndBootstrap` observes and denies outbound HTTP/DNS while exercising startup and running handlers. On Linux amd64/arm64, `TestDefaultServerHasNoOutboundNetwork` additionally runs the full server against a fixture database through a Unix socket with a process-wide seccomp filter: any Internet socket attempt traps, including DNS and custom transports. Connect/DNS negative controls must trap before the test accepts the server run. The test exercises startup and two seconds of running workers/requests; it does not claim to simulate every optional integration or arbitrary elapsed time.
+
+AEON-417 B adds an external **shadow authority** in `scripts/ci-authority` and a
+disposable Linux guest init in `scripts/ci-executor`. Install reviewed binaries
+outside all candidate workspaces; do not run this controller from a PR checkout.
+The authority authenticates the original webhook body with HMAC-SHA256, reads
+the numeric repository identity and current main/PR/queue state from GitHub,
+and reconstructs the complete plan from its dedicated bare mirror. PR plans
+bind the source head and the API-resolved merge commit separately. Queue plans
+enumerate every constituent through Git parents and recheck the active queue
+ref. Checks are revalidated after reconciliation. Its output includes each
+existing required context, every extra inventory context, and `ci/trusted`, all
+with **pending** status. There is no check writer or activation flag.
+
+`ci-authority shadow --config /absolute/controller/config.json --event
+pull_request --delivery <delivery-id> --signature <X-Hub-Signature-256> --webhook
+/absolute/controller/event.json --generation <positive-generation>` reads only
+Git objects and GitHub API state. Configuration has schema
+`aeon.ci.authority-config.v1`, `mirror`, a `git` object with absolute `path` and
+raw SHA-256 `digest`, and `authority`
+containing `repository_id`, `repository`, the reviewed `policy` pin,
+`environment_digest`, and `verifier_app_id` (zero until provisioned). Supply
+`AEON_CI_WEBHOOK_SECRET` and a read-only `AEON_CI_READ_TOKEN` to the controller
+process through approved credential storage; neither is forwarded to execution
+or output. The installed authority requires a separate Linux host and verifies
+root ownership, non-writable parents and Git bytes before opening its mirror.
+Mirror refresh is a separate trusted ingress responsibility. The
+current replay/generation guard lasts for one controller process; production
+needs durable serialized ingress before any authority activation.
+
+`observe` additionally needs a `profile`, `admission_public_key`, signed
+`--admission`, `--obligation`, `--run-id`, and `--job-id`. The profile fixes each
+obligation's absolute `/opt/aeon/` command, stage, reporter and expected manifest,
+plus raw SHA-256 pins for QEMU, firmware, kernel, initrd and a read-only ext4 root
+image. It also binds harness/toolchain/environment digests, security epoch,
+separate QEMU UID/GID, CPU/memory limits and timeout. The supervisor deep-copies
+these settings and requires `infrastructure: hosted-disposable`; the provider
+must independently attest that placement. This backend supports Linux/amd64
+only and never routes candidates to the trusted main pool or production hosts.
+Each metadata/build/test stage boots a new Linux/KVM VM with
+read-only framed task/source disks, no network, no host mount and no monitor or
+control socket. The root guest init uses a read-only, `nosuid` executor image and
+an unprivileged candidate process in private tmpfs storage with a fixed offline
+environment. Source export reads every verified Git blob directly, ignores
+candidate export attributes, and refuses symlinks/submodules and unsafe paths.
+Only bounded content-addressed opaque artifacts can cross the result interface.
+Candidate stdout is never interpreted as a host receipt or GitHub check.
+
+Admission is independently Ed25519-signed over the plan, exact candidate commit,
+complete tree-manifest digest, policy, executor, approved harness, environment,
+epoch, review target/record and a maximum 24-hour validity window. This admits
+the complete executable closure, including package initializers, JS helpers,
+dependency/config and lifecycle code. It cannot establish honest assertions in
+unreviewed code. Supervisor observations have an in-process private seal;
+serializing one loses that provenance. Trusted ingress can revoke an admission;
+expiry and revocation are rechecked after execution and during reconciliation.
+Durable signatures/revocation, source
+run/job verification, full receipts and reuse remain E's responsibility. Partial
+reruns are refused. The browser/application VM connection and approved browser
+reporter remain D/H work and currently fail closed.
+
+This is an unactivated implementation: independently reviewed VM images,
+Linux/KVM hosted provisioning and a real boot/tamper probe remain required.
+The tests cover protocol, admission and supervisor ownership, including attack
+classes from all five AEON-421 reviews; they do not certify a live VM boundary.
+App provisioning, expected-App per-context ruleset probes, durable ingress and
+review revocation are later coordinator/OPS steps. No workflow, runner route,
+required check, version or execution selection changes here. Keep full existing
+CI and both optimization switches off until those prerequisites are proven.
+Build the guest init with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`; the approved
+kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
+rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
+tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
+this worker, and missing images, recipes or admission refuse execution.

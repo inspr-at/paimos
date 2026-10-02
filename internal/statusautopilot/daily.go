@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -18,6 +19,10 @@ const batchSize = 50
 // after the last committed batch without holding up ordinary node writes.
 func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) error {
 	ctx = db.AllProjects(ctx, "daily status autopilot")
+	serverMode, err := config.StatusAutopilotMode()
+	if err != nil || serverMode == "off" {
+		return err
+	}
 	// Creating the System principal takes the principal-link lock (532).
 	// Principal writers can hold that lock before inserting a node, which takes
 	// the tree lock. Commit first-use provisioning before taking any tree lock
@@ -90,8 +95,20 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 			var completed time.Time
 			var running *time.Time
 			var after *string
-			if err = tx.QueryRow(ctx, `SELECT day,running_day,after_node_id::text FROM status_autopilot_days FOR UPDATE`).Scan(&completed, &running, &after); err != nil {
+			var priorMode string
+			if err = tx.QueryRow(ctx, `SELECT day,running_day,after_node_id::text,mode FROM status_autopilot_days FOR UPDATE`).Scan(&completed, &running, &after, &priorMode); err != nil {
 				return err
+			}
+			s, err := Load(ctx, tx)
+			if err != nil {
+				return err
+			}
+			mode := s.ModeAt(now)
+			if mode != priorMode {
+				completed, running, after = day.Add(-24*time.Hour), nil, nil
+				if _, err = tx.Exec(ctx, `UPDATE status_autopilot_days SET mode=$1,day=$2,running_day=NULL,after_node_id=NULL`, mode, completed); err != nil {
+					return err
+				}
 			}
 			if !completed.Before(day) {
 				done = true
@@ -108,10 +125,6 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 				return err
 			}
 			ids, err := collectIDs(rows)
-			if err != nil {
-				return err
-			}
-			s, err := Load(ctx, tx)
 			if err != nil {
 				return err
 			}
@@ -140,7 +153,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 					effective.Enabled = o.Effective
 				}
 				if d := evaluate(c, effective, *running); d != nil {
-					if err = apply(ctx, tx, actor, c.Node, *d); err != nil {
+					if err = enact(ctx, tx, actor, c.Node, *d, mode); err != nil {
 						return err
 					}
 				}
