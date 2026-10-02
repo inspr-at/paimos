@@ -53,6 +53,10 @@
 //
 // AEON-600 lane enforcement: the scheduler calls lanecontrol.ReserveTx with
 // its durable dispatch ID, then BindRunTx for explicitly budgeted later work.
+// The dispatch ID is also the envelope ID. Creating the order/run and reserving
+// its envelope must commit together; any refusal rolls back launch preparation.
+// A requested dispatch alone is not executable: scheduler pending-execution
+// guards may open only for an explicitly bound run that passes lane admission.
 // These calls share authz.LockProjectMutation with policy/revocation/target
 // changes and must precede event append. Claim narrows ordinary account
 // admission with live owner permission, policy/window, subscription quota,
