@@ -21,6 +21,44 @@ func TestRepositoryWorkflows(t *testing.T) {
 	}
 }
 
+func TestFullUIQALabelOptInBoundary(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/full-ui-qa.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []struct{ old, new string }{
+		{"    types: [opened, reopened, synchronize, labeled]", "    types: [opened, reopened, synchronize]"},
+		{"  schedule:", "  push:\n  schedule:"},
+		{"github.ref == 'refs/heads/main'", "true"},
+		{"contains(github.event.pull_request.labels.*.name, 'full-qa')", "true"},
+		{"contents: read", "contents: write"},
+		{"    runs-on: ubuntu-latest", "    runs-on: mbp2606"},
+		{"      fail-fast: false", "      fail-fast: true"},
+		{"shard: [1, 2, 3, 4, 5]", "shard: [1, 2, 3, 4, 5, 6]"},
+		{"always() && needs.qa-source.result != 'skipped'", "success()"},
+		{"    timeout-minutes: 90", "    permissions: {contents: write}\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    environment: production\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    continue-on-error: true\n    timeout-minutes: 90"},
+		{"    timeout-minutes: 90", "    env: {KEY: '${{ secrets.APP_KEY }}'}\n    timeout-minutes: 90"},
+	} {
+		t.Run(mutation.new, func(t *testing.T) {
+			changed := strings.Replace(string(body), mutation.old, mutation.new, 1)
+			if changed == string(body) {
+				t.Fatal("mutation did not change the workflow")
+			}
+			problems, err := checkWorkflow("full-ui-qa.yml", []byte(changed))
+			if err != nil || len(problems) == 0 {
+				t.Fatalf("unsafe full UI QA accepted: %v %v", problems, err)
+			}
+		})
+	}
+	// This filename-specific label exception must not admit other broad PR jobs.
+	problems, err := checkWorkflow("another-ui-qa.yml", body)
+	if err != nil || len(problems) == 0 {
+		t.Fatalf("broad PR exception escaped owning workflow: %v %v", problems, err)
+	}
+}
+
 func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
 	body, err := os.ReadFile("../../.github/workflows/cross-family-preview.yml")
 	if err != nil {

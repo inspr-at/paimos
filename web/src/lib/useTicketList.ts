@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, shallowRef, type Ref } from 'vue'
-import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage } from './api'
+import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage, type ListQuery } from './api'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
 import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
@@ -18,7 +18,8 @@ function message(error: unknown) { return error instanceof Error ? error.message
 // from a second, one-row request without that filter, so its menu still
 // shows what else could be chosen.
 // review: a change that met someone else's newer version offers to show it.
-export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void } = {}) {
+export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void; fetchList?: (query: ListQuery) => Promise<ListPage> } = {}) {
+  const fetchList = listOptions.fetchList ?? listNodes
   const rows = ref<ListItem[]>([])
   const cursor = ref<string | null>(null)
   const loading = ref(false)
@@ -86,11 +87,11 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     extraFacets.value = {}
     const extras = activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
       const facet = facetOf(dimension)!
-      const page = await listNodes(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
+      const page = await fetchList(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
       return [dimension, page.facets?.[facet] ?? {}] as const
     })
     try {
-      const { page, sent } = await trusted(() => listNodes(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
+      const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
       if (!page) return
       learn(page.items)
       const read = take(page.items, sent)
@@ -124,7 +125,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     loadingMore.value = true; moreError.value = ''
     try {
       const after = cursor.value
-      const { page, sent } = await trusted(() => listNodes(apiParams(within, filters.value, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
+      const { page, sent } = await trusted(() => fetchList(apiParams(within, filters.value, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
       if (!page) return
       const seen = new Set(rows.value.map(row => row.id))
       learn(page.items)
@@ -146,7 +147,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (!within || !loadedOnce.value) return
     const request = generation
     try {
-      const page = await listNodes(apiParams(within, filters.value, { facets: FACETS, limit: 1 }))
+      const page = await fetchList(apiParams(within, filters.value, { facets: FACETS, limit: 1 }))
       if (request === generation && page.facets) facets.value = page.facets
     } catch { /* the counts stay as they were */ }
   }
@@ -164,7 +165,7 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const request = generation
     const key = `${request}:${facet}`
     if (asked.has(key)) return asked.get(key)!
-    const run = listNodes(apiParams(within, filters.value, { facets: [facet], limit: 1 }))
+    const run = fetchList(apiParams(within, filters.value, { facets: [facet], limit: 1 }))
       .then(page => { if (request === generation) extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } })
       .catch(() => { /* the menu shows what the loaded rows have */ })
     asked.set(key, run)

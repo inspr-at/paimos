@@ -182,6 +182,10 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		if err := checkGatePreview(workflow); err != nil {
 			reject(err.Error())
 		}
+	} else if name == "full-ui-qa.yml" {
+		if err := checkFullUIQA(workflow); err != nil {
+			reject(err.Error())
+		}
 	} else if hasEvent(workflow["on"], "pull_request") {
 		pr := mapping(mapping(workflow["on"])["pull_request"])
 		_, paths := pr["paths"]
@@ -191,6 +195,54 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	}
 	return problems
+}
+
+// Full QA is an explicit label opt-in across all changed paths. This exception
+// does not admit another broad PR workflow or any self-hosted runner selection.
+func checkFullUIQA(workflow map[string]any) error {
+	expected := map[string]any{
+		"schedule": []any{map[string]any{"cron": "37 2 * * *"}},
+		"workflow_dispatch": map[string]any{"inputs": map[string]any{
+			"ref": map[string]any{
+				"description": "Branch, tag, or commit to test (blank means main)",
+				"required":    false, "type": "string", "default": "main",
+			},
+		}},
+		"pull_request": map[string]any{"types": []any{"opened", "reopened", "synchronize", "labeled"}},
+	}
+	if !reflect.DeepEqual(mapping(workflow["on"]), expected) {
+		return fmt.Errorf("full UI QA must retain nightly, manual-ref and label PR triggers")
+	}
+	if !reflect.DeepEqual(mapping(workflow["permissions"]), map[string]any{"contents": "read"}) || containsSecret(workflow) {
+		return fmt.Errorf("full UI QA requires a read-only token and no secrets")
+	}
+	jobs := mapping(workflow["jobs"])
+	source := mapping(jobs["qa-source"])
+	condition := "(github.event_name == 'schedule' && github.ref == 'refs/heads/main') || " +
+		"github.event_name == 'workflow_dispatch' || " +
+		"(github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-qa') && " +
+		"(github.event.action != 'labeled' || github.event.label.name == 'full-qa'))"
+	if actual, _ := source["if"].(string); compact(actual) != compact(condition) {
+		return fmt.Errorf("full UI QA source must require main schedule, manual dispatch or full-qa PR label")
+	}
+	shard := mapping(jobs["qa-shard"])
+	gate := mapping(jobs["qa-full"])
+	if len(jobs) != 3 || !hasNeed(shard["needs"], "qa-source") ||
+		gate["name"] != "full-ui-qa" || gate["if"] != "${{ always() && needs.qa-source.result != 'skipped' }}" ||
+		!reflect.DeepEqual(gate["needs"], []any{"qa-source", "qa-shard"}) {
+		return fmt.Errorf("full UI QA must bind source, shards and aggregate failure gate")
+	}
+	strategy := mapping(shard["strategy"])
+	if strategy["fail-fast"] != false || !reflect.DeepEqual(mapping(strategy["matrix"]), map[string]any{"shard": []any{1, 2, 3, 4, 5}}) {
+		return fmt.Errorf("full UI QA must run all five shards without fail-fast")
+	}
+	for _, value := range jobs {
+		job := mapping(value)
+		if job["runs-on"] != "ubuntu-latest" || job["permissions"] != nil || job["environment"] != nil || job["continue-on-error"] != nil {
+			return fmt.Errorf("full UI QA jobs must stay hosted, read-only and fail closed without environments")
+		}
+	}
+	return nil
 }
 
 func checkGatePreview(workflow map[string]any) error {
