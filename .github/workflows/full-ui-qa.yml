@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Full UI QA
+
+on:
+  schedule:
+    # Once nightly, away from the top-of-hour Actions rush (02:37 UTC).
+    - cron: '37 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to test (blank means main)'
+        required: false
+        type: string
+        default: main
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+# All tested refs, including manual refs and fork PRs, stay on hosted runners.
+# No repository secrets or persistent checkout credentials enter the tests.
+permissions:
+  contents: read
+
+jobs:
+  qa-source:
+    if: >-
+      (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-qa') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'full-qa'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'schedule' && 'main' || github.event_name == 'workflow_dispatch' && (inputs.ref || 'main') || github.sha }}
+      - name: Bind every shard to the same immutable commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  qa-shard:
+    needs: qa-source
+    runs-on: ubuntu-latest
+    # The existing offline audit itself allows 60 minutes. Leave room for
+    # dependency/browser setup and the other tests assigned to that shard.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.qa-source.outputs.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run the complete UI inventory, without retries or selection filters
+        working-directory: web
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/full-ui-results.json
+        run: >-
+          npx playwright test -c playwright.ui.config.ts
+          --shard=${{ matrix.shard }}/5 --workers=1 --retries=0 --forbid-only
+          --trace=retain-on-failure --reporter=github,line,json
+      - name: Preserve shard results and failed browser traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: full-ui-qa-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: web/test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  qa-full:
+    name: full-ui-qa
+    if: ${{ always() && needs.qa-source.result != 'skipped' }}
+    needs: [qa-source, qa-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize and require every shard
+        env:
+          SOURCE_RESULT: ${{ needs.qa-source.result }}
+          SHARD_RESULT: ${{ needs.qa-shard.result }}
+          TESTED_SHA: ${{ needs.qa-source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Full UI QA'
+            printf 'Tested commit: `%s`\n\n' "$TESTED_SHA"
+            printf 'Source resolution: **%s**\n\n' "$SOURCE_RESULT"
+            printf 'All five Playwright shards: **%s**\n\n' "$SHARD_RESULT"
+            echo 'One browser worker per shard; zero retries; complete playwright.ui.config.ts inventory.'
+            echo 'Per-shard JSON results and failed traces are attached as full-ui-qa artifacts.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$SOURCE_RESULT" = success
+          test "$SHARD_RESULT" = success

@@ -81,6 +81,25 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
+versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
+`go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
+--policy-commit <full-SHA>` computes a diagnostic policy digest for independent
+review. `shadow` uses that commit plus the independently approved
+`--policy-digest`, an `--environment-digest`, and a `--binding` JSON file with
+repository ID, event/delivery/generation, immutable base/candidate/check-target
+SHAs, PR source head/number or group ID/sorted constituent PRs. It emits a full
+pending plan; `--ledger` optionally appends to a private controller-owned JSONL
+file, and `--receipt` records an unsigned observation against an existing plan.
+The mirror must be bare and its policy revision must precede the bound base.
+Every trusted workflow job and shard row is retained, with base/candidate test
+package discovery and complete path/mode/blob fingerprints. Both shard layouts
+are inventory facets in shadow output, not two executor launches. No event
+authentication, executor admission, reusable credit, signatures or check
+publication exists in A; current workflows and runner routing are unchanged.
+Future authority/executor and selection packages must establish those boundaries
+before any omission. Run the foundation tests with `go test ./internal/ciproof`.
+
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
 `?section=knowledge` retains its background section. Tickets is the default,
@@ -1173,11 +1192,23 @@ npx playwright install chromium
 npm test
 ```
 
-The Playwright suite starts Vite on port 5175, intercepts all `/api/*` calls,
+The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
+
+**Full UI QA** runs the complete `playwright.ui.config.ts` inventory in five
+hosted shards with one browser worker each and zero retries. It runs nightly on
+`main` at 02:37 UTC. To request a full QA, dispatch `full-ui-qa.yml` with an
+optional `ref` (branch, tag or commit; blank defaults to `main`), or add the
+`full-qa` label to a PR. Updates to a labeled PR run the suite again; unrelated
+label additions do not. PR runs test the merge commit. Every shard checks out
+the same resolved commit, including when a manual branch moves during the run.
+The `full-ui-qa` check and Actions summary report the batch result; shard JSON
+reports and failed traces are retained as artifacts for seven days. This is an
+optional QA check; existing required CI checks and PR test selection are unchanged.
+Scheduled/manual triggers become available after the workflow reaches `main`.
 
 Licence: AGPL-3.0-only.
 
