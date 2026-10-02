@@ -187,13 +187,8 @@ CREATE TRIGGER account_readiness_seed AFTER INSERT ON agent_accounts FOR EACH RO
 
 -- Backfill current local memberships so legacy readings and ordinary-key
 -- caps also expose canonical resource IDs before a daemon's first new probe.
-INSERT INTO account_readiness_resources(tenant_id,kind,identity_kind,identity_key)
- SELECT tenant_id,CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'account',
- encode(sha256(convert_to('account:'||id::text||':'||CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'UTF8')),'hex') FROM agent_accounts;
-INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision)
- SELECT a.tenant_id,a.id,r.id,a.link_revision FROM agent_accounts a JOIN account_readiness_resources r ON r.tenant_id=a.tenant_id AND r.identity_kind='account'
- AND r.kind=CASE WHEN a.harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END
- AND r.identity_key=encode(sha256(convert_to('account:'||a.id::text||':'||r.kind,'UTF8')),'hex');
+-- migrate.go performs the existing-account backfill within this transaction,
+-- entering each tenant under FORCE RLS before recording migration 1135.
 -- Pending checks expire after five minutes (request/report/poll use the
 -- persisted requested_at). Expiry invalidates the receipt on the next new
 -- request, preserving keys and wait snapshots for audit; old keys return 409.

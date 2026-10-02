@@ -185,6 +185,11 @@ func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback s
 							saved[key] = child
 						}
 					}
+					if _, check := obj["requested_at"]; check && obj["actor_principal_id"] != nil {
+						if result, ok := obj["result"]; ok {
+							saved["result"] = result
+						}
+					}
 				}
 				mask(obj)
 			}

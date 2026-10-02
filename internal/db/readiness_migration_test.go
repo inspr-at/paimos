@@ -19,7 +19,7 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	var tenantID, agentID, accountID, windowID string
+	var tenantID, agentID, accountID, windowID, peerTenant, peerAccount string
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
 		if name != "1135_account_readiness.sql" {
 			return nil
@@ -27,7 +27,7 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 		if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('readiness-upgrade','Upgrade') RETURNING id::text`).Scan(&tenantID); err != nil {
 			return err
 		}
-		return db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Old daemon') RETURNING id::text`, tenantID).Scan(&agentID); err != nil {
 				return err
 			}
@@ -36,6 +36,19 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 			}
 			return tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,reserved,pace_model) VALUES($1,$2,now(),now()+interval '1 day','requests',100,41,17,'unrestricted') RETURNING id::text`, tenantID, accountID).Scan(&windowID)
 		})
+		if err != nil {
+			return err
+		}
+		if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('readiness-peer','Peer') RETURNING id::text`).Scan(&peerTenant); err != nil {
+			return err
+		}
+		return db.InTenant(dbtest.Seed(t.Context()), d.App, peerTenant, func(tx pgx.Tx) error {
+			var peerAgent string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Peer daemon') RETURNING id::text`, peerTenant).Scan(&peerAgent); err != nil {
+				return err
+			}
+			return tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,'peer','pi','daemon',$2,'Peer') RETURNING id::text`, peerTenant, peerAgent).Scan(&peerAccount)
+		})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +56,25 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 	if tenantID == "" {
 		t.Fatal("upgrade fixture was never installed before migration")
 	}
+	if err := db.InTenant(t.Context(), d.App, peerTenant, func(tx pgx.Tx) error {
+		var members int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND r.kind='key_cap' AND m.binding_revision=0`, peerAccount).Scan(&members); err != nil {
+			return err
+		}
+		if members != 1 {
+			t.Fatalf("peer Pi account membership: %d", members)
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM account_readiness_memberships WHERE account_id=$1`, accountID).Scan(&members); err != nil {
+			return err
+		}
+		if members != 0 {
+			t.Fatal("backfill bypassed tenant isolation")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	err = db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
 		var used, reserved int64
 		var sharing bool
