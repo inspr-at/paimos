@@ -217,6 +217,9 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 	if err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule=$2 AND anchor=$3 AND status='pending'`, n.ID, d.Rule, d.Anchor); err != nil {
+		return err
+	}
 	// The audit reason is also a durable comment for stalled, shipped, accepted
 	// and skipped-human-check tickets. It names exactly the same policy/evidence.
 	if d.To != "" || d.Skip {

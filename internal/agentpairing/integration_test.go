@@ -85,14 +85,15 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
-	pairing  *agentpairing.Module
-	t        *testing.T
-	db       *dbtest.DB
-	h        http.Handler
-	tenantID string
-	person   string
-	cookie   *http.Cookie
-	profiles map[string]string
+	pairing    *agentpairing.Module
+	t          *testing.T
+	db         *dbtest.DB
+	h          http.Handler
+	tenantID   string
+	person     string
+	cookie     *http.Cookie
+	profiles   map[string]string
+	sessionKey []byte
 }
 type proposal struct {
 	id, device, runtime, lifecycle string
@@ -124,15 +125,19 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: []byte(nonce()), BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, d.App)
+	sessionKey := []byte(nonce())
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, d.App)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pairing := agentpairing.New(d.App, origin, "pairtest")
+	if err := pairing.ConfigureAccountLink(sessionKey); err != nil {
+		t.Fatal(err)
+	}
 	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, events.New(d.App), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
 		return agentaccounts.Settle(ctx, tx, p, r.ID)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
-	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}}
+	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
 	if len(cookies) == 0 {

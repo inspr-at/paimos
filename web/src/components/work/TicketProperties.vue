@@ -8,6 +8,8 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import QueueIndicator from './QueueIndicator.vue'
+import type { QueuedTicket } from '../../lib/workQueue'
 import AgentStateLabel from '../agents/AgentStateLabel.vue'
 import TicketHours from '../business/TicketHours.vue'
 import TicketEstimate from './TicketEstimate.vue'
@@ -17,7 +19,7 @@ import { usePoller } from '../../lib/usePolledData'
 
 // Status, priority, assignee and release (editable popovers), type (read-only),
 // the parent epic, and estimate and dates only when they have values.
-const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult> }>()
+const props = defineProps<{ item: ListItem; editable: boolean; layout: 'row' | 'column'; now: number; queueEntry?: QueuedTicket | null; queueEditable?: boolean; releaseView?: NativeReleaseView; releaseEditable?: boolean; saveEstimate?: (hours: number | null) => Promise<SaveResult> }>()
 const emit = defineEmits<{ status: [anchor: HTMLElement]; priority: [anchor: HTMLElement]; assignee: [anchor: HTMLElement]; epic: [anchor: HTMLElement]; release: [anchor: HTMLElement]; openParent: [key: string] }>()
 
 function text(value: unknown): string { return typeof value === 'string' ? value.trim() : '' }
@@ -46,7 +48,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
   <dl class="props" :class="layout">
     <div class="prop">
       <dt>Status</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<span v-if="queueEntry" class="mono">· #{{ queueEntry.position }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div v-if="bound.length" class="prop agents-prop">
       <dt>Agents</dt>
@@ -63,7 +65,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div class="prop">
       <dt>Assignee</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><PersonAvatar v-if="item.assignee" :id="item.assignee.id" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" /><span :class="{ unset: !item.assignee }">{{ item.assignee?.name ?? 'Unassigned' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable && !queueEditable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><QueueIndicator v-if="queueEntry" :entry="queueEntry" /><PersonAvatar v-else-if="item.assignee" :id="item.assignee.id" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" /><span v-if="!queueEntry" :class="{ unset: !item.assignee }">{{ item.assignee?.name ?? 'Unassigned' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div class="prop">
       <dt>Type</dt>

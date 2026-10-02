@@ -16,7 +16,7 @@ function versionLabel(version: string, copy = true): string {
 }
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 const pill = (page: Page) => page.getByRole('button', { name: RELEASE_HISTORY_NAME })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
@@ -87,8 +87,12 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveCount(0)
   await expect(options(page).nth(1).getByRole('img', { name: '4 other changes', exact: true })).toBeVisible()
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.releases.find(r => r.version === history.current)!.codename })).toBeVisible()
-  await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
-  await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
+  // AEON-488: the title is the live release's codename under a product eyebrow, with one status line.
+  const live = history.releases.find(r => r.version === history.current)!
+  await expect(sheet(page).locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Release')
+  await expect(sheet(page).getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
+  await expect(sheet(page).locator('.head .status-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · 50 min$/)
+  await expect(sheet(page).locator('.detail .live-line')).toHaveText(/^Live here since (\w{3} )?\d\d:\d\d · (published|tagged) /)
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await expect(page).toHaveURL(/\/p\/PHAROS(\/tickets)?$/)
@@ -140,7 +144,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.goto('/releases')
   await historyReady
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   // The first selection's address has landed. Later ones wait until Compare is open.
   await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.current)}(?:$|\\?)`))
   navigationGate = new Promise(resolve => { releaseNavigations = resolve })
@@ -167,7 +171,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await page.keyboard.press('Escape')
   await expect(options(page)).toHaveCount(history.releases.length)
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
 
   // Compare from the selected release; j and k move the other end.
   await page.keyboard.press('c')
@@ -223,21 +227,21 @@ test('compare follows Back, Forward and an in-app release link', async ({ page }
   await openRelease(3)
   await expect(page).toHaveURL(path(3))
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goBack()
   await expect(page).toHaveURL(path(0))
   await expect(compare).toHaveCount(0)
   await selected(0)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await page.goForward()
   await expect(page).toHaveURL(path(3))
   await expect(compare).toHaveCount(0)
   await selected(3)
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('c')
   await expect(compare).toBeVisible()
   await openRelease(1)
@@ -268,7 +272,7 @@ test('a cancelled selection does not swallow the next visit to that release', as
   })
   await page.goto(path(0))
   await selected(0)
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   armed = true
   await page.keyboard.press('j')
   await selected(1)
@@ -408,6 +412,8 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const update = sheet(page).getByRole('status').filter({ hasText: 'this page still runs' })
   await expect(update).toBeVisible()
+  // AEON-488: the title already names what the server runs; the status line says this page is older.
+  await expect(sheet(page).getByRole('heading', { level: 1, name: newest.codename })).toBeVisible()
   await expect(update.locator('.calendar-version').first()).toHaveAttribute('aria-label', versionLabel(history.releases[1].version, false))
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
@@ -421,7 +427,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.getByRole('option', { name: /Release history/ }).click()
   await expect(sheet(page)).toBeVisible()
   // Keys wait until the sheet has taken focus.
-  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()
@@ -444,17 +450,20 @@ test('rows keep one look per state: current raised, new warm, selected ringed, t
   expect(current.outline).toBe('none')
 })
 
-test('nothing is clipped at 390: stats in a grid, the count on its own line, full headlines', async ({ page }) => {
+test('nothing is clipped at 390: stat card and chart stacked, the count on its own line, full headlines', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { history } = await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const stats = sheet(page).getByRole('group', { name: 'Release cadence' })
-  await expect(stats.getByText('Running here')).toBeVisible()
-  await expect(stats.getByText('This week')).toBeVisible()
-  await expect(stats.getByText('Median gap')).toHaveCount(0)
-  await stats.getByRole('button', { name: 'More stats' }).click()
-  await expect(stats.getByText('Median gap')).toBeVisible()
+  // AEON-488: one stat card that cycles, its arrows always there at 44 px, and the chart under it.
+  const card = sheet(page).getByRole('region', { name: 'Release stats' })
+  await expect(card.getByRole('group', { name: '1 of 7: Releases per week' })).toBeVisible()
+  const next = card.getByRole('button', { name: 'Next stat' })
+  await expect(next).toBeVisible()
+  expect((await next.boundingBox())!.height).toBe(44)
+  await next.click()
+  await expect(card.getByRole('group', { name: '2 of 7: Features per week' })).toBeVisible()
+  await expect(sheet(page).getByRole('region', { name: 'Release cadence' })).toBeVisible()
   await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
   const clipped = () => page.evaluate(() => {
     const out: string[] = []
@@ -469,13 +478,13 @@ test('nothing is clipped at 390: stats in a grid, the count on its own line, ful
     return out
   })
   expect(await clipped()).toEqual([])
-  await options(page).nth(1).click()
+  await options(page).nth(1).locator('.row-name').click()
   await expect(sheet(page).locator('.detail')).toBeVisible()
   await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
   expect(await clipped()).toEqual([])
   await sheet(page).getByRole('button', { name: 'All releases' }).click()
   await sheet(page).getByRole('button', { name: 'Compare' }).click()
-  await options(page).nth(3).click()
+  await options(page).nth(3).locator('.row-name').click()
   await expect(sheet(page).locator('.detail-pane > .compare')).toBeVisible()
   expect(await clipped()).toEqual([])
   void history
@@ -499,22 +508,23 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-test('the last 14 days show each day’s count above its bar, named for screen readers', async ({ page }) => {
+test('the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toBeVisible()
-  const days = sheet(page).getByRole('list', { name: /releases in the last 14 days/ }).getByRole('listitem')
-  await expect(days).toHaveCount(14)
-  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.count')?.textContent ?? null, today: li.classList.contains('today') })))
-  // A day with releases carries its number; a day without keeps the flat dash and no number.
+  const days = sheet(page).getByRole('list', { name: /^\d+ releases? in the last 7 days$/ }).getByRole('listitem')
+  await expect(days).toHaveCount(7)
+  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.val')?.textContent ?? null, today: li.classList.contains('current'), before: li.classList.contains('before') })))
+  // A day with releases carries its number; an empty one has none; before the first release it says so.
   for (const day of all) {
-    const n = /^(\d+) releases? on \d{1,2} \w+/.exec(day.label)?.[1] ?? null
-    if (n) expect(day.count).toBe(n)
-    else { expect(day.label).toMatch(/^No releases on \d{1,2} \w+/); expect(day.count).toBeNull() }
+    if (day.before) { expect(day.label).toMatch(/^\w{3} \d{1,2} \w{3}: before the first AEON release$/); expect(day.count).toBeNull(); continue }
+    const n = /^(?:\w{3} \d{1,2} \w{3}|Today): (\d+) releases?/.exec(day.label)?.[1]
+    expect(n, day.label).toBeTruthy()
+    expect(day.count).toBe(n === '0' ? null : n)
   }
   expect(all.at(-1)!.today).toBe(true)
-  expect(all.at(-1)!.label).toMatch(/, today$/)
+  expect(all.at(-1)!.label).toMatch(/^Today: \d+ releases? so far/)
   expect(all.some(day => day.count !== null)).toBe(true)
 })
 
@@ -526,7 +536,9 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await page.goto('/')
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
-  const rows = sheet(page).locator('.row .calendar-version')
+  // At rest: the pointer that clicked the footer pill would otherwise hover a row.
+  await page.mouse.move(1, 1)
+  const rows = sheet(page).locator('.row .version-pretty')
   await expect(rows.first()).toBeVisible()
   const count = await rows.count()
   expect(count).toBe(history.releases.length)

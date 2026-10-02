@@ -12,7 +12,8 @@ import CalendarVersion from './CalendarVersion.vue'
 // takes focus: the control around the name (a button, a menu item, an option),
 // else the name itself.
 // A release with no known name reads as its calendar version, as before.
-const props = defineProps<{ version: string; name?: string }>()
+// Lists can keep the name visible beside a separate version copy control.
+const props = defineProps<{ version: string; name?: string; plain?: boolean }>()
 defineSlots<{ default?: () => unknown }>()
 const label = computed(() => props.name || codenameOf(props.version))
 const id = useId()
@@ -34,7 +35,8 @@ onBeforeUnmount(() => stop?.())
 </script>
 
 <template>
-  <span v-if="label" ref="root" class="release-name" :class="{ shown, standalone }" :data-version="version" :tabindex="standalone ? 0 : undefined" :aria-describedby="standalone ? id : undefined">
+  <span v-if="plain" class="release-name"><span class="rn-name" lang="en"><slot>{{ label || version }}</slot></span></span>
+  <span v-else-if="label" ref="root" class="release-name" :class="{ shown, standalone }" :data-version="version" :tabindex="standalone ? 0 : undefined" :aria-describedby="standalone ? id : undefined">
     <span class="rn-name" lang="en"><slot>{{ label }}</slot></span>
     <span :id="id" class="rn-stamp" role="tooltip" aria-hidden="true"><CalendarVersion :value="version" rest /></span>
   </span>

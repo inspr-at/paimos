@@ -35,6 +35,7 @@ export interface AllowanceWindow extends AllowanceWrite {
   set_by_you?: boolean
 }
 export interface AgentAccount {
+  owner_person_id?: string; owner_person_name?: string; linked_at?: string; link_revision?: number
   ongoing_use_approved?: boolean
   reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; quota_pool_fingerprint?: string; statusline_enabled?: boolean
   statusline_opt_in?: 'own' | 'workspace'

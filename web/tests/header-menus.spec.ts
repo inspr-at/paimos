@@ -75,11 +75,13 @@ const names = (page: Page, menu: string) => page.getByRole('menu', { name: menu 
 // then read the settled URL and the heading that is actually on screen.
 async function expectFullHistory(page: Page) {
   const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-  await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(history.getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   await page.waitForLoadState('networkidle')
   await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
-  await expect(history.getByRole('heading', { level: 1, name: 'PAIMOS AEON releases' })).toBeVisible()
-  await expect(history.getByRole('option', { selected: true })).toHaveCount(0)
+  // AEON-488: the eyebrow names the product; the title is the live release's codename.
+  await expect(history.locator('.head .eyebrow')).toHaveText('PAIMOS AEON · Release')
+  await expect(history.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(history.getByRole('row', { selected: true })).toHaveCount(0)
   return history
 }
 
@@ -109,7 +111,7 @@ test.describe('release history before the version has loaded', () => {
       await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
       const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       await expect(history).toBeVisible()
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveCount(0)
       // The list stays up until the running release is known. A phone must not
       // cover it with an empty detail while the history is still on its way.
       if (width < 600) {
@@ -120,8 +122,8 @@ test.describe('release history before the version has loaded', () => {
       await page.waitForLoadState('networkidle')
       const version = state.history.current
       await expect(page).toHaveURL(new RegExp(`[?&]releases=${version.replace(/\./g, '\\.')}(?:&|#|$)`))
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveCount(1)
-      await expect(history.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveCount(1)
+      await expect(history.getByRole('row', { selected: true, includeHidden: true })).toHaveAttribute('id', `release-${version.replace(/\./g, '-')}`)
       // The running release's heading is its marketing name (AEON-430).
       const name = state.history.releases.find(r => r.version === version)!.codename!
       await expect(history.getByRole('heading', { level: 2, name })).toBeVisible()
@@ -404,7 +406,7 @@ test.describe('phones', () => {
     await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
     const history = await expectFullHistory(page)
     await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
-    await expect(history.getByRole('listbox', { name: 'Releases, newest first' })).toBeVisible()
+    await expect(history.getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   })
 
   // AEON-312: a ticket key stays whole beside the places, search, gear and avatar;

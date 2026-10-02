@@ -19,7 +19,7 @@ import (
 func (v *Validator) prepare(schema map[string]any) error {
 	for key, value := range schema {
 		switch key {
-		case "$schema", "$id", "title", "description", "type", "required", "enum", "const", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "uniqueItems", "maxProperties", "format":
+		case "$schema", "$id", "$comment", "title", "description", "type", "required", "enum", "const", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "uniqueItems", "maxProperties", "format":
 		case "$ref":
 			parts := strings.SplitN(text(value), "#", 2)
 			if parts[0] != "" && v.files[parts[0]] == nil {
