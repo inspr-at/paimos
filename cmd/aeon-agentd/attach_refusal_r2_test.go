@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -77,6 +78,9 @@ func TestPairedAttachMarksOnlyRemoteExchangeFailures(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal("fixture path unavailable")
+	}
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal("fixture store permissions unavailable")
 	}
 	const tenantID = "11111111-1111-4111-8111-111111111111"
 	const computerID = "22222222-2222-4222-8222-222222222222"
