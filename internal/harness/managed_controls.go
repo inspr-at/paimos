@@ -224,6 +224,8 @@ func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 				return err
 			}
 		}
+	}
+	for _, c := range expired {
 		if err = record(r.Context(), tx, p, s, "control_completed", nil, c); err != nil {
 			return err
 		}

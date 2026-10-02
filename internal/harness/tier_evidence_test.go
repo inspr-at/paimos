@@ -24,8 +24,28 @@ func tierHistoryActions(t *testing.T, f *harnessFixture, path string) []string {
 	}
 	return out
 }
+
+// Fail at the database boundary if a tier history write follows an audit
+// insert in the same transaction. This proves the event-counter fence without
+// relying on timing or a concurrent test accidentally avoiding the race.
+func tierHistoryEventFence(t *testing.T, f *harnessFixture) {
+	t.Helper()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE FUNCTION tier_history_event_fence() RETURNS trigger LANGUAGE plpgsql AS $$
+ BEGIN
+  IF EXISTS(SELECT 1 FROM events WHERE tenant_id=NEW.tenant_id AND xmin::text=pg_current_xact_id()::text) THEN
+   RAISE EXCEPTION 'tier history must precede the tenant event counter';
+  END IF;
+  RETURN NEW;
+ END $$;
+ CREATE TRIGGER tier_history_event_fence BEFORE INSERT ON harness_tier_history FOR EACH ROW EXECUTE FUNCTION tier_history_event_fence()`)
+		return err
+	})
+}
+
 func TestTierHistoryPreservesEachTransitionAndUndo(t *testing.T) {
 	f := fixture(t)
+	tierHistoryEventFence(t, f)
 	path, lease, identity := tierSession(t, f)
 	seedSyntheticTierPrice(t, f, path)
 	ask := map[string]any{"request_id": uid(), "tier": "fast", "reason": "QA waits"}
@@ -127,6 +147,7 @@ func TestTierEstimateHasSourceAndHonestEmptyTime(t *testing.T) {
 
 func TestTierHistoryExpiryAndBoundedRead(t *testing.T) {
 	f := fixture(t)
+	tierHistoryEventFence(t, f)
 	path, _, identity := tierSession(t, f)
 	seedSyntheticTierPrice(t, f, path)
 	w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, "fast", identity), "")
@@ -163,4 +184,27 @@ func TestTierHistoryExpiryAndBoundedRead(t *testing.T) {
 		}
 		return err
 	})
+}
+
+func TestTierAuditFailureRollsBackDecisionAndHistory(t *testing.T) {
+	f := fixture(t)
+	path, _, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	before := tierChangeBody(t, f, path, "fast", identity)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_tier_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+ BEGIN
+  IF NEW.type='harness.control_requested' THEN RAISE EXCEPTION 'audit unavailable'; END IF;
+  RETURN NEW;
+ END $$;
+ CREATE TRIGGER reject_tier_audit BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_tier_audit()`)
+		return err
+	})
+	expect(t, f.call(f.person, "POST", path+"/tier", before, ""), 500)
+	w := f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	s := decode(t, w)
+	if s["pending"] != nil || len(s["history"].([]any)) != 0 || s["revision"] != before["expected_revision"] {
+		t.Fatal("failed audit committed a tier decision", s)
+	}
 }

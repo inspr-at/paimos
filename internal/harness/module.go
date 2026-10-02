@@ -508,6 +508,9 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 	return s, proof(s, r, p)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
+	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
+		return batch.add(p, s, kind, before, after)
+	}
 	return workorders.Record(ctx, tx, p, s.ProjectID, "harness."+kind, before, after)
 }
 func validHarness(v string) bool { return runkind.Valid(v) }

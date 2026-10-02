@@ -96,7 +96,9 @@ func (m *Module) control(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	return scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2`, s.ID, id))
 }
-func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	var in struct{}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -231,7 +233,9 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	return map[string]any{"session": s, "controls": claimed}, nil
 }
-func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	var in struct {
 		Outcome string `json:"outcome"`
 		Reason  string `json:"reason"`

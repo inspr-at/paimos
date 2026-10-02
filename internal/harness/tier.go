@@ -230,7 +230,9 @@ func (m *Module) setTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	return m.changeTier(r, tx, p, in, "")
 }
-func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in tierChange, requestID string) (any, error) {
+func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in tierChange, requestID string) (result any, err error) {
+	r, finish := deferControlEvents(r, tx)
+	defer finish(&err)
 	if !workorders.UUID(in.RequestID) || !servicetier.Valid(in.Tier) || in.Revision == nil || *in.Revision < 0 {
 		return nil, workorders.Fail(400, "request id, tier and expected revision required")
 	}
