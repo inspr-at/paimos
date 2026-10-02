@@ -38,8 +38,14 @@ func TestAgentKeyBuildHistoryReadScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	const version = "260929113854.0.0"
+	const reserved = "260929113855.0.0"
+	const withdrawn = "260929113856.0.0"
 	mux := http.NewServeMux()
-	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{{Version: version}}}, version).Mount(mux)
+	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{
+		{Version: version, State: releasehistory.StatePublished},
+		{Version: reserved, State: releasehistory.StateReserved},
+		{Version: withdrawn, State: releasehistory.StateWithdrawn},
+	}}, version).Mount(mux)
 	secured := m.Middleware(mux)
 	for _, tc := range []struct {
 		method, path, token string
@@ -49,6 +55,10 @@ func TestAgentKeyBuildHistoryReadScope(t *testing.T) {
 		{"HEAD", "/api/releases", reader.Token, 200},
 		{"GET", "/api/releases/" + version, reader.Token, 200},
 		{"HEAD", "/api/releases/" + version, reader.Token, 200},
+		{"GET", "/api/releases/" + reserved, reader.Token, 404},
+		{"HEAD", "/api/releases/" + reserved, reader.Token, 404},
+		{"GET", "/api/releases/" + withdrawn, reader.Token, 404},
+		{"HEAD", "/api/releases/" + withdrawn, reader.Token, 404},
 		{"GET", "/api/releases", noScope.Token, 403},
 		{"GET", "/api/releases/" + version, noScope.Token, 403},
 		{"PUT", "/api/releases/" + version + "/presentation", reader.Token, 403},
