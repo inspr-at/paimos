@@ -117,9 +117,9 @@ func (m *Module) tierState(r *http.Request, tx pgx.Tx, p tenant.Principal, s Ses
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
-	c, err = scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state='completed' ORDER BY sequence DESC LIMIT 1`, s.ID))
+	last, err := scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state='completed' ORDER BY sequence DESC LIMIT 1`, s.ID))
 	if err == nil {
-		out.LastChange = &c
+		out.LastChange = &last
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}

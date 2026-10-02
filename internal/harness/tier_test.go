@@ -304,6 +304,29 @@ func TestTierRequestVisibleOnUnopenedListRow(t *testing.T) {
 	check(nil)
 }
 
+func TestTierPendingAndLastChangeKeepDistinctReceipts(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, "fast", identity), "")
+	expect(t, w, 201)
+	first := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	if first == "" {
+		t.Fatal("pending tier receipt has an empty id")
+	}
+	expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+first+"/complete", map[string]any{"outcome": "applied", "reason": "tier_applied_safe_point"}, lease), 200)
+	body := tierChangeBody(t, f, path, "default", identity)
+	w = f.call(f.person, "POST", path+"/tier", body, "")
+	expect(t, w, 201)
+	out := decode(t, w)
+	pending, pendingOK := out["pending"].(map[string]any)
+	last, lastOK := out["last_change"].(map[string]any)
+	if !pendingOK || !lastOK || pending["id"] != body["request_id"] || pending["state"] != "pending" || pending["value"] != "default" || last["id"] != first || last["state"] != "completed" || last["value"] != "fast" {
+		t.Fatalf("pending and last receipt aliased: %s", w.Body.String())
+	}
+}
+
 func TestTierReportRejectsUnpinnedFactorsAtomically(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
