@@ -32,7 +32,7 @@ func PickupTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID stri
 		}
 		enabled = override.Effective
 	}
-	if enabled {
+	if enabled && s.ModeAt(time.Now().UTC()) == "on" {
 		return apply(ctx, tx, p, c.Node, decision{Rule: "queue_pickup", To: "in_progress", Reason: "Agent picked up queued work after account allowance and daemon claim checks.", Anchor: runID})
 	}
 	var after json.RawMessage

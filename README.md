@@ -135,6 +135,60 @@ publication exists in A; current workflows and runner routing are unchanged.
 Future authority/executor and selection packages must establish those boundaries
 before any omission. Run the foundation tests with `go test ./internal/ciproof`.
 
+AEON-417 C adds `scripts/ci-go-impact`, a **shadow-only** Go selection and
+full-result comparison tool. The complete foundation/authority plan remains
+unchanged: every action is `run`, every required check and job remains present,
+and timing/static run fresh. `ci-go-impact shadow --mirror <absolute-bare-mirror>
+--git <absolute-reviewed-git> --plan <full-plan.json> --analysis-context
+<installed-context.json> --base-metadata <base-go-list.json> --candidate-metadata
+<candidate-go-list.json> --record <private-shadow.jsonl>` records a separate
+selection hint. This command consumes bounded artifacts and immutable Git blobs;
+it never launches candidate code or `go list` on the controller host. Missing,
+invalid, incomplete or unsupported metadata produces a full selection. Without
+metadata, omit the three analysis options to record that fallback explicitly.
+
+The metadata recipe is `/opt/aeon/bin/go list -mod=readonly -deps -test
+-json=<required-fields> ./...` in B's disposable offline Linux/amd64 guest. The
+installed recipe fixes the complete required field list and excludes large
+unused transitive-dependency lists to fit the artifact bound. Collect base and
+candidate separately under the same pinned image/environment. The context has `goos`,
+`goarch`, `tags` (empty), `toolchain_digest`, `dependency_digest` and
+`environment_digest`. The decoder covers production/test/external-test imports,
+test variants, ignored source files and production/test embeds; immutable source
+imports independently widen the graph so a supplied artifact cannot remove
+edges. Unsupported targets/tags, cgo/assembly, workspaces/replacements, missing
+objects, malformed metadata and graph limits fall back to full work. A sealed B
+metadata observation has a separate validation API; raw CLI artifacts remain
+diagnostic. The reviewed analysis image and actual hosted boot proof still need
+coordinator provisioning before any trusted collection claim.
+
+The union of both graphs retains removed imports, files and packages. Changes to
+testdata, embedded files and declared runtime fixtures select owners and reverse
+dependants. Shared CI/harness/module/migration/OpenAPI/web-embed/version inputs
+and unmapped paths select the full inventory. The compiled
+`internal/ciproof/go-impact-policy.json` initially audits only `runkind`,
+`scopecode` and `ticketbenefits`, with byte pins and explicit runtime inputs.
+Changed or unknown runtime closures remain selected with whole-tree input
+fingerprints; candidate policy edits force full selection. Every selected package
+retains **all** ordinary shard rows
+in both recorded layouts. A scheduling hint never permits omission without a
+verified passing baseline receipt: `required_fresh_packages` always includes the
+complete live package inventory while optimization is disabled.
+
+Add `--results <full-run.json>` to compare the hint with actual full-run terminal
+results. The diagnostic input schema `aeon.ci.go-full-run.v1` binds `plan_id`,
+`candidate_commit`, `environment_digest`, `run_id`, `attempt` (1) and `layout`
+(7 for PRs; 4 is allowed for full main runs). Its `results` array has
+`obligation_id`, `package`, and `result` (`success`, `failure`, `skipped` or
+`cancelled`) for every live row of that layout, including all split-package rows.
+New packages without rows use their `go-package/<import-path>` obligation.
+Missing/skipped/cancelled rows make the comparison incomplete and leave
+`omitted_failure_count` null; a complete comparison must have zero omitted
+failures. The CLI records the comparison before exiting nonzero for incomplete
+coverage or omitted failures. These unsigned diagnostic records do not mint
+receipts, baseline credit, certificates or success checks. No workflow, required
+check, runner route, queue reuse, timing reuse or UI selection changes in C.
+
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
 `?section=knowledge` retains its background section. Tickets is the default,
@@ -407,6 +461,24 @@ pending check when it clears a stored completion. Agents may add or edit pending
 checks that have no stored completion. Check and Undo in the ticket use the existing revision
 preconditions. Part B's automation skips pending checks when moving tickets to
 Delivered or Accepted.
+
+Status autopilot starts new workspaces with automatic rules enabled. Workspaces
+present when migration 1108 runs enter Suggest mode for 24 hours, including
+release publication hooks. Settings → Workspace → Status autopilot → Changes
+lists proposed status moves and attention flags with Apply / Dismiss. Proposals
+leave tickets untouched; Apply checks the current ticket and rule, and Dismiss
+prevents that status episode from returning. An owner can explicitly select
+**Enable automatic changes** to end the upgrade review period early; ordinary
+settings saves and project On do not end it. The worker rescans when the review
+period expires or an owner confirms, including within the same UTC day.
+
+Operators can set `AEON_STATUS_AUTOPILOT=off|suggest|on` (default `on`) before
+starting the server. `off` pauses all unattended status rules, including release
+hooks and attention flags; `suggest` keeps proposals waiting for review without
+an expiry. These server modes cap every workspace and project setting. Explicit
+Apply is available in Suggest mode and forbidden in Off. Invalid values refuse
+startup. An explicitly authorized daemon work claim still starts its ticket;
+it does not become an unattended status proposal.
 
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
@@ -1816,3 +1888,76 @@ This is the canonical inventory of server egress; there is no global switch that
 Separate processes have their own explicit destinations: `aeon-agentd` contacts its paired instance and selected model providers; user-run checksum installers and Homebrew fetch release/package assets; build/release/history tooling contacts the forge, registries and configured historical import sources. Those are not server startup workers. Classic migration readers remain historical CLI-only paths; they do not run in the server and Classic Paimos stays retired.
 
 `TestServeShutdownAndBootstrap` observes and denies outbound HTTP/DNS while exercising startup and running handlers. On Linux amd64/arm64, `TestDefaultServerHasNoOutboundNetwork` additionally runs the full server against a fixture database through a Unix socket with a process-wide seccomp filter: any Internet socket attempt traps, including DNS and custom transports. Connect/DNS negative controls must trap before the test accepts the server run. The test exercises startup and two seconds of running workers/requests; it does not claim to simulate every optional integration or arbitrary elapsed time.
+
+AEON-417 B adds an external **shadow authority** in `scripts/ci-authority` and a
+disposable Linux guest init in `scripts/ci-executor`. Install reviewed binaries
+outside all candidate workspaces; do not run this controller from a PR checkout.
+The authority authenticates the original webhook body with HMAC-SHA256, reads
+the numeric repository identity and current main/PR/queue state from GitHub,
+and reconstructs the complete plan from its dedicated bare mirror. PR plans
+bind the source head and the API-resolved merge commit separately. Queue plans
+enumerate every constituent through Git parents and recheck the active queue
+ref. Checks are revalidated after reconciliation. Its output includes each
+existing required context, every extra inventory context, and `ci/trusted`, all
+with **pending** status. There is no check writer or activation flag.
+
+`ci-authority shadow --config /absolute/controller/config.json --event
+pull_request --delivery <delivery-id> --signature <X-Hub-Signature-256> --webhook
+/absolute/controller/event.json --generation <positive-generation>` reads only
+Git objects and GitHub API state. Configuration has schema
+`aeon.ci.authority-config.v1`, `mirror`, a `git` object with absolute `path` and
+raw SHA-256 `digest`, and `authority`
+containing `repository_id`, `repository`, the reviewed `policy` pin,
+`environment_digest`, and `verifier_app_id` (zero until provisioned). Supply
+`AEON_CI_WEBHOOK_SECRET` and a read-only `AEON_CI_READ_TOKEN` to the controller
+process through approved credential storage; neither is forwarded to execution
+or output. The installed authority requires a separate Linux host and verifies
+root ownership, non-writable parents and Git bytes before opening its mirror.
+Mirror refresh is a separate trusted ingress responsibility. The
+current replay/generation guard lasts for one controller process; production
+needs durable serialized ingress before any authority activation.
+
+`observe` additionally needs a `profile`, `admission_public_key`, signed
+`--admission`, `--obligation`, `--run-id`, and `--job-id`. The profile fixes each
+obligation's absolute `/opt/aeon/` command, stage, reporter and expected manifest,
+plus raw SHA-256 pins for QEMU, firmware, kernel, initrd and a read-only ext4 root
+image. It also binds harness/toolchain/environment digests, security epoch,
+separate QEMU UID/GID, CPU/memory limits and timeout. The supervisor deep-copies
+these settings and requires `infrastructure: hosted-disposable`; the provider
+must independently attest that placement. This backend supports Linux/amd64
+only and never routes candidates to the trusted main pool or production hosts.
+Each metadata/build/test stage boots a new Linux/KVM VM with
+read-only framed task/source disks, no network, no host mount and no monitor or
+control socket. The root guest init uses a read-only, `nosuid` executor image and
+an unprivileged candidate process in private tmpfs storage with a fixed offline
+environment. Source export reads every verified Git blob directly, ignores
+candidate export attributes, and refuses symlinks/submodules and unsafe paths.
+Only bounded content-addressed opaque artifacts can cross the result interface.
+Candidate stdout is never interpreted as a host receipt or GitHub check.
+
+Admission is independently Ed25519-signed over the plan, exact candidate commit,
+complete tree-manifest digest, policy, executor, approved harness, environment,
+epoch, review target/record and a maximum 24-hour validity window. This admits
+the complete executable closure, including package initializers, JS helpers,
+dependency/config and lifecycle code. It cannot establish honest assertions in
+unreviewed code. Supervisor observations have an in-process private seal;
+serializing one loses that provenance. Trusted ingress can revoke an admission;
+expiry and revocation are rechecked after execution and during reconciliation.
+Durable signatures/revocation, source
+run/job verification, full receipts and reuse remain E's responsibility. Partial
+reruns are refused. The browser/application VM connection and approved browser
+reporter remain D/H work and currently fail closed.
+
+This is an unactivated implementation: independently reviewed VM images,
+Linux/KVM hosted provisioning and a real boot/tamper probe remain required.
+The tests cover protocol, admission and supervisor ownership, including attack
+classes from all five AEON-421 reviews; they do not certify a live VM boundary.
+App provisioning, expected-App per-context ruleset probes, durable ingress and
+review revocation are later coordinator/OPS steps. No workflow, runner route,
+required check, version or execution selection changes here. Keep full existing
+CI and both optimization switches off until those prerequisites are proven.
+Build the guest init with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`; the approved
+kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
+rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
+tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
+this worker, and missing images, recipes or admission refuse execution.

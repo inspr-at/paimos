@@ -209,6 +209,8 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Check Docker web inputs without Docker
+        run: node --test scripts/docker-web-inputs.test.mjs
       - working-directory: web
         run: npm ci
       - working-directory: web
