@@ -542,12 +542,12 @@ const KINDS = [
                 <span class="main" role="gridcell">
                   <span class="line1">
                     <span class="row-identity">
-                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
-                      <span v-if="r.version === current" class="tag current-tag"><span class="live-dot" aria-hidden="true" />Current</span>
-                      <span v-if="store.highlight.has(r.version)" class="tag new-tag">New</span>
-                      <span v-if="r.version === rollbackTarget" class="tag">Rollback target</span>
-                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag">From</span>
-                      <span v-if="r.version === compareTo" class="tag end-tag">To</span>
+                      <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
+                      <span v-if="r.version === current" class="tag current-tag" title="Current"><span class="live-dot" aria-hidden="true" /><span class="tag-label">Current</span></span>
+                      <span v-if="store.highlight.has(r.version)" class="tag new-tag" title="New"><span class="tag-label">New</span></span>
+                      <span v-if="r.version === rollbackTarget" class="tag" title="Rollback target"><span class="tag-label">Rollback target</span></span>
+                      <span v-if="mode === 'compare' && r.version === compareFrom" class="tag end-tag" title="From"><span class="tag-label">From</span></span>
+                      <span v-if="r.version === compareTo" class="tag end-tag" title="To"><span class="tag-label">To</span></span>
                     </span>
                     <ReleaseVersionCopy :value="r.version" class="row-version" @click.stop />
                   </span>
@@ -722,15 +722,37 @@ const KINDS = [
 .time { display: grid; gap: 1px; padding-top: 1px; }
 .clock { font-size: 13px; font-weight: 600; color: var(--ink); }
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
-.main { display: grid; gap: 3px; min-width: 0; }
-.line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.row-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
-.row-name { font-size: 14px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
-.row-name :deep(.rn-name) { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
-/* The name and badges stay together; the fixed-width reveal can wrap as a unit. */
-.row-version { flex: none; margin-left: auto; }
-.row-version :deep(.version-copy) { margin: 0; }
+.main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
+/* The version owns its slot, including the canonical reveal and copy icon.
+   Only the name gives way; the 44 px copy target keeps the same position. */
+.line1 { display: grid; grid-template-columns: minmax(0, 1fr) 146px; align-items: start; gap: 8px; min-width: 0; }
+.row-identity { display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
+.row-name { flex: 1; min-height: 44px; font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
+.row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
+.row-identity .live-dot { align-self: center; }
+.row-version { justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: 20px; }
 .row-version :deep(.version-layers) { justify-items: end; }
+/* Two badges in a desktop rail must still leave room for the name's ellipsis.
+   Compact the New hint first, keeping the Current / Rollback label readable. */
+@container release-row (max-width: 380px) {
+  .row-identity:has(.tag ~ .tag) .new-tag { position: relative; align-self: center; align-items: center; justify-content: center; width: 16px; padding: 0; }
+  .row-identity:has(.tag ~ .tag) .new-tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .row-identity:has(.tag ~ .tag) .new-tag .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Use the actual rail width: tablet and ticket-peek rails can be as narrow
+   as a phone. Badge text remains available to assistive technology. */
+@container release-row (max-width: 310px) {
+  .row-identity { gap: 6px; }
+  .row-identity .tag { position: relative; align-self: center; align-items: center; justify-content: center; width: 16px; padding: 0; }
+  .row-identity .tag:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .row-identity .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@container release-row (max-width: 210px) {
+  .row-identity { gap: 1.5px; }
+  .row-identity .tag, .row-identity:has(.tag ~ .tag) .new-tag { width: 8px; height: 12px; }
+}
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .new-tag { background: var(--gold-2); color: #3a2804; }
@@ -844,5 +866,9 @@ const KINDS = [
 
   .row-chev { opacity: 1; }
   .day-h { top: 74px; padding: 4px 8px 6px; }
+}
+@media (max-width: 350px) {
+  .row { grid-template-columns: 40px minmax(0, 1fr) 14px; column-gap: 6px; }
+  .age { overflow: hidden; text-overflow: ellipsis; }
 }
 </style>

@@ -133,7 +133,7 @@ test('release list copy controls have accessible interactive row semantics', asy
 })
 
 for (const width of [320, 390, 600, 1600]) {
-  test(`the list version is right-aligned and wraps only when needed at ${width}px`, async ({ page }) => {
+  test(`the list version stays on the name line and right-aligned at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await open(page)
     if (width <= 760) {
@@ -142,14 +142,13 @@ for (const width of [320, 390, 600, 1600]) {
       await sheet(page).getByRole('button', { name: 'All releases' }).click()
     }
     const row = options(page).first()
-    const name = row.locator('.rn-name')
+    const name = row.locator('.row-name')
     const version = row.locator('.row-version')
     const heading = row.locator('.line1')
     await expect(row.locator('.row-identity .current-tag')).toBeVisible()
     const [nameBounds, versionBounds, headingBounds] = await Promise.all([name.boundingBox(), version.boundingBox(), heading.boundingBox()])
     expect(Math.abs(versionBounds!.x + versionBounds!.width - headingBounds!.x - headingBounds!.width)).toBeLessThanOrEqual(1)
-    if (width <= 390) expect(versionBounds!.y).toBeGreaterThanOrEqual(nameBounds!.y + nameBounds!.height)
-    else expect(Math.abs(versionBounds!.y + versionBounds!.height / 2 - nameBounds!.y - nameBounds!.height / 2)).toBeLessThanOrEqual(1)
+    expect(versionBounds!.y).toBe(nameBounds!.y)
     const button = version.getByRole('button')
     await sheet(page).getByRole('grid').focus()
     await page.keyboard.press('Tab')
@@ -163,6 +162,135 @@ for (const width of [320, 390, 600, 1600]) {
       await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `after-${width}px.png`) })
     }
   })
+}
+
+// AEON-576: real renderer layers, badges and long names share a single line.
+// Keep reservations opted in so this also works after AEON-556 lands.
+for (const width of [1440, 1024, 390, 320]) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`release row geometry at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      const data = fixtures()
+      data.preferences['developer-ui'] = { show_reserved_versions: true }
+      data.preferences.theme = { choice: theme }
+      const history = presentedHistory(Date.parse('2026-10-02T12:00:00Z'))
+      await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'))
+      Object.assign(history.releases[0]!, { codename: 'Sunlit Sonde' })
+      Object.assign(history.releases[1]!, { codename: 'Rugged Ratio' })
+      Object.assign(history.releases[2]!, { codename: 'Pure Probe', release_sequence: 54 })
+      Object.assign(history.releases[3]!, { codename: 'Deliberately Long Code Name That Must Truncate Before The Version Or Badge' })
+      data.preferences.releases = { last_seen: history.releases[4]!.version }
+      await mockWork(page, data)
+      await mockReleases(page, history)
+      await page.goto('/releases/all?release_lang=en')
+      await expect(options(page)).toHaveCount(history.releases.length)
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+      await expect(options(page).nth(0).locator('.current-tag')).toBeVisible()
+      await expect(options(page).nth(1).locator('.tag').filter({ hasText: 'Rollback target' })).toBeVisible()
+      await expect(options(page).nth(2)).toContainText('Reserved, never published')
+      await expect(options(page).nth(0).locator('.new-tag')).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+
+      for (const index of [0, 1, 2, 3]) {
+        const row = options(page).nth(index)
+        await row.scrollIntoViewIfNeeded()
+        const name = row.locator('.row-name')
+        const version = row.locator('.row-version')
+        const button = version.getByRole('button')
+        const before = await button.boundingBox()
+        const geometry = await row.evaluate(el => {
+          const name = el.querySelector<HTMLElement>('.row-name')!
+          const text = name.querySelector<HTMLElement>('.rn-name')!
+          const version = el.querySelector<HTMLElement>('.row-version')!
+          const layers = version.querySelector<HTMLElement>('.version-layers')!
+          const heading = el.querySelector<HTMLElement>('.line1')!
+          const baseline = (node: Element) => {
+            const marker = document.createElement('span')
+            marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
+            node.append(marker)
+            const top = marker.getBoundingClientRect().top
+            marker.remove()
+            return top
+          }
+          const rect = (node: Element) => {
+            const box = node.getBoundingClientRect()
+            return { top: box.top, right: box.right, left: box.left, height: box.height, width: box.width }
+          }
+          const canvas = document.createElement('canvas').getContext('2d')!
+          canvas.font = getComputedStyle(text).font
+          canvas.letterSpacing = getComputedStyle(text).letterSpacing
+          return {
+            name: rect(name), text: rect(text), version: rect(version), layers: rect(layers), heading: rect(heading),
+            tags: [...el.querySelectorAll<HTMLElement>('.row-identity .tag')].map(rect),
+            badgeBaselines: [...el.querySelectorAll<HTMLElement>('.row-identity .tag-label')]
+              .filter(label => getComputedStyle(label).position !== 'absolute').map(baseline),
+            nameBaseline: baseline(text),
+            versionBaseline: baseline(version.querySelector('.version-pretty')!),
+            renderers: [...layers.children].map(rect),
+            ellipsis: getComputedStyle(text).textOverflow,
+            ellipsisWidth: canvas.measureText('…').width,
+            truncated: text.scrollWidth > text.clientWidth,
+            nowrap: getComputedStyle(text).whiteSpace,
+            overflow: el.scrollWidth - el.clientWidth,
+          }
+        })
+        const label = `${width} ${theme} row ${index}`
+        expect(geometry.version.top, label).toBe(geometry.name.top)
+        expect(geometry.layers.top, label).toBe(geometry.text.top)
+        expect(geometry.versionBaseline, `${label} text baseline`).toBe(geometry.nameBaseline)
+        for (const baseline of geometry.badgeBaselines) expect(baseline, `${label} badge baseline`).toBe(geometry.nameBaseline)
+        expect(geometry.heading.height, label).toBe(geometry.version.height)
+        expect(geometry.version.right, label).toBeCloseTo(geometry.heading.right, 0)
+        expect(geometry.text.right, label).toBeLessThanOrEqual(geometry.version.left)
+        expect(geometry.ellipsis, label).toBe('ellipsis')
+        expect(geometry.nowrap, label).toBe('nowrap')
+        if (index === 3) expect(geometry.truncated, label).toBe(true)
+        if (geometry.truncated) expect(geometry.text.width, `${label} ellipsis fits`).toBeGreaterThanOrEqual(geometry.ellipsisWidth)
+        expect(geometry.overflow, label).toBe(0)
+        for (const badge of geometry.tags) {
+          expect(badge.left, label).toBeGreaterThanOrEqual(geometry.text.right)
+          expect(badge.right, label).toBeLessThanOrEqual(geometry.version.left)
+          expect(badge.top, label).toBeGreaterThanOrEqual(geometry.name.top)
+          expect(badge.top + badge.height, label).toBeLessThanOrEqual(geometry.name.top + geometry.name.height)
+        }
+        for (const renderer of geometry.renderers) {
+          expect(renderer.left, label).toBeGreaterThanOrEqual(geometry.version.left)
+          expect(renderer.right, label).toBeLessThanOrEqual(geometry.version.right)
+          expect(renderer.height, label).toBe(geometry.text.height)
+        }
+        await row.hover()
+        expect(await button.boundingBox(), `${label} row hover`).toEqual(before)
+        await button.hover()
+        await expect(button).toHaveAttribute('data-version-view', 'revealed')
+        await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+        expect(await button.boundingBox(), `${label} version hover`).toEqual(before)
+        await button.focus()
+        expect(await button.boundingBox(), `${label} keyboard focus`).toEqual(before)
+        expect((await button.boundingBox())!.height, label).toBeGreaterThanOrEqual(44)
+        const bounds = await name.boundingBox()
+        expect(bounds!.y, `${label} revealed`).toBe((await version.boundingBox())!.y)
+        await sheet(page).getByRole('grid').focus()
+        await page.mouse.move(1, 1)
+      }
+      // Keyboard selection keeps the list visible on phones, unlike opening detail.
+      const row = options(page).nth(1)
+      const copy = row.locator('.row-version').getByRole('button')
+      await row.scrollIntoViewIfNeeded()
+      await sheet(page).getByRole('grid').focus()
+      const before = await copy.boundingBox()
+      await page.keyboard.press('Home')
+      await page.keyboard.press('j')
+      await expect(row).toHaveAttribute('aria-selected', 'true')
+      expect(await copy.boundingBox()).toEqual(before)
+      expect(await sheet(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+      if (process.env.RELEASE_LIST_SHOTS) {
+        await options(page).first().evaluate(el => el.scrollIntoView({ block: 'center' }))
+        await mkdir(process.env.RELEASE_LIST_SHOTS, { recursive: true })
+        await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `row-${width}-${theme}.png`) })
+      }
+    })
+  }
 }
 
 test('the detail heading is the name; the number is a quiet line in the notes; search finds a name', async ({ page }) => {
