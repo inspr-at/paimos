@@ -501,14 +501,14 @@ func acceptanceBody(digest, mutation string) string {
 }
 
 // Receipt lifetime coverage must run even without the optional browser/PDF
-// renderer. The existing rendering integration above additionally exercises
+// renderer. The separate rendering integration additionally exercises
 // ProcessNext when that renderer is available.
 func TestConfirmationReceiptSurvivesGCWithoutAttachment(t *testing.T) {
 	f := newFixture(t)
 	id, digest, path := f.issued()
 	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/")
 	status, body := f.call(nil, "POST", api+"/accept", acceptanceBody(digest, "77777777-7777-4777-8777-777777777777"))
-	if status != http.StatusOK {
+	if status != http.StatusCreated {
 		t.Fatalf("accept %d %s", status, body)
 	}
 	var receipt attachments.Prepared
