@@ -9,7 +9,7 @@ import (
 
 func TestCatalogV3Ladders(t *testing.T) {
 	profiles := catalogProfiles()
-	if len(profiles) != 39 {
+	if len(profiles) != 50 {
 		t.Fatalf("catalog has %d profiles", len(profiles))
 	}
 	slugOK := regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -38,11 +38,11 @@ func TestCatalogV3Ladders(t *testing.T) {
 		}
 	}
 	want := map[string][]string{
-		"scout":                {"codex-luna-medium", "claude-haiku-medium"},
-		"mechanical":           {"codex-luna-high", "claude-haiku-high"},
-		"build":                {"codex-6-1-sol-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"},
-		"build-hard":           {"codex-6-1-sol-xhigh", "codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"},
-		"review-gate":          {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "grok-4-7-xhigh", "cursor-grok-xhigh"},
+		"scout":                {"codex-luna-medium", "claude-haiku-medium", "gemini-gemini-2-5-flash-4096"},
+		"mechanical":           {"codex-luna-high", "claude-haiku-high", "gemini-gemini-2-5-flash-16384"},
+		"build":                {"codex-6-1-sol-high", "claude-sonnet-high", "pi-anthropic-sonnet-high", "gemini-gemini-2-5-pro-16384", "opencode-ollama-qwen3-coder-default"},
+		"build-hard":           {"codex-6-1-sol-xhigh", "codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"},
+		"review-gate":          {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "grok-4-7-xhigh", "cursor-grok-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"},
 		"review-gate-security": {"grok-4-7-xhigh", "cursor-grok-xhigh", "codex-6-1-sol-xhigh"},
 	}
 	for role, slugs := range want {

@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -129,91 +130,108 @@ func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
 }
 
 func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
-	reset(t)
-	p := makePrincipal(t, "upgrade", "person", "Owner", []string{"admin"})
-	inRegistry(t, p, func(tx pgx.Tx) error {
-		seeds := catalogProfiles()
-		ids := map[string]string{}
-		// Reproduce exact immutable v2 profiles and its old terra profile.
-		for _, s := range seeds {
-			if strings.HasPrefix(s.Slug, "codex-6-1-") || s.Harness == "grok" {
-				continue
-			}
-			s.Version = "2"
-			row, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{s.Slug, s.Version, s.Harness, s.Family, s.Model, s.Effort, s.Tier})
-			if err != nil {
-				return err
-			}
-			ids[s.Slug] = row.ID
-		}
-		terra, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{"codex-terra-high", "2", "codex", "openai", "gpt-6-terra", "high", "standard"})
-		if err != nil {
-			return err
-		}
-		ids[terra.Slug] = terra.ID
-		until := time.Now().Add(time.Hour)
-		for role, slugs := range v2Ladders {
-			for i, slug := range slugs {
-				r := Route{Role: role, Priority: i + 1, ProfileID: ids[slug], State: "available"}
-				if role == "review-gate" && i == 1 {
-					r.State = "conserved"
-					r.Reason = "owner preference"
-					r.ValidUntil = &until
+	for _, expanded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("additional-harnesses-%t", expanded), func(t *testing.T) {
+			reset(t)
+			p := makePrincipal(t, "upgrade", "person", "Owner", []string{"admin"})
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				seeds := catalogProfiles()
+				ids := map[string]string{}
+				// Reproduce exact immutable v2 profiles and its old terra profile.
+				for _, s := range seeds {
+					if strings.HasPrefix(s.Slug, "codex-6-1-") || s.Harness == "grok" || (!expanded && (s.Harness == "gemini" || s.Harness == "opencode")) {
+						continue
+					}
+					s.Version = "2"
+					row, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{s.Slug, s.Version, s.Harness, s.Family, s.Model, s.Effort, s.Tier})
+					if err != nil {
+						return err
+					}
+					ids[s.Slug] = row.ID
 				}
-				if err := insertRoute(t.Context(), tx, p.TenantID, r); err != nil {
+				terra, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{"codex-terra-high", "2", "codex", "openai", "gpt-6-terra", "high", "standard"})
+				if err != nil {
 					return err
 				}
-			}
-		}
-		// Custom build-hard order must survive. Both versions match seed values,
-		// but it is structurally different from the v2 default.
-		_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`)
-		return err
-	})
-	var before []Route
-	inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
-	NewWithVault(appPool, nil).sweep(t.Context())
-	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
-		t.Fatal("v3 profiles missing")
-	}
-	inRegistry(t, p, func(tx pgx.Tx) error {
-		steps, err := loadLadder(t.Context(), tx, "build")
-		if err != nil {
-			return err
-		}
-		if steps[0].Profile.Model != "gpt-6.1-sol" {
-			t.Fatalf("build still selects %s", steps[0].Profile.Model)
-		}
-		after, err := listRoutes(t.Context(), tx)
-		if err != nil {
-			return err
-		}
-		filter := func(in []Route, role string) []Route {
-			out := []Route{}
-			for _, r := range in {
-				if r.Role == role {
-					out = append(out, r)
+				ids[terra.Slug] = terra.ID
+				until := time.Now().Add(time.Hour)
+				for role, slugs := range v2Ladders {
+					if expanded {
+						slugs = append([]string(nil), slugs...)
+						for _, route := range defaultRoutes(seeds) {
+							if route.Role == role && (strings.HasPrefix(route.Slug, "gemini-") || strings.HasPrefix(route.Slug, "opencode-")) {
+								slugs = append(slugs, route.Slug)
+							}
+						}
+					}
+					for i, slug := range slugs {
+						r := Route{Role: role, Priority: i + 1, ProfileID: ids[slug], State: "available"}
+						if role == "review-gate" && i == 1 {
+							r.State = "conserved"
+							r.Reason = "owner preference"
+							r.ValidUntil = &until
+						}
+						if err := insertRoute(t.Context(), tx, p.TenantID, r); err != nil {
+							return err
+						}
+					}
 				}
+				// Custom build-hard order must survive. Both versions match seed values,
+				// but it is structurally different from the v2 default.
+				_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`)
+				return err
+			})
+			var before []Route
+			inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
+			NewWithVault(appPool, nil).sweep(t.Context())
+			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+			if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
+				t.Fatal("v3 profiles missing")
 			}
-			return out
-		}
-		if !reflect.DeepEqual(filter(before, "build-hard"), filter(after, "build-hard")) {
-			t.Fatal("custom routes changed")
-		}
-		oldGate, newGate := filter(before, "review-gate"), filter(after, "review-gate")
-		if !reflect.DeepEqual(oldGate[1], newGate[1]) {
-			t.Fatal("active override changed")
-		}
-		return nil
-	})
-	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	if eventCount(t, p, "model.catalog_upgraded") != 1 {
-		t.Fatal("upgrade not idempotent")
-	}
-	gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=xai", "", 200)
-	if gate.Profile == nil || gate.Profile.Family != "openai" || !strings.Contains(gate.CommandTemplate, "--sandbox read-only") {
-		t.Fatalf("security route: %+v", gate)
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				steps, err := loadLadder(t.Context(), tx, "build")
+				if err != nil {
+					return err
+				}
+				if steps[0].Profile.Model != "gpt-6.1-sol" {
+					t.Fatalf("build still selects %s", steps[0].Profile.Model)
+				}
+				after, err := listRoutes(t.Context(), tx)
+				if err != nil {
+					return err
+				}
+				filter := func(in []Route, role string) []Route {
+					out := []Route{}
+					for _, r := range in {
+						if r.Role == role {
+							out = append(out, r)
+						}
+					}
+					return out
+				}
+				oldHard, newHard := filter(before, "build-hard"), filter(after, "build-hard")
+				additional := 2
+				if expanded {
+					additional = 0
+				}
+				if len(newHard) != len(oldHard)+additional || !reflect.DeepEqual(oldHard, newHard[:len(oldHard)]) {
+					t.Fatal("custom routes changed instead of appending additional harnesses")
+				}
+				oldGate, newGate := filter(before, "review-gate"), filter(after, "review-gate")
+				if !reflect.DeepEqual(oldGate[1], newGate[1]) {
+					t.Fatal("active override changed")
+				}
+				return nil
+			})
+			decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+			if eventCount(t, p, "model.catalog_upgraded") != 1 {
+				t.Fatal("upgrade not idempotent")
+			}
+			gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=xai", "", 200)
+			if gate.Profile == nil || gate.Profile.Family != "openai" || !strings.Contains(gate.CommandTemplate, "--sandbox read-only") {
+				t.Fatalf("security route: %+v", gate)
+			}
+		})
 	}
 }
 

@@ -32,7 +32,7 @@ func (rt *runtime) cmdUse() *Command {
 		},
 		run: func(args []string) error {
 			switch args[0] {
-			case "codex", "claude", "grok", "cursor", "pi":
+			case "codex", "claude", "grok", "cursor", "pi", "gemini", "opencode":
 			default:
 				return usagef("unknown harness")
 			}

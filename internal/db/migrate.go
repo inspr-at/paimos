@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -26,7 +27,8 @@ const migrationLock int64 = 780002
 var migrationFiles embed.FS
 
 // migrate applies each unrecorded SQL file in its own transaction, except
-// explicitly marked single concurrent index builds (see concurrentIndex).
+// explicitly marked single concurrent index builds (see concurrentIndex) and
+// 1088's resumable CHECK expansion/validation/replacement phases.
 // A later call skips files already listed in schema_migrations.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return MigrateWithHook(ctx, pool, nil)
@@ -34,8 +36,19 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 // MigrateWithHook runs pending migrations and calls before just before each
 // file. Migration tests use it to populate an older schema; production passes
-// no hook through migrate.
+// no hook through migrate. Phase commits do not change its filename-only API.
 func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string) error) error {
+	return migrateWithHooks(ctx, pool, before, nil)
+}
+
+// MigrateWithPhaseHook observes only 1088's staged CHECK transactions, after
+// completed phases have committed. Tests can interrupt or contend at a boundary
+// without changing the existing MigrateWithHook filename callback contract.
+func MigrateWithPhaseHook(ctx context.Context, pool *pgxpool.Pool, beforePhase func(string) error) error {
+	return migrateWithHooks(ctx, pool, nil, beforePhase)
+}
+
+func migrateWithHooks(ctx context.Context, pool *pgxpool.Pool, before, beforePhase func(string) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("migration connection: %w", err)
@@ -89,7 +102,7 @@ func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string
 				return fmt.Errorf("migrate agent role model discovery: %w", err)
 			}
 		}
-		if err := applyFile(ctx, conn, name); err != nil {
+		if err := applyFile(ctx, conn, name, beforePhase); err != nil {
 			return err
 		}
 	}
@@ -221,7 +234,7 @@ func migratePublicLinkTokens(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
+func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func(string) error) error {
 	body, err := migrationFiles.ReadFile("migrations/" + name)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
@@ -229,6 +242,9 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	stmts := splitSQL(string(body))
 	if len(stmts) == 0 {
 		return fmt.Errorf("migration %s has no statements", name)
+	}
+	if name == "1088_more_harnesses.sql" {
+		return applyMoreHarnessChecks(ctx, conn, name, body, stmts, before)
 	}
 	index, table, err := concurrentIndex(string(body), stmts)
 	if err != nil {
@@ -263,6 +279,83 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", name, err)
+	}
+	return nil
+}
+
+// Keep 1088 one numbered migration while committing installation's exclusive
+// DDL locks before validation scans hot tables. The old enums stay enforced
+// until all supersets validate; retiring them and recording the complete file
+// is atomic. Temporary phase records commit with their DDL so interruptions
+// resume safely, and finalization removes only this migration's own records.
+func applyMoreHarnessChecks(ctx context.Context, conn *pgxpool.Conn, name string, body []byte, stmts []string, before func(string) error) error {
+	const count = 10
+	if len(stmts) != 2*count+2 || stmts[0] != "SET LOCAL lock_timeout = '5s'" || !strings.HasPrefix(stmts[len(stmts)-1], "DO $$") {
+		return fmt.Errorf("migration %s: unexpected staged CHECK shape", name)
+	}
+	add := regexp.MustCompile(`(?s)^ALTER TABLE ([a-z_][a-z0-9_]*) ADD CONSTRAINT ([a-z_][a-z0-9_]*)\s+CHECK \(.+\) NOT VALID$`)
+	for i := 0; i < count; i++ {
+		match := add.FindStringSubmatch(stmts[i+1])
+		if match == nil || strings.Join(strings.Fields(stmts[count+i+1]), " ") != "ALTER TABLE "+match[1]+" VALIDATE CONSTRAINT "+match[2] {
+			return fmt.Errorf("migration %s: CHECK installation/validation mismatch at check %d", name, i+1)
+		}
+	}
+	phases := []struct {
+		name  string
+		stmts []string
+	}{
+		{"install", stmts[1 : count+1]},
+		{"validate", stmts[count+1 : 2*count+1]},
+		{"replace", stmts[2*count+1:]},
+	}
+	prefix := name + "#check-phase:"
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	keys := []string{prefix + digest + ":install", prefix + digest + ":validate"}
+	applied, err := appliedVersions(ctx, conn)
+	if err != nil {
+		return err
+	}
+	for version := range applied {
+		if strings.HasPrefix(version, prefix) && version != keys[0] && version != keys[1] {
+			return fmt.Errorf("migration %s: interrupted CHECK phases have different source bytes", name)
+		}
+	}
+	for i, phase := range phases {
+		if i < len(keys) && applied[keys[i]] {
+			continue
+		}
+		if before != nil {
+			if err := before(name + "#" + phase.name); err != nil {
+				return fmt.Errorf("before %s#%s: %w", name, phase.name, err)
+			}
+		}
+		if err := func() error {
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			if _, err := tx.Exec(ctx, stmts[0]); err != nil {
+				return err
+			}
+			for _, stmt := range phase.stmts {
+				if _, err := tx.Exec(ctx, stmt); err != nil {
+					return err
+				}
+			}
+			version := name
+			if i < len(keys) {
+				version = keys[i]
+			} else if _, err := tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version=ANY($1::text[])`, keys); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES($1)`, version); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}(); err != nil {
+			return fmt.Errorf("migrate %s#%s: %w", name, phase.name, err)
+		}
 	}
 	return nil
 }

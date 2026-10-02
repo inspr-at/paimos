@@ -202,7 +202,7 @@ var harnessCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 //     including Nix/Home Manager.
 func RecoveryFix(harness, reason string) HarnessFix {
 	switch harness {
-	case "claude", "codex", "cursor", "grok", "pi":
+	case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 	default:
 		return HarnessFix{}
 	}
@@ -221,6 +221,10 @@ func RecoveryFix(harness, reason string) HarnessFix {
 			command = "claude auth login"
 		case "cursor":
 			command = "cursor-agent login"
+		case "gemini":
+			command = "gemini"
+		case "opencode":
+			command = "opencode auth login"
 		case "pi":
 			// pi signs in from its own prompt with /login.
 			command = "pi"
@@ -246,7 +250,7 @@ func KnownHarnessState(state string) bool {
 // Callers scope reports to enrolled harnesses and check legacy-state agreement.
 func HarnessReport(harness, state, reason string) (HarnessDetail, bool) {
 	switch harness {
-	case "claude", "codex", "cursor", "grok", "pi":
+	case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 	default:
 		return HarnessDetail{}, false
 	}

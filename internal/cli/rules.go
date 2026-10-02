@@ -28,7 +28,7 @@ func (o *rulesOptions) flags(fs *flagSet) {
 	fs.string(&o.Person, "rules-person", 0, "authorized person UUID")
 	fs.string(&o.Agent, "rules-agent", 0, "named agent principal UUID (required for agent callers)")
 	fs.string(&o.Role, "rules-role", 0, "coordinator, builder, reviewer, or operator")
-	fs.string(&o.Harness, "rules-harness", 0, "claude-code, codex, grok, pi, or cursor")
+	fs.string(&o.Harness, "rules-harness", 0, "claude-code, codex, grok, pi, cursor, gemini, or opencode")
 	fs.string(&o.Task, "rules-task", 0, "optional exact task UUID")
 	fs.string(&o.Cache, "rules-cache", 0, "explicit private .json cache in an existing physical directory")
 	fs.string(&o.Floor, "rules-floor", 0, "independently retained private locked-floor .txt file")

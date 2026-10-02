@@ -50,7 +50,7 @@ func TestInvalidRunKindCLIReportsFlagAndValues(t *testing.T) {
 			args = append(args, "--owner-pid", "1", "--state-dir", t.TempDir())
 		}
 		code, _, stderr := runCLI(args, "")
-		if code != 2 || !strings.Contains(stderr, "--harness") || !strings.Contains(stderr, "codex, claude, pi, cursor, grok, media, terminal") {
+		if code != 2 || !strings.Contains(stderr, "--harness") || !strings.Contains(stderr, "codex, claude, pi, cursor, grok, gemini, opencode, media, terminal") {
 			t.Fatalf("%s: code %d, %s", command, code, stderr)
 		}
 	}

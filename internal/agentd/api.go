@@ -423,6 +423,11 @@ type ProbeStatusReporter interface {
 
 // ProbeStatus reports a probe and, when it failed, only its cause category.
 func (r *Remote) ProbeStatus(ctx context.Context, accountID, daemonID, generation string, status ProbeStatus) error {
+	// Keep historical server probe causes unchanged. The richer unverified
+	// reason travels in lifecycle details; it never implies a vendor sign-out.
+	if !status.OK && status.Failure == ProbeUnverified {
+		status.Failure = ProbeUnavailable
+	}
 	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "available": status.OK}
 	if !status.OK && (status.Failure == ProbeAuthFailed || status.Failure == ProbeUnavailable) {
 		body["failure"] = status.Failure

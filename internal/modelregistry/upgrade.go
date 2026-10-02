@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"context"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -144,11 +145,22 @@ func matchesV2(role string, steps []ladderStep) bool {
 	if !ok {
 		return role == "review-gate-security" && len(steps) == 0
 	}
+	legacyCount := len(expected)
+	if len(steps) != legacyCount {
+		// Main's additive harness upgrade appends exact pins to historical
+		// defaults. Recognize that suffix while retaining custom route policy.
+		expected = append([]string(nil), expected...)
+		for _, route := range defaultRoutes(catalogProfiles()) {
+			if route.Role == role && (strings.HasPrefix(route.Slug, "gemini-") || strings.HasPrefix(route.Slug, "opencode-")) {
+				expected = append(expected, route.Slug)
+			}
+		}
+	}
 	if len(steps) != len(expected) {
 		return false
 	}
 	for i, step := range steps {
-		if step.Priority != i+1 || step.Profile.Slug != expected[i] || step.Profile.Version != "2" || !step.Profile.Enabled {
+		if step.Priority != i+1 || step.Profile.Slug != expected[i] || (step.Profile.Version != "2" && (i < legacyCount || step.Profile.Version != CatalogVersion)) || !step.Profile.Enabled {
 			return false
 		}
 		if step.Profile.Slug == "codex-terra-high" {

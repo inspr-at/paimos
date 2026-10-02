@@ -59,6 +59,12 @@ var seedModels = []seedModel{
 	{"cursor", "grok-4.7-medium-fast", "xai", "frontier", []string{"medium"}},
 	{"cursor", "grok-4.7-high-fast", "xai", "frontier", []string{"high"}},
 	{"cursor", "grok-4.7-xhigh-fast", "xai", "frontier", []string{"xhigh"}},
+	// Fixed thinking-budget pins, compatible with AEON-511C's Google buckets.
+	// Gemini 2.5 Pro cannot disable thinking; Flash has a lower maximum.
+	{"gemini", "gemini-2.5-flash", "google", "fast", []string{"0", "1024", "4096", "16384", "24576"}},
+	{"gemini", "gemini-2.5-pro", "google", "strong", []string{"1024", "4096", "16384", "32768"}},
+	{"opencode", "google/gemini-2.5-pro", "google", "strong", []string{"default"}},
+	{"opencode", "ollama/qwen3-coder", "local", "standard", []string{"default"}},
 }
 
 func catalogProfiles() []seedProfile {
@@ -99,6 +105,7 @@ func catalogSlug(model seedModel, effort string) string {
 			id = "cursor-grok-xhigh"
 		}
 	}
+	id = strings.ReplaceAll(id, "/", "-")
 	return strings.ReplaceAll(id, ".", "-")
 }
 
@@ -147,6 +154,17 @@ func defaultRoutes(profiles []seedProfile) []seedRoute {
 					}
 				}
 			}
+		}
+		// Keep the additional harnesses behind the role's original candidates.
+		switch role.name {
+		case "scout":
+			slugs = append(slugs, "gemini-gemini-2-5-flash-4096")
+		case "mechanical":
+			slugs = append(slugs, "gemini-gemini-2-5-flash-16384")
+		case "build":
+			slugs = append(slugs, "gemini-gemini-2-5-pro-16384", "opencode-ollama-qwen3-coder-default")
+		case "build-hard", "review-gate":
+			slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
 		}
 		for i, slug := range slugs {
 			out = append(out, seedRoute{Role: role.name, Priority: i + 1, Slug: slug})

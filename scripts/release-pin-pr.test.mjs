@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -218,6 +219,21 @@ test("snapshot dry run cannot mint credentials or be used as a write base", asyn
   await assert.rejects(proposePin(env(), { pinFile, write: true }, f.dependencies), /live base/);
 });
 
+test("attestation args bind the image, signer workflow and exact source", () => {
+  assert.deepEqual(attestationArgs(version, digest, sourceCommit), [
+    "attestation", "verify", `oci://ghcr.io/inspr-at/aeon@${digest}`, "--repo", "inspr-at/paimos",
+    "--signer-workflow", "inspr-at/paimos/.github/workflows/release.yml",
+    "--signer-digest", sourceCommit, "--source-ref", `refs/tags/v${version}`,
+    "--source-digest", sourceCommit, "--deny-self-hosted-runners",
+  ]);
+});
+
+test("attestation args never combine mutually exclusive gh identity flags", () => {
+  const identityFlags = ["--cert-identity", "--cert-identity-regex", "--signer-repo", "--signer-workflow"];
+  const args = attestationArgs(version, digest, sourceCommit);
+  assert.deepEqual(args.filter(arg => identityFlags.includes(arg)), ["--signer-workflow"]);
+});
+
 test("real CLI verifier binds the image and provenance; its output never enters logs", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "aeon-pin-verifier-"));
   const log = join(directory, "args");
@@ -230,11 +246,48 @@ test("real CLI verifier binds the image and provenance; its output never enters 
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
     "attestation", "verify", `oci://ghcr.io/inspr-at/aeon@${digest}`, "--repo", "inspr-at/paimos",
     "--signer-workflow", "inspr-at/paimos/.github/workflows/release.yml",
-    "--cert-identity", `https://github.com/inspr-at/paimos/.github/workflows/release.yml@refs/tags/v${version}`,
     "--signer-digest", sourceCommit, "--source-ref", `refs/tags/v${version}`,
     "--source-digest", sourceCommit, "--deny-self-hosted-runners",
   ]);
   assert.equal(f.calls.some(call => call.path?.startsWith(`/repos/${TARGET}/`)), false);
+});
+
+test("release records the digest before the non-blocking pin proposal and preserves asset dependencies", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const image = workflow.split("\n  image:\n")[1].split("\n  assets:\n")[0];
+  const record = image.indexOf("      - name: Record pushed digest\n");
+  const proposal = image.indexOf("      - name: Propose verified nixcfg deployment pin\n");
+  assert.ok(record >= 0 && proposal > record);
+  assert.match(image.slice(proposal), /^        continue-on-error: true$/m);
+  assert.match(image, /^      digest: \$\{\{ steps.push.outputs.digest \}\}$/m);
+  assert.match(workflow.split("\n  assets:\n")[1], /^    needs: \[agentd-darwin, image\]$/m);
+});
+
+test("release pin shell reports failures in dry-run and write modes without hiding the failed outcome", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const proposal = workflow.split("      - name: Propose verified nixcfg deployment pin\n")[1].split("\n  assets:\n")[0];
+  const script = proposal.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n");
+  const directory = mkdtempSync(join(tmpdir(), "aeon-pin-workflow-"));
+  const argsLog = join(directory, "args"), summary = join(directory, "summary");
+  writeFileSync(join(directory, "node"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGS_LOG"\nexit "$PROPOSAL_EXIT"\n', { mode: 0o700 });
+  for (const enabled of ["", "true"]) {
+    for (const exit of [0, 1]) {
+      writeFileSync(summary, "");
+      const result = spawnSync("/bin/bash", ["-c", script], {
+        encoding: "utf8",
+        env: { PATH: directory, ARGS_LOG: argsLog, PROPOSAL_EXIT: String(exit), AEON_PIN_BOT_ENABLED: enabled, GITHUB_STEP_SUMMARY: summary },
+      });
+      assert.equal(result.status, exit, result.stderr);
+      assert.deepEqual(readFileSync(argsLog, "utf8").trim().split("\n"), ["scripts/release-pin-pr.mjs", ...(enabled === "true" ? ["--write"] : [])]);
+      if (exit) {
+        assert.match(result.stdout, /::warning::Deployment pin proposal failed/);
+        assert.match(readFileSync(summary, "utf8"), /Deployment pin proposal failed; release assets will still be built\./);
+      } else {
+        assert.equal(result.stdout, "");
+        assert.equal(readFileSync(summary, "utf8"), "");
+      }
+    }
+  }
 });
 
 test("recorded release evidence carries the verified digest and proposal without private content", () => {
