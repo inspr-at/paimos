@@ -115,6 +115,8 @@ each ticket's placement with its canonical person assignee, falling back to the
 viewer's canonical You setting for unassigned or agent-assigned tickets. Work-start
 estimate snapshots use only the assignee; registered sessions and dispatched runs
 save their starter's work placement separately from the model that actually runs.
+Operator keys have no You setting. With an empty matrix, existing planning gaps
+and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
 

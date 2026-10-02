@@ -608,8 +608,8 @@ type planPrice struct {
 	Input, Output, Cached *string
 }
 
-// planRoute is one resolved role, shared by every row with that role. view
-// is nil when the registry selected nothing.
+// planRoute is one resolved placement, shared by rows with the same project,
+// person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
 	price    *planPrice
 	view     *planningRoute
@@ -621,7 +621,7 @@ type planRoute struct {
 // planBilling is how a harness was billed most recently.
 type planBilling struct{ mode, plan string }
 
-// planner holds what one list page's estimates share: the resolved roles, the
+// planner holds what one list page's estimates share: the resolved placements, the
 // calibration samples and each routed harness's billing.
 type planner struct {
 	routes       map[string]*planRoute
@@ -930,8 +930,8 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 	return out, rows.Err()
 }
 
-// loadPlanRows reads role, area and hours for the page rows and for the open
-// and done ticket and task children of page epics.
+// loadPlanRows reads each row's placement and hours, including the open and
+// done ticket and task children of page epics. A nil viewer is the snapshot path.
 func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string, viewer *string) ([]planRow, error) {
 	hours := estimateHoursSQL("n.fields")
 	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`
