@@ -139,6 +139,9 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	claimed := []offered{}
 	for _, old := range pending {
+		if old.Kind == "tier" && s.Activity != "idle" {
+			continue
+		}
 		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, old.ID))
 		if e != nil {
 			return nil, e
@@ -270,6 +273,26 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		}
 		if c.ExpiresAt == nil || !c.ExpiresAt.After(now) {
 			return nil, workorders.Fail(409, "setting authorization expired")
+		}
+		if c.Kind == "tier" {
+			authorized, e := controlRequesterAuthorized(r, tx, p, s, c)
+			if e != nil {
+				return nil, e
+			}
+			if !authorized {
+				return nil, workorders.Fail(409, "tier authorization revoked")
+			}
+			if err = validateTier(ctx, tx, s, c.Value); err != nil {
+				return nil, err
+			}
+			old := s
+			s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET service_tier=$2,service_tier_revision=service_tier_revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, c.Value))
+			if err != nil {
+				return nil, err
+			}
+			if err = record(ctx, tx, p, s, "tier_changed", old, s); err != nil {
+				return nil, err
+			}
 		}
 		if c.Kind == "rename" {
 			old := s

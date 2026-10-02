@@ -62,6 +62,7 @@ import (
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -125,6 +126,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier", "harness.read", false, 200, m.getTier},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier", "harness.control", false, 201, m.setTier},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report", "harness.worker", true, 200, m.reportTiers},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask", "harness.worker", true, 201, m.askTier},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision", "harness.control", false, 201, m.decideTier},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings", "harness.control", false, 200, m.managedSettings},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls", "harness.control", false, 201, m.managedControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context", "harness.worker", true, 200, m.managedContext},
@@ -149,6 +155,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	ServiceTier             *string                  `json:"service_tier,omitempty"`
+	ServiceTierRevision     int64                    `json:"service_tier_revision,omitempty"`
+	ServiceTierReports      []servicetier.Report     `json:"service_tier_reports,omitempty"`
 	Generator               *string                  `json:"generator,omitempty"`
 	Command                 *string                  `json:"command,omitempty"`
 	AgentActivityMode       string                   `json:"agent_activity_mode,omitempty"`
@@ -341,13 +350,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp()`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),service_tier,service_tier_revision,service_tier_reports`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports)
 	if err != nil {
 		return s, err
 	}
@@ -497,7 +506,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
+			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, servicetier.Capability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -508,7 +517,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 			out = append(out, v)
 		}
 	}
-	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability]) {
+	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability] || seen[servicetier.Capability]) {
 		return nil, workorders.Fail(400, "unmanaged session cannot own controls")
 	}
 	sort.Strings(out)

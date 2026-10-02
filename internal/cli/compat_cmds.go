@@ -568,5 +568,6 @@ func (rt *runtime) compatStubs() []*Command {
 		rt.cmdBaselineBatch(),
 		rt.cmdSync(),
 		rt.cmdHarnessV2(),
+		rt.cmdAgentsTier(),
 	}
 }

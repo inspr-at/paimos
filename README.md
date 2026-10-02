@@ -1555,6 +1555,35 @@ Fixture mode retains its stricter private-directory exclusions. Unmanaged captur
 remains unavailable until the exact owning source is bound; live model and effort
 capture remain unimplemented.
 
+### Session service tiers (AEON-436)
+
+`aeon agents tier show --project KEY --session UUID` shows Default / Fast / Fastest,
+per-model adapter provenance, published price multipliers and pending decisions.
+`set --tier fast` uses a person key with the existing project `harness.control`
+permission. It queues a change bound to the current daemon/process generation;
+the active tier changes only after the daemon acknowledges the native mechanism
+at an idle boundary. Codex resumes its owned thread with `service_tier` for the
+next run; Claude applies its `fastMode` setting for the next turn. A rejected or
+uncertain native acknowledgement leaves the active tier unchanged. A session
+running on its own and an ended session are read-only.
+
+`ask --tier fast --reason "QA waits"` records the session agent's request without
+exposing its daemon lease or switching the tier. Persons can use `approve` or
+`decline --decision-request UUID --tier fast`; the tier API exposes requests for
+the Decision Desk. Undo uses `set` with the previous tier: it cancels an unclaimed
+change or queues a reversing change after confirmation. A claimed change must
+settle before a reversing change can be queued.
+
+The session-bound `/tier/report` endpoint carries the adapter's facts for each
+model: price, speed (unknown where unpublished), mechanism, harness/adapter
+version and checked-at. Missing prices disable paid tiers. Price and subscription
+capacity consumption are distinct; the fragment's illustrative factors are not
+pricing defaults. Vendor facts are pinned in `internal/servicetier`; account or
+vendor rejection remains authoritative. Usage snapshots retain tier segments and
+their multipliers, and run telemetry records the active tier. Earlier tokens are
+never repriced when a tier changes; vendor billed costs remain vendor costs.
+The UI is delivered separately in part B.
+
 ### Session recovery
 
 Managed sandbox controls (AEON-260) use the additive

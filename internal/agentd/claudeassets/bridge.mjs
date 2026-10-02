@@ -361,6 +361,7 @@ try {
     pathToClaudeCodeExecutable: claudePath,
     persistSession: false,
     settingSources: [],
+    extraArgs: { settings: JSON.stringify({fastMode:false}) },
     strictMcpConfig: true,
     mcpServers,
     plugins: [],
@@ -479,6 +480,14 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });
         if (state.reacted) deleteCorrelation(uuid);
         controlUUID = "";
+      } else if (request.op === "tier") {
+        failureReason = "setting_rejected";
+        if (!sessionStarted || turnActive || !["default", "fast"].includes(request.value) ||
+            !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel) ||
+            typeof queryHandle.applyFlagSettings !== "function") throw new Error("unavailable");
+        await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+        emit({ kind: "settings_changed", service_tier: request.value });
+        emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "model" || request.op === "effort") {
         failureReason = "setting_rejected";
         if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");

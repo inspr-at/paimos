@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -126,7 +127,11 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err != nil {
 		return nil, err
 	}
-	if s.Harness != "claude" || !forceAvailable(s, now) || !has(s, managedControlCapability) || !has(s, in.Kind) {
+	qualified := s.Harness == "claude" && has(s, managedControlCapability) && has(s, in.Kind)
+	if in.Kind == "tier" {
+		qualified = (s.Harness == "claude" || s.Harness == "codex") && has(s, servicetier.Capability)
+	}
+	if !qualified || !forceAvailable(s, now) || s.StoppedAt != nil || s.ArchivedAt != nil {
 		return nil, workorders.Fail(409, "live sandboxed managed control unavailable for this adapter")
 	}
 	if *s.ProcessOwnership != in.Ownership {
@@ -147,7 +152,7 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 			return nil, err
 		}
 		var pending bool
-		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind IN ('rename','model','effort') AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind IN ('rename','model','effort','tier') AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
 			return nil, err
 		}
 		if pending {
@@ -162,7 +167,11 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, workorders.Fail(429, "session control quota reached")
 	}
 	identity, _ := json.Marshal(in.Ownership)
-	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+interval '45 seconds',nullif($8,'') FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg, in.Value))
+	ttl := 45
+	if in.Kind == "tier" {
+		ttl = 86400
+	} // wait for a safe point, still bound to the exact process
+	c, err := scanControl(tx.QueryRow(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value) SELECT $1,$2,$3,$4,coalesce(max(sequence),0)+1,$5,$6::jsonb,$7,clock_timestamp()+make_interval(secs=>$9),nullif($8,'') FROM harness_controls WHERE session_id=$3 RETURNING `+controlColumns, p.TenantID, in.RequestID, s.ID, in.Kind, p.ID, string(identity), dg, in.Value, ttl))
 	if err != nil {
 		return nil, err
 	}

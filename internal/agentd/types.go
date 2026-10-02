@@ -89,6 +89,7 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`
 	ToolActivity     *agentactivity.Activity `json:"-"`
@@ -145,6 +146,7 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	ServiceTier            string                  `json:"service_tier,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`
 	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
@@ -223,6 +225,7 @@ type API interface {
 }
 
 type StartRequest struct {
+	ServiceTier   string
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
@@ -249,6 +252,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	HarnessTier  string
 	Doing        string
 	ToolActivity *agentactivity.Activity
 	VendorLimit  *capacity.LimitHit
