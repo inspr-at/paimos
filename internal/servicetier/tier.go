@@ -15,6 +15,8 @@ import (
 
 const Capability = "service_tier_v1"
 
+const noPublishedPrice = "not offered: no published price"
+
 func Valid(t string) bool { return t == "default" || t == "fast" || t == "fastest" }
 
 type Tier struct {
@@ -49,28 +51,25 @@ func Advertised(harness, model, version string) Report {
 		CheckedAt: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Source: "adapter default-only report", Applies: "next_run",
 		ChangeInstructions: "This adapter reports Default only; use the harness's own session controls for serving-speed changes"}
 	r.Tiers = []Tier{{Tier: "default", Name: "Default", Offered: true, SpeedFactor: number(1), PriceMultiplier: number(1), UsageMultiplier: number(1), Mechanism: "default"},
-		{Tier: "fast", Name: "Fast", Reason: "No published price and supported mechanism for this harness/model"},
-		{Tier: "fastest", Name: "Fastest", Reason: "No published price and supported mechanism for this harness/model"}}
+		{Tier: "fast", Name: "Fast", Reason: noPublishedPrice},
+		{Tier: "fastest", Name: "Fastest", Reason: noPublishedPrice}}
 	switch harness {
 	case "codex":
 		r.Source = "https://learn.chatgpt.com/docs/agent-configuration/speed"
-		r.ChangeInstructions = "Change it in its terminal with /fast or the vendor service_tier setting"
+		r.ChangeInstructions = "Change the vendor service_tier setting in its terminal"
 		r.Tiers[0].Mechanism = "service_tier=default"
 		if atLeast(version, 0, 159, 2) && (model == "gpt-6.1-sol" || model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna") {
-			r.Tiers[1] = Tier{Tier: "fast", Name: "Fast", Offered: true, PriceMultiplier: number(2), UsageMultiplier: number(2.5), Mechanism: "service_tier=fast"}
+			// The mechanism is known; an exact-model vendor price is not pinned.
+			r.Tiers[1].Mechanism = "service_tier=fast"
 		}
-		// Ultrafast access is account-controlled, so advertising model support
-		// alone cannot make it selectable. A qualified reporter may supply it.
-		r.Tiers[2].Reason = "Ultrafast requires advertised model support, a published price and account access"
 	case "claude":
 		r.Source = "https://code.claude.com/docs/en/fast-mode"
 		r.Applies = "next_turn"
 		r.ChangeInstructions = "Change it in its terminal with /fast"
 		r.Tiers[0].Mechanism = "fastMode=false"
 		if atLeast(version, 2, 1, 205) && (model == "claude-opus-5-5" || model == "claude-opus-5" || model == "claude-opus-4-8") {
-			r.Tiers[1] = Tier{Tier: "fast", Name: "Fast", Offered: true, SpeedFactor: number(2.5), PriceMultiplier: number(2), Mechanism: "fastMode=true"}
+			r.Tiers[1].Mechanism = "fastMode=true"
 		}
-		r.Tiers[2].Reason = "Claude Code advertises no tier above fast mode"
 	}
 	return r
 }
@@ -136,6 +135,7 @@ func (r Report) Validate() error {
 		return errors.New("invalid tier report provenance")
 	}
 	seen := map[string]bool{}
+	pinned := Advertised(r.Harness, r.Model, r.HarnessVersion)
 	for _, t := range r.Tiers {
 		if !Valid(t.Tier) || seen[t.Tier] || t.Name != map[string]string{"default": "Default", "fast": "Fast", "fastest": "Fastest"}[t.Tier] {
 			return errors.New("invalid or duplicate tier")
@@ -148,6 +148,19 @@ func (r Report) Validate() error {
 		}
 		if t.Offered != (t.PriceMultiplier != nil) || (t.Offered && t.Mechanism == "") || (!t.Offered && (t.Reason == "" || len(t.Reason) > 256)) {
 			return errors.New("offered tier requires price and mechanism; unavailable tier requires reason")
+		}
+		var pin Tier
+		for _, candidate := range pinned.Tiers {
+			if candidate.Tier == t.Tier {
+				pin = candidate
+				break
+			}
+		}
+		if t.Offered != pin.Offered || !sameFactor(t.SpeedFactor, pin.SpeedFactor) || !sameFactor(t.PriceMultiplier, pin.PriceMultiplier) || !sameFactor(t.UsageMultiplier, pin.UsageMultiplier) {
+			return fmt.Errorf("%s factors differ from the pinned vendor catalog", t.Tier)
+		}
+		if t.Offered && t.Tier != "default" && (pinned.Source == "" || !r.CheckedAt.Equal(pinned.CheckedAt) || r.Source != pinned.Source) {
+			return errors.New("paid tier requires pinned vendor price provenance")
 		}
 		if t.Offered {
 			mechanism := "default"
@@ -174,4 +187,11 @@ func (r Report) Validate() error {
 		return errors.New("Default price must be one")
 	}
 	return nil
+}
+
+func sameFactor(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

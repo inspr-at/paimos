@@ -268,8 +268,7 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 			return nil, err
 		}
 		// Persist the undo operation too, so a lost response can be replayed.
-		identity, _ := json.Marshal(in.Ownership)
-		if _, err = tx.Exec(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value,state,outcome,reason,claimed_at,completed_at) SELECT $1,$2,$3,'tier',coalesce(max(sequence),0)+1,$4,$5::jsonb,$6,clock_timestamp(),$7,'completed','applied','tier_cancelled_pending',clock_timestamp(),clock_timestamp() FROM harness_controls WHERE session_id=$3`, p.TenantID, in.RequestID, s.ID, p.ID, string(identity), dg, in.Tier); err != nil {
+		if err = persistTierReceipt(r.Context(), tx, p, s, in, dg, "tier_cancelled_pending"); err != nil {
 			return nil, err
 		}
 		if err = record(r.Context(), tx, p, s, "tier_cancelled", c, map[string]any{"control_id": c.ID}); err != nil {
@@ -279,6 +278,9 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		return nil, err
 	} else {
 		if s.ServiceTier != nil && *s.ServiceTier == in.Tier {
+			if err = persistTierReceipt(r.Context(), tx, p, s, in, dg, "tier_already_active"); err != nil {
+				return nil, err
+			}
 			return m.tierState(r, tx, p, s)
 		}
 		body, _ := json.Marshal(map[string]any{"request_id": in.RequestID, "kind": "tier", "value": in.Tier, "expected_ownership": in.Ownership})
@@ -302,6 +304,17 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		return nil, err
 	}
 	return m.tierState(r, tx, p, s)
+}
+
+// Completed receipts bind successful operations that need no daemon work.
+// The caller holds the session lock, which also serializes control sequences.
+func persistTierReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, in tierChange, dg []byte, reason string) error {
+	identity, err := json.Marshal(in.Ownership)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value,state,outcome,reason,claimed_at,completed_at) SELECT $1,$2,$3,'tier',coalesce(max(sequence),0)+1,$4,$5::jsonb,$6,clock_timestamp(),$7,'completed','applied',$8,clock_timestamp(),clock_timestamp() FROM harness_controls WHERE session_id=$3`, p.TenantID, in.RequestID, s.ID, p.ID, string(identity), dg, in.Tier, reason)
+	return err
 }
 func (m *Module) askTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)

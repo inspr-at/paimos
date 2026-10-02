@@ -1576,8 +1576,12 @@ settle before a reversing change can be queued.
 
 The session-bound `/tier/report` endpoint carries the adapter's facts for each
 model: price, speed (unknown where unpublished), mechanism, harness/adapter
-version and checked-at. Missing prices disable paid tiers. Price and subscription
-capacity consumption are distinct; the fragment's illustrative factors are not
+version and checked-at. Offered tiers and all reported multipliers must match the
+pinned vendor catalog; reports cannot supply their own price or usage factors.
+The currently named Codex and Claude models have no cited tier price pins, so
+Fast and Fastest are not offered and their multipliers remain null. A paid tier
+requires a cited vendor price and mechanism before it can be enabled. Price and
+subscription capacity consumption are distinct; the fragment's illustrative factors are not
 pricing defaults. Vendor facts are pinned in `internal/servicetier`; account or
 vendor rejection remains authoritative. Usage snapshots retain tier segments and
 their multipliers, and run telemetry records the active tier. Earlier tokens are
@@ -1586,7 +1590,8 @@ The UI is delivered separately in part B.
 
 Regression coverage includes native acknowledgement and Undo, pending replay,
 tenant/project isolation, revoked authority, vendor cooldown and stored costs
-across tier changes.
+across tier changes. Requests that leave the active tier unchanged also retain
+their idempotency receipt; reusing their ID with a different body returns 409.
 
 ### Session recovery
 

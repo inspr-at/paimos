@@ -5129,7 +5129,7 @@ paths:
     post:
       security: *auth
       operationId: setSessionServiceTier
-      description: Person-only project harness.control; live exact process ownership and tier revision required. Returns a pending control; the daemon confirms at the next safe point. Undo is another change. A request for the active tier cancels an unclaimed pending change; a claimed change must finish before undo.
+      description: Person-only project harness.control; live exact process ownership and tier revision required. Returns a pending control; the daemon confirms at the next safe point. Undo is another change. A request for the active tier cancels an unclaimed pending change; a claimed change must finish before undo. Request IDs are bound to the person and full body, including when the requested tier is already active.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ServiceTierChange'}}}
@@ -5137,7 +5137,7 @@ paths:
         '201': {description: Pending change or cancelled pending change, content: {application/json: {schema: {$ref: '#/components/schemas/SessionServiceTier'}}}}
         '400': {description: Invalid tier or missing price}
         '403': {description: Person with harness.control required}
-        '409': {description: Read-only session or changed revision/ownership}
+        '409': {description: Read-only session, changed revision/ownership or request ID reused with a different body}
   /projects/{projectId}/harness-sessions/{sessionId}/tier/report:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5146,7 +5146,7 @@ paths:
     post:
       security: *auth
       operationId: reportSessionServiceTiers
-      description: Session-bound agent worker lease reports vendor capability facts per exact model. Only unmanaged sessions may report their active tier here; managed tier changes require a person control and daemon completion. No secrets or vendor credentials.
+      description: Session-bound agent worker lease reports vendor capability facts per exact model. Offered tiers and multipliers must match the pinned vendor catalog; paid tiers require a cited vendor price and mechanism with checked-at provenance. Unpublished factors remain null. Only unmanaged sessions may report their active tier here; managed tier changes require a person control and daemon completion. No secrets or vendor credentials.
       requestBody:
         required: true
         content:
@@ -5160,7 +5160,7 @@ paths:
                 active_tier: {$ref: '#/components/schemas/ServiceTier'}
       responses:
         '200': {description: Stored report}
-        '400': {description: Invalid capability report}
+        '400': {description: Invalid capability report or factors differing from the pinned vendor catalog}
         '403': {description: Worker proof rejected}
         '409': {description: Managed active tier cannot be self-escalated}
   /projects/{projectId}/harness-sessions/{sessionId}/tier/ask:
@@ -12750,7 +12750,7 @@ components:
       properties:
         tier: {$ref: '#/components/schemas/ServiceTier'}
         name: {type: string, enum: [Default, Fast, Fastest]}
-        offered: {type: boolean, description: True only when a price and supported mechanism are reported.}
+        offered: {type: boolean, description: True only when the pinned catalog has a supported mechanism and a cited vendor price with checked-at provenance.}
         speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
         price_multiplier: {type: [number, 'null'], exclusiveMinimum: 0}
         usage_multiplier: {type: [number, 'null'], exclusiveMinimum: 0, description: 'Subscription capacity consumption, separate from token price.'}

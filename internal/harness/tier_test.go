@@ -2,6 +2,7 @@
 package harness_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/servicetier"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -34,6 +36,26 @@ func tierSession(t *testing.T, f *harnessFixture) (string, string, ownedprocess.
 	expect(t, f.call(f.agent, "POST", path+"/tier/report", map[string]any{"reports": []servicetier.Report{r}, "active_tier": "default"}, lease), 200)
 	return path, lease, identity
 }
+
+// Orchestration tests use a synthetic stored price to exercise confirmation,
+// Undo and frozen accounting independently of vendor pricing availability.
+// This fixture is never submitted as a vendor report; report ingestion must
+// reject it. Its artificial numbers are not catalog entries or vendor prices.
+func seedSyntheticTierPrice(t *testing.T, f *harnessFixture, path string) {
+	t.Helper()
+	r := servicetier.Advertised("codex", "fixture-model", "0.159.2")
+	price, usage := 2.0, 2.5
+	r.Source = "synthetic orchestration test fixture (not vendor pricing)"
+	r.Tiers[1] = servicetier.Tier{Tier: "fast", Name: "Fast", Offered: true, PriceMultiplier: &price, UsageMultiplier: &usage, Mechanism: "service_tier=fast"}
+	raw, err := json.Marshal([]servicetier.Report{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET service_tier_reports=$2 WHERE id=$1`, path[strings.LastIndex(path, "/")+1:], raw)
+		return err
+	})
+}
 func tierChangeBody(t *testing.T, f *harnessFixture, path, tier string, identity ownedprocess.Identity) map[string]any {
 	t.Helper()
 	w := f.call(f.person, "GET", path+"/tier", nil, "")
@@ -43,6 +65,7 @@ func tierChangeBody(t *testing.T, f *harnessFixture, path, tier string, identity
 func TestTierChangeConfirmUndoAndSafePoint(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
 	body := tierChangeBody(t, f, path, "fast", identity)
 	w := f.call(f.person, "POST", path+"/tier", body, "")
 	expect(t, w, 201)
@@ -95,6 +118,7 @@ func TestTierChangeConfirmUndoAndSafePoint(t *testing.T) {
 func TestTierAskApproveDeclineCancelAndAuthorization(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
 	ask := map[string]any{"request_id": uid(), "tier": "fast", "reason": "QA waits for this turn"}
 	expect(t, f.call(f.person, "POST", path+"/tier/ask", ask, ""), 403)
 	w := f.call(f.agent, "POST", path+"/tier/ask", ask, "")
@@ -155,6 +179,7 @@ func TestTierUnmanagedEndedAndOwnershipFence(t *testing.T) {
 func TestTierIsolationRevocationAndReportFreeze(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
 	expect(t, f.call(f.foreign, "GET", path+"/tier", nil, ""), 404)
 	otherProject := uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -203,6 +228,7 @@ func TestTierIsolationRevocationAndReportFreeze(t *testing.T) {
 func TestTierUsagePersistsFrozenCostAcrossChanges(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
 	expect(t, f.call(f.person, "POST", "/api/model-prices", map[string]any{"model": "fixture-model", "version": 1, "input_usd_per_million": "1", "output_usd_per_million": "1", "cached_input_usd_per_million": "1"}, ""), 201)
 	for i, tc := range []struct{ tier, cost string }{{"default", "0.000100000000"}, {"fast", "0.000300000000"}, {"default", "0.000400000000"}} {
 		if i > 0 {
@@ -223,5 +249,136 @@ func TestTierUsagePersistsFrozenCostAcrossChanges(t *testing.T) {
 		if i > 0 && len(out.TierSegments) != 2 {
 			t.Fatal("usage did not retain both frozen multipliers")
 		}
+	}
+}
+
+func TestTierReportRejectsUnpinnedFactorsAtomically(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	before := decode(t, f.call(f.person, "GET", path+"/tier", nil, ""))
+	for _, tc := range []struct {
+		name string
+		edit func(*servicetier.Report)
+	}{
+		{"fast-price", func(r *servicetier.Report) {
+			n := 6.0
+			r.Tiers[1].Offered, r.Tiers[1].PriceMultiplier, r.Tiers[1].Mechanism = true, &n, "service_tier=fast"
+		}},
+		{"fast-speed", func(r *servicetier.Report) { n := 2.5; r.Tiers[1].SpeedFactor = &n }},
+		{"fast-usage", func(r *servicetier.Report) { n := 2.5; r.Tiers[1].UsageMultiplier = &n }},
+		{"fastest-price", func(r *servicetier.Report) {
+			n := 8.0
+			r.Tiers[2].Offered, r.Tiers[2].PriceMultiplier, r.Tiers[2].Mechanism = true, &n, "service_tier=ultrafast"
+		}},
+		{"default-speed", func(r *servicetier.Report) { n := 3.0; r.Tiers[0].SpeedFactor = &n }},
+		{"default-usage", func(r *servicetier.Report) { n := 3.0; r.Tiers[0].UsageMultiplier = &n }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := servicetier.Advertised("codex", "fixture-model", "0.159.2")
+			tc.edit(&r)
+			// A valid report first proves the whole request rolls back if a later
+			// model tries to inject a price or multiplier.
+			good := servicetier.Advertised("codex", "gpt-6.1-sol", "0.159.2")
+			expect(t, f.call(f.agent, "POST", path+"/tier/report", map[string]any{"reports": []servicetier.Report{good, r}}, lease), 400)
+			w := f.call(f.person, "GET", path+"/tier", nil, "")
+			expect(t, w, 200)
+			after := decode(t, w)
+			if after["revision"] != before["revision"] || after["active_tier"] != "default" {
+				t.Fatal("rejected report changed tier state")
+			}
+			reports, _ := json.Marshal(after["reports"])
+			original, _ := json.Marshal(before["reports"])
+			if string(reports) != string(original) {
+				t.Fatal("rejected report changed persisted catalog")
+			}
+		})
+	}
+	for _, tier := range []string{"fast", "fastest"} {
+		expect(t, f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, tier, identity), ""), 400)
+		expect(t, f.call(f.agent, "POST", path+"/tier/ask", map[string]any{"request_id": uid(), "tier": tier, "reason": "must not invent a price"}, ""), 400)
+	}
+}
+
+func TestTierAlreadyActiveRetainsIdempotencyReceipt(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	// Keep the control workflow fixture price independent of report validation.
+	// A changed tier would otherwise be accepted without a stored receipt.
+	seedSyntheticTierPrice(t, f, path)
+	body := tierChangeBody(t, f, path, "default", identity)
+	w := f.call(f.person, "POST", path+"/tier", body, "")
+	expect(t, w, 201)
+	state := decode(t, w)
+	if state["active_tier"] != "default" || state["pending"] != nil || state["revision"] != body["expected_revision"] {
+		t.Fatal("already-active request queued work or changed tier revision")
+	}
+	expect(t, f.call(f.person, "POST", path+"/tier", body, ""), 201)
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"tier", func(b map[string]any) { b["tier"] = "fast" }},
+		{"revision", func(b map[string]any) { b["expected_revision"] = state["revision"].(float64) + 1 }},
+		{"ownership", func(b map[string]any) {
+			wrong := identity
+			wrong.Generation = strings.Repeat("c", 32)
+			b["expected_ownership"] = wrong
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := map[string]any{}
+			for k, v := range body {
+				changed[k] = v
+			}
+			tc.edit(changed)
+			expect(t, f.call(f.person, "POST", path+"/tier", changed, ""), 409)
+		})
+	}
+	other := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, other, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other controller')`, other.TenantID, other.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.db, other.TenantID, other.ID, "admin")
+	expect(t, f.call(other, "POST", path+"/tier", body, ""), 409)
+	// Refreshing the report changes the revision. The original retry must still
+	// succeed because its completed receipt precedes revision/ownership checks.
+	expect(t, f.call(f.agent, "POST", path+"/tier/report", map[string]any{"reports": servicetier.Reports("codex", "fixture-model", "0.159.2")}, lease), 200)
+	expect(t, f.call(f.person, "POST", path+"/tier", body, ""), 201)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1`, path[strings.LastIndex(path, "/")+1:]).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatalf("already-active retries created %d controls, want one receipt", count)
+		}
+		var completed bool
+		err := tx.QueryRow(t.Context(), `SELECT state='completed' AND outcome='applied' AND reason='tier_already_active' AND request_digest IS NOT NULL AND completed_at IS NOT NULL FROM harness_controls WHERE id=$1`, body["request_id"]).Scan(&completed)
+		if err == nil && !completed {
+			t.Fatal("already-active receipt was not durably completed")
+		}
+		return err
+	})
+	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
+	expect(t, w, 200)
+	if len(decode(t, w)["controls"].([]any)) != 0 {
+		t.Fatal("completed no-op receipt was offered to daemon")
+	}
+}
+
+func TestUnmanagedCodexTierInstructions(t *testing.T) {
+	f := fixture(t)
+	path, _, _ := tierSession(t, f)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged' WHERE id=$1`, path[strings.LastIndex(path, "/")+1:])
+		return err
+	})
+	w := f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	state := decode(t, w)
+	reason, _ := state["read_only_reason"].(string)
+	if state["read_only"] != true || !strings.Contains(reason, "service_tier") || strings.Contains(reason, "/fast") {
+		t.Fatalf("incorrect read-only Codex instructions: %q", reason)
 	}
 }
