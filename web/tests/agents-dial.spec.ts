@@ -45,7 +45,7 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
   })
   const queue = state === 'room' ? [] : Array.from({ length: state === 'off' ? 2 : 3 }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: false, wait_reason: '' } }))
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
-  return { work, calls }
+  return { work, calls, data }
 }
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const totalMore = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
@@ -66,7 +66,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await expect(card.locator('.f-live')).toContainText(expected[state])
     if (shots) {
       mkdirSync(shots, { recursive: true })
+      const bounds = (await card.boundingBox())!
+      // An element screenshot inside the app's scroller otherwise clips long
+      // phone details. Expand only the capture height, then restore the guard's viewport.
+      await page.setViewportSize({ width, height: Math.ceil(Math.max(1000, bounds.y + bounds.height + 100)) })
       await card.screenshot({ path: `${shots}/${width}-${theme}-${state}-unfolded.png`, animations: 'disabled' })
+      await page.setViewportSize({ width, height: 1000 })
       await fold.click()
       await card.screenshot({ path: `${shots}/${width}-${theme}-${state}-folded.png`, animations: 'disabled' })
       await fold.click()
@@ -172,4 +177,13 @@ for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and r
   await expect(card.locator('.rows > li')).toHaveCount(7)
   await expect(card.locator('[data-key="claude"] .lim-num')).toHaveText('30')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+})
+
+test('linked viewer keeps room on alias-owned accounts while counts use the canonical owner', async ({ page }) => {
+  const { work, data } = await setup(page, 'room')
+  data.accounts = data.accounts.map(a => ({ ...a, owner_person_id: me.id }))
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: 'canonical-person', running: { codex: 2, claude: 1 }, running_total: 3, source: 'plan', updated_at: null } }))
+  await page.goto('/agents')
+  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now, 12 at once in all.')
+  await expect(dial(page).locator('.f-live')).toContainText('3 running · room for 5 more')
 })

@@ -19,7 +19,7 @@ const { snapshot, plan, folded, error, saving, waiting, save, toggleFold } = con
 const memo = reactive<Record<string, number>>({})
 watch(viewer, () => { for (const key of Object.keys(memo)) delete memo[key] })
 const ownAccounts = computed(() => new Set(agents.accounts.filter(a => a.owner_person_id
-  ? a.owner_person_id === snapshot.value?.principal_id
+  ? a.owner_person_id === snapshot.value?.principal_id || a.owner_person_id === session.identity?.principal.id
   : a.registered_by_principal_id === snapshot.value?.principal_id || a.registered_by_principal_id === session.identity?.principal.id).map(a => a.id)))
 const room = computed<Record<string, number | null>>(() => {
   const own = capacity.rows.filter(r => ownAccounts.value.has(r.id))
@@ -227,7 +227,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 .f-chip.is-off .f-n { color: var(--ink-3); font-weight: 500; font-size: 12.5px; line-height: 16px; }
 .f-pm { display: flex; align-items: center; flex: none; padding: 1px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-2); }
 .f-chip.is-off .f-pm { box-shadow: inset 0 0 0 1px var(--line); }
-.pm { display: grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-2); cursor: pointer; }
+.pm { display: grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-2); cursor: pointer; transition: background .15s ease; }
 @media (hover: hover) { .pm:hover:not(:disabled) { background: var(--row-hover); color: var(--teal-ink); } }
 .pm:active:not(:disabled) { color: var(--teal-ink); }
 .pm:disabled { opacity: .3; cursor: default; }
@@ -368,5 +368,5 @@ p { margin: 0; }
   .f-chip:nth-of-type(3n + 1)::before { content: ''; }
   .f-chip:nth-of-type(2n + 1)::before { content: none; }
 }
-@media (prefers-reduced-motion: reduce) { .step { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .step, .pm { transition: none; } }
 </style>
