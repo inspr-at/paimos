@@ -13582,7 +13582,7 @@ components:
       required: [state, basis, tickets, hours, tokens, speed_factor, speed_tickets]
       properties:
         state: {type: string, enum: [calibrated, uncalibrated]}
-        basis: {type: string, description: Sample cell and versions used; always includes n.}
+        basis: {type: string, description: Sample cell and versions used; always includes n. Truncated or unavailable history is explicitly uncalibrated.}
         tickets: {type: integer, minimum: 0}
         hours: {type: [number, 'null'], description: Median measured active hours in history; model-adjusted estimate hours in planning. Null below five samples.}
         tokens: {type: [integer, 'null'], description: Median reported input plus output tokens; null below five samples.}
@@ -13655,7 +13655,7 @@ components:
             sessions: {type: integer, minimum: 0}
             running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
-            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour; an epic sums its open and done children. Null without an estimate.'}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. An epic sums only calibrated open and done children; excluded default estimates are counted in children.uncalibrated. Null without a contributing estimate.'}
             calibration:
               description: The rate behind a ticket's estimate.
               type: object
@@ -13685,12 +13685,12 @@ components:
         model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
-          description: 'Epics only: open and done ticket and task children, and how many are estimated.'
+          description: 'Epics only: open and done ticket and task children, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
           type: object
           required: [total, estimated]
           properties:
             total: {type: integer, minimum: 0}
-            estimated: {type: integer, minimum: 0}
+            estimated: {type: integer, minimum: 0, description: Children contributing calibrated estimates to the sum.}
             uncalibrated: {type: integer, minimum: 0, description: Children with size estimates excluded from the sum because their rates are uncalibrated.}
     TicketEstimateSnapshot:
       type: object
