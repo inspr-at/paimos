@@ -63,6 +63,13 @@ func TestPreferenceWritesRevisionLocksAndErrors(t *testing.T) {
 	}
 	backend := kindID(t, doc, "backend")
 	review := kindID(t, doc, "review")
+	expectPrefError(t, admin, "PUT", "/api/model-preferences/levels/default", `{}`, 400, "revision_required")
+	expectPrefError(t, admin, "DELETE", "/api/model-preferences/levels/default", "", 400, "revision_required")
+	oversized, err := json.Marshal(map[string]any{"revision": 0, "rows": make([]preferenceRow, maxPreferenceKinds+1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectPrefError(t, admin, "PUT", "/api/model-preferences/levels/default", string(oversized), 413, "too_many_rows")
 	expectPrefError(t, member, "PUT", "/api/model-preferences/levels/default", `{"revision":0,"residency":"any"}`, 403, "permission")
 	for _, route := range []struct{ method, path, body string }{{"PUT", "/api/model-preferences/levels/person", `{"revision":0,"residency":"any"}`}, {"DELETE", "/api/model-preferences/levels/person?revision=0", ""}, {"PUT", "/api/model-preferences/levels/person/rows/" + backend, prefRowBody(0, normal, complex, false)}, {"DELETE", "/api/model-preferences/levels/person/rows/" + backend + "?revision=0", ""}, {"POST", "/api/work-kinds", `{"label":"Agent kind"}`}, {"PATCH", "/api/work-kinds/" + backend, `{"hint":"x"}`}, {"DELETE", "/api/work-kinds/" + backend, ""}, {"POST", "/api/work-kinds/" + backend + "/restore", ""}, {"POST", "/api/models/" + normal.ProfileID + "/retire", `{"reason":"x"}`}, {"DELETE", "/api/models/" + normal.ProfileID + "/retire", ""}} {
 		expectPrefError(t, agent, route.method, route.path, route.body, 403, "person_required")
@@ -109,6 +116,41 @@ func TestPreferenceWritesRevisionLocksAndErrors(t *testing.T) {
 	if eventCount(t, admin, "model.preferences_changed") != 6 {
 		t.Fatal("writes or rejected requests recorded wrong events")
 	}
+}
+
+func TestPreferenceProjectOnlyManager(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "prefs-project-grant", "person", "Admin", []string{"admin"})
+	manager := addPrincipal(t, admin.TenantID, "person", "Project manager", nil)
+	prefDoc(t, admin)
+	var project string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PM-1','Managed project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'prefs_manager','Preferences manager') RETURNING id::text`, admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'model_prefs.manage')`, admin.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, admin.TenantID, manager.ID, role, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pattern := "PUT /api/model-preferences/levels/{level}"
+	scope, scoped, err := authz.ResolveRouteScope(t.Context(), appPool, pattern, "/api/model-preferences/levels/project")
+	if err != nil || !scoped || !scope.AnyProject {
+		t.Fatal("project grant cannot reach middleware", scope, scoped, err)
+	}
+	if err := authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(t.Context(), manager), appPool), pattern, scope); err != nil {
+		t.Fatal("manager without models.read cannot reach write", err)
+	}
+	decode[preferenceWriteResult](t, &manager, "PUT", "/api/model-preferences/levels/project?project_id="+project, `{"revision":0,"residency":"eu"}`, 200)
+	expectPrefError(t, manager, "PUT", "/api/model-preferences/levels/default", `{"revision":0,"residency":"eu"}`, 403, "permission")
+	expectPrefError(t, manager, "PUT", "/api/model-preferences/levels/project?project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", `{"revision":0,"residency":"eu"}`, 403, "permission")
 }
 func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	reset(t)
@@ -246,14 +288,14 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, normal, complex, false), 200)
 	var project, ticket string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TICKET-P','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TKT-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TICKET-1','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TKT-2','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"TICKET-1", ticket} {
+	for _, key := range []string{"TKT-2", ticket} {
 		result := decode[struct {
 			WorkResolution
 			Preference PreferenceDecision `json:"preference"`
