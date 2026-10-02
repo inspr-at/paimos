@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/internal/lanecontrol"
 )
 
 const (
@@ -63,7 +64,11 @@ func (s *Supervisor) finishUnlaunched(ctx context.Context, entry *owned) error {
 		return err
 	}
 	entry.mu.Unlock()
-	return s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+	t := Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"}
+	if entry.record.LaneEnvelopeID != "" {
+		t.LaneSettlement = &lanecontrol.Settlement{ExitConfirmed: true}
+	}
+	return s.update(ctx, entry, t)
 }
 
 // reconcileUnlaunched checks actual server state; a Claim error alone says

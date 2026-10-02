@@ -12,7 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/lanecontrol"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -91,8 +93,23 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusRequestEntityTooLarge, "value is too large")
 		return
 	}
+	if key == "agents.working" {
+		if p.Kind != tenant.Person {
+			httpapi.WriteError(w, 403, "person required for working target")
+			return
+		}
+		if _, err := lanecontrol.ParseWorkingPreference(trimmed); err != nil {
+			httpapi.WriteError(w, 400, err.Error())
+			return
+		}
+	}
 	out := preference{Key: key}
 	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if key == "agents.working" {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+		}
 		var value []byte
 		var at time.Time
 		err := tx.QueryRow(r.Context(), `

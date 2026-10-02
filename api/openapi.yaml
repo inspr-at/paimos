@@ -13179,6 +13179,20 @@ components:
           type: [string, 'null']
           format: uuid
           description: Optional earlier run of the same work order and agent. A different order, agent, or unknown run is rejected.
+    LaneExecutionGrant:
+      type: object
+      description: Claim-bound maximum duration including stop allowance. A replay returns the original deadline, never a fresh budget. Window end prevents new claims; the current attempt may finish within this grant.
+      required: [envelope_id, run_id, project_id, workspace_id, daemon_id, daemon_generation, remaining_ms, stop_allowance_ms, expires_at]
+      properties:
+        envelope_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        daemon_id: {type: string}
+        daemon_generation: {type: string}
+        remaining_ms: {type: integer, format: int64, minimum: 0}
+        stop_allowance_ms: {type: integer, format: int64, minimum: 1}
+        expires_at: {type: string, format: date-time}
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -13186,6 +13200,8 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         reservation_ids: {type: array, items: {type: string, format: uuid}, description: Required and nonempty for a normal claim; empty for verification refusal.}
+        lane_capability: {type: string, enum: [lane-execution-v1], description: Required for lane work. Attests remaining-duration enforcement, confirmed process settlement, qualified adapter boundaries and a locally approved isolated project workspace. Legacy daemons cannot claim lane work.}
+        lane_workspace_id: {type: string, format: uuid, description: Opaque run-specific local workspace identity; required with lane_capability. No host paths are sent.}
         verification_unavailable:
           type: string
           enum: [adapter_unsupported, binding_incomplete, local_binding_missing]
@@ -14203,6 +14219,9 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        lane_envelope_id: {type: [string, 'null'], format: uuid, description: Shared dispatch budget; retries and child work may not bypass it.}
+        lane_project_id: {type: [string, 'null'], format: uuid, description: Selects an explicitly approved local project mapping, never a repository URL from ticket text.}
+        lane_grant: {$ref: '#/components/schemas/LaneExecutionGrant'}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
         queue_node_id: {type: [string, 'null'], format: uuid}
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
@@ -14246,6 +14265,13 @@ components:
       type: object
       required: [sequence, kind]
       properties:
+        lane_settlement:
+          type: object
+          description: On finished lane telemetry only. Missing or unconfirmed exit retains the maximum hold and slot. Elapsed time includes owned-process waiting and stopping time. Replays settle once.
+          required: [elapsed_ms, exit_confirmed]
+          properties:
+            elapsed_ms: {type: integer, format: int64, minimum: 0}
+            exit_confirmed: {type: boolean}
         sequence: {type: integer, format: int64, minimum: 1}
         kind: {type: string, enum: [started, heartbeat, turn, tool, usage, status, finished]}
         status: {type: string, enum: [starting, running, waiting, completed, failed, cancelled, ownership_lost]}

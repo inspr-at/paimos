@@ -18,6 +18,9 @@ import (
 // Only terminal failed attempts may hand off: never mid-turn, after a cancel,
 // or when ownership was lost. Replayed telemetry cannot arm a second retry.
 func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
+	if v.LaneEnvelopeID != nil {
+		return nil
+	} // Lane lifecycle must explicitly budget and bind retries.
 	if v.Status != "failed" || v.Purpose != "managed" || v.AccountID == nil || v.ReadOnlyReview {
 		return nil
 	}

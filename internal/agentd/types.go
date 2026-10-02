@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/lanecontrol"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -45,21 +46,24 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
-	RetryOfRunID              string `json:"retry_of_run_id"`
-	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
-	Purpose                   string `json:"purpose,omitempty"`
-	VerificationTask          string `json:"verification_task,omitempty"`
-	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed,omitempty"`
-	ID                        string `json:"id"`
-	WorkOrderID               string `json:"work_order_id"`
-	AgentPrincipalID          string `json:"agent_principal_id"`
-	ModelProfileID            string `json:"model_profile_id"`
-	AccountID                 string `json:"account_id"`
-	RequestedAccountID        string `json:"requested_account_id"`
-	Status                    string `json:"status"`
+	LaneEnvelopeID            string             `json:"lane_envelope_id,omitempty"`
+	LaneProjectID             string             `json:"lane_project_id,omitempty"`
+	LaneGrant                 *lanecontrol.Grant `json:"lane_grant,omitempty"`
+	ReadOnlyReview            bool               `json:"read_only_review,omitempty"`
+	RetryOfRunID              string             `json:"retry_of_run_id"`
+	CapacityHandoff           bool               `json:"capacity_handoff,omitempty"`
+	Purpose                   string             `json:"purpose,omitempty"`
+	VerificationTask          string             `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64             `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string             `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool              `json:"repository_mutation_allowed,omitempty"`
+	ID                        string             `json:"id"`
+	WorkOrderID               string             `json:"work_order_id"`
+	AgentPrincipalID          string             `json:"agent_principal_id"`
+	ModelProfileID            string             `json:"model_profile_id"`
+	AccountID                 string             `json:"account_id"`
+	RequestedAccountID        string             `json:"requested_account_id"`
+	Status                    string             `json:"status"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -149,6 +153,7 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	LaneSettlement         *lanecontrol.Settlement `json:"lane_settlement,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`
 	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
