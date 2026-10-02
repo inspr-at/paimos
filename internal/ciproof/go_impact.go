@@ -67,7 +67,7 @@ type GoImpactReport struct {
 func goImpactID(r GoImpactReport) string { r.ID = ""; return digest("go-impact-shadow", r) }
 
 func goImpactPolicyDigest() string {
-	return Hash("go-impact-policy", goImpactPolicyBytes, []byte("union-Git-test-imports/runtime-audit/full-fresh-shadow/v1"), []byte(digest("go-metadata-recipe", GoMetadataRecipe("job/go-test"))))
+	return Hash("go-impact-policy", goImpactPolicyBytes, []byte("union-Git-test-imports/runtime-audit/full-fresh-shadow/v2"), []byte(digest("go-metadata-recipe", GoMetadataRecipe("job/go-test"))))
 }
 
 // AnalyzeGoImpact never changes the foundation/controller's complete plan.
@@ -283,11 +283,17 @@ func analyzeGoImpact(p Plan, base, candidate *GoMetadata, policy goImpactPolicy,
 				}
 			}
 		}
+		reasons := goKeys(forced[pkg])
 		input := wholeTreeInput(p)
-		if valid {
+		closureAudited := valid && !report.FullSelection
+		for _, reason := range reasons {
+			if strings.HasPrefix(reason, "unaudited-runtime-closure:") {
+				closureAudited = false
+			}
+		}
+		if closureAudited {
 			input = goClosureDigest(p, pkg, base, candidate, policy, policyDigest)
 		}
-		reasons := goKeys(forced[pkg])
 		selected := report.FullSelection || len(reasons) > 0
 		if report.FullSelection {
 			reasons = append(reasons, "full-selection")

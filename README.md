@@ -168,8 +168,9 @@ dependants. Shared CI/harness/module/migration/OpenAPI/web-embed/version inputs
 and unmapped paths select the full inventory. The compiled
 `internal/ciproof/go-impact-policy.json` initially audits only `runkind`,
 `scopecode` and `ticketbenefits`, with byte pins and explicit runtime inputs.
-Changed or unknown runtime closures remain selected; candidate policy edits
-force full selection. Every selected package retains **all** ordinary shard rows
+Changed or unknown runtime closures remain selected with whole-tree input
+fingerprints; candidate policy edits force full selection. Every selected package
+retains **all** ordinary shard rows
 in both recorded layouts. A scheduling hint never permits omission without a
 verified passing baseline receipt: `required_fresh_packages` always includes the
 complete live package inventory while optimization is disabled.

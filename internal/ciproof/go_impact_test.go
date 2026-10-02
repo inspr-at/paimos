@@ -334,6 +334,12 @@ func TestCompiledGoAuditAndCandidateMetadataCannotNarrowSourceImports(t *testing
 		t.Fatalf("compiled audit not usable: %v", r.Reasons)
 	}
 	reader := packageImpact(t, r, "reader")
+	if reader.InputDigest != wholeTreeInput(p) {
+		t.Fatal("unknown runtime closure acquired a partial input fingerprint")
+	}
+	if packageImpact(t, r, "runkind").InputDigest == wholeTreeInput(p) {
+		t.Fatal("audited unchanged closure lost its diagnostic fingerprint")
+	}
 	if !slices.Contains(reader.Reasons, "reverse-dependency:"+goModule+"/internal/dep") {
 		t.Fatalf("Git imports were narrowed: %v", reader.Reasons)
 	}
