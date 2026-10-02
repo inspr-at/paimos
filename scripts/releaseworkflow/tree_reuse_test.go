@@ -250,7 +250,8 @@ func TestTreeReuseRecomputesRealImmutableMerge(t *testing.T) {
 import { cleanMergeTree } from ` + strconv.Quote(script) + `;
 const [base, head, checkout, tree, conflict, otherConflict] = process.argv.slice(1);
 assert.equal(cleanMergeTree(base, head, checkout), tree);
-assert.throws(() => cleanMergeTree(conflict, otherConflict, checkout));`
+assert.throws(() => cleanMergeTree(conflict, otherConflict, checkout),
+  error => error.status === 1 && error.stdout.includes('CONFLICT'));`
 	cmd := exec.Command("node", "--input-type=module", "-e", program, base, head, checkout, tree, conflict, otherConflict)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
