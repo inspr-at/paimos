@@ -50,9 +50,6 @@ func TestStoredResidencyClassification(t *testing.T) {
 		{"uncovered profile", "any", func(e *ResidencyEvidence) { e.ProfileIDs = []string{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"} }},
 		{"local execution", "local", func(e *ResidencyEvidence) {
 			*e.LocalExecution = true
-			e.InferenceCountries = []string{}
-			e.StorageCountries = []string{}
-			e.LogCountries = []string{}
 		}},
 		{"expired local", "any", func(e *ResidencyEvidence) { *e.LocalExecution = true; e.ExpiresAt = now }},
 		{"not explicitly local", "any", func(e *ResidencyEvidence) { e.LocalExecution = nil }},
@@ -254,6 +251,7 @@ func TestResidencyEvidenceFenceUsesStoredEvidenceAndInjectedClock(t *testing.T) 
 	callEvidence(t, mod, owner, "", "PUT", a.ID, now, e, 200)
 	check(now, 0, true, "residency")
 	*e.LocalExecution = true
+	e.LogCountries = []string{"IE"}
 	callEvidence(t, mod, owner, "", "PUT", a.ID, now, e, 200)
 	seed(t, owner, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET residency='local' WHERE id=$1`, runID)
@@ -295,6 +293,7 @@ func TestResidencyEvidenceRejectsInvalidBoundedInputs(t *testing.T) {
 	}{
 		{"future", func(e *ResidencyEvidence) { e.VerifiedAt = now.Add(time.Minute) }},
 		{"backwards", func(e *ResidencyEvidence) { e.ExpiresAt = e.VerifiedAt }},
+		{"overlong validity", func(e *ResidencyEvidence) { e.ExpiresAt = e.VerifiedAt.Add(401 * 24 * time.Hour) }},
 		{"missing proof", func(e *ResidencyEvidence) { e.ProofRef = " " }},
 		{"large proof", func(e *ResidencyEvidence) { e.ProofRef = strings.Repeat("x", 1025) }},
 		{"missing set", func(e *ResidencyEvidence) { e.LogCountries = nil }},

@@ -14245,7 +14245,7 @@ components:
       type: object
       additionalProperties: false
       required: [model_profile_ids, inference_countries, storage_countries, log_countries, local_execution, verified_at, expires_at, proof_ref]
-      description: Host attestation, not an automated compliance certification. Country sets use uppercase ISO 3166-1 alpha-2 codes. EU requires all three nonempty sets to contain only EU member countries. Local execution explicitly attests operator-local execution. Both classes require a covered profile, a proof reference, verified_at no later than now and expires_at strictly after now. Optional retention and training declarations are recorded without changing the residency class.
+      description: Host attestation, not an automated compliance certification. Country sets use uppercase ISO 3166-1 alpha-2 codes. EU and local require all three nonempty sets to contain only EU member countries; local additionally requires explicit operator-local execution. Both classes require a covered profile, a proof reference, verified_at no later than now and expires_at strictly after now. The validity interval from verified_at to expires_at must be positive and at most 400 days. Optional retention and training declarations are recorded without changing the residency class.
       properties:
         model_profile_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
         inference_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}

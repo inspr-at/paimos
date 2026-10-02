@@ -66,6 +66,9 @@ func TestResidencyEvidenceReservationUsesStoredEvidence(t *testing.T) {
 				t.Fatalf("wrong reservation: %+v", out)
 			}
 			check(e.ExpiresAt, 409) // Queued reservation replay fails at expiry.
+			seed(t, owner, func(tx pgx.Tx) error {
+				return Release(t.Context(), tx, host, run, "", "")
+			})
 			_, _, next := insertTicketRun(t, owner, host, profile)
 			seed(t, owner, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET residency=$2 WHERE id=$1`, next, requirement)
@@ -76,6 +79,12 @@ func TestResidencyEvidenceReservationUsesStoredEvidence(t *testing.T) {
 			if scalar(t, owner, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, next) != 0 {
 				t.Fatal("expired evidence created a reservation")
 			}
+			// Identical clock, account and capacity qualify after renewal, so
+			// the rejection above cannot pass because of a parallel-slot limit.
+			at := e.ExpiresAt
+			e.ExpiresAt = now.Add(time.Hour)
+			callEvidence(t, mod, owner, "", "PUT", a.ID, at, e, 200)
+			check(at, 200)
 		})
 	}
 }

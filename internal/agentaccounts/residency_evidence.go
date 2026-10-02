@@ -12,7 +12,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -49,8 +48,23 @@ const residencyBindingSQL = `jsonb_build_object('daemon_id',a.daemon_id,
  'link_revision',a.link_revision,'harness',a.harness,'provider',a.provider,'model',a.model)`
 
 func (e ResidencyEvidence) validate(now time.Time) error {
+	if err := e.validateStructure(); err != nil {
+		return err
+	}
+	return e.validateTime(now)
+}
+
+func (e ResidencyEvidence) validateTime(now time.Time) error {
+	if e.VerifiedAt.After(now) {
+		return fail(400, "invalid residency evidence")
+	}
+	return nil
+}
+
+func (e ResidencyEvidence) validateStructure() error {
 	if len(e.ProfileIDs) == 0 || len(e.ProfileIDs) > 256 || e.LocalExecution == nil ||
-		e.VerifiedAt.IsZero() || e.ExpiresAt.IsZero() || e.VerifiedAt.After(now) || !e.ExpiresAt.After(e.VerifiedAt) ||
+		e.VerifiedAt.IsZero() || e.ExpiresAt.IsZero() || !e.ExpiresAt.After(e.VerifiedAt) ||
+		e.ExpiresAt.Sub(e.VerifiedAt) > 400*24*time.Hour ||
 		strings.TrimSpace(e.ProofRef) == "" || !utf8.ValidString(e.ProofRef) || utf8.RuneCountInString(e.ProofRef) > 1024 ||
 		strings.ContainsFunc(e.ProofRef, unicode.IsControl) || looksLikeCredential(e.ProofRef) ||
 		(e.RetentionDays != nil && (*e.RetentionDays < 0 || *e.RetentionDays > 36500)) {
@@ -82,9 +96,6 @@ func (e ResidencyEvidence) class(profileID string, now time.Time) string {
 	if e.validate(now) != nil || !e.ExpiresAt.After(now) || !slices.Contains(e.ProfileIDs, strings.ToLower(profileID)) {
 		return "any"
 	}
-	if *e.LocalExecution {
-		return "local"
-	}
 	for _, countries := range [][]string{e.InferenceCountries, e.StorageCountries, e.LogCountries} {
 		if len(countries) == 0 {
 			return "any"
@@ -98,14 +109,34 @@ func (e ResidencyEvidence) class(profileID string, now time.Time) string {
 			}
 		}
 	}
+	// Local is stricter than EU in the fence, so it must also meet EU's
+	// country requirements; local execution alone says nothing about storage.
+	if *e.LocalExecution {
+		return "local"
+	}
 	return "eu"
 }
 
 type storedResidencyClassifier struct{ now time.Time }
 
-func (c storedResidencyClassifier) ResidencyClass(_ context.Context, _ pgx.Tx, a Account, profile string) (string, string, *time.Time, error) {
+func (c storedResidencyClassifier) ResidencyClass(ctx context.Context, tx pgx.Tx, a Account, profile string) (string, string, *time.Time, error) {
 	if a.residencyEvidence == nil {
-		return "any", "", nil, nil
+		// Reservation scans do not attach evidence. Load it under the same
+		// transaction and binding check used by the advisory account reads.
+		if tx == nil {
+			return "any", "", nil, nil
+		}
+		record, err := loadResidencyEvidence(ctx, tx, a.ID)
+		if isNoRows(err) {
+			return "any", "", nil, nil
+		}
+		if err != nil {
+			return "", "", nil, err
+		}
+		if !record.BindingCurrent {
+			return "any", "", nil, nil
+		}
+		a.residencyEvidence = &record.Evidence
 	}
 	e := a.residencyEvidence
 	return e.class(profile, c.now), e.ProofRef, &e.ExpiresAt, nil
@@ -158,17 +189,20 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+		if err := in.validateStructure(); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	var out residencyEvidenceRecord
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		// Role mutation takes the same tenant row. Take it before the pairing
-		// lock and account row; append the event only after all other writes.
-		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
-			return err
-		}
-		if err := agentpairing.Lock(ctx, tx); err != nil {
-			return err
+		// m.in acquires pairing first, matching existing lifecycle writers.
+		// Only writes need the tenant fence shared with role mutation.
+		if write {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+				return err
+			}
 		}
 		permission := "account.read"
 		if write {
@@ -179,7 +213,7 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Kind == tenant.Agent {
 			var err error
-			p.Scopes, err = keyScopes(ctx, tx, r, p)
+			p.Scopes, err = readKeyScopes(ctx, tx, r, p, write)
 			if err != nil {
 				return err
 			}
@@ -187,7 +221,16 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{}); err != nil {
 			return fail(403, "permission denied")
 		}
-		a, err := lockAccount(ctx, tx, id)
+		var a Account
+		var err error
+		if write {
+			a, err = lockAccount(ctx, tx, id)
+		} else {
+			a, err = getAccount(ctx, tx, id)
+			if isNoRows(err) {
+				return fail(404, "account not found")
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -219,7 +262,7 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err := in.validate(now); err != nil {
+		if err := in.validateTime(now); err != nil {
 			return err
 		}
 		for i := range in.ProfileIDs {
