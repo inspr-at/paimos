@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -135,7 +136,15 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		AuthorFamily: r.URL.Query().Get("author_family"),
 		Harness:      r.URL.Query().Get("harness"),
 	}
-	var out Resolution
+	project := r.URL.Query().Get("project_id")
+	if project != "" && !uuidRE.MatchString(project) {
+		writeErr(w, fail(http.StatusBadRequest, "invalid project_id"))
+		return
+	}
+	var out struct {
+		Resolution
+		Trace PreferenceTrace `json:"trace"`
+	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if err := ensureCatalog(r.Context(), tx, p); err != nil {
 			return err
@@ -144,7 +153,15 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out, err = resolveRole(r.Context(), tx, q, now)
+		out.Resolution, err = resolveRole(r.Context(), tx, q, now)
+		if err != nil {
+			return err
+		}
+		// Preserve this CLI-facing role ladder. Qualified review dispatch uses
+		// ResolveReviewFor; attach the same residency evidence additively here.
+		_, out.Trace, _, err = placementTrace(r.Context(), tx, WorkQuery{
+			Role: q.Role, PersonID: modelprefs.PrefsPerson(r.Context(), tx, p), ProjectID: project,
+		})
 		return err
 	})
 	if err != nil {

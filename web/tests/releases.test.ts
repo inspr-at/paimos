@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import { withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -306,6 +306,19 @@ test('new since the last visit: newer published releases, nothing on a first vis
   const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+  assert.deepEqual([...newSince(releases, '1', true)].sort(), ['2', '2.5', '3'])
+  assert.equal(newSince(releases, null, true).size, 0)
+  assert.equal(newSince([releases[2]], '1').size, 0)
+})
+
+test('reserved versions are opt-in without changing the full history or result counts', () => {
+  const releases = [rel('3', ''), rel('2', '', { state: 'reserved', published_at: null }), rel('1', '', { published_at: null })]
+  const before = structuredClone(releases)
+  assert.deepEqual(visibleReleases(releases).map(r => r.version), ['3', '1'])
+  assert.deepEqual(visibleReleases(releases, true), releases)
+  // A tagged published version without a publication timestamp remains visible.
+  assert.deepEqual(releases, before)
+  assert.equal(releases.filter(r => matches(r, { q: '', features: false, fixes: false, tickets: false })).length, 3)
 })
 
 test('regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap', () => {

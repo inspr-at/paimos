@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Locator } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -52,6 +52,10 @@ async function frame(page: Page, kind: string, value?: string) {
     const channels = (window as unknown as { attachChannels: EventTarget[] }).attachChannels
     channels.at(-1)!.dispatchEvent(new MessageEvent(kind, { data: JSON.stringify(value ?? null) }))
   }, { kind, value })
+}
+async function allowAttach(dialog: Locator) {
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ }).click()
 }
 test('watch is default-off, including the approving owner', async ({ page }) => {
   const worker = await setup(page, false)
@@ -119,11 +123,11 @@ test('approving an attach request reads the lists again', async ({ page }) => {
   await page.goto('/agents')
   await page.getByRole('button', { name: 'Attach session', exact: true }).click()
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
-  await page.getByRole('button', { name: 'Review session' }).click()
+  await page.getByRole('button', { name: /Find request/ }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('PDF worker image')
   const before = sessionListReads(calls)
-  await dialog.getByRole('button', { name: 'Allow live watch' }).click()
+  await allowAttach(dialog)
   await expect(dialog.getByText('Approved. Keep the attach terminal open to share new turns.')).toBeVisible()
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
@@ -157,7 +161,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     })
     await page.getByRole('button', { name: 'Attach session', exact: true }).click()
     await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
-    await page.getByRole('button', { name: 'Review session' }).click()
+    await page.getByRole('button', { name: /Find request/ }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Requested by a process on Markus’s MacBook.', { exact: false })).toBeVisible()
     await expect(dialog.getByText('Only allow if you started this watch yourself.')).toBeVisible()
@@ -166,15 +170,16 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(dialog.getByText('PID 4812 · UID 501')).toBeVisible()
     // The actual bytes being approved must be visible without opening details.
     await expect(dialog.locator('details')).not.toHaveAttribute('open', '')
-    await expect(dialog.locator(':scope > dl').getByText(snapshot.transcript, { exact: true })).toBeVisible()
-    await expect(dialog.locator(':scope > dl').getByText(snapshot.file_id, { exact: true })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' })).toBeVisible()
+    await expect(dialog.locator('.margin').getByText(snapshot.transcript, { exact: true })).toBeVisible()
+    await expect(dialog.locator('.margin').getByText(snapshot.file_id, { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('radio', { name: 'Allow', exact: true })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
     await expect(dialog).not.toContainText('Linux and a headless Mac keep this approval')
     await expect(dialog).toContainText('PDF worker image')
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
     await page.screenshot({ path: `${shots}/approval-${consent_mode}-${theme}-${width}.png` })
-    await dialog.getByRole('button', { name: consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow live watch' }).click()
+    await allowAttach(dialog)
     await expect(dialog.getByText(consent_mode === 'local_auth' ? 'Waiting for confirmation on Markus’s MacBook. Nothing is shared until you confirm there.' : 'Approved. Keep the attach terminal open to share new turns.')).toBeVisible()
     expect(approved).toBe(true)
   })
@@ -203,11 +208,12 @@ test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
   await page.goto('/agents')
   await page.getByRole('button', { name: 'Attach session', exact: true }).click()
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
-  await page.getByRole('button', { name: 'Review session' }).click()
+  await page.getByRole('button', { name: /Find request/ }).click()
   await expect(page.getByRole('dialog')).toContainText('Local confirmation is unavailable on this computer')
   await expect(page.getByRole('dialog')).not.toContainText('Linux and a headless Mac keep this approval')
-  await expect(page.getByRole('button', { name: 'Allow and confirm on Mac' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeEnabled()
+  await expect(page.getByRole('dialog').getByRole('radio', { name: 'Allow', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
+  await expect(page.getByRole('dialog').getByRole('radio', { name: 'Decline', exact: true })).toBeEnabled()
 })
 
 test('an Aeon approval on Linux says that computer keeps this approval', async ({ page }) => {
@@ -221,7 +227,7 @@ test('an Aeon approval on Linux says that computer keeps this approval', async (
   await page.goto('/agents')
   await page.getByRole('button', { name: 'Attach session', exact: true }).click()
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
-  await page.getByRole('button', { name: 'Review session' }).click()
+  await page.getByRole('button', { name: /Find request/ }).click()
   await expect(page.getByRole('dialog')).toContainText('This computer keeps approval in AEON.')
 })
 
@@ -255,7 +261,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     })
     await page.getByRole('button', { name: 'Attach session', exact: true }).click()
     await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
-    await page.getByRole('button', { name: 'Review session' }).click()
+    await page.getByRole('button', { name: /Find request/ }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Attach a running session' })).toBeVisible()
     await expect(dialog).toContainText('PDF worker image')
@@ -270,10 +276,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: `${shots}/lease-approval-${consent_mode}-${theme}-${width}.png` })
-    const action = consent_mode === 'local_auth' ? 'Allow and confirm on Mac' : 'Allow attach'
-    await dialog.getByRole('button', { name: action, exact: true }).click()
+    await allowAttach(dialog)
     await expect(dialog).toContainText(consent_mode === 'local_auth' ? 'Waiting for confirmation on Markus’s MacBook. Nothing is shared until you confirm there.' : 'Approved. Keep the attach terminal open to report session status.')
-    await expect(dialog.getByRole('button', { name: action, exact: true })).toHaveCount(0)
+    await expect(dialog.getByRole('radio', { name: 'Allow', exact: true })).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: 'Detach session', exact: true })).toBeVisible()
     expect(approvals).toBe(1)
   })

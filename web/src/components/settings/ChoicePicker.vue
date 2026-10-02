@@ -46,7 +46,7 @@ function move(event: KeyboardEvent) {
         >
           <span class="text"><span class="label">{{ choice.label }}</span><span v-if="choice.detail" class="detail">{{ choice.detail }}</span></span>
           <span v-if="choice.hint" class="hint">{{ choice.hint }}</span>
-          <AppIcon v-if="choice.value === current" name="check" :size="14" class="tick" />
+          <AppIcon :style="{ visibility: choice.value === current ? 'visible' : 'hidden' }" name="check" :size="14" class="tick" />
         </button>
       </div>
       <p v-if="!shown.length" class="none">Nothing matches “{{ term.trim() }}”.</p>
@@ -59,7 +59,7 @@ function move(event: KeyboardEvent) {
 .find { margin: 2px 2px 6px; }
 .find .field { height: 34px; font-size: 13px; }
 .menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; }
-.choice { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.choice { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; font-weight: 600; text-align: left; }
 @media (hover: hover) { .choice:hover { background: var(--row-hover); } }
 .choice:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .choice[aria-selected="true"] { font-weight: 600; }
