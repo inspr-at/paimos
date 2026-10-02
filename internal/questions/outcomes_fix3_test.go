@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -64,10 +65,21 @@ func TestFix3UnavailablePreviousTicketDoesNotBlockCorrection(t *testing.T) {
 			case "moved":
 				// The membership FK requires routing to be detached before a move.
 				// Keep the immutable answer/effect's earlier ticket reference intact.
-				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE desk_askers SET ticket_id=NULL,comment_node_id=question_id WHERE question_id=$1`, q.ID); err != nil {
+				tx, err := f.d.Admin.Begin(t.Context())
+				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, f.hidden); err != nil {
+				defer tx.Rollback(t.Context())
+				if err := writeCapability(t.Context(), tx); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE desk_askers SET ticket_id=NULL,comment_node_id=question_id WHERE question_id=$1`, q.ID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, f.hidden); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 				if f.count(t, `SELECT count(*) FROM nodes WHERE id=$1 AND project_id=$2`, f.ticket, f.hidden) != 1 {
@@ -335,7 +347,7 @@ func TestFix3DoctrineDecideAndDispatcherFenceProbes(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM desk_pending WHERE question_id=$1 AND revision=$2 AND kind='outcome'`, q.ID, q.Revision).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.m.dispatchOne(t.Context(), f.person.TenantID, id); err != nil {
+	if err := f.m.dispatchOne(db.AllProjects(t.Context(), "desk outcome dispatch fence test"), f.person.TenantID, id); err != nil {
 		t.Fatal(err)
 	}
 	if probe.cache.Load() == 0 || probe.guard.Load() == 0 {
