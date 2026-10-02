@@ -8,6 +8,7 @@ CREATE TABLE person_pause_settings (
         CHECK (default_level IN ('stop_now','pause_quickly','pause','wrap_up')),
     leaving_request_id uuid,
     leaving_at timestamptz,
+    leaving_scope jsonb NOT NULL DEFAULT '{"hosts":"all"}',
     PRIMARY KEY (tenant_id, person_id),
     FOREIGN KEY (tenant_id, person_id) REFERENCES principals(tenant_id, id),
     CHECK ((leaving_request_id IS NULL) = (leaving_at IS NULL))
@@ -20,3 +21,6 @@ CREATE POLICY person_pause_settings_tenant ON person_pause_settings
 CREATE POLICY person_pause_settings_owner ON person_pause_settings AS RESTRICTIVE
     USING ((SELECT session_read_marker_owned(tenant_id, person_id)))
     WITH CHECK ((SELECT session_read_marker_owned(tenant_id, person_id)));
+
+-- Optional planning snapshots use the session's existing tenant/owner fences.
+ALTER TABLE harness_sessions ADD COLUMN pause_progress jsonb;

@@ -213,14 +213,18 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	if err = record(ctx, tx, p, s, "control_requested", nil, c); err != nil {
 		return s, err
 	}
-	deadline := now.Add(time.Duration(in.DeadlineMinutes) * time.Minute)
+	start := now
+	if in.startsAt != nil && in.startsAt.After(start) {
+		start = *in.startsAt
+	}
+	deadline := start.Add(time.Duration(in.DeadlineMinutes) * time.Minute)
 	if in.Level == "pause_quickly" {
-		deadline = minTime(deadline, now.Add(2*time.Minute))
+		deadline = minTime(deadline, start.Add(3*time.Minute))
 	} else if in.Level == "wrap_up" || in.Level == "pause" {
-		deadline = minTime(deadline, now.Add(10*time.Minute))
+		deadline = minTime(deadline, start.Add(10*time.Minute))
 	}
 	if in.deadlineAt != nil {
-		deadline = *in.deadlineAt
+		deadline = minTime(deadline, *in.deadlineAt)
 	}
 	next := Pause{ControlID: c.ID, State: "requested", RequestedBy: p.ID, RequestedAt: now, Reason: in.Reason, DeadlineAt: deadline, Level: in.Level, Note: in.Note, StartsAt: in.startsAt, LeavingID: in.leavingID}
 	s, err = savePause(ctx, tx, p, s, next, "pause_requested")

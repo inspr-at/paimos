@@ -38,8 +38,8 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 	}
 	at, _ := time.Parse(time.RFC3339Nano, p["requested_at"].(string))
 	deadline, _ := time.Parse(time.RFC3339Nano, p["deadline_at"].(string))
-	if deadline.Sub(at) != 2*time.Minute {
-		t.Fatal("quick pause limit is not two minutes")
+	if deadline.Sub(at) != 3*time.Minute {
+		t.Fatal("quick pause limit is not three minutes")
 	}
 	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
 	w = f.call(f.person, "GET", path, nil, "")
@@ -101,6 +101,18 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	key := func(path string) string { return path[strings.LastIndex(path, "/")+1:] }
 	if plans[key(waiting)]["level"] != "pause" || plans[key(waiting)]["deliver"] != false || plans[key(finishing)]["level"] != "wrap_up" || plans[key(stopOnly)]["level"] != "stop_now" || plans[key(stopOnly)]["deliver"] != false {
 		t.Fatal(plans)
+	}
+	// The leave time cannot extend an immediately started Wrap up past its
+	// ten-minute limit; a scheduled Pause still ends at the leaving deadline.
+	requested, _ := time.Parse(time.RFC3339Nano, plans[key(finishing)]["requested_at"].(string))
+	wrapDeadline, _ := time.Parse(time.RFC3339Nano, plans[key(finishing)]["deadline_at"].(string))
+	if span := wrapDeadline.Sub(requested); span < 10*time.Minute-time.Second || span > 10*time.Minute+time.Second {
+		t.Fatalf("leaving Wrap up deadline is %v after request, want ten minutes", span)
+	}
+	leaveAt, _ := time.Parse(time.RFC3339Nano, report["deadline_at"].(string))
+	waitDeadline, _ := time.Parse(time.RFC3339Nano, plans[key(waiting)]["deadline_at"].(string))
+	if !waitDeadline.Equal(leaveAt) {
+		t.Fatalf("scheduled Pause deadline %v, want leave instant %v", waitDeadline, leaveAt)
 	}
 	expect(t, f.call(f.agent, "POST", waiting+"/pause-plan", map[string]any{"control_id": plans[key(waiting)]["control_id"], "handover_point": "Too early"}, waitingLease), 409)
 	w = f.call(f.person, "PUT", "/api/me/leaving-at", body, "")

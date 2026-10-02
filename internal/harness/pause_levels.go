@@ -40,7 +40,7 @@ func minTime(a, b time.Time) time.Time {
 
 // A missing estimate never implies that finishing will fit. The caller supplies
 // only a fresh estimate, and both scheduling clocks belong to the database.
-func leavingLevel(now, deadline time.Time, remaining *time.Duration, inbox bool) (string, time.Time) {
+func leavingLevel(now, deadline time.Time, estimate leavingEstimate, inbox bool) (string, time.Time) {
 	budget := deadline.Sub(now)
 	if budget <= 0 {
 		return "stop_now", now
@@ -48,11 +48,11 @@ func leavingLevel(now, deadline time.Time, remaining *time.Duration, inbox bool)
 	if !inbox {
 		return "stop_now", deadline
 	}
-	if budget <= 2*time.Minute {
-		return "pause_quickly", now
-	}
-	if remaining != nil && *remaining >= 0 && *remaining < 10*time.Minute && *remaining <= budget {
+	if estimate.finishFits(budget - time.Minute) {
 		return "wrap_up", now
+	}
+	if budget <= 10*time.Minute && !estimate.handoverFits(budget) && estimate.canInterrupt() && (estimate.nextPoint != nil || budget <= 2*time.Minute) {
+		return "pause_quickly", now
 	}
 	start := deadline.Add(-10 * time.Minute)
 	if start.Before(now) {
@@ -114,24 +114,28 @@ func advancePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session)
 		return stampPause(s, now), nil
 	}
 	next := *s.Pause
-	if next.LeavingID != "" && next.State == "requested" && next.StartsAt != nil && next.StartsAt.After(now) {
-		var remaining *time.Duration
-		interval, err := etaInterval(ctx, tx)
-		if err != nil {
-			return s, err
-		}
-		if s.EtaReadyAt != nil && s.EtaReportedAt != nil && now.Sub(*s.EtaReportedAt) >= 0 && now.Sub(*s.EtaReportedAt) <= 2*interval {
-			d := max(0, s.EtaReadyAt.Sub(now))
-			remaining = &d
-		}
-		level, start := leavingLevel(now, next.DeadlineAt, remaining, cooperativePause(s))
-		next.Level, next.StartsAt = level, &start
+	interval, err := etaInterval(ctx, tx)
+	if err != nil {
+		return s, err
 	}
-	if (next.Level == "pause" || next.Level == "wrap_up") && next.DeadlineAt.Sub(now) <= 2*time.Minute {
+	estimate := freshPauseEstimate(s, now, interval)
+	if next.LeavingID != "" && next.State == "requested" && next.StartsAt != nil && next.StartsAt.After(now) {
+		level, start := leavingLevel(now, next.DeadlineAt, estimate, cooperativePause(s))
+		next.Level, next.StartsAt = level, &start
+		// Starting earlier must also move the level limit earlier. It can never
+		// extend an already published deadline.
+		if level == "pause" || level == "wrap_up" {
+			next.DeadlineAt = minTime(next.DeadlineAt, start.Add(10*time.Minute))
+		} else if level == "pause_quickly" {
+			next.DeadlineAt = minTime(next.DeadlineAt, start.Add(3*time.Minute))
+		}
+	}
+	budget := next.DeadlineAt.Sub(now)
+	if (next.Level == "pause" || next.Level == "wrap_up") && budget <= 2*time.Minute && !estimate.levelFits(next.Level, budget) && estimate.canInterrupt() {
 		next.Level = "pause_quickly"
 		next.StartsAt = &now
 	}
-	changed := next.Level != s.Pause.Level || !sameTime(next.StartsAt, s.Pause.StartsAt)
+	changed := next.Level != s.Pause.Level || !sameTime(next.StartsAt, s.Pause.StartsAt) || !next.DeadlineAt.Equal(s.Pause.DeadlineAt)
 	if changed {
 		var err error
 		s, err = savePause(ctx, tx, p, s, next, "pause_level_changed")
@@ -143,7 +147,7 @@ func advancePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session)
 			return s, err
 		}
 	}
-	if next.Level == "pause_quickly" && next.InterruptControlID == "" && s.Management == "managed" && has(s, "interrupt") {
+	if next.Level == "pause_quickly" && next.InterruptControlID == "" && s.Management == "managed" && has(s, "interrupt") && estimate.canInterrupt() {
 		payload, _ := json.Marshal(SessionRequestPayload{Level: "pause_quickly"})
 		var ownership any
 		if has(s, managedControlCapability) {
@@ -306,7 +310,8 @@ func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	}
 	var id *string
 	var deadline *time.Time
-	err := tx.QueryRow(r.Context(), `SELECT leaving_request_id::text,leaving_at FROM person_pause_settings WHERE person_id=$1`, p.ID).Scan(&id, &deadline)
+	scope := leavingScope{Hosts: json.RawMessage(`"all"`)}
+	err := tx.QueryRow(r.Context(), `SELECT leaving_request_id::text,leaving_at,leaving_scope FROM person_pause_settings WHERE person_id=$1`, p.ID).Scan(&id, &deadline, &scope)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
@@ -339,7 +344,11 @@ func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 			return nil, err
 		}
 	}
-	return map[string]any{"deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false}, nil
+	agents := []string{}
+	for _, item := range items {
+		agents = append(agents, item.ID)
+	}
+	return map[string]any{"deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false, "hosts": scope.Hosts, "agents": agents}, nil
 }
 
 func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -350,11 +359,15 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, err
 	}
 	var in struct {
+		leavingScope
 		Deadline time.Time `json:"deadline_at"`
 		Reason   string    `json:"reason"`
 		Note     string    `json:"note"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if err := in.leavingScope.normalize(); err != nil {
 		return nil, err
 	}
 	// Match Postgres timestamp precision before retry comparison and scheduling;
@@ -380,7 +393,13 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, err
 	}
 	if deadline := old.(map[string]any)["deadline_at"].(*time.Time); deadline != nil && deadline.Equal(in.Deadline) {
-		return old, nil
+		var scope leavingScope
+		if err := tx.QueryRow(ctx, `SELECT leaving_scope FROM person_pause_settings WHERE person_id=$1`, p.ID).Scan(&scope); err != nil {
+			return nil, err
+		}
+		if scope.equal(in.leavingScope) {
+			return old, nil
+		}
 	}
 	cancelled, err := m.cancelLeavingAt(r, tx, p)
 	if err != nil {
@@ -389,7 +408,7 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if cancelled.(map[string]any)["stop_in_flight"].(bool) {
 		return nil, workorders.Fail(409, "stop already in flight")
 	}
-	// This is all *my* running work, irrespective of admin privileges. Project
+	// This selects only *my* running work, irrespective of admin privileges. Project
 	// permissions are checked again in the transaction; RLS hides other projects.
 	allowed, err := authz.ProjectsTx(ctx, tx, p)
 	if err != nil {
@@ -406,7 +425,7 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 			rows.Close()
 			return nil, err
 		}
-		if allowed("harness.control", s.ProjectID) {
+		if allowed("harness.control", s.ProjectID) && in.leavingScope.selects(s) {
 			items = append(items, s)
 		}
 	}
@@ -419,7 +438,11 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 		return nil, workorders.Fail(409, "leaving mode supports at most 200 running sessions")
 	}
 	var id string
-	if err = tx.QueryRow(ctx, `INSERT INTO person_pause_settings(tenant_id,person_id,leaving_request_id,leaving_at) VALUES($1,$2,gen_random_uuid(),$3) ON CONFLICT(tenant_id,person_id) DO UPDATE SET leaving_request_id=gen_random_uuid(),leaving_at=EXCLUDED.leaving_at RETURNING leaving_request_id::text`, p.TenantID, p.ID, in.Deadline).Scan(&id); err != nil {
+	scope, err := json.Marshal(in.leavingScope)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.QueryRow(ctx, `INSERT INTO person_pause_settings(tenant_id,person_id,leaving_request_id,leaving_at,leaving_scope) VALUES($1,$2,gen_random_uuid(),$3,$4::jsonb) ON CONFLICT(tenant_id,person_id) DO UPDATE SET leaving_request_id=gen_random_uuid(),leaving_at=EXCLUDED.leaving_at,leaving_scope=EXCLUDED.leaving_scope RETURNING leaving_request_id::text`, p.TenantID, p.ID, in.Deadline, string(scope)).Scan(&id); err != nil {
 		return nil, err
 	}
 	interval, err := etaInterval(ctx, tx)
@@ -432,19 +455,14 @@ func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 				return nil, err
 			}
 		}
-		var remaining *time.Duration
-		if s.EtaReadyAt != nil && s.EtaReportedAt != nil && now.Sub(*s.EtaReportedAt) >= 0 && now.Sub(*s.EtaReportedAt) <= 2*interval {
-			d := max(0, s.EtaReadyAt.Sub(now))
-			remaining = &d
-		}
-		level, start := leavingLevel(now, in.Deadline, remaining, cooperativePause(s))
+		level, start := leavingLevel(now, in.Deadline, freshPauseEstimate(s, now, interval), cooperativePause(s))
 		plan := request
 		plan.Level, plan.startsAt, plan.deadlineAt, plan.leavingID = level, &start, &in.Deadline, id
 		if _, err = requestPause(ctx, tx, p, s, plan); err != nil {
 			return nil, err
 		}
 	}
-	if err = pausePreferenceEvent(ctx, tx, p, "leaving_requested", nil, map[string]any{"request_id": id, "deadline_at": in.Deadline}); err != nil {
+	if err = pausePreferenceEvent(ctx, tx, p, "leaving_requested", nil, map[string]any{"request_id": id, "deadline_at": in.Deadline, "hosts": in.Hosts, "agents": in.Agents}); err != nil {
 		return nil, err
 	}
 	return m.getLeavingAt(r, tx, p)
@@ -486,13 +504,14 @@ func (m *Module) cancelLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		}
 		items[i] = next
 	}
-	if _, err = tx.Exec(ctx, `UPDATE person_pause_settings SET leaving_at=NULL,leaving_request_id=NULL WHERE person_id=$1`, p.ID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE person_pause_settings SET leaving_at=NULL,leaving_request_id=NULL,leaving_scope='{"hosts":"all"}'::jsonb WHERE person_id=$1`, p.ID); err != nil {
 		return nil, err
 	}
 	if err = pausePreferenceEvent(ctx, tx, p, "leaving_cancelled", map[string]any{"request_id": out["request_id"], "deadline_at": out["deadline_at"]}, nil); err != nil {
 		return nil, err
 	}
 	out["deadline_at"], out["request_id"], out["items"] = nil, nil, items
+	out["hosts"], out["agents"] = json.RawMessage(`"all"`), []string{}
 	return out, nil
 }
 

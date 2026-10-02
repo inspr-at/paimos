@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.3",
-    "sha256": "165f454376ffca3aded5a7c4ce2b398352ac76c9b6a3ea1a396a5f9b5bedeb7c",
+    "version": "harness-session/2.4",
+    "sha256": "0fdd1ea84bbc31b15f84537400488fab8663a85bda80baf8567671d67053853e",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1463,6 +1463,77 @@
           },
           "pause_can_interrupt": {
             "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
           },
           "phase": {
             "enum": [
@@ -2470,6 +2541,77 @@
           },
           "pause_can_interrupt": {
             "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
           },
           "phase": {
             "enum": [

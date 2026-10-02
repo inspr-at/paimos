@@ -5059,8 +5059,8 @@ paths:
         '200': {description: Deadline and current plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
     put:
       tags: [Harness sessions]
-      summary: Schedule all my running work to stop by a deadline
-      description: 'People with harness.control only. Selects owned sessions in authorized projects. Uses fresh finish estimates for Wrap up, begins Pause at T minus 10 minutes, escalates to Pause quickly at T minus 2 minutes, and requests Stop now at T through the existing generation-fenced stop channel. Agents without inbox support keep running until T. Repeating the same deadline is idempotent. More than 200 eligible sessions returns 409 without partial scheduling. A changed deadline replaces pending plans; already paused sessions stay paused. No server-side process signal or closure is inferred from a stop request.'
+      summary: Schedule selected running work to stop by a deadline
+      description: 'People with harness.control only. Selects owned sessions in authorized projects. Fresh finish estimates choose Wrap up first when under ten minutes and with one minute to spare. Otherwise Pause starts at T minus ten minutes; fresh handover and command timing choose Pause quickly when the full handover cannot fit. With missing timing, escalation starts two minutes before the level deadline. Current uninterruptible commands keep cooperative Pause. Pause and Wrap up have a ten-minute cap from their actual start; Pause quickly has a three-minute cap. Each deadline is the earlier of the leave instant and the level cap; Stop now is queued at that deadline through the existing generation-fenced stop channel. Agents without inbox support keep running until T. Repeating the same deadline and selection is idempotent. More than 200 eligible sessions returns 409 without partial scheduling. A changed deadline or selection replaces pending plans; already paused sessions stay paused. Host scope is stored for downstream launcher admission integration. No server-side process signal or closure is inferred from a stop request.'
       requestBody:
         required: true
         content:
@@ -5073,6 +5073,8 @@ paths:
                 deadline_at: {type: string, format: date-time, description: 'Future UTC deadline within 24 hours, evaluated using the database clock.'}
                 reason: {type: string, maxLength: 240}
                 note: {type: string, maxLength: 2000}
+                hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+                agents: {type: array, maxItems: 200, items: {type: string, format: uuid}, description: 'Explicit session selection, independent of hosts; ended or unauthorized sessions are ignored. Omission selects running sessions on the chosen hosts.'}
       responses:
         '200': {description: Durable deadline and plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
         '409': {description: Too many sessions or a stop already in flight}
@@ -5590,6 +5592,14 @@ paths:
                 doing: {type: string, minLength: 1, maxLength: 60, description: "Public agent summary without credentials, paths, URLs or command arguments. Collected only in agent_summary mode."}
                 doing_at: {type: string, format: date-time, description: "Optional observation time; defaults to server receipt. Older than ten minutes is ignored; future times beyond thirty seconds are rejected."}
                 tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+                step: {$ref: '#/components/schemas/HarnessPauseProgress/properties/step'}
+                next_point: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point'}
+                next_point_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point_in_min'}
+                finish_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_in_min'}
+                finish_outcome: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_outcome'}
+                interrupt: {$ref: '#/components/schemas/HarnessPauseProgress/properties/interrupt'}
+                command: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command'}
+                command_left_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command_left_min'}
                 display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
@@ -8569,7 +8579,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.3']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.4']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12789,6 +12799,25 @@ components:
       required: [default_level]
       properties:
         default_level: {$ref: '#/components/schemas/HarnessPauseLevel', default: pause}
+    HarnessWindDownHosts:
+      description: 'Host identities as reported by sessions, or all. Defaults to all. Stored separately from the explicit agents selected to wind down, for launcher admission integration.'
+      oneOf:
+        - {type: string, const: all}
+        - {type: array, maxItems: 200, items: {type: string, minLength: 1, maxLength: 128}}
+    HarnessPauseProgress:
+      type: object
+      description: 'Latest worker planning snapshot. Sending any planning field replaces the snapshot; omitted fields in that snapshot are unknown, null clears. Omitting all planning fields preserves its original report time. Estimates count down from reported_at and expire after two ETA intervals. Text must be public labels without credentials, paths or command arguments. The command here is the current operation, separate from a terminal session command label.'
+      required: [reported_at]
+      properties:
+        reported_at: {type: string, format: date-time, readOnly: true}
+        step: {type: [string, 'null'], maxLength: 240}
+        next_point: {type: [string, 'null'], maxLength: 240}
+        next_point_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_outcome: {type: [string, 'null'], maxLength: 240}
+        interrupt: {type: [boolean, 'null'], description: Whether the current operation can be interrupted; never grants signal authority.}
+        command: {type: [string, 'null'], maxLength: 240}
+        command_left_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
     HarnessLeavingReport:
       type: object
       required: [deadline_at, request_id, items, stop_in_flight]
@@ -12797,6 +12826,8 @@ components:
         request_id: {type: [string, 'null'], format: uuid}
         items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
         stop_in_flight: {type: boolean}
+        hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+        agents: {type: array, items: {type: string, format: uuid}}
     HarnessPauseRequest:
       type: object
       additionalProperties: false
@@ -12912,7 +12943,8 @@ components:
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
         supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
-        pause_can_interrupt: {type: boolean, description: Pause quickly can interrupt the current command only when advertised; otherwise it reacts after the command.}
+        pause_can_interrupt: {type: boolean, description: 'Harness advertises cooperative interrupt support. Fresh pause_progress.interrupt describes the current operation; false means it reacts after the command.'}
+        pause_progress: {$ref: '#/components/schemas/HarnessPauseProgress'}
         pause: {$ref: '#/components/schemas/HarnessPause', description: Durable cooperative stop request and handover. Delivered on every heartbeat until closure.}
         continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:

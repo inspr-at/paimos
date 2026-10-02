@@ -70,7 +70,7 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 		if finished["type"] != "boolean" || !isRequired(required, "finished") {
 			t.Fatalf("%s finished must be a required response boolean", op)
 		}
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings"} {
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings", "pause_progress"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}
@@ -78,6 +78,50 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s requires %s", op, field)
 			}
 		}
+	}
+}
+
+func TestPausePlanningHeartbeatFieldsStayOptional(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := child(doc, "paths", "/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "requestBody", "content", "application/json", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := schema
+	if !reflect.DeepEqual(request["required"], []any{"phase", "activity_sequence"}) {
+		t.Fatal("planning report changed legacy heartbeat requirements")
+	}
+	fields := request["properties"].(map[string]any)
+	for _, field := range []string{"step", "next_point", "next_point_in_min", "finish_in_min", "finish_outcome", "interrupt", "command", "command_left_min"} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("missing planning heartbeat field %s", field)
+		}
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := current["harness-session"]
+	var shape map[string]any
+	if err := json.Unmarshal(after.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range shape {
+		delete(value.(map[string]any)["properties"].(map[string]any), "pause_progress")
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bump, err := RequiredBump(Pin{Version: "harness-session/2.3", SHA256: "before-planning", Shape: before}, after); err != nil || bump != "minor" {
+		t.Fatalf("optional planning snapshot classified as %s: %v", bump, err)
 	}
 }
 
