@@ -58,6 +58,25 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
+versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
+`go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
+--policy-commit <full-SHA>` computes a diagnostic policy digest for independent
+review. `shadow` uses that commit plus the independently approved
+`--policy-digest`, an `--environment-digest`, and a `--binding` JSON file with
+repository ID, event/delivery/generation, immutable base/candidate/check-target
+SHAs, PR source head/number or group ID/sorted constituent PRs. It emits a full
+pending plan; `--ledger` optionally appends to a private controller-owned JSONL
+file, and `--receipt` records an unsigned observation against an existing plan.
+The mirror must be bare and its policy revision must precede the bound base.
+Every trusted workflow job and shard row is retained, with base/candidate test
+package discovery and complete path/mode/blob fingerprints. Both shard layouts
+are inventory facets in shadow output, not two executor launches. No event
+authentication, executor admission, reusable credit, signatures or check
+publication exists in A; current workflows and runner routing are unchanged.
+Future authority/executor and selection packages must establish those boundaries
+before any omission. Run the foundation tests with `go test ./internal/ciproof`.
+
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
 `?section=knowledge` retains its background section. Tickets is the default,
