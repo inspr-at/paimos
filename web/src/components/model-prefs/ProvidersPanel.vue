@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { useId } from 'vue'
+import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
-import { LEVEL_LABEL, lowerLevelLabel, providerDisabled, RESIDENCY_LABEL, type PrefLevel, type Residency, type ResidencyLockMode, type ResidencyView } from '../../lib/modelPrefs'
-defineProps<{ level: PrefLevel; view: ResidencyView; mode: ResidencyLockMode; locked: boolean; editable: boolean; busy: boolean }>()
-const emit = defineEmits<{ choose: [value: Residency]; lock: [value: boolean] }>()
+import { LEVEL_LABEL, lowerLevelLabel, providerDisabled, providerWarning, RESIDENCY_LABEL, type PrefLevel, type Residency, type ResidencyLockMode, type ResidencyView } from '../../lib/modelPrefs'
+defineProps<{ level: PrefLevel; view: ResidencyView; mode: ResidencyLockMode; locked: boolean; editable: boolean; busy: boolean; outside: string[]; truncated?: boolean }>()
+const emit = defineEmits<{ choose: [value: Residency]; lock: [value: boolean]; showRuns: [] }>()
 const id = useId()
 const values: Residency[] = ['any', 'eu', 'local']
 const SUB = { any: 'All registered providers', eu: 'Only routes with EU-hosting evidence', local: 'Only verified local execution' }
 function move(event: KeyboardEvent) {
   if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey) return
-  const buttons = [...(event.currentTarget as HTMLElement).parentElement!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+  const buttons = [...(event.currentTarget as HTMLElement).parentElement!.querySelectorAll<HTMLButtonElement>('button:not(:disabled):not([aria-disabled="true"])')]
   if (!buttons.length) return
   event.preventDefault()
   const index = buttons.indexOf(event.currentTarget as HTMLButtonElement)
@@ -22,12 +23,16 @@ function move(event: KeyboardEvent) {
   <section class="providers" :aria-labelledby="`${id}-title`">
     <h3 :id="`${id}-title`" class="eyebrow">Allowed providers</h3><p class="hint">Which AI providers agents may use, for every kind of work.</p>
     <div class="providers-options" role="radiogroup" aria-label="Allowed providers">
-      <button v-for="value in values" :key="value" type="button" role="radio" :aria-checked="view.value === value" :tabindex="view.value === value ? 0 : -1" :disabled="!editable || busy || providerDisabled(value, view, level, mode)" :data-tip="providerDisabled(value, view, level, mode) ? `Locked by ${LEVEL_LABEL[view.locked_by!]}` : undefined" @keydown="move" @click="emit('choose', value)"><span class="knob" /><span><b>{{ RESIDENCY_LABEL[value] }}</b><small>{{ SUB[value] }}</small></span></button>
+      <button v-for="value in values" :key="value" type="button" role="radio" :aria-checked="view.value === value" :tabindex="view.value === value ? 0 : -1" :disabled="!editable || providerDisabled(value, view, level, mode)" :aria-disabled="busy || !editable || providerDisabled(value, view, level, mode)" :data-tip="providerDisabled(value, view, level, mode) ? `Locked by ${LEVEL_LABEL[view.locked_by!]}` : undefined" @keydown="move" @click="!busy && emit('choose', value)"><span class="knob" /><span><b>{{ RESIDENCY_LABEL[value] }}</b><small>{{ SUB[value] }}</small></span></button>
     </div>
     <div class="provider-origin"><span class="origin-copy"><span class="level-dot" :style="{ '--lv': `var(--level-${view.set_by})` }" />{{ LEVEL_LABEL[view.set_by] }}<span v-if="view.locked_by"> · <AppIcon name="lock" :size="12" /> Locked by {{ LEVEL_LABEL[view.locked_by].toLowerCase() }}</span></span>
-      <label v-if="level !== 'project'" class="switch"><input type="checkbox" :checked="!locked" :disabled="!editable || busy" :title="mode === 'warn' ? 'A lower level may choose a looser value, with a warning.' : undefined" @change="emit('lock', !($event.target as HTMLInputElement).checked)">{{ lowerLevelLabel(level) }}</label>
+      <label v-if="level !== 'project'" class="switch"><input type="checkbox" :checked="!locked" :disabled="!editable" :aria-disabled="busy || !editable" :title="mode === 'warn' ? 'A lower level may choose a looser value, with a warning.' : undefined" @click="busy && $event.preventDefault()" @change="!busy && emit('lock', !($event.target as HTMLInputElement).checked)">{{ lowerLevelLabel(level) }}</label>
     </div>
-    <p class="route-count">{{ view.qualifying_routes }} model {{ view.qualifying_routes === 1 ? 'route qualifies' : 'routes qualify' }} today<span v-if="view.value !== 'any' && !view.qualifying_routes">. Work waits; it never spills to another provider.</span></p>
+    <p class="route-count">{{ view.qualifying_routes }} model {{ view.qualifying_routes === 1 ? 'route qualifies' : 'routes qualify' }} today<template v-if="truncated"> among the first 256 profiles; more choices exist</template><span v-if="view.value !== 'any' && !view.qualifying_routes">. Work waits; it never spills to another provider.</span></p>
+    <div class="provider-notices">
+      <p v-if="providerWarning(view)" class="provider-warning warning" role="status"><AppIcon name="alert" :size="15" />{{ providerWarning(view) }}</p>
+      <div v-if="outside.length" class="provider-warning outside" role="status"><p>{{ outside.length }} {{ outside.length === 1 ? 'agent is' : 'agents are' }} still running on providers outside this setting. Nothing is stopped automatically.</p><div><RouterLink v-for="run in outside" :key="run" :to="{ path: '/agents', query: { run } }" @click="$emit('showRuns')">Show run {{ run.slice(0, 8) }}</RouterLink></div></div>
+    </div>
   </section>
 </template>
 <style scoped>
@@ -44,6 +49,7 @@ b { font-size: 13px; } small { display: block; margin-top: 3px; color: var(--ink
 .origin-copy, .origin-copy > span { display: inline-flex; align-items: center; gap: 5px; }
 .switch { white-space: normal; font-size: 12px; }
 .provider-warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; background: var(--gold-wash); border-radius: 10px; color: var(--warn-ink); font-size: 12px; }
+.provider-notices { display: grid; gap: 8px; } .outside { display: grid; } .outside > div { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .provider-warning svg { flex: none; margin-top: 2px; }
 @media (max-width: 600px) { .providers-options { grid-template-columns: 1fr; gap: 6px; } .providers-options button { height: 64px; padding: 8px 12px; } .provider-origin { display: grid; grid-template-rows: 18px 44px; gap: 8px; min-height: 70px; } .switch { min-height: 44px; } }
 </style>

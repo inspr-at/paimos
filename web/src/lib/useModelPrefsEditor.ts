@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { onBeforeUnmount, ref } from 'vue'
 import { APIError } from './api'
-import { archiveWorkKind, createWorkKind, getModelPreferences, getPickerProfiles, getReviewCandidates, putPreferenceRow, putPreferenceScope, resetPreference } from './modelPrefsApi'
-import type { ModelPreferences, ModelSelector, PickerCandidate, PrefLevel, PrefProfile, PrefScope, PrefWriteResult } from './modelPrefs'
+import { archiveWorkKind, createWorkKind, getModelPreferences, putPreferenceRow, putPreferenceScope, resetPreference } from './modelPrefsApi'
+import type { ModelPreferences, ModelSelector, PrefLevel, PrefScope, PrefWriteResult } from './modelPrefs'
 
 export function useModelPrefsEditor(project: string | undefined, initial: PrefLevel) {
   const doc = ref<ModelPreferences | null>(null), level = ref<PrefLevel>(initial)
-  const profiles = ref<PrefProfile[]>([]), candidates = ref<PickerCandidate[]>([])
-  const loading = ref(true), busy = ref(false), notice = ref(''), catalogError = ref('')
+  const loading = ref(true), busy = ref(false), notice = ref('')
   const outside = ref<string[]>([])
   const abort = new AbortController()
   let generation = 0, active = true
@@ -15,16 +14,14 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
   async function load() {
     const token = ++generation
     loading.value = true
-    const results = await Promise.allSettled([getModelPreferences(project, abort.signal), getPickerProfiles(abort.signal), getReviewCandidates(abort.signal)])
-    if (!active || token !== generation) return
-    loading.value = false
-    const [prefs, models, reviews] = results
-    if (prefs.status === 'fulfilled') doc.value = prefs.value
-    else notice.value = prefs.reason instanceof Error ? prefs.reason.message : 'Preferences could not be loaded'
-    if (models.status === 'fulfilled') profiles.value = models.value
-    if (reviews.status === 'fulfilled') candidates.value = reviews.value.ladder
-    catalogError.value = models.status === 'rejected' || reviews.status === 'rejected' ? 'Some model choices could not be loaded' : ''
+    try {
+      const prefs = await getModelPreferences(project, abort.signal)
+      if (active && token === generation) doc.value = prefs
+    } catch (error) {
+      if (active && token === generation) notice.value = error instanceof Error ? error.message : 'Preferences could not be loaded'
+    } finally { if (active && token === generation) loading.value = false }
   }
+
   async function mutate(write: () => Promise<unknown>, optimistic?: () => void) {
     if (busy.value || !doc.value || !doc.value.can[`edit_${level.value}`]) return
     const token = ++generation, before = structuredClone(doc.value ? JSON.parse(JSON.stringify(doc.value)) : null) as ModelPreferences
@@ -67,7 +64,7 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
       const model = effective[selector.bucket]
       model.selector = selector.value
       const selection = selector.value
-      model.profile = selection.mode === 'pinned' ? profiles.value.find(p => p.id === selection.profile_id) ?? null : model.profile
+      model.profile = selection.mode === 'pinned' ? doc.value?.views[target]?.choices?.find(c => c.profile.id === selection.profile_id)?.profile ?? null : model.profile
       model.follows_latest = selector.value.mode === 'latest'; model.pinned = selector.value.mode === 'pinned'
       effective.changed_here = target !== 'default'; effective.set_by = target
     } : undefined)
@@ -83,5 +80,5 @@ export function useModelPrefsEditor(project: string | undefined, initial: PrefLe
     return mutate(() => createWorkKind(label.trim(), target === 'project' ? project : undefined))
   }
   function archive(kind: string) { return mutate(() => archiveWorkKind(kind)) }
-  return { doc, level, profiles, candidates, loading, busy, notice, catalogError, outside, load, scope, row, reset, addKind, archive }
+  return { doc, level, loading, busy, notice, outside, load, scope, row, reset, addKind, archive }
 }

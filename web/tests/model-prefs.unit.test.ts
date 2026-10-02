@@ -45,12 +45,13 @@ describe('model preferences presentation', () => {
     expect(modelCopy(model).tip).toContain('ticket\'s own role')
     expect(modelCopy({ ...model, unavailable_reason: 'retired' }).detail).toContain('Automatic')
   })
-  it('restricts reviewer choices by floor, ladder and qualified harness; residency waits stay explicit', () => {
+  it('uses server review evidence, including newly qualified harnesses and per-model residency', () => {
     const residency = { value: 'any' as const, set_by: 'default' as const, loosened_lock: false, qualifying_routes: 4 }
-    const candidates = [{ profile_id: PREF_MODELS[1]!.id, selected: false, skip_reasons: [] }]
-    expect(pickerReason(PREF_MODELS[1]!, true, candidates, residency)).toContain('Codex is not qualified')
-    expect(pickerReason(PREF_MODELS[0]!, true, candidates, residency)).toContain('strong or frontier')
-    expect(pickerReason(PREF_MODELS[3]!, true, candidates, residency)).toBe('Outside the review ladder')
-    expect(pickerReason(PREF_MODELS[0]!, false, [], { ...residency, value: 'local', qualifying_routes: 0 })).toContain('No local model route')
+    const choice = prefsDocument(prefsFixture()).views.person!.choices![3]!
+    expect(pickerReason(choice, true, residency)).toBe('')
+    expect(pickerReason({ ...choice, profile: { ...choice.profile, harness: 'gemini' } }, true, residency)).toBe('')
+    expect(pickerReason({ ...choice, review_reason: 'No isolated review adapter' }, true, residency)).toBe('No isolated review adapter')
+    expect(pickerReason({ ...choice, residency_routes: 0 }, false, { ...residency, value: 'eu' })).toContain('No EU-hosted route')
+    expect(pickerReason(undefined, true, residency)).toContain('unavailable')
   })
 })

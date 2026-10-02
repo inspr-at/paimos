@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, expect, it, vi } from 'vitest'
-import { APIError } from '../src/lib/api'
-import { getModelPreferences, getPickerProfiles, getReviewCandidates, putPreferenceRow, putPreferenceScope } from '../src/lib/modelPrefsApi'
+import { APIError, api } from '../src/lib/api'
+import { getModelPreferences, putPreferenceRow, putPreferenceScope } from '../src/lib/modelPrefsApi'
 import { useModelPrefsEditor } from '../src/lib/useModelPrefsEditor'
 import { prefsDocument, prefsFixture, PREF_MODELS } from './model-prefs-fixtures'
+vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
 const lifecycle = vi.hoisted(() => ({ cleanups: [] as (() => void)[] }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => lifecycle.cleanups.push(cleanup) }))
-vi.mock('../src/lib/modelPrefsApi', async original => ({ ...await original<typeof import('../src/lib/modelPrefsApi')>(), getModelPreferences: vi.fn(), getPickerProfiles: vi.fn(), getReviewCandidates: vi.fn(), putPreferenceRow: vi.fn(), putPreferenceScope: vi.fn() }))
+vi.mock('../src/lib/modelPrefsApi', async original => ({ ...await original<typeof import('../src/lib/modelPrefsApi')>(), getModelPreferences: vi.fn(), putPreferenceRow: vi.fn(), putPreferenceScope: vi.fn() }))
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 beforeEach(() => {
   vi.resetAllMocks(); lifecycle.cleanups.length = 0
   vi.mocked(getModelPreferences).mockResolvedValue(prefsDocument(prefsFixture()))
-  vi.mocked(getPickerProfiles).mockResolvedValue(PREF_MODELS)
-  vi.mocked(getReviewCandidates).mockResolvedValue({ ladder: [] })
 })
 it('captures the row, project and revision; saves one row optimistically and rolls back a rejected write', async () => {
   const editor = useModelPrefsEditor('project-a', 'person'); await editor.load()
@@ -66,4 +65,11 @@ it('preserves section locks on provider changes and snapshots inherited residenc
   expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'eu', residency_locked: false, prefs_locked: true }, undefined)
   await editor.scope({ residency_locked: true })
   expect(putPreferenceScope).toHaveBeenLastCalledWith('person', { revision: 0, residency: 'any', residency_locked: true, prefs_locked: true }, undefined)
+})
+
+it('loads preference evidence with one request and no independent review ladder', async () => {
+  const editor = useModelPrefsEditor('project-a', 'person'); await editor.load()
+  expect(getModelPreferences).toHaveBeenCalledTimes(1)
+  expect(api).not.toHaveBeenCalled()
+  expect(editor.doc.value!.views.person!.choices).toHaveLength(PREF_MODELS.length)
 })

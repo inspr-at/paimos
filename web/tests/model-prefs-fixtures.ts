@@ -35,7 +35,7 @@ export function prefsDocument(source: ModelPreferences, project = true): ModelPr
     }
     view.residency.qualifying_routes = view.residency.value === 'any' ? 4 : 0
     view.residency.loosened_lock = !!view.residency.lock_value && strict[view.residency.value] < strict[view.residency.lock_value]
-    view.choices = PREF_MODELS.map(p => ({ profile: p, line: p.harness === 'codex' ? 'sol' : 'fable', model_version: p.model_version, retired: p.id === 'model-retired', review_ladder: p.effort === 'xhigh', review_reason: p.harness === 'codex' ? 'Codex is not qualified for reviews: inherited MCP tools are not isolated.' : '', residency_routes: view.residency.value === 'any' ? 1 : 0 } satisfies PrefChoice))
+    view.choices = PREF_MODELS.map(p => ({ profile: p, line: p.harness === 'codex' ? 'sol' : 'fable', model_version: p.model_version, retired: p.id === 'model-retired', review_ladder: p.effort === 'xhigh', review_reason: p.harness === 'codex' ? 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' : '', residency_routes: view.residency.value === 'any' ? 1 : 0 } satisfies PrefChoice))
     for (const kind of doc.kinds.filter(k => !k.archived_at && (level === 'project' || !k.project_id))) {
       let normal: ModelSelector = { mode: 'auto' }, complex: ModelSelector = { mode: 'auto' }, setBy: PrefLevel = 'default', lockedBy = ''
       for (const current of levels.slice(0, i + 1)) {

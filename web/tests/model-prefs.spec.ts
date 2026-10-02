@@ -8,7 +8,7 @@ import { prefsDocument, prefsFixture, PREF_MODELS, prefScope, customKind } from 
 import type { ModelPreferences, PrefLevel, PrefRow } from '../src/lib/modelPrefs'
 import { expectStableControls } from './helpers/stable'
 
-async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[] } = {}) {
+async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void> } = {}) {
   const data = fixtures()
   data.preferences['list:p-pharos'] = { visible: ['status', 'model'] }
   const ticket = data.nodes.find(n => n.key === 'PHAROS-11')!
@@ -20,12 +20,21 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
   state.residency_lock_mode = options.mode ?? 'warn'
   if (options.readOnly) state.can.edit_default = false
   let conflict = options.conflict ?? false
-  await page.route('**/api/models**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/resolve') ? { ladder: PREF_MODELS.filter(p => p.effort === 'xhigh').map(p => ({ profile_id: p.id, selected: false, skip_reasons: [] })) } : PREF_MODELS }))
+  await page.route('**/api/models**', route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/resolve') && url.searchParams.get('ticket') === ticket.id) return route.fulfill({ json: {
+      profile: PREF_MODELS[3], role: 'build-hard', owner_required: false, residency: 'any',
+      trace: { kind: 'backend', kind_source: 'ticket', complexity: 'L', complexity_source: 'agent', bucket: 'complex', set_by: 'project', mode: 'pinned',
+        residency: { value: 'any', set_by: 'person', qualifying_routes: 4, loosened_lock: false }, fallback: 'preferred profile unavailable' },
+    } })
+    return route.fulfill({ status: 503, json: { error: 'Redundant model catalog and reviewer-ladder requests must not be needed' } })
+  })
   await page.route('**/api/model-preferences**', async route => {
     const url = new URL(route.request().url()), method = route.request().method(), path = url.pathname, project = url.searchParams.has('project_id')
     if (method === 'GET') return route.fulfill({ json: prefsDocument(state, project) })
     const body = method === 'PUT' ? route.request().postDataJSON() : undefined
     calls.push({ method, path, body })
+    await options.beforeWrite?.()
     if (conflict) { conflict = false; state.levels.person!.revision++; return route.fulfill({ status: 409, json: { error: 'stale_revision', code: 'stale_revision' } }) }
     const level = path.split('/')[4] as PrefLevel, kind = path.split('/')[6], scope = state.levels[level]!
     const revision = method === 'PUT' ? body.revision : Number(url.searchParams.get('revision'))
@@ -82,7 +91,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       { name: 'your level', run: async () => { await modal.getByRole('tab', { name: 'You', exact: true }).click(); await expect(modal.getByRole('tab', { name: 'You', exact: true })).toHaveAttribute('aria-selected', 'true') } },
     ] })
     expect(calls.filter(c => c.method === 'PUT').length).toBeGreaterThanOrEqual(3)
-    const accents = await modal.locator('.kind-row').evaluateAll(elements => elements.map(el => { const s = getComputedStyle(el); return [s.borderLeftWidth, s.borderTopWidth] }))
+    const accents = await modal.locator('.kind-row, .kind-row > th, .kind-row > td').evaluateAll(elements => elements.map(el => { const s = getComputedStyle(el); return [s.borderLeftWidth, s.borderTopWidth] }))
     expect(accents.every(widths => widths.every(v => parseFloat(v) <= 1))).toBe(true)
     expect((await new AxeBuilder({ page }).include('.model-prefs-dialog').analyze()).violations).toEqual([])
     if (process.env.MODEL_PREFS_SHOTS) { mkdirSync(process.env.MODEL_PREFS_SHOTS, { recursive: true }); await page.screenshot({ path: join(process.env.MODEL_PREFS_SHOTS, `preferences-${width}-${theme}.png`) }) }
@@ -109,7 +118,7 @@ test('project gear, project-only kinds, locks, reviews, add/remove and planning 
   const reviews = page.getByRole('dialog', { name: 'Reviews · Normally', exact: true })
   const codex = reviews.locator('.picker-line').filter({ has: page.getByRole('heading', { name: /Codex Sol/ }) })
   await expect(codex.getByRole('button', { name: 'Follows new versions' })).toBeDisabled()
-  await expect(codex).toContainText('Codex is not qualified')
+  await expect(codex).toContainText('Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
   await expect(reviews.getByRole('button', { name: '5', exact: true })).toHaveCount(0)
   await reviews.getByRole('button', { name: 'Cancel Esc' }).click()
   await modal.getByRole('tab', { name: 'Default', exact: true }).click()
@@ -127,8 +136,15 @@ test('project gear, project-only kinds, locks, reviews, add/remove and planning 
   await page.goto('/p/PHAROS')
   const modelLink = page.getByRole('button', { name: /Why this model\?/ }).first()
   await expect(modelLink).toBeVisible()
+  await expect(modelLink).toHaveAttribute('tabindex', '-1')
   await modelLink.click()
-  await expect(dialog(page).getByRole('heading', { name: 'Why this model?' })).toBeVisible()
+  await expect(dialog(page).getByRole('heading', { name: 'Why this model?' })).toBeInViewport()
+  const why = dialog(page).locator('.why')
+  await expect(why).toContainText('If it’s complex (L), set by an agent')
+  await expect(why).toContainText('This project selects a pinned model')
+  await expect(why).toContainText('Allowed providers: Any provider, set by You')
+  await expect(why).toContainText('Automatic fallback: preferred profile unavailable')
+  await expect(why).toContainText('Runs Claude Fable 5.1 · xhigh today via claude')
   await expect(row(page, 'backend')).toBeVisible()
 
 })
@@ -140,7 +156,9 @@ for (const mode of ['freeze', 'tighten_only', 'warn'] as const) test(`provider l
   const modal = dialog(page), any = modal.getByRole('radio', { name: /Any provider/ }), local = modal.getByRole('radio', { name: /Local only/ })
   if (mode === 'warn') {
     await expect(any).toBeEnabled(); await any.click()
-    await expect(modal.locator('.warning')).toContainText('Looser than the lock')
+    await expect(modal.locator('.providers .warning')).toContainText('Looser than the lock')
+    await expect(modal.locator('.providers .warning')).toBeInViewport()
+    await expect(any).toBeFocused()
   } else await expect(any).toBeDisabled()
   if (mode === 'freeze') await expect(local).toBeDisabled(); else await expect(local).toBeEnabled()
 })
@@ -160,9 +178,13 @@ test('provider-change notices link to the affected queued run', async ({ page })
   await page.route('**/api/harness-sessions?*', route => route.fulfill({ json: { items: [], next_cursor: null } }))
   await open(page)
   await dialog(page).getByRole('radio', { name: /EU-hosted only/ }).click()
+  await expect(dialog(page).locator('.providers .outside')).toContainText('1 agent is still running')
+  await expect(dialog(page).locator('.outside')).toBeInViewport()
   await expect(dialog(page).locator('.outside')).toContainText('Nothing is stopped automatically')
-  await dialog(page).getByRole('link', { name: 'Agent 1', exact: true }).click()
+  await page.evaluate(() => { (window as typeof window & { prefsNavigation: string }).prefsNavigation = 'same document' })
+  await dialog(page).getByRole('link', { name: `Show run ${id.slice(0, 8)}`, exact: true }).click()
   await expect(page.locator(`#run-${id}`)).toBeFocused()
+  expect(await page.evaluate(() => (window as typeof window & { prefsNavigation: string }).prefsNavigation)).toBe('same document')
 })
 
 test('Escape leaves a field before closing and browser shortcuts remain native', async ({ page }) => {
@@ -183,4 +205,111 @@ test('Escape leaves a field before closing and browser shortcuts remain native',
   expect(await page.evaluate(() => (window as typeof window & { prefsNative: boolean[] }).prefsNative)).toEqual([true, true, true, true])
   await field.press('Escape'); await expect(field).not.toBeFocused(); await expect(modal).toBeVisible()
   await page.keyboard.press('Escape'); await expect(modal).toHaveCount(0)
+})
+
+for (const width of [1440, 1024, 390]) test(`confirmations stay by their actions at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+  const { state } = await setup(page)
+  state.levels.person!.rows = [{ kind_id: 'backend', locked: false, normal: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id }, complex: { mode: 'auto' } }]
+  await open(page)
+  const modal = dialog(page), footer = modal.locator('.prefs-footer'), body = modal.locator(':scope > .card > .body')
+  await expectStableControls({ controls: { reset: footer.locator('.reset-all'), finalAction: footer.locator('.done'), tabs: modal.getByRole('tablist'), frame: modal.locator(':scope > .card') }, scrollAreas: { body }, interactions: [
+    { name: 'show reset confirmation', run: async () => {
+      await footer.getByRole('button', { name: 'Reset all your changes', exact: true }).click()
+      await expect(footer.getByRole('button', { name: 'Confirm reset' })).toBeInViewport()
+      await expect(footer.getByRole('button', { name: 'Keep' })).toBeFocused()
+    } },
+    { name: 'keep current settings', run: async () => {
+      await footer.getByRole('button', { name: 'Keep' }).click()
+      await expect(footer.getByRole('button', { name: 'Reset all your changes' })).toBeFocused()
+    } },
+  ] })
+  const done = footer.getByRole('button', { name: 'Done Esc' })
+  expect(await done.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+  const backend = row(page, 'backend')
+  await expectStableControls({ controls: { row: backend, remove: backend.getByRole('button', { name: 'Remove Backend', exact: true }), models: backend.locator('.model-chip').first(), footer, frame: modal.locator(':scope > .card') }, scrollAreas: { body }, interactions: [
+    { name: 'show inline removal', run: async () => {
+      await backend.getByRole('button', { name: 'Remove Backend', exact: true }).click()
+      const confirmation = backend.locator('+ .remove-confirmation')
+      await expect(confirmation).toBeInViewport()
+      await expect(confirmation.getByRole('button', { name: 'Keep' })).toBeFocused()
+    } },
+    { name: 'keep the kind', run: async () => {
+      await modal.locator('.remove-confirmation').getByRole('button', { name: 'Keep' }).click()
+      await expect(backend.getByRole('button', { name: 'Remove Backend', exact: true })).toBeFocused()
+    } },
+  ] })
+})
+
+test('saving retains keyboard focus and guards controls while the write is held', async ({ page }) => {
+  let release!: () => void
+  let held = new Promise<void>(done => { release = done })
+  const { calls } = await setup(page, { beforeWrite: () => held })
+  await open(page)
+  const modal = dialog(page), radio = modal.getByRole('radio', { name: /EU-hosted only/ })
+  await radio.focus(); await radio.press('Space')
+  await expect(radio).toHaveAttribute('aria-disabled', 'true'); await expect(radio).toBeFocused()
+  const tab = modal.getByRole('tab', { name: 'You', exact: true })
+  await tab.focus(); await tab.press('Enter'); await expect(tab).toBeFocused()
+  await expect(tab).toHaveAttribute('aria-selected', 'true')
+  release(); await expect(radio).toHaveAttribute('aria-disabled', 'false'); await expect(tab).toBeFocused()
+  // Restore unrestricted providers, then hold the model save and its opener.
+  await modal.getByRole('radio', { name: /Any provider/ }).click(); await expect(modal.locator('.save-status')).toHaveText('')
+  held = new Promise<void>(done => { release = done })
+  const chip = row(page, 'backend').locator('.model-chip').first()
+  await chip.focus(); await chip.press('Enter')
+  const picker = page.getByRole('dialog', { name: 'Backend · Normally', exact: true })
+  const claude = picker.locator('.picker-line').filter({ has: page.getByRole('heading', { name: /Claude Fable/ }) })
+  await claude.getByRole('button', { name: '5.1', exact: true }).press('Enter')
+  await expect(chip).toHaveAttribute('aria-disabled', 'true'); await expect(chip).toBeFocused()
+  release(); await expect(chip).toHaveAttribute('aria-disabled', 'false'); await expect(chip).toBeFocused()
+  await chip.press('Enter')
+  await expect(picker.getByRole('button', { name: '5.1', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await picker.getByRole('button', { name: 'Cancel Esc' }).click()
+  held = new Promise<void>(done => { release = done })
+  const badge = row(page, 'backend').locator('.set-by')
+  await badge.focus(); await badge.press('Enter')
+  await page.getByRole('menuitem', { name: 'Lock for projects' }).press('Enter')
+  await expect(badge).toHaveAttribute('aria-disabled', 'true'); await expect(badge).toBeFocused()
+  release(); await expect(badge).toHaveAttribute('aria-disabled', 'false'); await expect(badge).toBeFocused()
+  expect(calls.filter(c => c.method === 'PUT')).toHaveLength(4)
+})
+
+test('ticket explanation uses the resolved complex column rather than the viewer matrix', async ({ page }) => {
+  await setup(page); await page.goto('/p/PHAROS')
+  await page.getByRole('button', { name: /Why this model\?/ }).first().click()
+  const why = dialog(page).locator('.why')
+  await expect(why).toBeInViewport()
+  await expect(why).toContainText('If it’s complex (L), set by an agent')
+  await expect(why).toContainText('This project selects a pinned model')
+  await expect(why).toContainText('Automatic fallback: preferred profile unavailable')
+  await expect(why).toContainText('Runs Claude Fable 5.1 · xhigh today via claude')
+})
+
+test('review picker works from server evidence when auxiliary catalogs are unavailable', async ({ page }) => {
+  await setup(page); await open(page)
+  await row(page, 'review').locator('.model-chip').first().click()
+  const picker = page.getByRole('dialog', { name: 'Reviews · Normally', exact: true })
+  const claude = picker.locator('.picker-line').filter({ has: page.getByRole('heading', { name: /Claude Fable/ }) })
+  await expect(claude.getByRole('button', { name: 'Follows new versions' })).toBeEnabled()
+  await expect(claude.getByRole('button', { name: '5.1', exact: true })).toBeEnabled()
+})
+
+test('remove confirmation is inline, visible and focused on Keep', async ({ page }) => {
+  await setup(page); await open(page)
+  const modal = dialog(page)
+  await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+  const backend = row(page, 'backend')
+  await backend.getByRole('button', { name: 'Remove Backend', exact: true }).click()
+  await expect(backend.locator('+ .remove-confirmation')).toBeInViewport()
+  await expect(backend.locator('+ .remove-confirmation').getByRole('button', { name: 'Keep' })).toBeFocused()
+})
+
+test('picker marks the selected pinned version', async ({ page }) => {
+  const { state } = await setup(page)
+  state.levels.person!.rows = [{ kind_id: 'backend', locked: false, normal: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id }, complex: { mode: 'auto' } }]
+  await open(page); await row(page, 'backend').locator('.model-chip').first().click()
+  const picker = page.getByRole('dialog', { name: 'Backend · Normally', exact: true })
+  await expect(picker.getByRole('button', { name: '5.1', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })

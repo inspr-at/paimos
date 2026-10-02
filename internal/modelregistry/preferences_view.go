@@ -32,8 +32,9 @@ type preferenceViewRow struct {
 	Complex     preferenceEffective `json:"complex"`
 }
 type preferenceView struct {
-	Choices   []preferenceChoice `json:"choices"`
-	Residency struct {
+	Choices          []preferenceChoice `json:"choices"`
+	ChoicesTruncated bool               `json:"choices_truncated"`
+	Residency        struct {
 		modelprefs.ResidencyResult
 		QualifyingRoutes int `json:"qualifying_routes"`
 	} `json:"residency"`
@@ -76,12 +77,13 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	if err != nil {
 		return out, err
 	}
-	profiles, err := listProfiles(ctx, tx)
+	profiles, err := listPickerProfiles(ctx, tx)
 	if err != nil {
 		return out, err
 	}
-	if len(profiles) > 256 {
-		return out, prefFail(413, "too_many_picker_profiles")
+	truncated := len(profiles) > 256
+	if truncated {
+		profiles = profiles[:256]
 	}
 	routes, err := listRoutes(ctx, tx)
 	if err != nil {
@@ -94,25 +96,8 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 	}
 	routeProfiles := map[string]string{}
-	retiredRows, err := tx.Query(ctx, `SELECT profile_id::text FROM model_profile_retirements`)
-	if err != nil {
-		return out, err
-	}
-	retired := map[string]bool{}
-	for retiredRows.Next() {
-		var id string
-		if err := retiredRows.Scan(&id); err != nil {
-			retiredRows.Close()
-			return out, err
-		}
-		retired[id] = true
-	}
-	retiredRows.Close()
-	if err := retiredRows.Err(); err != nil {
-		return out, err
-	}
 	for _, profile := range profiles {
-		if profile.Enabled && !retired[profile.ID] {
+		if profile.Enabled {
 			routeProfiles[profile.ID] = profile.Harness
 		}
 	}
@@ -126,7 +111,7 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 		out.Levels[s.Level] = &level
 		out.Revision += s.Revision
-		view := &preferenceView{Rows: []preferenceViewRow{}}
+		view := &preferenceView{Rows: []preferenceViewRow{}, ChoicesTruncated: truncated}
 		view.Residency.ResidencyResult = modelprefs.ResolveResidency(chain[:i+1])
 		view.Changes = len(level.Rows)
 		if s.Residency != nil {
@@ -171,7 +156,7 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 			} else if capability := agentverification.For(profile.Harness, "darwin", "arm64"); !capability.Supported {
 				reason = capability.Reason
 			}
-			view.Choices = append(view.Choices, preferenceChoice{Profile: profile, Line: line, ModelVersion: version, Retired: retired[profile.ID], ReviewLadder: reviewProfiles[profile.ID], ReviewReason: reason, ResidencyRoutes: counts[profile.ID]})
+			view.Choices = append(view.Choices, preferenceChoice{Profile: profile, Line: line, ModelVersion: version, ReviewLadder: reviewProfiles[profile.ID], ReviewReason: reason, ResidencyRoutes: counts[profile.ID]})
 		}
 		resolvedCells := map[string]WorkResolution{}
 		for _, kind := range kinds {

@@ -106,21 +106,6 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	return ids, nil
 }
 
-// ResidencyRouteCount counts account/profile routes with valid residency and
-// model allowance. Capacity is transient and does not change this evidence
-// count. Load account metadata once for the whole editor view.
-func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (int, error) {
-	counts, err := ResidencyProfileRouteCounts(ctx, tx, profiles, projectID, requirement, now)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, count := range counts {
-		total += count
-	}
-	return total, nil
-}
-
 // ResidencyProfileRouteCounts shares the same account read and harness fences
 // across picker choices. It is advisory evidence, never a reservation decision.
 func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (map[string]int, error) {

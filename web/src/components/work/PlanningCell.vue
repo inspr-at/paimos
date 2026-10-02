@@ -23,13 +23,13 @@ function why() {
   const key = String(route.params.projectKey ?? route.params.key ?? '')
   const rowProject = (props.row as PlanningRow & { project?: { id: string; title: string } | null }).project
   const project = rowProject ?? projects.byRouteKey(key)
-  openModelPrefs({ project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, preview: model.value?.label })
+  openModelPrefs({ project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, ticket: props.rowId, preview: model.value?.label })
 }
 const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cost', paid: 'No cost' }
 </script>
 
 <template>
-  <button v-if="model" type="button" class="plan-model" :class="{ empty: model.state === 'none', planned: model.state === 'planned' }" :data-tip="`${model.tip} · Why this model?`" :aria-label="`${model.label}. Why this model?`" @click.stop="why" :aria-describedby="descriptionId">
+  <button v-if="model" type="button" tabindex="-1" class="plan-model" :class="{ empty: model.state === 'none', planned: model.state === 'planned' }" :data-tip="`${model.tip} · Why this model?`" :aria-label="`${model.label}. Why this model?`" @click.stop="why" :aria-describedby="descriptionId">
     <HarnessMark v-if="model.harness" class="brand" :harness="model.harness" :provider="model.provider" :size="12" />
     <EffortMeter :level="model.effort" :enabled="modelDisplay.effortMeter" :planned="model.state === 'planned'" />
     <span class="model-name" aria-hidden="true">{{ model.state === 'planned' ? '~' : '' }}{{ model.text || '—' }}</span>

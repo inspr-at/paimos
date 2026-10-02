@@ -9,6 +9,7 @@ const id = useId(), menu = ref<HTMLElement>(), button = ref<HTMLButtonElement>()
 const opened = ref(false)
 function hide() { menu.value?.hidePopover(); opened.value = false; button.value?.focus({ preventScroll: true }) }
 async function open(event: MouseEvent) {
+  if (props.busy) return
   if (event.altKey) { if (props.editable && props.level !== 'project' && (!props.row.locked_by || props.row.locked_by === props.level)) emit('lock'); return }
   if (opened.value) { hide(); return }
   const rect = button.value!.getBoundingClientRect()
@@ -27,7 +28,7 @@ function keys(event: KeyboardEvent) {
 }
 </script>
 <template>
-  <button ref="button" type="button" class="set-by" :aria-label="`${kind}: ${setByLabel(row)}`" aria-haspopup="menu" :aria-expanded="opened" :aria-controls="id" :disabled="busy" @click="open"><span class="level-dot" :style="{ '--lv': `var(--level-${row.locked_by || row.set_by || 'default'})` }" /><AppIcon v-if="row.locked_by" name="lock" :size="12" /><span>{{ setByLabel(row) }}</span><AppIcon v-if="row.warnings.length" name="alert" :size="12" :data-tip="row.warnings.join('; ')" /></button>
+  <button ref="button" type="button" class="set-by" :aria-label="`${kind}: ${setByLabel(row)}`" aria-haspopup="menu" :aria-expanded="opened" :aria-controls="id" :aria-disabled="busy" @click="open"><span class="level-dot" :style="{ '--lv': `var(--level-${row.locked_by || row.set_by || 'default'})` }" /><AppIcon v-if="row.locked_by" name="lock" :size="12" /><span>{{ setByLabel(row) }}</span><AppIcon v-if="row.warnings.length" name="alert" :size="12" :data-tip="row.warnings.join('; ')" /></button>
   <div :id="id" ref="menu" popover="auto" class="set-menu" role="menu" :aria-label="`${kind} setting`" @keydown="keys" @toggle="opened = $event.newState === 'open'">
     <p>{{ setByLabel(row) }}. {{ level === 'project' ? 'Project settings cannot lock other levels.' : 'A row lock fixes both model choices below this level.' }}</p>
     <button v-if="level !== 'project'" type="button" role="menuitem" :disabled="!editable || !!row.locked_by && row.locked_by !== level" @click="choose('lock')"><AppIcon name="lock" :size="14" />{{ ownLocked ? 'Unlock' : level === 'default' ? 'Lock for people and projects' : 'Lock for projects' }}</button>

@@ -14116,6 +14116,7 @@ components:
       type: object
       required: [residency, rows, changes]
       properties:
+        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Automatic routing still uses the full registry.}
         choices:
           type: array
           maxItems: 256

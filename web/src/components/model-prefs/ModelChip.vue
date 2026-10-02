@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 import { modelCopy, type PrefChoice, type EffectiveModel } from '../../lib/modelPrefs'
-const props = defineProps<{ model: EffectiveModel; label: string; review: boolean; disabled: boolean; choices?: PrefChoice[] }>()
+const props = defineProps<{ model: EffectiveModel; label: string; review: boolean; disabled: boolean; busy?: boolean; choices?: PrefChoice[] }>()
 defineEmits<{ pick: [] }>()
 const copy = computed(() => modelCopy(props.model, props.review, props.choices))
 const mark = computed(() => {
@@ -16,7 +16,7 @@ const mark = computed(() => {
 })
 </script>
 <template>
-  <button type="button" class="model-chip" :class="{ warning: model.unavailable_reason }" :disabled="disabled" :aria-label="`${label}: ${copy.name}`" :data-tip="copy.tip" aria-haspopup="dialog" @click="$emit('pick')">
+  <button type="button" class="model-chip" :class="{ warning: model.unavailable_reason }" :disabled="disabled" :aria-disabled="busy || disabled" :aria-label="`${label}: ${copy.name}`" :data-tip="copy.tip" aria-haspopup="dialog" @click="!busy && !disabled && $emit('pick')">
     <span class="model-mark"><AppIcon v-if="model.selector.mode === 'auto'" :name="review ? 'compare' : 'sparkle'" :size="16" /><HarnessMark v-else :harness="mark.harness" :provider="mark.provider" :size="16" /></span>
     <span class="model-text"><b>{{ copy.name }}</b><small><AppIcon v-if="model.unavailable_reason" name="alert" :size="12" /><AppIcon v-else-if="model.follows_latest" name="refresh" :size="12" /><AppIcon v-else-if="model.pinned" name="pin" :size="12" /><span>{{ copy.detail }}</span></small></span>
   </button>

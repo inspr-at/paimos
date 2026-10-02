@@ -15,7 +15,7 @@ function keys(event: KeyboardEvent, index: number) {
 </script>
 <template>
   <div class="editing"><span class="editing-label">You are editing</span><div class="level-tabs" role="tablist" aria-label="Preference level">
-    <button v-for="(item, i) in levels" :id="`${id}-${item}`" :key="item" type="button" role="tab" :aria-selected="level === item" :tabindex="level === item ? 0 : -1" :disabled="busy" @click="emit('change', item)" @keydown="keys($event, i)"><span class="level-dot" :style="{ '--lv': `var(--level-${item})` }" />{{ item === 'default' ? 'Default' : item === 'person' ? 'You' : `Project ${project}` }}</button>
+    <button v-for="(item, i) in levels" :id="`${id}-${item}`" :key="item" type="button" role="tab" :aria-selected="level === item" :tabindex="level === item ? 0 : -1" :aria-disabled="busy" @click="!busy && emit('change', item)" @keydown="keys($event, i)"><span class="level-dot" :style="{ '--lv': `var(--level-${item})` }" />{{ item === 'default' ? 'Default' : item === 'person' ? 'You' : `Project ${project}` }}</button>
   </div></div>
 </template>
 <style scoped>

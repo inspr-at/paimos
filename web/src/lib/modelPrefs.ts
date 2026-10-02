@@ -12,7 +12,7 @@ export interface ResidencyView { value: Residency; set_by: PrefLevel; locked_by?
 export interface EffectiveModel { selector: ModelSelector; profile: PrefProfile | null; label: string; brand: string; follows_latest: boolean; pinned: boolean; today_version: string; unavailable_reason?: string }
 export interface PrefViewRow { kind_id: string; set_by: string; locked_by: string; changed_here: boolean; reset_to: string; warnings: string[]; normal: EffectiveModel; complex: EffectiveModel }
 export interface PrefChoice { profile: PrefProfile; line: string; model_version: string; retired: boolean; review_ladder: boolean; review_reason: string; residency_routes: number }
-export interface PrefView { choices?: PrefChoice[]; residency: ResidencyView; rows: PrefViewRow[]; changes: number }
+export interface PrefView { choices_truncated?: boolean; choices?: PrefChoice[]; residency: ResidencyView; rows: PrefViewRow[]; changes: number }
 export interface ModelPreferences { revision: number; person_id: string | null; kinds: WorkKind[]; levels: Record<PrefLevel, PrefScope | null>; views: Record<PrefLevel, PrefView | null>; can: Record<'edit_default' | 'edit_person' | 'edit_project' | 'add_default_kind' | 'add_project_kind', boolean>; residency_lock_mode: ResidencyLockMode }
 export interface PrefWriteResult { level: PrefScope; revision: number; running_outside: string[]; residency: ResidencyView }
 export const LEVELS: PrefLevel[] = ['default', 'person', 'project']
@@ -57,7 +57,6 @@ export function profileLine(p: PrefProfile): { line: string; version: string } {
   const m = /^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$/.exec(id)
   return m ? { line: m[1]! + m[3]! + suffix, version: m[2]!.replaceAll('-', '.') } : { line: p.model, version: '' }
 }
-export interface PickerCandidate { profile_id: string; selected: boolean; skip_reasons: string[] }
 // Match the server's segment ordering: aliases track the newest vendor version.
 export function compareModelVersions(a: string, b: string): number {
   if (a === b) return 0
@@ -70,13 +69,17 @@ export function compareModelVersions(a: string, b: string): number {
   }
   return 0
 }
-export function pickerReason(p: PrefProfile, review: boolean, candidates: PickerCandidate[], residency: ResidencyView): string {
-  if (!p.enabled) return 'Disabled in the model registry'
-  if (review) {
-    if (!['strong', 'frontier'].includes(p.tier) || p.effort !== 'xhigh') return 'Reviews require strong or frontier models at extra high effort'
-    if (!candidates.some(c => c.profile_id === p.id)) return 'Outside the review ladder'
-    if (!['claude', 'grok'].includes(p.harness)) return `${p.harness === 'codex' ? 'Codex' : p.harness} is not qualified for reviews`
-  }
-  if (residency.value !== 'any' && residency.qualifying_routes === 0) return `No ${residency.value === 'eu' ? 'EU-hosted' : 'local'} model route qualifies today`
+export function pickerReason(choice: PrefChoice | undefined, review: boolean, residency: ResidencyView): string {
+  if (!choice) return 'Model choice evidence is unavailable'
+  if (!choice.profile.enabled) return 'Disabled in the model registry'
+  if (review && choice.review_reason) return choice.review_reason
+  if (residency.value !== 'any' && !choice.residency_routes) return `No ${residency.value === 'eu' ? 'EU-hosted' : 'local'} route for this model today`
   return ''
 }
+
+export interface ModelPreferenceTrace {
+  kind: string; kind_source: string; complexity: string; complexity_source: string; bucket: 'normal' | 'complex';
+  set_by: PrefLevel; locked_by?: PrefLevel; mode: 'auto' | 'latest' | 'pinned'; role?: string;
+  residency: ResidencyView; ticket_requirement?: Residency; fallback?: string; blocked?: string; prefs?: string; hard?: string[]
+}
+export interface TicketModelResolution { profile: PrefProfile | null; trace: ModelPreferenceTrace; owner_required: boolean; role: string; residency: Residency }
