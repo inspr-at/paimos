@@ -18,8 +18,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/releasehistory"
@@ -29,9 +32,13 @@ func main() {
 	repo := flag.String("repo", ".", "git working tree with tags")
 	out := flag.String("out", "internal/releasehistory/data/history.json", "manifest to write")
 	repository := flag.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub owner/name for links and evidence")
+	candidate := flag.String("candidate", "", "embed this committed version before its release tag exists")
 	offline := flag.Bool("offline", false, "do not read GitHub")
 	flag.Parse()
-	opts := releasehistory.Options{Repo: *repo, Repository: *repository}
+	opts := releasehistory.Options{Repo: *repo, Repository: *repository, Candidate: *candidate}
+	if *candidate != "" {
+		opts.CandidateCI = candidateRun(*repository, os.Getenv)
+	}
 	if !*offline && *repository != "" {
 		opts.GitHub = &releasehistory.GitHub{Token: os.Getenv("GITHUB_TOKEN")}
 	}
@@ -62,4 +69,25 @@ func main() {
 		}
 	}
 	fmt.Printf("release history: %d releases (%d published) from %s -> %s\n", len(h.Releases), published, h.Source, *out)
+}
+
+// The building workflow is still running. Its conclusion cannot be known here.
+func candidateRun(repository string, getenv func(string) string) *releasehistory.Run {
+	id := getenv("GITHUB_RUN_ID")
+	if !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(id) || !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repository) {
+		return nil
+	}
+	server := getenv("GITHUB_SERVER_URL")
+	if server == "" {
+		server = "https://github.com"
+	}
+	u, err := url.Parse(server)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return nil
+	}
+	name := getenv("GITHUB_WORKFLOW")
+	if name == "" {
+		name = "CI"
+	}
+	return &releasehistory.Run{Name: name, URL: strings.TrimRight(server, "/") + "/" + repository + "/actions/runs/" + id, Status: "in_progress"}
 }

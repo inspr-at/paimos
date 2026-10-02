@@ -5,6 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
 
 // AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
@@ -554,4 +555,49 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   }
   // AEON-515: the footer pill shows the marketing name beside its Pretty version.
   await expect(page.locator('footer.app-footer .version-pill .footer-codename')).toBeVisible()
+})
+
+
+test('the running candidate shows frozen features and fixes with honest pending evidence', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const history = releaseHistory()
+  const latest = history.releases[0]!
+  const candidate = {
+    ...latest, state: 'candidate', tag: '', headline: '', tagged_at: null, published_at: null,
+    notes: { source: 'embedded-product-notes', snapshot_sha256: 'a'.repeat(64), captured_at: latest.reserved_at, release_revision: 1, gaps: [], hidden: 0, items: [], public_items: [
+      { key: 'AEON-427', group: 'features', pill_en: 'Frozen feature', pill_de: '', benefit_en: 'Captured feature benefit.', benefit_de: '' },
+      { key: 'AEON-428', group: 'fixes', pill_en: 'Frozen fix', pill_de: '', benefit_en: 'Captured fix benefit.', benefit_de: '' },
+    ] },
+    evidence: { ...latest.evidence, image: null, ci: null, release_run: null, release_url: '', unavailable: [], pending: ['tag_message', 'tagged_at', 'published_at', 'image', 'ci', 'release_run', 'release_url'] },
+  }
+  await mockWork(page, fixtures())
+  await mockReleases(page, { ...history, releases: [candidate, ...history.releases.slice(1)] })
+  await page.goto('/releases')
+  await expect(sheet(page).getByRole('heading', { level: 2, name: latest.codename })).toBeVisible()
+  const detail = sheet(page).locator('article.detail')
+  await expect(detail.getByText('Candidate release', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Publication pending', { exact: true })).toBeVisible()
+  await expect(detail.getByRole('heading', { name: 'Features', exact: true })).toBeVisible()
+  await expect(detail.getByRole('heading', { name: 'Fixes', exact: true })).toBeVisible()
+  await expect(detail.getByText('Frozen feature', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Frozen fix', { exact: true })).toBeVisible()
+  await expect(detail.locator('.live-line')).toContainText('reserved')
+  await expect(detail.locator('.live-line')).not.toContainText('tagged')
+  await expect(sheet(page).locator('.result-count')).toContainText('5 published')
+  await expect(sheet(page).locator('.result-count')).toContainText('1 candidate')
+  const evidence = detail.getByRole('button', { name: /^Evidence/ })
+  const grid = sheet(page).getByRole('grid', { name: 'Releases, newest first' })
+  await expectStableControls({
+    controls: { evidence, releaseList: grid, selectedRow: grid.getByRole('row').first() },
+    scrollAreas: { detail: sheet(page).locator('.detail-pane') },
+    interactions: [{ name: 'open candidate evidence', run: async () => {
+      await evidence.click()
+      await expect(detail.getByRole('list', { name: 'Pending evidence' })).toBeVisible()
+    } }],
+  })
+  await expect(detail.getByText('Tag message: pending', { exact: true })).toBeVisible()
+  await expect(detail.getByText('Release run: pending', { exact: true })).toBeVisible()
+  await expect(detail.locator('a[href*="/actions/runs/"]')).toHaveCount(0)
+  await expect(detail.locator('a[href*="/releases/tag/"]')).toHaveCount(0)
+  await expect(detail.locator('.ev-body')).not.toContainText('sha256:')
 })

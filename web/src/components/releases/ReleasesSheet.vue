@@ -164,6 +164,8 @@ const currentKnown = computed(() => byVersion.value.has(current.value))
 const rollbackTarget = computed(() => currentKnown.value ? releases.value.find(r => r.state === 'published' && r.version < current.value)?.version ?? null : null)
 const filtering = computed(() => !!filter.q.trim() || filter.features || filter.fixes || filter.tickets)
 const reservedCount = computed(() => releases.value.filter(r => r.state === 'reserved').length)
+const candidateCount = computed(() => releases.value.filter(r => r.state === 'candidate').length)
+const publishedCount = computed(() => releases.value.filter(r => r.state === 'published').length)
 const compareTo = computed(() => mode.value === 'compare' && cursor.value && cursor.value !== compareFrom.value ? cursor.value : null)
 // One notice. An outdated page says a newer version is live; it does not also
 // warn that this build's history lacks that version. The server is chosen once:
@@ -176,7 +178,7 @@ const notice = computed(() => releaseNotice(pageRuns.value, server.value, missin
 const hero = computed(() => { const v = liveServer(server.value, pageRuns.value); return isCalendarVersion(v) ? v : '' })
 const heroName = computed(() => byVersion.value.get(hero.value)?.codename)
 const eyebrow = computed(() => view.value === 'details'
-  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${releases.value.length - reservedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : [])].join(' · ')
+  ? [generationLabel.value, `${brand.value.short_name} releases`, ...(releases.value.length ? [`${publishedCount.value} published`] : []), ...(reservedCount.value ? [`${reservedCount.value} reserved`] : []), ...(candidateCount.value ? [`${candidateCount.value} candidate`] : [])].join(' · ')
   : `${brand.value.wordmark} · Release`)
 // One status line under it: since when it runs here, or that this page is older.
 const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
@@ -492,7 +494,7 @@ const KINDS = [
             </div>
             <p class="result-count" aria-live="polite">
               <template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
+              <template v-else-if="releases.length">{{ publishedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template><template v-if="candidateCount"> · {{ candidateCount }} candidate</template></template>
             </p>
           </div>
 
@@ -556,7 +558,7 @@ const KINDS = [
                     <span v-if="rails.get(r.version)?.text" class="rail-name"><span class="headline" :class="{ theme: rails.get(r.version)!.themed }" :lang="rails.get(r.version)!.lang"><template v-for="(p, i) in marked(rails.get(r.version)!.text)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span><LangBadge v-if="rails.get(r.version)!.lang !== lang" :lang="rails.get(r.version)!.lang" /></span>
                     <span v-if="view === 'details' && technicalLine(r)" class="subjects" :title="technicalLine(r)"><template v-for="(p, i) in marked(technicalLine(r))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </template>
-                  <span v-if="r.state === 'published'" class="counts">
+                  <span v-if="r.state !== 'reserved'" class="counts">
                     <template v-for="k in KINDS" :key="k.key">
                       <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
                     </template>

@@ -295,3 +295,12 @@ describe('cadence over a range', () => {
     expect(releaseRangeKey('p-1')).toBe('aeon.release-history.range.p-1')
   })
 })
+
+
+it('a candidate reservation is not reported as a tag or publication', () => {
+  const candidate = rel(NOW - HOUR, { state: 'candidate', tagged_at: null, published_at: null })
+  const since = releaseStats([candidate], NOW).find(stat => stat.key === 'since')!
+  expect(since.sub).toContain('reserved')
+  expect(since.sub).not.toContain('tagged')
+  expect(since.sub).not.toContain('published')
+})
