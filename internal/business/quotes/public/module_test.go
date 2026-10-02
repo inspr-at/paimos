@@ -500,6 +500,63 @@ func acceptanceBody(digest, mutation string) string {
 	return fmt.Sprintf(`{"version":1,"expected_content_sha256":%q,"client_mutation_id":%q,"name":"Customer Example","company":"Example Co","note":"Approved","confirm":true}`, digest, mutation)
 }
 
+// Receipt lifetime coverage must run even without the optional browser/PDF
+// renderer. The existing rendering integration above additionally exercises
+// ProcessNext when that renderer is available.
+func TestConfirmationReceiptSurvivesGCWithoutAttachment(t *testing.T) {
+	f := newFixture(t)
+	id, digest, path := f.issued()
+	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/")
+	status, body := f.call(nil, "POST", api+"/accept", acceptanceBody(digest, "77777777-7777-4777-8777-777777777777"))
+	if status != http.StatusOK {
+		t.Fatalf("accept %d %s", status, body)
+	}
+	var receipt attachments.Prepared
+	err := db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		var err error
+		receipt, err = f.store.Put(t.Context(), tx, f.tenantID, attachments.OwnerReceipt, strings.NewReader("%PDF-1.7\nsynthetic receipt\n%%EOF\n"))
+		if err != nil {
+			return err
+		}
+		event, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id, Type: "quote.confirmation_ready", After: map[string]any{"version": 1, "file_sha256": receipt.SHA256, "renderer_version": "synthetic"}})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO quote_confirmation_receipts(tenant_id,quote_node_id,version,acceptance_event_id,original_content_sha256,file_sha256,renderer_version,stored_event_id)
+		 SELECT tenant_id,quote_node_id,version,event_id,$3,$4,'synthetic',$5 FROM quote_decisions WHERE tenant_id=$1 AND quote_node_id=$2 AND version=1`, f.tenantID, id, digest, receipt.SHA256, event.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := f.store.Open(f.tenantID, receipt.SHA256, "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(file.Name(), old, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, apply := range []bool{false, true} {
+		gc, err := attachments.GC(t.Context(), f.pool.App, f.store, f.tenantID, apply)
+		if err != nil || gc.Candidates != 0 || gc.Removed != 0 {
+			t.Fatalf("receipt GC %+v: %v", gc, err)
+		}
+	}
+	verified, err := attachments.Verify(t.Context(), f.pool.App, f.store, f.tenantID)
+	if err != nil || verified.Checked != 1 || len(verified.Issues) != 0 {
+		t.Fatalf("receipt verify %+v: %v", verified, err)
+	}
+	if err := os.Remove(file.Name()); err != nil {
+		t.Fatal(err)
+	}
+	verified, err = attachments.Verify(t.Context(), f.pool.App, f.store, f.tenantID)
+	if err != nil || verified.Checked != 1 || len(verified.Issues) != 1 || verified.Issues[0].Problem != "missing" || verified.Issues[0].SHA256 != receipt.SHA256 {
+		t.Fatalf("missing receipt verify %+v: %v", verified, err)
+	}
+}
+
 func TestPublicSelectorUnderForcedRLS(t *testing.T) {
 	f := newFixture(t)
 	var superuser, bypassRLS, forcedRLS bool

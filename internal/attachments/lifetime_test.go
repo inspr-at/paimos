@@ -308,3 +308,54 @@ func TestBlobLifetimeRejectsWrongTenantAndSnapshotIsolation(t *testing.T) {
 		t.Fatalf("published without valid transaction: %v", err)
 	}
 }
+
+func TestGCOnlyCollectsOldOrphansForSelectedTenant(t *testing.T) {
+	d, p, _ := setup(t)
+	store := Store{FilesDir: t.TempDir()}
+	body := fixturePNG(t)
+	old := oldOrphan(t, d, p, store, body)
+	var young Prepared
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		young, err = store.Put(t.Context(), tx, p.TenantID, OwnerAttachment, strings.NewReader("recent orphan"))
+		return err // no reference: the seven-day grace still applies
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, other, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'other-files','Other files')`, other); err != nil {
+			return err
+		}
+		var actor string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other person') RETURNING id::text`, other).Scan(&actor); err != nil {
+			return err
+		}
+		blob, err := store.Put(t.Context(), tx, other, OwnerQuoteProfile, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO quote_document_profile_assets(tenant_id,sha256,content_type,size,created_by_principal_id) VALUES($1,$2,$3,$4,$5)`, other, blob.SHA256, blob.ContentType, blob.Size, actor)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ageBlob(t, store, other, old.SHA256, true)
+	report, err := GC(t.Context(), d.App, store, p.TenantID, false)
+	if err != nil || report.Candidates != 3 || report.Removed != 0 {
+		t.Fatalf("dry run %+v %v", report, err)
+	}
+	assertBlobBytes(t, store, p.TenantID, old.SHA256, body)
+	report, err = GC(t.Context(), d.App, store, p.TenantID, true)
+	if err != nil || report.Candidates != 3 || report.Removed != 3 {
+		t.Fatalf("apply %+v %v", report, err)
+	}
+	assertBlobBytes(t, store, p.TenantID, young.SHA256, []byte("recent orphan"))
+	assertBlobBytes(t, store, other, old.SHA256, body)
+	verified, err := Verify(t.Context(), d.App, store, other)
+	if err != nil || verified.Checked != 1 || len(verified.Issues) != 0 {
+		t.Fatalf("other tenant verify %+v %v", verified, err)
+	}
+}

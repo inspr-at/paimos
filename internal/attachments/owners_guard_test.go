@@ -32,6 +32,8 @@ func TestBlobWritersHaveRegisteredOwners(t *testing.T) {
 	}
 	// These are the shared protocol implementations, not independent owners.
 	protocol := map[string]bool{"internal/attachments/storage.go:Put": true, "internal/attachments/storage.go:PutProfileAsset": true}
+	files := map[string]*ast.File{}
+	storePackages := map[string]bool{"internal/attachments": true}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -52,19 +54,39 @@ func TestBlobWritersHaveRegisteredOwners(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		usesStore := rel == "internal/attachments/storage.go" || strings.HasPrefix(rel, "internal/attachments/")
+		files[rel] = file
 		for _, imp := range file.Imports {
 			value, _ := strconv.Unquote(imp.Path.Value)
 			if value == "github.com/inspr-at/paimos/internal/attachments" {
-				usesStore = true
+				storePackages[filepath.Dir(rel)] = true
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rel, file := range files {
+		usesStore := storePackages[filepath.Dir(rel)]
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				continue
 			}
 			writer := rel + ":" + fn.Name.Name
+			direct := map[ast.Expr]bool{}
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				if call, ok := node.(*ast.CallExpr); ok {
+					direct[call.Fun] = true
+				}
+				return true
+			})
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				if sel, ok := node.(*ast.SelectorExpr); ok && usesStore && !direct[sel] && (sel.Sel.Name == "Put" || sel.Sel.Name == "Publish" || sel.Sel.Name == "PutProfileAsset") {
+					t.Errorf("indirect blob writer in %s: use a direct call with an inventoried owner", writer)
+				}
+				return true
+			})
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
@@ -142,10 +164,6 @@ func TestBlobWritersHaveRegisteredOwners(t *testing.T) {
 				})
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	for writer := range registered {
 		if !seen[writer] {
