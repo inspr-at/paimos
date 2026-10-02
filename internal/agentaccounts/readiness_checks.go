@@ -173,9 +173,6 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 	if fresh {
 		// Freeze a telemetry-only denial into its original canonical wait too;
 		// the owner's check can then request the same bounded early recovery.
-		if err := reconcileReadinessResources(ctx, tx, a); err != nil {
-			return c, err
-		}
 		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
 			return c, err
 		}
