@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, stepState, TRUNCATED_LADDER, type PolicyLadder, type PolicyStep } from '../src/lib/policies.ts'
+import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, stepState, truncatedLadder, type PolicyLadder, type PolicyStep } from '../src/lib/policies.ts'
 import type { Permission } from '../src/lib/access.ts'
 
 const ladder = (role: PolicyLadder['role'] = 'review-gate'): PolicyLadder => ({ role, setup: true, truncated: false, steps: [], dispatch_family_order: ['openai', 'xai', 'anthropic', 'cursor', 'google', 'local'], review_floors: ['Other family'] })
@@ -84,5 +84,5 @@ test('truncation and suspension expiry are honest with an injected observation t
   const step = { state: 'unavailable', reason: 'out of credit', valid_until: '2026-10-02T19:30:00Z' } as PolicyStep
   assert.match(stepState(step, now), /Unavailable · out of credit · until/)
   assert.equal(stepState(step, now + 7200000), 'Suspension expired · eligible again')
-  assert.match(TRUNCATED_LADDER, /first 50 steps; the rest are applied by Aeon but not listed here/)
+  assert.match(truncatedLadder(), /first 50 steps; the rest are applied by AEON but not listed here/)
 })

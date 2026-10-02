@@ -13,7 +13,7 @@ import { crmData, mockCRM } from './crm-fixtures'
 import { mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixtures'
 import { mockPolicies } from './policies-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { POLICY_ROLES, POLICY_TABS, TRUNCATED_LADDER } from '../src/lib/policies'
+import { POLICY_ROLES, POLICY_TABS, truncatedLadder } from '../src/lib/policies'
 
 const world = {
   me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
@@ -142,10 +142,20 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const detail = panel.getByTestId('policies-row-link')
     const content = panel.locator('.policy-content')
     const loaded = () => expect(content).toHaveAttribute('aria-busy', 'false')
+    const capture = async (label: string) => {
+      if (width === 390) await page.locator('main').evaluate(main => {
+        const policies = main.querySelector('.policies')!
+        main.scrollTop += policies.getBoundingClientRect().top - main.getBoundingClientRect().top
+      })
+      const path = testInfo.outputPath(`policies-${width}-${theme}-${label}.png`)
+      await page.screenshot({ path, fullPage: true })
+      await testInfo.attach(label, { path, contentType: 'image/png' })
+    }
     await loaded()
     await expect(panel.getByRole('list', { name: 'Configured ladder' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     await expect(panel.getByText(/out of credit/)).toBeVisible()
+    await capture('ladders')
     // Lazy, source-specific loads: registry is not fetched with the first tab.
     expect(mock.data.calls.every(path => path === '/api/models/routes')).toBe(true)
     const common = Object.fromEntries(POLICY_TABS.map((item, i) => [`policies-tab-${item.id}`, tabs.nth(i)]))
@@ -162,6 +172,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await tab('keys').click(); await loaded()
     await expect(panel.getByText('rules.publish', { exact: true })).toBeVisible()
     await expect(panel.getByText('models.read', { exact: true })).toHaveCount(0)
+    await capture('agent-key-limits')
     await tab('elsewhere').click(); await loaded()
     const owners = panel.getByTestId('policies-owner-link')
     await expect(owners).toHaveCount(6)
@@ -171,6 +182,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       interactions: [{ name: 'owner links through hover and focus', run: async () => { await owners.last().hover(); await owners.first().focus() } }],
     })
     await expect(panel.getByRole('article').filter({ hasText: 'Merge queue and repository ownership' })).toContainText('Advisory')
+    await capture('elsewhere')
     await tab('ladders').click(); await loaded()
     const roleControls = { ...common, 'policies-row-link': detail, 'policies-role-group': panel.getByTestId('policies-role-group'), ...Object.fromEntries(POLICY_ROLES.map(item => [`policies-role-${item.id}`, role(item.id)])) }
     await expectStableControls({
@@ -190,14 +202,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       controls: roleControls, scrollAreas: { policies: panel },
       interactions: [
         { name: 'loaded to loading', run: async () => { await role('scout').click(); await truncation.started; await expect(content).toHaveAttribute('aria-busy', 'true') } },
-        { name: 'loading to truncated', run: async () => { truncation.release(); await expect(content.getByText(TRUNCATED_LADDER, { exact: true })).toBeVisible(); await expect(panel.locator('.ladder li')).toHaveCount(50) } },
+        { name: 'loading to truncated', run: async () => { truncation.release(); await expect(content.getByText(truncatedLadder(), { exact: true })).toBeVisible(); await expect(panel.locator('.ladder li')).toHaveCount(50) } },
       ],
     })
     mock.data.count = 50
     const complete = mock.holdNext()
     await role('build').click(); await complete.started
     await expectStableControls({ controls: roleControls, scrollAreas: { policies: panel }, interactions: [
-      { name: 'loading to complete', run: async () => { complete.release(); await loaded(); await expect(panel.locator('.ladder li')).toHaveCount(50); await expect(content.getByText(TRUNCATED_LADDER, { exact: true })).toHaveCount(0) } },
+      { name: 'loading to complete', run: async () => { complete.release(); await loaded(); await expect(panel.locator('.ladder li')).toHaveCount(50); await expect(content.getByText(truncatedLadder(), { exact: true })).toHaveCount(0) } },
     ] })
     mock.data.mode = 'failed'
     const failure = mock.holdNext()
@@ -220,10 +232,19 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       { name: 'open and close detail', run: async () => { await detail.click(); await expect(panel.getByRole('dialog')).toBeVisible(); await panel.getByTestId('policies-sheet-close').click(); await expect(panel.getByRole('dialog')).not.toBeVisible(); await expect(detail).toBeFocused() } },
     ] })
     await detail.click()
+    // A short phone viewport makes the real detail overflow, so the scrolling
+    // assertion cannot pass merely because assigning scrollTop was a no-op.
+    if (width === 390) await page.setViewportSize({ width, height: 600 })
     const sheet = panel.getByRole('dialog'), close = panel.getByTestId('policies-sheet-close')
+    await capture('detail-sheet')
     if (width === 390) {
+      const frame = (await sheet.boundingBox())!
+      for (const [key, expected] of Object.entries({ x: 0, y: 0, width, height: 600 })) {
+        expect(Math.abs(frame[key as keyof typeof frame] - expected), `phone sheet ${key}`).toBeLessThanOrEqual(0.5)
+      }
+      expect(await sheet.locator('.sheet-body').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
       await expectStableControls({ controls: { 'policies-sheet-close': close, 'phone-sheet-frame': sheet }, scrollAreas: { body: sheet.locator('.sheet-body') }, interactions: [
-        { name: 'scroll long phone detail', run: async () => { await sheet.locator('.sheet-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } },
+        { name: 'scroll long phone detail', run: async () => { expect(await sheet.locator('.sheet-body').evaluate(el => { el.scrollTop = el.scrollHeight; return el.scrollTop })).toBeGreaterThan(0) } },
         { name: 'shorter key detail uses same sheet', run: async () => { await close.click(); await tab('keys').click(); await loaded(); await detail.click(); await expect(sheet).toContainText('Permission registry') } },
         { name: 'static detail uses same sheet', run: async () => { await close.click(); await tab('elsewhere').click(); await loaded(); await detail.click(); await expect(sheet).toContainText('The existing owner decides') } },
       ] })
@@ -233,8 +254,6 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await tab('ladders').focus(); await page.keyboard.press('ArrowRight'); await expect(tab('keys')).toBeFocused()
     await page.keyboard.press('Control+ArrowRight'); await expect(tab('keys')).toBeFocused()
     await tab('ladders').click(); await loaded()
-    await page.locator('main').evaluate(el => { el.scrollTop = 0 })
-    await testInfo.attach(`policies-${width}-${theme}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
   })
 }
 

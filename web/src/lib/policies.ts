@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { api } from './api.ts'
 import { createScope } from './identityScope.ts'
+import { brand } from './brand.ts'
 import type { Permission } from './access.ts'
 
 export const POLICY_TABS = [
@@ -26,7 +27,7 @@ export interface PolicyLadder {
   role: PolicyRole; steps: PolicyStep[]; setup: boolean; truncated: boolean
   dispatch_family_order: string[]; review_floors: string[]
 }
-export const TRUNCATED_LADDER = 'Showing the first 50 steps; the rest are applied by Aeon but not listed here.'
+export const truncatedLadder = () => `Showing the first 50 steps; the rest are applied by ${brand.value.short_name} but not listed here.`
 export const deniedPolicy = (tab: PolicyTab) => `You can't see this: it needs ${tab === 'ladders' ? 'See models' : tab === 'keys' ? 'See roles and a person session' : 'a person session'}.`
 
 export interface ElsewhereRule { title: string; text: string; owner: string; status: 'Enforced' | 'Advisory'; to?: string; permissions?: string[] }
@@ -44,7 +45,7 @@ export const ELSEWHERE_RULES: readonly ElsewhereRule[] = [
   { title: 'Publishing agent rules', text: 'Publishing and restoring require a person, in the handler and the transaction helper. Bearer keys are refused by the middleware.', owner: 'Agent rules', status: 'Enforced' },
   { title: 'Release planning and membership', text: 'Release writes require a person. Agent keys can read allowed release routes; the middleware refuses planning and membership writes.', owner: 'Releases', status: 'Enforced' },
   { title: 'Locked doctrine changes', text: 'The proposal handler accepts an agent principal for unlocked rules. A change to or from a locked rule requires a person without a key creator. Bearer keys cannot reach the proposal handler.', owner: 'Doctrine', status: 'Enforced' },
-  { title: 'Merge queue and repository ownership', text: 'GitHub rulesets and code owners govern repository changes outside Aeon.', owner: 'GitHub', status: 'Advisory' },
+  { title: 'Merge queue and repository ownership', text: 'GitHub rulesets and code owners govern repository changes outside this workspace.', owner: 'GitHub', status: 'Advisory' },
 ]
 export const ownerLinks = (allowed: (permission: string) => boolean) => ELSEWHERE_RULES.filter(row => row.to && row.permissions?.every(allowed))
 export function keyLimits(registry: Permission[]) {

@@ -5,7 +5,7 @@ import { useSession } from '../../stores/session'
 import { can, onAccessChange, permissionsAvailable, permissionsKnown } from '../../lib/authz'
 import { permissionLabel } from '../../lib/access'
 import { scopeOwner } from '../../lib/identityScope'
-import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, POLICY_ROLES, POLICY_TABS, stepName, stepState, TRUNCATED_LADDER, type PolicyRole, type PolicyTab } from '../../lib/policies'
+import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, POLICY_ROLES, POLICY_TABS, stepName, stepState, truncatedLadder, type PolicyRole, type PolicyTab } from '../../lib/policies'
 import AppIcon from '../AppIcon.vue'
 
 const session = useSession()
@@ -82,7 +82,7 @@ function tabKey(event: KeyboardEvent, index: number) {
               <span class="rule-status">Enforced</span>
             </li>
           </ol>
-          <p v-if="ladder.truncated" class="truncation" role="status">{{ TRUNCATED_LADDER }}</p>
+          <p v-if="ladder.truncated" class="truncation" role="status">{{ truncatedLadder() }}</p>
           <div class="routing-notes">
             <p><strong>CLI</strong> follows configured priority and harness health, without ticket context.</p>
             <p><strong>Dispatch</strong> applies family order, review floors, platform capability, approved accounts and model preferences.</p>
@@ -114,10 +114,10 @@ function tabKey(event: KeyboardEvent, index: number) {
           <h3>Qualified routing · Dispatch</h3><p>Dispatch uses {{ ladder.dispatch_family_order.join(', ') }} as its built-in review family order, then applies further qualification and preferences.</p>
           <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
           <h3>Availability</h3><p>A suspended step records its reason and expiry. Once the suspension expires, it stops excluding that profile. The server decides availability when routing runs.</p>
-          <p v-if="ladder.truncated">{{ TRUNCATED_LADDER }}</p>
+          <p v-if="ladder.truncated">{{ truncatedLadder() }}</p>
         </template>
         <template v-else-if="tab === 'keys'"><h3>Permission registry · Access</h3><p>These permissions are marked as not grantable to agent keys in the live registry. Holding a role does not bypass a key’s scope ceiling.</p><p>This registry endpoint is available to person sessions with See roles. Bearer keys are refused by the middleware even when they hold See roles.</p></template>
-        <template v-else><h3>The existing owner decides</h3><p>This page reads existing rules. It stores no policy, grants no exception and changes no enforcement.</p><p>Enforced describes existing checks in Aeon. Advisory describes guidance or rules owned outside Aeon, including GitHub repository controls.</p><p>Editors are linked only where an existing screen and your permissions allow it. Model preferences, ladder editing and lane coordination have no editor screen here.</p></template>
+        <template v-else><h3>The existing owner decides</h3><p>This page reads existing rules. It stores no policy, grants no exception and changes no enforcement.</p><p>Enforced describes existing checks in this workspace. Advisory describes guidance or rules owned elsewhere, including GitHub repository controls.</p><p>Editors are linked only where an existing screen and your permissions allow it. Model preferences, ladder editing and lane coordination have no editor screen here.</p></template>
       </div>
       <footer><button class="btn" data-testid="policies-sheet-close" @click="closeDetails">Close <kbd>Esc</kbd></button></footer>
     </dialog>
@@ -179,7 +179,7 @@ function tabKey(event: KeyboardEvent, index: number) {
   .role-detail { height: 42px; }
   .policy-row { gap: 8px; grid-template-columns: 22px minmax(0, 1fr) auto; }
   .key-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .policy-sheet { inset: 0; margin: 0; width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .policy-sheet { inset: 0; margin: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .policy-sheet header { padding: 22px 20px 16px; }
   .sheet-body { padding-inline: 20px; }
   .policy-sheet footer { padding-inline: 20px; }
