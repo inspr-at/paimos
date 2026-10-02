@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Locator } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -56,8 +56,177 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; manage?: b
 async function list(page: Page, requests: ReturnType<typeof request>[]) {
   await page.route(PENDING, route => route.fulfill({ json: { requests } }))
 }
-const strip = (page: Page) => page.getByRole('group', { name: 'Attach requests' })
+const strip = (page: Page) => page.locator('.queue:has(.attach-item)')
+async function chooseAndDecide(dialog: Locator, choice: 'Allow' | 'Decline') {
+  await dialog.getByRole('radio', { name: choice, exact: true }).check()
+  await dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ }).click()
+}
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
+  test(`attach controls never move from code to memo or settled state ${theme} ${width}`, async ({ page }) => {
+    await setup(page, { theme, paused: true })
+    await page.setViewportSize({ width, height: 900 })
+    let state: State = 'pending'
+    const posts: string[] = []
+    await page.route('**/api/agent-pairing/attach/**', route => {
+      if (route.request().method() === 'GET') return route.fallback()
+      posts.push(route.request().url())
+      if (route.request().url().endsWith('/approve')) state = 'approved'
+      return route.fulfill({ json: request('guard', state, { consent: 'local_auth' }) })
+    })
+    await list(page, [request('guard', 'pending', { consent: 'local_auth' })])
+    await page.goto('/agents#attach=123456789')
+    const dialog = page.getByRole('dialog')
+    const actions = dialog.locator(width === 390 ? '.at-bottom .desk-btn' : '.at-top .desk-btn')
+    const positions = async () => Promise.all([actions.nth(0).boundingBox(), actions.nth(1).boundingBox(), dialog.getByRole('button', { name: 'Close attach review' }).boundingBox()])
+    await expect(dialog.getByLabel('Attach code')).toHaveValue('123 456 789')
+    const initial = await positions()
+    expect(posts).toEqual([])
+    await dialog.getByLabel('Attach code').fill('123456789')
+    expect(await positions()).toEqual(initial)
+    await dialog.getByRole('button', { name: /Find request/ }).click()
+    await expect(dialog).toContainText('PDF worker image')
+    expect(await positions()).toEqual(initial)
+    await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
+    for (const choice of ['Allow', 'Decline', 'Allow']) {
+      await dialog.getByRole('radio', { name: choice, exact: true }).check()
+      expect(await positions()).toEqual(initial)
+      expect(posts).toHaveLength(1)
+    }
+    await dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ }).click()
+    await expect(dialog).toContainText('Waiting for confirmation on Markus’s MacBook.')
+    expect(await positions()).toEqual(initial)
+    expect(posts).toHaveLength(2)
+    expect(await fits(page)).toBe(true)
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.clock.resume()
+    expect((await new AxeBuilder({ page }).include('dialog').analyze()).violations).toEqual([])
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: `${shots}/memo-guard-${theme}-${width}.png` })
+  })
+}
+
+for (const platform of ['MacIntel', 'Win32']) {
+  test(`attach keyboard keeps browser shortcuts native and requires explicit lookup on ${platform}`, async ({ page }) => {
+    await page.addInitScript(platform => Object.defineProperty(navigator, 'platform', { value: platform }), platform)
+    await setup(page, { paused: true })
+    await list(page, [])
+    const posts: string[] = []
+    await page.route('**/api/agent-pairing/attach/**', route => {
+      if (route.request().method() === 'GET') return route.fallback()
+      posts.push(route.request().url())
+      return route.fulfill({ json: request('keys', route.request().url().endsWith('/approve') ? 'approved' : 'pending') })
+    })
+    await page.goto('/agents#attach=123456789')
+    const dialog = page.getByRole('dialog'), input = dialog.getByLabel('Attach code')
+    await expect(input).toBeFocused()
+    expect(posts).toEqual([])
+    await input.press('Enter')
+    expect(posts).toEqual([])
+    const native = await input.evaluate(el => ['s', 'r', 'd', 'p', 'a'].map(key => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, metaKey: true })
+      el.dispatchEvent(event); return event.defaultPrevented
+    }))
+    expect(native).toEqual([false, false, false, false, false])
+    const controlSave = await input.evaluate(el => { const event = new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true, ctrlKey: true }); el.dispatchEvent(event); return event.defaultPrevented })
+    expect(controlSave).toBe(false)
+    await input.press(platform === 'MacIntel' ? 'Meta+Enter' : 'Control+Enter')
+    await expect(dialog).toContainText('PDF worker image')
+    expect(posts).toHaveLength(1)
+    await dialog.locator('.paper').focus()
+    await page.keyboard.press('1')
+    await expect(dialog.getByRole('radio', { name: 'Allow', exact: true })).toBeChecked()
+    expect(posts).toHaveLength(1)
+    await page.keyboard.press('Enter')
+    await expect(dialog).toContainText('Approved. Keep the attach terminal open')
+    expect(posts).toHaveLength(2)
+    await dialog.getByRole('button', { name: 'Close attach review' }).click()
+    await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+    await expect(input).toBeFocused()
+    await input.press('Escape')
+    await expect(dialog).toBeVisible()
+    await expect(input).not.toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+  })
+}
+
+test('a reviewed request expires in place and cannot send an approval', async ({ page }) => {
+  await setup(page, { paused: true })
+  await list(page, [request('expires', 'pending', { mins: 2 })])
+  const posts: string[] = []
+  await page.route('**/api/agent-pairing/attach/**', route => { if (route.request().method() === 'GET') return route.fallback(); posts.push(route.request().url()); return route.fulfill({ json: request('expires', 'approved') }) })
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
+  await page.clock.fastForward(120_000)
+  await expect(dialog).toContainText('Request expired. Run aeon-agentd attach again.')
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
+  await dialog.locator('.paper').focus()
+  await page.keyboard.press('1')
+  await page.keyboard.press('Enter')
+  expect(posts).toEqual([])
+})
+
+test('attach approvals share the queue count and expiry ordering, never a code or inline Allow', async ({ page }) => {
+  const data = await setup(page, { paused: true })
+  data.approvals.push({ id: 'permission', agent_name: 'worker', resource_id: 'p-pharos', run_id: null, decision: null, decided_by_principal_id: null, agent_principal_id: data.sessions[0]!.agent_principal_id, scope: 'nodes.read', resource_kind: 'node', rationale: 'Read this project', expires_at: new Date(NOW + 4 * 60_000).toISOString(), proposed_at: new Date(NOW).toISOString(), risk: 'low' })
+  await list(page, [request('later', 'pending', { mins: 6 }), request('sooner', 'pending', { mins: 2, mode: 'lease' })])
+  await page.goto('/agents')
+  const queue = strip(page)
+  await expect(queue.locator('.count-badge')).toHaveText('3')
+  const rows = queue.locator('.items > li')
+  await expect(rows).toHaveCount(3)
+  expect(await rows.evaluateAll(rows => rows.map(row => row.getAttribute('data-row')))).toEqual(['t:sooner', 'a:permission', 't:later'])
+  await expect(queue.locator('.attach-item').getByRole('button', { name: /Allow/ })).toHaveCount(0)
+  await expect(queue).not.toContainText('123456789')
+  await expect(queue.locator('.attach-item').first()).toContainText('Status only')
+  await expect(page.getByRole('button', { name: 'Attach session', exact: true }).locator('.count-badge')).toHaveCount(0)
+})
+
+test('round navigation and choices keep controls fixed, Skip sends no decision', async ({ page }) => {
+  await setup(page, { paused: true })
+  await list(page, [request('one', 'pending', { mins: 4 }), request('two', 'pending', { mins: 8, host: 'Another Mac with a much longer host name', mode: 'lease' })])
+  const posts: string[] = []
+  await page.route('**/api/agent-pairing/attach/**', route => { if (route.request().method() === 'GET') return route.fallback(); posts.push(route.request().url()); return route.fulfill({ json: request('one', 'approved') }) })
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).first().click()
+  const dialog = page.getByRole('dialog')
+  const controls = dialog.locator('.desk-top button')
+  const positions = async () => controls.evaluateAll(items => items.map(item => { const { x, y, width, height } = item.getBoundingClientRect(); return { x, y, width, height } }))
+  const before = await positions()
+  await dialog.getByRole('button', { name: 'Next request', exact: true }).click()
+  await expect(dialog).toContainText('Another Mac with a much longer host name')
+  expect(await positions()).toEqual(before)
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  expect(await positions()).toEqual(before)
+  await dialog.getByRole('button', { name: 'Previous request', exact: true }).click()
+  expect(await positions()).toEqual(before)
+  await dialog.locator('.paper').focus()
+  await page.keyboard.press('s')
+  await expect(dialog).toContainText('Another Mac with a much longer host name')
+  expect(await positions()).toEqual(before)
+  expect(posts).toEqual([])
+})
+
+test('a declined request settles then folds into Decided', async ({ page }) => {
+  await setup(page, { paused: true })
+  let state: State = 'pending'
+  await page.route(PENDING, route => route.fulfill({ json: { requests: [request('fold', state)] } }))
+  await page.route('**/api/agent-pairing/attach/fold/revoke', route => { state = 'detached'; return route.fulfill({ json: request('fold', state) }) })
+  await page.goto('/agents')
+  await strip(page).getByRole('button', { name: 'Review' }).click()
+  await chooseAndDecide(page.getByRole('dialog'), 'Decline')
+  await expect(strip(page).locator('[data-outcome="declined"]')).toContainText('You declined it')
+  await page.getByRole('button', { name: 'Close attach review' }).click()
+  await page.clock.fastForward(7_000)
+  await expect(page.locator('.attach-item')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Decided', exact: false }).click()
+  await expect(page.locator('.attach-past')).toContainText('Declined')
+})
 
 test('a waiting attach is listed with computer, harness and expiry, and one click reviews it', async ({ page }) => {
   await setup(page)
@@ -73,8 +242,10 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   mkdirSync(shots, { recursive: true })
   await expect(row).toContainText('Claude on Markus’s MacBook')
   await page.screenshot({ path: `${shots}/single-waiting.png` })
-  await expect(row).toContainText('Wants to watch the conversation')
-  await expect(row).toContainText('Computer paired · This session not yet linked')
+  await expect(row).toContainText('and share its conversation')
+  await expect(row).toContainText('PHAROS-12')
+  await expect(row).toContainText('Your terminal on Markus’s MacBook waits')
+  await expect(row.getByRole('button', { name: /Allow/ })).toHaveCount(0)
   await expect(row).toContainText(/Expires in [89]m/)
   expect(posts).toEqual([])
   await row.getByRole('button', { name: 'Review' }).click()
@@ -86,7 +257,7 @@ test('a waiting attach is listed with computer, harness and expiry, and one clic
   // Reviewing is not approving: nothing was sent, and there is no code to type.
   expect(posts).toEqual([])
   await expect(dialog.getByLabel('Attach code')).toHaveCount(0)
-  await dialog.getByRole('button', { name: 'Allow live watch' }).click()
+  await chooseAndDecide(dialog, 'Allow')
   await expect(dialog).toContainText('Approved. Keep the attach terminal open to share new turns.')
   expect(posts).toHaveLength(1)
   expect(posts[0].url).toMatch(/\/api\/agent-pairing\/attach\/r-wait\/approve$/)
@@ -102,10 +273,10 @@ test('a decision refreshes the list instead of waiting for the next poll', async
   await page.goto('/agents')
   await strip(page).getByRole('button', { name: 'Review' }).click()
   const before = reads
-  await page.getByRole('dialog').getByRole('button', { name: 'Decline' }).click()
-  await expect(page.getByRole('dialog')).toContainText('This watch ended.')
+  await chooseAndDecide(page.getByRole('dialog'), 'Decline')
+  await expect(page.getByRole('dialog')).toContainText('You declined it. Nothing was shared.')
   await page.getByRole('button', { name: 'Close attach review' }).click()
-  await expect(strip(page).locator('[data-outcome="cancelled"]')).toContainText('Request cancelled')
+  await expect(strip(page).locator('[data-outcome="declined"]')).toContainText('You declined it')
   expect(reads).toBeGreaterThan(before)
 })
 
@@ -117,10 +288,10 @@ test('approved, expired and cancelled requests say so, and ended ones can be dis
     request('r-no', 'detached', { mode: 'lease' }),
   ])
   await page.goto('/agents')
-  await expect(strip(page).locator('[data-outcome="approved"]')).toContainText('Approved. Confirm with Touch ID on that Mac.')
+  await expect(strip(page).locator('[data-outcome="approved"]')).toContainText('Confirm with Touch ID on Markus’s MacBook.')
   const expired = strip(page).locator('[data-outcome="expired"]')
   await expect(expired).toContainText('Codex on Linux workstation')
-  await expect(expired).toContainText('Request expired. Start a new attach in the terminal.')
+  await expect(expired).toContainText('Request expired. Run aeon-agentd attach again.')
   await expect(strip(page).locator('[data-outcome="cancelled"]')).toContainText('Request cancelled')
   // Nothing waits, so no Review action and no primary button.
   await expect(strip(page).getByRole('button', { name: 'Review' })).toHaveCount(0)
@@ -172,7 +343,7 @@ test('the terminal link fills the code in, is removed from the address bar, and 
   })
   await page.goto('/agents#attach=123456789')
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('heading', { name: 'Attach a running session' })).toBeVisible()
+  await expect(dialog.getByRole('heading', { name: 'Enter the code from your terminal' })).toBeVisible()
   await expect(dialog.getByLabel('Attach code')).toHaveValue('123 456 789')
   await expect.poll(() => new URL(page.url()).hash).toBe('')
   expect(new URL(page.url()).pathname).toBe('/agents')
@@ -181,11 +352,12 @@ test('the terminal link fills the code in, is removed from the address bar, and 
   expect(urls.filter(url => url.includes('123456789'))).toEqual([])
   mkdirSync(shots, { recursive: true })
   await page.screenshot({ path: `${shots}/link-prefilled.png` })
-  await dialog.getByRole('button', { name: 'Review session' }).click()
+  await dialog.getByRole('button', { name: /Find request/ }).click()
   await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
   expect(sent).toEqual([{ url: expect.stringMatching(/\/attach\/lookup$/), body: { user_code: '123456789' } }])
   // Still waiting for the person's own click.
-  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
   expect(sent).toHaveLength(1)
 })
 
@@ -209,12 +381,12 @@ test('German pairing guidance still only prefills the approval code', async ({ b
     })
     await page.goto('/agents#attach=123456789')
     const dialog = page.getByRole('dialog')
-    await expect(dialog.getByRole('heading', { name: 'Eine laufende Sitzung verknüpfen' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Enter the code from your terminal' })).toBeVisible()
     await expect(dialog).toContainText('Verknüpfe jede laufende Sitzung separat mit ihrem Ticket.')
     await expect(dialog.getByLabel('Verknüpfungscode')).toHaveValue('123 456 789')
     await expect.poll(() => new URL(page.url()).hash).toBe('')
     expect(sent).toEqual([])
-    await dialog.getByRole('button', { name: 'Sitzung prüfen' }).click()
+    await dialog.getByRole('button', { name: /Find request/ }).click()
     await expect(dialog).toContainText('Computer gekoppelt · Diese Sitzung ist noch nicht verknüpft')
     expect(sent).toHaveLength(1)
   } finally { await page.close() }
@@ -475,10 +647,12 @@ test('names still loading for the previous person never enable approval for the 
   await page.waitForTimeout(400)
   // The previous person's names land late: they fill nothing in for her, and approval stays off.
   await expect(dialog.getByText('Loading…')).toHaveCount(2)
-  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeDisabled()
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeDisabled()
   second.open()
   await expect(dialog).toContainText('PDF worker image')
-  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
 })
 
 test('a decision still on its way when the person changes shows nothing to the next person', async ({ page }) => {
@@ -494,7 +668,7 @@ test('a decision still on its way when the person changes shows nothing to the n
   await list(page, [request('r-wait', 'pending')])
   await page.goto('/agents')
   await strip(page).getByRole('button', { name: 'Review' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Allow live watch' }).click()
+  await chooseAndDecide(page.getByRole('dialog'), 'Allow')
   await expect.poll(() => approvals).toBe(1)
   await signInAsOla(page)
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -559,10 +733,11 @@ for (const action of ['approve', 'revoke'] as const) {
     const session = page.locator(`[data-row="s:${data.sessions[0].id}"]`)
     await expect(session).toContainText('imac0')
     await strip(page).getByRole('button', { name: 'Review' }).click()
-    await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+    await page.getByRole('dialog').getByRole('radio', { name: 'Allow', exact: true }).check()
+    await expect(page.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
     // The clock has not advanced since startup: only the accepted write can refresh.
     await holdDecisionBody(page, action)
-    await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
+    await chooseAndDecide(page.getByRole('dialog'), action === 'approve' ? 'Allow' : 'Decline')
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
     await page.getByRole('button', { name: 'Close attach review' }).click()
     expect(await decisionBody(page)).toEqual({ decoding: true, aborted: false })
@@ -574,7 +749,7 @@ for (const action of ['approve', 'revoke'] as const) {
     await page.clock.runFor(1)
     await expect.poll(() => sessionReads).toBeGreaterThan(before.sessionReads)
     await expect(session).toContainText('Accepted attach session')
-    await expect(strip(page).locator(`[data-outcome="${action === 'approve' ? 'approved' : 'cancelled'}"]`)).toBeVisible()
+    await expect(strip(page).locator(`[data-outcome="${action === 'approve' ? 'approved' : 'declined'}"]`)).toBeVisible()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await page.getByRole('button', { name: 'Attach session', exact: true }).click()
     await expect(page.getByLabel('Attach code')).toHaveValue('')
@@ -587,9 +762,10 @@ for (const action of ['approve', 'revoke'] as const) {
     await page.route(`**/api/agent-pairing/attach/r-wait/${action}`, route => route.fulfill({ json: request('r-wait', action === 'approve' ? 'approved' : 'detached') }))
     await page.goto('/agents')
     await strip(page).getByRole('button', { name: 'Review' }).click()
-    await expect(page.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+    await page.getByRole('dialog').getByRole('radio', { name: 'Allow', exact: true }).check()
+    await expect(page.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
     await holdDecisionBody(page, action)
-    await page.getByRole('button', { name: action === 'approve' ? 'Allow live watch' : 'Decline', exact: true }).click()
+    await chooseAndDecide(page.getByRole('dialog'), action === 'approve' ? 'Allow' : 'Decline')
     await expect.poll(() => decisionBody(page)).toEqual({ decoding: true, aborted: false })
     await list(page, [request('r-next', 'pending', { host: 'Ola’s Mac' })])
     await signInAsOla(page)
@@ -640,14 +816,15 @@ for (const entry of ['the list', 'a typed code'] as const) {
     else {
       await page.getByRole('button', { name: 'Attach session' }).click()
       await dialog.getByLabel('Attach code').fill('123456789')
-      await dialog.getByRole('button', { name: 'Review session' }).click()
+      await dialog.getByRole('button', { name: /Find request/ }).click()
     }
     await expect(dialog).toContainText('Requested by a process on Markus’s MacBook.')
     // Still reading: names are pending, so the button is off and nothing can be sent.
     await expect(dialog.getByText('Loading…')).toHaveCount(2)
-    const allow = dialog.getByRole('button', { name: 'Allow live watch' })
+    await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+    const allow = dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })
     await expect(allow).toBeDisabled()
-    await expect(dialog.getByRole('button', { name: 'Decline' })).toBeEnabled()
+    await expect(dialog.getByRole('radio', { name: 'Decline', exact: true })).toBeEnabled()
     await allow.click({ force: true })
     expect(posts.filter(url => url.endsWith('/approve'))).toEqual([])
     names.open()
@@ -670,7 +847,8 @@ test('names that cannot be read fall back to the ids and approval is possible', 
   await page.goto('/agents')
   await strip(page).getByRole('button', { name: 'Review' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('button', { name: 'Allow live watch' })).toBeEnabled()
+  await dialog.getByRole('radio', { name: 'Allow', exact: true }).check()
+  await expect(dialog.getByRole('button', { name: /^Decide(?: & next)?(?:\s|$)/ })).toBeEnabled()
   await expect(dialog.locator('dd[title="p-pharos"]')).toHaveText('p-pharos')
   await expect(dialog.locator('dd[title="n-2"]')).toHaveText('n-2')
 })
@@ -690,7 +868,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(strip(page).locator('[data-outcome="cancelled"]')).toBeVisible()
     expect(await fits(page)).toBe(true)
     expect(await strip(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    expect((await new AxeBuilder({ page }).include('[aria-label="Attach requests"]').analyze()).violations).toEqual([])
+    expect((await new AxeBuilder({ page }).include('.queue').analyze()).violations).toEqual([])
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: `${shots}/pending-${theme}-${width}.png` })
     // Every action is a real, reachable control at this width.

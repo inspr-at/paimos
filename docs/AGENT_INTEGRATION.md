@@ -468,6 +468,20 @@ or a report, and keeps it in memory only until the Agents page fills the lookup 
 with it (exactly nine digits, else ignored). A session that ended drops it, and opening
 the link looks up and approves nothing.
 
+The terminal's waiting block names the Decision Desk and the Attach session entry,
+prints the code in three space-separated groups, and makes the validated fragment
+link clickable with OSC 8. Ctrl-C cancels a waiting request; after activation it
+stops sharing. On today's /agents page, attach requests are approvals in **Needs you**,
+ordered with permission requests by expiry. Rows show the ticket, sharing mode and
+waiting terminal, never the code, and offer **Review…** only. Review opens a memo
+with unselected Allow/Decline choices; **Decide** submits the choice. The code entry
+step performs no lookup until **Find request**. Controls stay above the growing
+memo on desktop and in a pinned bottom bar in a full-height phone sheet.
+Single keys work outside text fields; from the code field use Command+Enter on
+macOS or Ctrl+Enter elsewhere. Escape leaves the field before closing the review.
+Allowed, expired and cancelled outcomes stay in place. Because the server combines
+cancellation and decline as detached, only the deciding tab says Declined.
+
 Attach reads and decisions stay with the tenant, person and authentication
 generation that started them. Each continuation checks that scope in the same
 synchronous turn as applying its answer. Starting sign-in or sign-out also
