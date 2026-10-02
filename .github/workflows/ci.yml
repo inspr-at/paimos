@@ -478,7 +478,8 @@ jobs:
       - working-directory: web
         env:
           STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts --workers=1
+          AGENT_ACTIVITY_SHOTS: ${{ runner.temp }}/status-autopilot-shots/activity
+        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
       - uses: actions/upload-artifact@v7
         if: always()
         with:
