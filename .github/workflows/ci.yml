@@ -331,8 +331,20 @@ jobs:
           tests/accounts-computers.spec.ts tests/agents-top.spec.ts
           tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
       - name: Recurring work and anchored-control regressions (AEON-573)
+        id: recurrence-ui
         working-directory: web
+        env:
+          AEON_RECURRENCE_SHOTS: ${{ runner.temp }}/aeon-recurrence-shots
         run: npm test -- tests/recurrences.spec.ts --workers=1
+      - name: Preserve recurrence screenshots and failures
+        if: always() && steps.recurrence-ui.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aeon-573-recurring-work
+          path: |
+            ${{ runner.temp }}/aeon-recurrence-shots/
+            web/test-results/
+          retention-days: 7
       - name: Session linking, approval and security regressions
         working-directory: web
         env:
