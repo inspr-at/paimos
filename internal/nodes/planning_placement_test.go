@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -533,5 +534,44 @@ func TestPlanningLookupWorkSharedWithinReadTransaction(t *testing.T) {
 				t.Errorf("%s %q: %d queries, want %d", order, marker, got, want)
 			}
 		}
+	}
+}
+
+func TestPlanningPlacementLimitBeforeResolution(t *testing.T) {
+	w := planningSetup(t)
+	ctx := dbtest.Seed(t.Context())
+	if err := db.InTenant(ctx, appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name) SELECT $1,'person','Placement cap '||g FROM generate_series(1,$2::int) g`, w.admin.TenantID, maxPlanPlacements); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields)
+   SELECT $1,k.id,$2,'CAP-'||row_number() OVER(ORDER BY p.id),p.name,jsonb_build_object('assignee',p.id,'area','backend','route_role','build','estimate_hours',2)
+   FROM principals p CROSS JOIN node_kinds k WHERE p.name LIKE 'Placement cap %' AND k.slug='ticket'`, w.admin.TenantID, w.root.ID); err != nil {
+			return err
+		}
+		rows, err := filteredPlanPlacements(ctx, tx, listQuery{Within: &w.root.ID, Kinds: []string{"ticket"}})
+		if err != nil {
+			return err
+		}
+		if len(rows) != maxPlanPlacements {
+			t.Fatalf("boundary: %d placements", len(rows))
+		}
+		var extra string
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','One beyond cap') RETURNING id::text`, w.admin.TenantID).Scan(&extra); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields) SELECT $1,id,$2,'CAP-EXTRA','Extra',jsonb_build_object('assignee',$3::text,'area','backend','route_role','build','estimate_hours',2) FROM node_kinds WHERE slug='ticket'`, w.admin.TenantID, w.root.ID, extra)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tracer := &ticketGraphTracer{}
+	pool := tracedPool(t, tracer)
+	code, body := callAs(t, New(pool, nil), &w.admin, "GET", "/api/nodes?within="+w.root.ID+"&kind=ticket&sort=tokens&limit=1", "")
+	if code != 400 || !strings.Contains(string(body), "too many planning placements") {
+		t.Fatalf("cap: %d %s", code, body)
+	}
+	if countMarker(tracer.snapshot(), "WHERE r.role = $1") != 0 {
+		t.Fatal("over-limit list read role ladders before rejecting")
 	}
 }

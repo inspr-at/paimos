@@ -99,7 +99,7 @@ func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 	out := workKindPage{Items: []workKind{}}
 	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{}); err != nil {
+		if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{ProjectID: project}); err != nil {
 			return err
 		}
 		if err := readableProject(ctx, tx, p, project); err != nil {

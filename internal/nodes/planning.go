@@ -837,7 +837,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		}
 	}
 	if money == nil {
-		money, err = loadPlanMicros(ctx, tx, ids, seen)
+		money, err = loadPlanMicros(ctx, tx, ids, seen, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -882,14 +882,10 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 
 // loadPlanMicros reads list and paid micro-dollars for the page with the same
 // rounding the cost sort uses.
-func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen) (map[string]planMicros, error) {
+func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen, seeds []planRow) (map[string]planMicros, error) {
 	out := map[string]planMicros{}
 	if len(ids) == 0 {
 		return out, nil
-	}
-	seeds, err := loadPlanRows(ctx, tx, ids, planningViewer(ctx, tx))
-	if err != nil {
-		return nil, err
 	}
 	rates, err := planningRates(ctx, tx, seen, seeds)
 	if err != nil {

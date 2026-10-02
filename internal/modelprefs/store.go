@@ -18,8 +18,17 @@ func CanonicalPersonSQL(expr string) string {
 	return `(SELECT coalesce(cp.linked_to,cp.id) FROM principals cp WHERE cp.id=(` + expr + `)::uuid AND cp.kind='person' AND cp.status='active')`
 }
 func CanonicalPerson(ctx context.Context, tx pgx.Tx, id string) (*string, error) {
+	cache, _ := ctx.Value(chainCacheKey{}).(*readCache)
+	if cache != nil {
+		if person, ok := cache.people[id]; ok {
+			return copyPerson(person), nil
+		}
+	}
 	var out *string
 	err := tx.QueryRow(ctx, `SELECT `+CanonicalPersonSQL("$1")+`::text`, optional(id)).Scan(&out)
+	if err == nil && cache != nil {
+		cache.people[id] = copyPerson(out)
+	}
 	return out, err
 }
 
@@ -74,7 +83,11 @@ func orderedChain(raw []byte) ([]Scope, error) {
 	return out, nil
 }
 func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID string) ([]Scope, error) {
-	cache, _ := ctx.Value(chainCacheKey{}).(map[string][]Scope)
+	read, _ := ctx.Value(chainCacheKey{}).(*readCache)
+	var cache map[string][]Scope
+	if read != nil {
+		cache = read.chains
+	}
 	key := projectID + "|"
 	if personID != nil {
 		key += *personID
@@ -97,11 +110,32 @@ func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID strin
 }
 
 type chainCacheKey struct{}
+type kindCacheKey struct{ area, project string }
+type kindLookup struct {
+	kind     Kind
+	fallback bool
+}
+type readCache struct {
+	chains map[string][]Scope
+	people map[string]*string
+	kinds  map[kindCacheKey]kindLookup
+}
 
-// WithChainCache is for one read-only transaction. Callers must discard it
-// before a preference write or another transaction; the scopes are immutable.
+func copyPerson(person *string) *string {
+	if person == nil {
+		return nil
+	}
+	id := *person
+	return &id
+}
+
+// WithChainCache is for one read-only transaction. It shares scope, canonical
+// person and (area, project) kind reads. Discard it before a preference write
+// or another transaction; cached scopes and kinds are immutable.
 func WithChainCache(ctx context.Context) context.Context {
-	return context.WithValue(ctx, chainCacheKey{}, map[string][]Scope{})
+	return context.WithValue(ctx, chainCacheKey{}, &readCache{
+		chains: map[string][]Scope{}, people: map[string]*string{}, kinds: map[kindCacheKey]kindLookup{},
+	})
 }
 
 type Kind struct {
@@ -118,15 +152,26 @@ func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, b
 	if area == "review" || area == "other" {
 		area = ""
 	}
+	cache, _ := ctx.Value(chainCacheKey{}).(*readCache)
+	key := kindCacheKey{area, projectID}
+	if cache != nil {
+		if found, ok := cache.kinds[key]; ok {
+			return found.kind, found.fallback, nil
+		}
+	}
 	var kind Kind
 	err := tx.QueryRow(ctx, `SELECT id::text,slug,label,hint,project_id::text,system,position FROM work_kinds
  WHERE archived_at IS NULL AND ((slug=$1 AND (project_id IS NULL OR project_id=$2::uuid)) OR slug='other')
  ORDER BY (slug=$1) DESC,(project_id IS NOT NULL) DESC LIMIT 1`, area, optional(projectID)).
 		Scan(&kind.ID, &kind.Slug, &kind.Label, &kind.Hint, &kind.ProjectID, &kind.System, &kind.Position)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Kind{Slug: "other"}, true, nil
+		kind, err = Kind{Slug: "other"}, nil
 	}
-	return kind, kind.Slug != area, err
+	fallback := kind.Slug != area
+	if err == nil && cache != nil {
+		cache.kinds[key] = kindLookup{kind, fallback}
+	}
+	return kind, fallback, err
 }
 func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	_, err := tx.Exec(ctx, `SELECT aeon_seed_work_kinds($1::uuid)`, tenantID)

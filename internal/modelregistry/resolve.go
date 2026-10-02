@@ -45,7 +45,7 @@ type ladderStep struct {
 	SuppressedUntil *time.Time
 }
 
-func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
+func resolveRoleUncached(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) (Resolution, error) {
 	role, ok := roleByName(q.Role)
 	if !ok {
 		return Resolution{}, fail(http.StatusBadRequest, "unknown model role")
@@ -94,7 +94,7 @@ func resolveRole(ctx context.Context, tx pgx.Tx, q resolveQuery, now time.Time) 
 	return out, nil
 }
 
-func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
+func loadLadderUncached(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT r.priority, r.profile_id::text, r.state, r.reason, r.valid_until,
 		       p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at,

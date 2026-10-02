@@ -15759,7 +15759,7 @@ components:
         Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
         Null clears a classification and provenance, but a valid estimate causes missing classifications to be suggested again. Existing tickets are not backfilled.
       properties:
-        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security, null]}
+        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, null]}
         route_role_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
         route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}

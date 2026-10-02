@@ -94,9 +94,9 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div v-if="layout === 'column'" class="prop"><dt>Updated</dt><dd><time class="prop-static" :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time></dd></div>
     <div v-if="layout === 'column'" class="prop"><dt>Created</dt><dd><time class="prop-static" :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time></dd></div>
+    <TicketPlacement :item="item" :editable="editable" :save="savePlacement" />
     <!-- Last: logged hours arrive after the ticket, and nothing moves when they do. -->
     <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
-    <TicketPlacement :item="item" :editable="editable" :save="savePlacement" />
   </dl>
 </template>
 

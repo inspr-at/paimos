@@ -62,6 +62,8 @@ required before merge/release. Before rolling back below this fence, set all
 residency requirements to `any` or pause dispatch; older binaries cannot enforce
 these stamps.
 
+AEON-502 C adds `1130_tenant_work_kinds.sql`, an additive tenant-insert trigger using the existing idempotent work-kind seed. It covers startup `EnsureTenant` inserts under forced RLS and restores the caller's tenant setting. Existing tenants retain their configured kinds; no table, column or historical migration changes.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

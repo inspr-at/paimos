@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
@@ -464,6 +465,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		ctx = modelprefs.WithChainCache(ctx)
+		ctx = modelregistry.WithResolutionCache(ctx)
 		ctx = context.WithValue(ctx, planRouteCacheKey{}, map[string]*planRoute{})
 		var anchor any
 		if mark != nil {
