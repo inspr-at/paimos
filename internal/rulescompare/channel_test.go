@@ -5,7 +5,33 @@ package rulescompare
 import (
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/markdownsource/testfixture"
 )
+
+func TestDeliveryRequiresCompleteActiveInstruction(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Text: "Preserve safety."}}}
+	cases := map[string]string{
+		"comment":           "<!-- Preserve safety. -->",
+		"multiline comment": "<!--\n- Preserve safety.\n-->",
+		"qualified":         "- Optionally: Preserve safety.",
+		"suffix":            "- Preserve safety. Unless inconvenient.",
+		"quote":             "> Preserve safety.",
+	}
+	for name, block := range testfixture.Blocks() {
+		cases[name] = strings.ReplaceAll(block, "Example instruction.", "Preserve safety.")
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "fail" {
+				t.Fatal("non-instruction certified as matching doctrine")
+			}
+			if doubles := sessionDoubles(HarnessFile{Harness: "codex", Session: true, Text: "# Aeon session rules\n\n" + body}, []PinnedRelease{release}); len(doubles) != 0 {
+				t.Fatalf("non-instruction certified as duplicate: %v", doubles)
+			}
+		})
+	}
+}
 
 func TestDeliveryReportOneChannel(t *testing.T) {
 	const (

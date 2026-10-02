@@ -45,6 +45,58 @@ func undoEvent(t *testing.T, f fixture, event events.Event, status int) {
 	t.Helper()
 	expect(t, request(f.handler, f.admin, http.MethodPost, "/api/events/"+strconv.FormatInt(event.ID, 10)+"/undo", ""), status)
 }
+
+func TestCRMUndoUsesCurrentAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		permissions []string
+		legacy      []string
+		owner       bool
+		want        int
+	}{
+		{"revoked stale admin", []string{"events.read", "events.undo"}, []string{"admin"}, false, 403},
+		{"events only custom role", []string{"events.read", "events.undo", "events.undo_other"}, []string{"admin"}, false, 403},
+		{"owner without legacy admin", nil, []string{}, true, 201},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			withUndo(t, &f)
+			expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/organisations", map[string]any{"name": "Authority fixture"}), 201)
+			event := eventOf(t, f, "crm.customer_created")
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+				var role string
+				if tc.owner {
+					if err := tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='owner'`).Scan(&role); err != nil {
+						return err
+					}
+				} else {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'undo_test','Undo test') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest($3::text[])`, f.admin.TenantID, role, tc.permissions); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.admin.ID, role); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE principals SET roles=$2 WHERE id=$1`, f.admin.ID, tc.legacy)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			f.admin.Roles = tc.legacy
+			undoEvent(t, f, event, tc.want)
+			var deleted bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT deleted_at IS NOT NULL FROM nodes WHERE id=$1`, *event.NodeID).Scan(&deleted); err != nil {
+				t.Fatal(err)
+			}
+			if deleted != (tc.want == 201) {
+				t.Fatal("undo mutation disagrees with live authority")
+			}
+		})
+	}
+}
 func TestCRMUndoStaleAndPrimary(t *testing.T) {
 	f := setup(t)
 	withUndo(t, &f)
