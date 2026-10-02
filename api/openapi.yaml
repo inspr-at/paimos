@@ -14463,7 +14463,7 @@ components:
           properties:
             pending_check: {$ref: "#/components/schemas/AccountCheck"}
             readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
-            share_usage: {type: boolean, description: Owner-controlled quota sharing, false until opted in.}
+            share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
             details_redacted: {type: boolean}
             owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
             owner_person_name: {type: string}
