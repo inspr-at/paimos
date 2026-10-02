@@ -158,6 +158,10 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		if err := permit(ctx, tx, p, d.project, "knowledge.write"); err != nil {
 			return fail(403, "knowledge_access_lost", "Replacing the earlier Decision requires knowledge.write permission.")
 		}
+		var beforeNode, afterNode json.RawMessage
+		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tid, previous.KnowledgeID).Scan(&beforeNode); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `UPDATE nodes SET state='cancelled',fields=jsonb_set(jsonb_set(fields,'{metadata,decision_state}','"superseded"'),'{metadata,superseded_by}',to_jsonb($3::text)),
  updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2 AND fields->'metadata'->>'question_id'=$4 AND deleted_at IS NULL`, tid, previous.KnowledgeID, a.ID, d.question)
 		if err != nil {
@@ -166,7 +170,10 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		if tag.RowsAffected() != 1 {
 			return fail(409, "effect_ownership_conflict", "The earlier Decision changed; review its provenance before correcting it.")
 		}
-		changes = append(changes, events.Change{NodeID: &previous.KnowledgeID, Type: "knowledge.superseded", After: map[string]any{"superseded_by": a.ID, "question_id": d.question}})
+		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tid, previous.KnowledgeID).Scan(&afterNode); err != nil {
+			return err
+		}
+		changes = append(changes, events.Change{NodeID: &previous.KnowledgeID, Type: "knowledge.updated", Before: beforeNode, After: afterNode, Metadata: json.RawMessage(`{"reason":"Decision Desk supersession"}`)})
 	}
 	if previous.TicketID != "" || a.Outcome == "requirement" {
 		if err := permit(ctx, tx, p, d.project, "nodes.write"); err != nil {
@@ -262,7 +269,11 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 			return err
 		}
 		state = "active"
-		changes = append(changes, events.Change{NodeID: &a.ID, Type: "knowledge.created", After: map[string]any{"id": a.ID, "title": title, "body": a.Answer, "fields": fields, "state": "backlog"}})
+		var afterNode json.RawMessage
+		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tid, a.ID).Scan(&afterNode); err != nil {
+			return err
+		}
+		changes = append(changes, events.Change{NodeID: &a.ID, Type: "knowledge.created", After: afterNode})
 	case "doctrine":
 		inbox := doctrineInput(in.Doctrine)
 		inbox.RequestID, inbox.Source, inbox.Why = a.ID, a.Answer, a.Reason

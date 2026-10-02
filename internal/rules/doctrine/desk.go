@@ -128,15 +128,22 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	if in.RuleSHA != "" && !digestPattern.MatchString(in.RuleSHA) {
 		return Proposal{}, nil, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
 	}
-	if err := authz.RequireTx(ctx, tx, actor, "rules.write", authz.Scope{}); err != nil {
+	// This writer is also used by the pre-existing unforgeable analysis service
+	// capability. It receives the same access fence, never human authority.
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, actor.TenantID); err != nil {
 		return Proposal{}, nil, err
+	}
+	if !m.analysisAuthorized(ctx, actor) {
+		if err := authz.RequireTx(ctx, tx, actor, "rules.write", authz.Scope{}); err != nil {
+			return Proposal{}, nil, err
+		}
 	}
 	rawInput, _ := json.Marshal(in)
 	sum := sha256.Sum256(rawInput)
 	requestDigest := hex.EncodeToString(sum[:])
 	existing, err := getProposal(ctx, tx, in.RequestID)
 	if err == nil {
-		if !existing.Inbox || existing.ProposedBy != actor.ID || existing.InboxDigest != requestDigest || existing.DeskQuestionID != deskQuestion || existing.DeskAnswerID != deskAnswer {
+		if !existing.Inbox || existing.ProposedBy != actor.ID || (existing.InboxDigest != "" && existing.InboxDigest != requestDigest || existing.InboxDigest == "" && (existing.Path != in.Path || existing.RuleKey != in.RuleKey)) || existing.DeskQuestionID != deskQuestion || existing.DeskAnswerID != deskAnswer {
 			return Proposal{}, nil, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
 		return existing, nil, nil

@@ -259,12 +259,46 @@ func TestOutcomeAvailabilityAndPermissionRevocationRetry(t *testing.T) {
 			t.Fatalf("denied stamp %+v", s)
 		}
 	}
+	// A person who may answer still cannot publish Knowledge or edit tickets.
+	var limited, role string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','answer only') RETURNING id::text`, f.person.TenantID).Scan(&limited); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'answer_only','Answer only') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['questions.read','questions.decide'])`, f.person.TenantID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, limited, role, f.project); err != nil {
+		t.Fatal(err)
+	}
+	answerer := tenant.Principal{ID: limited, TenantID: f.person.TenantID, Kind: tenant.Person}
+	view = question(t, request(t.Context(), f.mux, answerer, "GET", "/api/questions/"+q.ID, nil), 200)
+	for _, s := range view.Outcomes {
+		if s.Outcome == "once" && !s.Available {
+			t.Fatal("ordinary answer denied")
+		}
+		if s.Outcome != "once" && (s.Available || s.Why == "") {
+			t.Fatalf("extra outcome authority granted %+v", s)
+		}
+	}
+	if w := request(t.Context(), f.mux, answerer, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: q.Revision, Outcome: "always", Answer: "not authorized"}); w.Code != 422 {
+		t.Fatalf("denied outcome %d", w.Code)
+	}
 	q = f.outcome(t, q, "always", "Approved answer")
+	// Keep an owner while revoking the answering person's authority.
+	var backupOwner string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','backup owner') RETURNING id::text`, f.person.TenantID).Scan(&backupOwner); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, f.person.TenantID, backupOwner, "owner")
 	// Hold the same access fence as dispatch, revoke, then release. No sleeps.
 	tx, err := f.d.Admin.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback(t.Context())
 	if _, err = tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.person.TenantID); err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +321,10 @@ func TestOutcomeAvailabilityAndPermissionRevocationRetry(t *testing.T) {
 	}
 	if f.count(t, `SELECT count(*) FROM desk_decisions WHERE question_id=$1 AND state='active'`, q.ID) != 0 {
 		t.Fatal("failed effect falsely active")
+	}
+	agentStatus := question(t, request(t.Context(), f.mux, f.agent, "GET", "/api/questions/"+q.ID+"/status", nil), 200)
+	if e := outcomeRow(t, agentStatus); e.State != "failed" || e.ErrorMessage == "" {
+		t.Fatal("asker cannot see outcome failure")
 	}
 	dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "owner")
 	f.advance(30 * time.Second)
@@ -381,5 +419,41 @@ func TestDoctrinePendingPublishedAndCorrectedEffects(t *testing.T) {
 	}
 	if f.count(t, `SELECT count(*) FROM doctrine_proposals`) != 2 {
 		t.Fatal("failed correction fabricated a new draft")
+	}
+	// A landed rule has the same person-review boundary as a published PR.
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET data=data||'{"state":"promoted","promoted_commit":"2222222222222222222222222222222222222222"}' WHERE id=$1`, published); err != nil {
+		t.Fatal(err)
+	}
+	q = f.outcome(t, q, "once", "Leave the published doctrine unchanged")
+	f.advance(10 * time.Second)
+	f.dispatch(t)
+	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "failed" || e.ErrorCode != "doctrine_review_required" {
+		t.Fatalf("landed rule automatically changed %+v", e)
+	}
+}
+
+func TestDoctrineChangedBaseDuringGraceIsVisibleAndSafe(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	target := f.doctrineTarget(t)
+	in := input()
+	in.Doctrine = target
+	q := f.outcome(t, f.ask(t, in), "doctrine", "- 🟡 Keep commits small and reviewed.")
+	// Updating the pin invalidates its old cache through the existing trigger.
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_sources SET commit_sha='2222222222222222222222222222222222222222' WHERE id=$1`, target.SourceID); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(10 * time.Second)
+	f.dispatch(t)
+	status := f.status(t, q.ID)
+	if e := outcomeRow(t, status); e.State != "failed" || e.ErrorMessage == "" || e.EffectRef != "" {
+		t.Fatalf("stale doctrine falsely proposed %+v", e)
+	}
+	for _, stamp := range status.Outcomes {
+		if stamp.Outcome == "doctrine" && (stamp.Available || stamp.Why == "") {
+			t.Fatal("stale stamp did not explain refusal")
+		}
+	}
+	if f.count(t, `SELECT count(*) FROM doctrine_proposals`) != 0 {
+		t.Fatal("stale base created a proposal")
 	}
 }

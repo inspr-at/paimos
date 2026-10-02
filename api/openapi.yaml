@@ -8837,6 +8837,16 @@ components:
         created_at: {type: string, format: date-time}
         deliver_after: {type: string, format: date-time}
         replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
+    QuestionEffectData:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id: {type: string, format: uuid}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; corrections refuse if it changed.}
+        knowledge_id: {type: string, format: uuid}
+        doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
+        supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
+        superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -8850,7 +8860,7 @@ components:
         effect_ref: {type: string}
         error_code: {type: string}
         error_message: {type: string, description: Safe explanation of a failed effect; automatic retry rechecks current authority.}
-        effect_data: {type: object, description: Exact criterion or Knowledge/draft reference and correction provenance.}
+        effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
         receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
         receipt_failure: {type: string}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
@@ -14789,7 +14799,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
-              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, ticket]}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision, ticket]}
               kind: {type: string, enum: [knowledge, ticket]}
               slug: {type: string}
               title: {type: string}

@@ -251,7 +251,7 @@ func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 		q.Answer = a
 	}
 	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,e.error_message,e.effect_data,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
- WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
+ WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.kind='outcome' OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
 	}
@@ -462,8 +462,8 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if _, err = tx.Exec(ctx, `INSERT INTO desk_decisions(tenant_id,project_id,question_id,revision) VALUES($1,$2,$3,$4)`, p.TenantID, project, id, rev); err != nil {
 			return err
 		}
-		// No external effects before P3/P4. Each durable effect has its own identity,
-		// revision and destination; a failed inbox cannot hide a successful comment.
+		// Each revision-bound effect applies after grace with its own identity and
+		// destination; a failed inbox cannot hide a successful comment or outcome.
 		if _, err = tx.Exec(ctx, `INSERT INTO desk_pending(tenant_id,project_id,question_id,revision,asker_id,kind,deliver_after)
  SELECT a.tenant_id,a.project_id,a.question_id,$3,a.id,k.kind,r.deliver_after FROM desk_askers a
  JOIN desk_answers r ON r.tenant_id=a.tenant_id AND r.question_id=a.question_id AND r.revision=$3

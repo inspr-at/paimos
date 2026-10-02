@@ -197,7 +197,20 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 		} else if p.ErrorCode != "" {
 			state += ": " + p.ErrorCode
 		}
+		if p.Kind == "outcome" && p.State == "delivered" && q.Answer != nil {
+			if q.Answer.Outcome == "doctrine" {
+				state = "draft saved; waiting for a person"
+			} else {
+				state = "applied"
+			}
+		}
 		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, state)
+		if p.ErrorMessage != "" {
+			fmt.Fprintln(rt.stdout, "  why:", p.ErrorMessage)
+		}
+		if p.Kind == "outcome" && p.EffectRef != "" {
+			fmt.Fprintln(rt.stdout, "  effect:", p.EffectRef)
+		}
 	}
 	return nil
 }

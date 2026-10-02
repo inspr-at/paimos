@@ -277,7 +277,7 @@ export function wantsToc(headings: Heading[], body: string): boolean {
 // ---------- Type-specific details ----------
 export interface DetailField { key: string; label: string; kind: 'text' | 'url' | 'choice' | 'list'; placeholder?: string; choices?: string[]; hint?: string }
 export const DETAIL_FIELDS: Record<KnowledgeType, DetailField[]> = {
- decision: [],
+  decision: [],
   runbook: [{ key: 'related_agents', label: 'Agents that run it', kind: 'list', placeholder: 'camy, kite', hint: 'Agent names, separated by commas.' }],
   guideline: [{ key: 'rule', label: 'The rule in one line', kind: 'text', placeholder: 'Never mark state with a coloured edge.', hint: 'Agents put this line into their prompts.' }],
   memory: [{ key: 'confidence', label: 'Confidence', kind: 'choice', choices: ['high', 'medium', 'low'] }],

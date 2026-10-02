@@ -45,10 +45,10 @@ test('slugs: suggestions from titles, unique, and the rules agents rely on', () 
   assert.equal(slugProblem('runbook', 'ok_slug-2'), '')
 })
 
- test('Decision entries use the same Knowledge taxonomy, routing and history status', () => {
+test('Decision entries use the same Knowledge taxonomy, routing and history status', () => {
   assert.equal(isKnowledgeType('decision'), true)
   assert.equal(typeMeta('decision').label, 'Decision')
   assert.equal(TYPES[0].type, 'runbook')
   assert.deepEqual(parseEntryParam('decision/decision-history'), {type:'decision',slug:'decision-history'})
   assert.equal(dockPath('AEON','decision','decision-history'),'/p/AEON/knowledge?entry=decision/decision-history')
- })
+})

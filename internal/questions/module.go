@@ -148,7 +148,7 @@ func (m *Module) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	// Bearer credentials never acquire human authority, including injected
 	// person contexts in internal callers that accidentally retain a key header.
-	if p.Kind != tenant.Person || r.Header.Get("Authorization") != "" {
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" || r.Header.Get("Authorization") != "" {
 		result(w, 0, nil, fail(403, "person_required", "a signed-in person must decide"))
 		return
 	}
