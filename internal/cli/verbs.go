@@ -506,10 +506,12 @@ func (rt *runtime) cmdModel() *Command {
 	return &Command{
 		Name:  "model",
 		Short: "Model roles",
-		Use:   "model <resolve|prefs>",
+		Use:   "model <resolve|prefs|refresh|report>",
 		subs: []*Command{
 			rt.cmdModelResolve(),
 			rt.cmdModelPrefs(),
+			rt.cmdModelRefresh(),
+			rt.cmdModelReport(),
 		},
 	}
 }

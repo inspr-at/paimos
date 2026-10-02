@@ -109,6 +109,7 @@ type owned struct {
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	modelReports    map[string]bool // successful content-free evidence IDs, bounded per run
 	capacityPending map[string]capacity.Reading
 	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
@@ -1098,6 +1099,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
+		if errors.Is(err, errModelInvalid) {
+			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
+		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1236,6 +1240,12 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if len(ev.ModelReports) > 0 {
+		s.reportModels(entry, ev.ModelReports)
+	}
+	if ev.ErrorCode == "model_invalid" {
+		s.reportModelState(entry, "invalid")
+	}
 	mode := agentactivity.Summary
 	if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
 		entry.mu.Lock()
@@ -1301,6 +1311,19 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 			}
 		}
 		entry.mu.Unlock()
+	}
+	// Only positive, model-bound vendor usage can clear an invalid-model pause.
+	workingModel := ""
+	if ev.SessionUsage != nil && ev.SessionUsage.OutputTokens != nil && *ev.SessionUsage.OutputTokens > 0 {
+		workingModel = ev.SessionUsage.Model
+	} else if ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0 {
+		workingModel = ev.EffectiveModel
+	}
+	entry.mu.Lock()
+	confirmed := workingModel != "" && workingModel == entry.harness.Model
+	entry.mu.Unlock()
+	if confirmed {
+		s.reportModelState(entry, "working")
 	}
 	if ev.Kind == "" {
 		return

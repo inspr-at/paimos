@@ -43,7 +43,7 @@ type TicketRoute struct {
 func ResolveTicketRoute(ctx context.Context, tx pgx.Tx, role, area string, now time.Time) (*TicketRoute, error) {
 	role = strings.TrimSpace(role)
 	area = strings.TrimSpace(area)
-	if !KnownRouteRole(role) || !KnownRouteArea(area) || role == "review-gate" {
+	if !KnownRouteRole(role) || !KnownRouteArea(area) || strings.HasPrefix(role, "review-gate") {
 		return nil, nil
 	}
 	res, err := resolveRole(ctx, tx, resolveQuery{Role: role}, now)

@@ -16,6 +16,42 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
+func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "security-catalog", "person", "Owner", []string{"admin"})
+	foreign := makePrincipal(t, "foreign-security-catalog", "person", "Other", []string{"admin"})
+	profile := codexProfile(t, admin)
+	until := time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour)
+	seed := func(tenantID string, fn func(pgx.Tx) error) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_security_role_routes(tenant_id,role,priority,profile_id,state,reason,valid_until)
+			VALUES($1,'review-gate-security',1,$2,'conserved','Owner override',$3)`, admin.TenantID, profile, until)
+		return err
+	})
+	check := func(tenantID, author string, at time.Time, want int) {
+		t.Helper()
+		seed(tenantID, func(tx pgx.Tx) error {
+			profiles, err := catalogProfiles(t.Context(), tx, "review-gate-security", author, at)
+			if err != nil {
+				return err
+			}
+			if len(profiles) != want || want == 1 && profiles[0].ID != profile {
+				t.Fatalf("security catalog for %s: got %d profiles, want %d", author, len(profiles), want)
+			}
+			return nil
+		})
+	}
+	check(admin.TenantID, "anthropic", until.Add(-time.Minute), 0)
+	check(admin.TenantID, "anthropic", until.Add(time.Minute), 1)
+	check(admin.TenantID, "openai", until.Add(time.Minute), 0)
+	check(foreign.TenantID, "anthropic", until.Add(time.Minute), 0)
+}
+
 func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
