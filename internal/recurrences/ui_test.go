@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -100,6 +101,82 @@ func TestUIRetiredSchedulerClaimIgnoresReactivatedRow(t *testing.T) {
 	f.run()
 	if len(f.receipts(r.ID)) != 0 || len(f.receipts(good.ID)) != 1 {
 		t.Fatal("retired row ran or prevented a healthy row from running")
+	}
+}
+
+func TestUIProjectRecurrenceEventsPreserveVisibilityBoundaries(t *testing.T) {
+	f := setup(t)
+	reader := projectPrincipal(f, "viewer")
+	other := f.node("project", nil, "Invisible project")
+	ids := []int64{}
+	for _, change := range []events.Change{
+		{NodeID: &f.project, Type: "recurrence.updated", After: map[string]string{"name": "Visible"}},
+		{NodeID: &other, Type: "recurrence.updated", After: map[string]string{"name": "Other project"}},
+		{NodeID: &f.project, Type: "recurrence.updated", After: map[string]string{"node_id": other}},
+		{NodeID: &f.project, Type: "run.started", After: map[string]string{"name": "Workspace telemetry"}},
+		{Type: "recurrence.updated", After: map[string]string{"name": "Workspace event"}},
+	} {
+		f.tx(func(tx pgx.Tx) error {
+			event, err := events.Append(t.Context(), tx, f.p, change)
+			if err == nil {
+				ids = append(ids, event.ID)
+			}
+			return err
+		})
+	}
+	ctx := tenant.WithPrincipal(t.Context(), reader)
+	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id FROM events WHERE id=ANY($1::bigint[]) ORDER BY id`, ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		seen := []int64{}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			seen = append(seen, id)
+		}
+		if len(seen) != 1 || seen[0] != ids[0] {
+			t.Errorf("project recurrence visibility %v, want only %d", seen, ids[0])
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUIDeferredEventClaimDoesNotStarveReadyRow(t *testing.T) {
+	f := setup(t)
+	in := f.input()
+	in.Trigger = Trigger{Kind: "event", Event: "release.published", EventStart: "hour"}
+	deferred := f.create(in)
+	in.Trigger.EventStart = "now"
+	ready := f.create(in)
+	// Fix ordering before any receipts exist so the deferred row wins LIMIT 1.
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET id=$2 WHERE id=$1`, deferred.ID, "10000000-0000-4000-8000-000000000010"); err != nil {
+			return err
+		}
+		deferred.ID = "10000000-0000-4000-8000-000000000010"
+		if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET id=$2 WHERE id=$1`, ready.ID, "10000000-0000-4000-8000-000000000020"); err != nil {
+			return err
+		}
+		ready.ID = "10000000-0000-4000-8000-000000000020"
+		return nil
+	})
+	f.now = f.now.Add(time.Minute)
+	f.m.WithHistory([]Publication{{ProjectKey: "REC", Name: "Release", Version: "v2", PublishedAt: f.now}})
+	f.run()
+	if len(f.receipts(deferred.ID)) != 0 || f.get(deferred.ID).EventCursor != 0 || len(f.receipts(ready.ID)) != 1 {
+		t.Fatal("deferred row advanced early or prevented the ready row from running")
+	}
+	f.now = f.now.Add(time.Hour)
+	f.run()
+	if len(f.receipts(deferred.ID)) != 1 || len(f.receipts(ready.ID)) != 1 {
+		t.Fatal("due row did not run once or ready row was duplicated")
 	}
 }
 

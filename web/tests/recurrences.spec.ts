@@ -2,7 +2,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
-import { stableBoxes } from './helpers/stable'
+import { expectStableControls } from './helpers/stable'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Recurrence, RecurrenceInput, RecurrenceResult } from '../src/lib/recurrences'
 
 const id = '57000000-0000-4000-8000-000000000001', eventId = '57000000-0000-4000-8000-000000000002'
@@ -60,22 +62,41 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   test(`controls stay anchored at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 }); await page.emulateMedia({ colorScheme: theme })
     const { errors } = await setup(page); await settings(page)
-    const checkRow = await stableBoxes({ actions: row(page).locator('.row-actions'), toggle: row(page).locator('.toggle'), run: row(page).locator('.run') })
-    await row(page).getByRole('button', { name: 'Pause', exact: true }).click()
-    await expect(row(page).getByRole('button', { name: 'Resume', exact: true })).toBeEnabled(); await checkRow()
-    await page.getByRole('button', { name: 'Undo', exact: true }).click()
-    await expect(row(page).getByRole('button', { name: 'Pause', exact: true })).toBeEnabled(); await checkRow()
+    await expectStableControls({
+      controls: { actions: row(page).locator('.row-actions'), toggle: row(page).locator('.toggle'), run: row(page).locator('.run') },
+      interactions: [
+        { name: 'Pause', run: async () => { await row(page).getByRole('button', { name: 'Pause', exact: true }).click(); await expect(row(page).getByRole('button', { name: 'Resume', exact: true })).toBeEnabled() } },
+        { name: 'Undo pause', run: async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(row(page).getByRole('button', { name: 'Pause', exact: true })).toBeEnabled() } },
+      ],
+    })
     await newEditor(page)
     if (width === 390) expect((await editor(page).boundingBox())!.width).toBe(390)
-    // Reading/control changes below use DOM click so scrolling cannot masquerade
-    // as a layout shift. Keep the body's scroll fixed for this geometry assertion.
-    await editor(page).locator('.editor-body').evaluate(el => { el.scrollTop = 0 })
-    const check = await stableBoxes({ cancel: editor(page).getByRole('button', { name: /^Cancel/ }), create: editor(page).getByRole('button', { name: /^Create/ }), name: editor(page).getByRole('textbox', { name: 'Name', exact: true }), parent: editor(page).getByRole('button', { name: 'Parent', exact: true }), trigger: editor(page).getByRole('radiogroup', { name: 'Trigger', exact: true }), options: editor(page).locator('.option').first(), preview: editor(page).locator('.preview-head') })
-    for (const frequency of ['Daily', 'Monthly', 'Weekly']) { await editor(page).getByRole('radio', { name: frequency, exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(editor(page).getByRole('button', { name: /^Create/ })).toBeEnabled(); await check() }
-    await editor(page).getByRole('radio', { name: 'Event', exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(editor(page).getByRole('button', { name: /^Create/ })).toBeEnabled(); await check()
-    await editor(page).getByRole('radio', { name: 'Next morning', exact: true }).evaluate(el => (el as HTMLElement).click()); await check()
-    for (const option of ['Put each one into the work queue', 'Skip while the previous one is still open']) { await editor(page).getByRole('checkbox', { name: new RegExp(option) }).evaluate(el => (el as HTMLElement).click()); await check() }
-    await page.screenshot({ path: `/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/shots/aeon-573b-ui/editor-${width}-${theme}.png` })
+    const controls = {
+      cancel: editor(page).getByRole('button', { name: /^Cancel/ }), create: editor(page).getByRole('button', { name: /^Create/ }),
+      name: editor(page).getByRole('textbox', { name: 'Name', exact: true }), parent: editor(page).getByRole('button', { name: 'Parent', exact: true }),
+      trigger: editor(page).getByRole('radiogroup', { name: 'Trigger', exact: true }),
+      time: editor(page).getByRole('radio', { name: 'Schedule', exact: true }), event: editor(page).getByRole('radio', { name: 'Event', exact: true }),
+      queue: editor(page).locator('.option').nth(0), skip: editor(page).locator('.option').nth(1), preview: editor(page).locator('.preview-head'),
+      ...(width === 390 ? { sheet: editor(page) } : {}),
+    }
+    const scrollAreas = { body: editor(page).locator('.editor-body') }
+    await expectStableControls({
+      controls: { ...controls, frequency: editor(page).getByRole('radiogroup', { name: 'Repeat', exact: true }), ...Object.fromEntries(['Daily', 'Monthly', 'Weekly'].map(name => [name, editor(page).getByRole('radio', { name, exact: true })])) },
+      scrollAreas,
+      interactions: ['Daily', 'Monthly', 'Weekly'].map(name => ({ name, run: async () => { await editor(page).getByRole('radio', { name, exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(controls.create).toBeEnabled() } })),
+    })
+    await expectStableControls({ controls, scrollAreas, interactions: [{ name: 'Event trigger', run: async () => { await controls.event.evaluate(el => (el as HTMLElement).click()); await expect(controls.create).toBeEnabled() } }] })
+    await expectStableControls({
+      controls: { ...controls, start: editor(page).getByRole('radiogroup', { name: 'Start', exact: true }), ...Object.fromEntries(['Right away', '1 hour later', 'Next morning'].map(name => [name, editor(page).getByRole('radio', { name, exact: true })])) },
+      scrollAreas,
+      interactions: [
+        ...['Next morning', '1 hour later', 'Right away'].map(name => ({ name, run: async () => { await editor(page).getByRole('radio', { name, exact: true }).evaluate(el => (el as HTMLElement).click()); await expect(controls.create).toBeEnabled() } })),
+        ...['Put each one into the work queue', 'Skip while the previous one is still open'].map(name => ({ name, run: async () => { await editor(page).getByRole('checkbox', { name: new RegExp(name) }).evaluate(el => (el as HTMLElement).click()); await expect(controls.create).toBeEnabled() } })),
+      ],
+    })
+    const shots = process.env.AEON_RECURRENCE_SHOTS || 'test-results/recurrences'
+    mkdirSync(shots, { recursive: true })
+    await page.screenshot({ path: join(shots, `editor-${width}-${theme}.png`) })
     await editor(page).getByRole('button', { name: /^Cancel/ }).click(); expect(errors).toEqual([])
   })
 }

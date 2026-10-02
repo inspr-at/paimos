@@ -83,6 +83,15 @@ func workNotClosedSQL(stateExpr, categoryAlias string) string {
 	return workCountBucketSQL(stateExpr, categoryAlias) + ` NOT IN ('done','cancelled','archived')`
 }
 
+// WorkNotClosedSQL shares the Hide closed rule with services reading work
+// nodes. It returns a catalog CTE, its kind-specific join, and the predicate.
+// Aliases are trusted SQL identifiers supplied by the caller, never input data.
+func WorkNotClosedSQL(nodeAlias, categoryAlias string) (cte, join, predicate string) {
+	return workStateCategoryCTE(),
+		` LEFT JOIN configured ` + categoryAlias + ` ON ` + categoryAlias + `.kind_id=` + nodeAlias + `.kind_id AND ` + categoryAlias + `.norm=` + workStateNormSQL(nodeAlias+".state"),
+		workNotClosedSQL(nodeAlias+".state", categoryAlias)
+}
+
 // workStateKnownSQL is 0 for a workflow state and 1 otherwise. It stays
 // ascending in both sort directions, so an unknown spelling stays after the
 // workflow. The state is normalised the same way as the buckets, so " OPEN ",

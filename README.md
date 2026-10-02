@@ -33,6 +33,10 @@ does not edit the overlap policy; `--revision` can bind Run now to a definition.
 Delete requires `expected_revision`; it pauses the definition and appends a
 retirement event. Receipts, the definition and created tickets are retained;
 retired definitions are omitted from reads and cannot be resumed or run.
+Project-only readers see recurrence history and retirement events for visible
+projects. The scheduler ignores retired definitions even if an older client
+resumed the row. Both overlap prevention and Run now's open-previous notice use
+the node list's closed-state rule, including each kind's configured categories.
 
 `aeon recur create|list|get|update|pause|resume|run-now|preview` manages
 server-owned schedules. Create reads a JSON definition from stdin or
@@ -68,7 +72,9 @@ writing anything, including while paused. Event triggers use
 cannot be previewed. Event triggers may set `event_start` to `now` (default),
 `hour` or `morning`; morning means 06:00 on the next local calendar day in
 `event_timezone` (an IANA zone, default UTC). The scheduler checks the database
-clock before claiming delayed publications, including across DST changes.
+clock inside each claim before running delayed publications, including across
+DST changes. Deferred rows yield to other ready definitions without advancing
+their event cursor.
 
 For example, a weekly tool sweep under the code-health epic can be created with
 this body (replace project/parent UUIDs with the intended existing nodes):

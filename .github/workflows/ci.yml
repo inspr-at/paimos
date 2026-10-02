@@ -330,6 +330,9 @@ jobs:
           tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
           tests/accounts-computers.spec.ts tests/agents-top.spec.ts
           tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
+      - name: Recurring work and anchored-control regressions (AEON-573)
+        working-directory: web
+        run: npm test -- tests/recurrences.spec.ts --workers=1
       - name: Session linking, approval and security regressions
         working-directory: web
         env:

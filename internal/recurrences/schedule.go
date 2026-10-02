@@ -64,12 +64,6 @@ func parseSchedule(t Trigger) (*schedule, error) {
 		}
 	}
 	s.frequency = parts["FREQ"]
-	if raw := parts["INTERVAL"]; raw != "" {
-		s.interval, err = strconv.Atoi(raw)
-		if err != nil || s.frequency != "MONTHLY" || (s.interval != 1 && s.interval != 2 && s.interval != 3 && s.interval != 6) {
-			return nil, fmt.Errorf("MONTHLY INTERVAL must be 1, 2, 3 or 6")
-		}
-	}
 	switch s.frequency {
 	case "DAILY":
 		if len(parts) != 1 {

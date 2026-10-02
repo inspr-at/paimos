@@ -77,7 +77,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 	ctx = db.AllProjects(ctx, "recurrence scheduler")
 	var active bool
 	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrences WHERE NOT paused)`).Scan(&active)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrences r WHERE NOT paused AND NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=r.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=r.id::text))`).Scan(&active)
 	}); err != nil {
 		return err
 	}
@@ -109,6 +109,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			// The tenant/tree claim comes before node rows and recurrence rows. This
 			// single-row unit never takes a later resource lock after events.Append.
 			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND NOT (id=ANY($2::uuid[])) AND NOT (id=ANY($3::uuid[])) AND
+    NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=r.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=r.id::text) AND
     ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now, failedIDs, deferredIDs))
 			claimed = r
 			if errors.Is(err, pgx.ErrNoRows) {
