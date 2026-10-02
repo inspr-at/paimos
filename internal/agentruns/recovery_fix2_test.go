@@ -44,8 +44,9 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
 					return err
 				}
 				// Advance the persisted wait deadline, never sleep for expiry.
-				_, err := tx.Exec(t.Context(), `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,source,observed_at,stop_kind,denial_reason,credit_state,wait_id,next_attempt_at)
- VALUES($1,$2,'vendor','harness',clock_timestamp()-interval '1 hour','unnamed','vendor_denied','unknown',gen_random_uuid(),clock_timestamp()-interval '1 second')`, f.agent.TenantID, resource)
+				_, err := tx.Exec(t.Context(), `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,reported_by_account_id,binding_revision,source,observed_at,stop_kind,denial_reason,credit_state,wait_id,next_attempt_at)
+ SELECT $1,$2,'vendor',a.id,a.link_revision,'harness',clock_timestamp()-interval '1 hour','unnamed','vendor_denied','unknown',gen_random_uuid(),clock_timestamp()-interval '1 second'
+ FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id WHERE r.id=$3`, f.agent.TenantID, resource, run.ID)
 				return err
 			})
 			var claimed agentruns.Run
