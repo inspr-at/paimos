@@ -67,7 +67,7 @@ func withCandidate(h History, head versionFile, opts Options, git func(...string
 	if err != nil {
 		return History{}, err
 	}
-	notes, err := candidateNotes(h, head, git)
+	notes, bundle, err := candidateNotes(h, head, git)
 	if err != nil {
 		return History{}, err
 	}
@@ -88,35 +88,55 @@ func withCandidate(h History, head versionFile, opts Options, git func(...string
 		r.Evidence.Pending = append(r.Evidence.Pending, "ci")
 	}
 	h.Releases = append(h.Releases, r)
+	if notes.Source == ProductNotesSource && bundle != nil {
+		present, err := git("ls-tree", "--name-only", "HEAD", "--", NoteCorrectionsPath)
+		if err != nil {
+			return History{}, err
+		}
+		if strings.TrimSpace(present) != "" {
+			raw, err := committedFile(git, NoteCorrectionsPath, 16<<20)
+			if err != nil {
+				return History{}, err
+			}
+			// Published entries already have their correction layer. Apply the
+			// committed layer only to the new candidate's public projection.
+			corrected, err := withNoteCorrections(History{Product: h.Product, Repository: h.Repository, Releases: []Release{r}}, *bundle, raw)
+			if err != nil {
+				return History{}, err
+			}
+			h.Releases[len(h.Releases)-1] = corrected.Releases[0]
+		}
+	}
 	Sort(h.Releases)
 	return h, nil
 }
 
-func candidateNotes(h History, head versionFile, git func(...string) (string, error)) (*Notes, error) {
+func candidateNotes(h History, head versionFile, git func(...string) (string, error)) (*Notes, *ProductNotes, error) {
 	path := "release-notes/" + head.Version + ".json"
 	present, err := git("ls-tree", "--name-only", "HEAD", "--", path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if strings.TrimSpace(present) != "" {
 		raw, err := committedFile(git, path, 16<<20)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return NotesFromSnapshot(raw, head.Version, "HEAD:"+path)
+		notes, err := NotesFromSnapshot(raw, head.Version, "HEAD:"+path)
+		return notes, nil, err
 	}
 	raw, err := committedFile(git, ProductNotesPath, 16<<20)
 	if err != nil {
-		return nil, fmt.Errorf("candidate requires committed captured notes: %w", err)
+		return nil, nil, fmt.Errorf("candidate requires committed captured notes: %w", err)
 	}
 	bundle, err := ReadProductNotes(raw)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	notes, ok := bundle.Releases[head.Version]
 	if !sameProductNotes(h, bundle) || !ok || (notes.ReleaseChannel != "" && notes.ReleaseChannel != head.ReleaseChannel) || (notes.ReleaseSequence != 0 && notes.ReleaseSequence != head.ReleaseSequence) {
-		return nil, fmt.Errorf("candidate requires matching committed product notes")
+		return nil, nil, fmt.Errorf("candidate requires matching committed product notes")
 	}
 	withNotes := withProductNotes(History{Product: h.Product, Repository: h.Repository, Releases: []Release{{Version: head.Version}}}, bundle)
-	return withNotes.Releases[0].Notes, nil
+	return withNotes.Releases[0].Notes, &bundle, nil
 }

@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/inspr-at/paimos/internal/releasehistory"
 )
@@ -86,7 +87,7 @@ func candidateRun(repository string, getenv func(string) string) *releasehistory
 		return nil
 	}
 	name := getenv("GITHUB_WORKFLOW")
-	if name == "" {
+	if name == "" || len(name) > 255 || strings.ContainsFunc(name, unicode.IsControl) {
 		return nil
 	}
 	return &releasehistory.Run{Name: name, URL: strings.TrimRight(server, "/") + "/" + repository + "/actions/runs/" + id, Status: "in_progress"}

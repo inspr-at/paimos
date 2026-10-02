@@ -231,6 +231,21 @@ func TestCandidateAlreadyTaggedWithNewerHistory(t *testing.T) {
 	}
 }
 
+func TestCandidateCommittedCorrectionBinding(t *testing.T) {
+	dir, opts := candidateRepo(t)
+	correction := NoteCorrection{Version: candidateVersion, Key: "AEON-427", SHA256: strings.Repeat("b", 64),
+		Reason: "Bound to the wrong capture.", Group: GroupFixes}
+	candidateWrite(t, dir, NoteCorrectionsPath, map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{correction}})
+	candidateGit(t, dir, "add", NoteCorrectionsPath)
+	candidateGit(t, dir, "commit", "-qm", "invalid committed correction")
+	// Keep the working-tree layer valid so only validation of the committed
+	// candidate layer can reject this capture mismatch.
+	candidateWrite(t, dir, NoteCorrectionsPath, map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{}})
+	if _, err := Build(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "invalid correction binding") {
+		t.Fatalf("committed correction binding was not enforced: %v", err)
+	}
+}
+
 func TestCandidateRejectsInvalidInputs(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -282,13 +297,18 @@ func TestCandidateCommittedSnapshotPrecedence(t *testing.T) {
 			dir, opts := candidateRepo(t)
 			snapshot := noteFixture()
 			snapshot.Version = candidateVersion
+			snapshot.Tickets[0].Key = "AEON-427"
 			snapshot.Tickets[0].Group = GroupFixes
 			if malformed {
 				snapshot.Version = notesVersion
 			}
 			path := "release-notes/" + candidateVersion + ".json"
 			candidateWrite(t, dir, path, snapshot)
-			candidateGit(t, dir, "add", path)
+			pill := "Product projection correction"
+			correction := NoteCorrection{Version: candidateVersion, Key: "AEON-427", SHA256: strings.Repeat("a", 64),
+				Reason: "Only the product projection is corrected.", Group: GroupFeatures, PillEN: &pill}
+			candidateWrite(t, dir, NoteCorrectionsPath, map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{correction}})
+			candidateGit(t, dir, "add", path, NoteCorrectionsPath)
 			candidateGit(t, dir, "commit", "-qm", "capture notes")
 			h, err := Build(t.Context(), opts)
 			if malformed {
@@ -301,7 +321,7 @@ func TestCandidateCommittedSnapshotPrecedence(t *testing.T) {
 				t.Fatal(err)
 			}
 			notes := h.Releases[0].Notes
-			if notes.Source != "HEAD:"+path || len(notes.Items) != 1 || notes.Items[0].Group != GroupFixes || notes.Items[0].PillEN != "Clear release notes" || notes.SHA256 == strings.Repeat("a", 64) {
+			if notes.Source != "HEAD:"+path || len(notes.Items) != 1 || notes.Items[0].Group != GroupFixes || notes.Items[0].PillEN != "Clear release notes" || notes.SHA256 == strings.Repeat("a", 64) || len(notes.Corrections) != 0 {
 				t.Fatalf("committed snapshot lost precedence: %+v", notes)
 			}
 		})
