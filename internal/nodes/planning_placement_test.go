@@ -348,7 +348,7 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 	before := expected{gap: "area", rate: 5_000_000, cost: 10}
 	views = planningOf(t, w.admin, path+"&sort=list_cost")
 	s, b := views[security.Key], views[twin.Key]
-	if s.RouteGap != "" || s.Route == nil || s.Tokens.Calibration.AnyRoute || *s.Tokens.Estimated != 4_000_000 || *s.Cost.ListEstimated != "4.000000" || !reflect.DeepEqual(s, b) || before.gap == s.RouteGap || before.rate == s.Tokens.Calibration.TokensPerHour || before.cost == 4 {
+	if s.RouteGap != "" || s.Route == nil || s.Tokens.Calibration.AnyRoute || *s.Tokens.Estimated != 4_000_000 || *s.Cost.ListEstimated != "4.000000" || !reflect.DeepEqual(s, b) || before.gap == s.RouteGap || before.rate == s.Tokens.Calibration.TokensPerHour || *s.Cost.ListEstimated == fmt.Sprintf("%d.000000", before.cost) {
 		t.Fatalf("security did not change to twin: %+v %+v", s, b)
 	}
 	var afterTotal int64

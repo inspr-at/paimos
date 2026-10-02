@@ -115,6 +115,9 @@ each ticket's placement with its canonical person assignee, falling back to the
 viewer's canonical You setting for unassigned or agent-assigned tickets. Work-start
 estimate snapshots use only the assignee; registered sessions and dispatched runs
 save their starter's work placement separately from the model that actually runs.
+Planning and dispatch normalize `eu-e1` to `eu` and `local-l1` to `local`.
+Rebinding a session computes the new ticket's placement; detaching clears it.
+A run's frozen placement is reused only for that run's ticket.
 Operator keys have no You setting. With an empty matrix, existing planning gaps
 and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized

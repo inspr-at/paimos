@@ -39,8 +39,9 @@ func planPlacementColumns(viewer string) string {
   OR btrim(coalesce(n.fields->>'complexity',''))='' AND btrim(coalesce(n.fields->>'route_role',''))='build-hard'
   THEN 'complex' ELSE 'normal' END AS bucket,
  btrim(coalesce(n.fields->>'route_role','')) AS role,
- CASE WHEN btrim(coalesce(n.fields->>'residency','')) IN ('eu','local')
-  THEN btrim(n.fields->>'residency') ELSE 'any' END AS residency`
+ CASE WHEN btrim(coalesce(n.fields->>'residency','')) IN ('eu','eu-e1') THEN 'eu'
+  WHEN btrim(coalesce(n.fields->>'residency','')) IN ('local','local-l1') THEN 'local'
+  ELSE 'any' END AS residency`
 }
 
 func placementKeySQL(alias string) string {
