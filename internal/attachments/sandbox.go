@@ -50,6 +50,7 @@ type previewGrant struct {
 // Configure once at startup, and route both hosts to this same instance.
 type Sandbox struct {
 	origin, appOrigin, appHost, host string
+	reservedHost                     string
 	configured                       bool
 	lease                            func(*http.Request) (func(context.Context) (tenant.Principal, error), error)
 	mu                               sync.Mutex
@@ -62,6 +63,12 @@ type Sandbox struct {
 // same-site session requests. No development exception weakens that boundary.
 func NewSandbox(appOrigin, origin string, lease func(*http.Request) (func(context.Context) (tenant.Principal, error), error)) *Sandbox {
 	s := &Sandbox{grants: make(map[[32]byte]previewGrant), now: time.Now, lease: lease, configured: origin != ""}
+	// Reserve the configured sandbox host even when another setting disables
+	// previews. In particular, a missing/invalid app URL must never turn that
+	// host into an alias for the authenticated application.
+	if candidate, err := url.Parse(origin); err == nil {
+		s.reservedHost = strings.TrimSuffix(candidate.Hostname(), ".")
+	}
 	a, aOK := sandboxOrigin(appOrigin)
 	b, bOK := sandboxOrigin(origin)
 	if aOK {
@@ -124,7 +131,12 @@ func (m *Module) WrapSandbox(app http.Handler) http.Handler {
 			m.sandboxContent(w, r)
 			return
 		}
-		if s != nil && s.configured && s.appHost != "" && r.Host != s.appHost {
+		hostname := strings.TrimSuffix((&url.URL{Host: r.Host}).Hostname(), ".")
+		if s != nil && s.configured && ((s.appHost != "" && r.Host != s.appHost) ||
+			(s.appHost == "" && strings.EqualFold(hostname, s.reservedHost))) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+			w.Header().Set("Referrer-Policy", "no-referrer")
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}

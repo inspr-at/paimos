@@ -76,6 +76,23 @@ func TestSandboxHostBoundary(t *testing.T) {
 	if w.Code != 204 {
 		t.Fatal("app host refused")
 	}
+	for _, appURL := range []string{"", "invalid", "http://app.example.com", previewApp + "/"} {
+		for _, origin := range []string{previewOrigin, previewOrigin + "/", "http://preview.example.net"} {
+			m.Sandbox = NewSandbox(appURL, origin, testLease(tenant.Principal{}))
+			for _, host := range []string{previewOrigin, previewOrigin + ":443", previewOrigin + ".", strings.ToUpper(previewOrigin)} {
+				w = httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest("GET", host+"/api/auth/login", nil))
+				if w.Code != 421 || w.Header().Get("Set-Cookie") != "" {
+					t.Fatal("disabled sandbox became an app alias")
+				}
+			}
+			w = httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("GET", previewApp+"/api/me", nil))
+			if w.Code != 204 {
+				t.Fatal("disabled sandbox changed app routing")
+			}
+		}
+	}
 	// An unconfigured feature must not change existing health-check host routing.
 	m.Sandbox = NewSandbox(previewApp, "", nil)
 	w = httptest.NewRecorder()
