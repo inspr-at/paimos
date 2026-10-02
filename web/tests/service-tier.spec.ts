@@ -60,7 +60,13 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
     await setup(page, { active: width === 390 ? 'fast' : 'default' })
     await page.goto('/agents')
-    if (width === 390) await row(page).locator('.phone-tier [data-tier]').click()
+    if (width === 390) {
+      const host = row(page).locator('.host-badge'), tier = row(page).locator('.phone-tier [data-tier]')
+      await expect(host).toBeVisible()
+      const hb = (await host.boundingBox())!, tb = (await tier.boundingBox())!
+      expect(tb.x + tb.width).toBeLessThanOrEqual(hb.x + .5)
+      await tier.click()
+    }
     else await glyph(page).click()
     await expect(picker(page).getByRole('radio', { name: /Fastest:/ })).toHaveAttribute('aria-disabled', 'false')
     const controls = { choices: picker(page).getByRole('radiogroup'), fast: picker(page).locator('[data-option=fast]'), default: picker(page).locator('[data-option=default]'), fastest: picker(page).locator('[data-option=fastest]'), cancel: picker(page).getByRole('button', { name: /Cancel/ }), confirm: picker(page).locator('.tp-go'), ...(width === 390 ? { frame: picker(page) } : {}) }

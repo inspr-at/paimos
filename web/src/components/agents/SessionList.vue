@@ -718,10 +718,10 @@ function rowClick(event: MouseEvent, id: string) {
   .c-exec { grid-column: 2 / 4; grid-row: 2; min-width: 0; margin-top: 6px; gap: 6px; }
   .exec-icon { width: 18px; height: 18px; place-items: center; }
   .exec-icon :deep(svg) { max-width: 18px; max-height: 13px; }
-  .row > .c-host { display: none; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
-  .c-exec { padding-right: 0; }
+  .row > .c-host { display: flex; grid-column: 3; grid-row: 2; justify-self: end; margin-top: 6px; padding: 0; }
+  .row > .c-exec { padding-right: 132px; }
   /* One line: harness · model · effort. The account stays in the tooltip and the detail panel. */
-  .exec-copy { display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
+  .exec-copy { flex: 1; display: flex; align-items: baseline; min-width: 0; font-size: 12px; color: var(--ink-2); }
   .exec-account { display: contents; }
   .exec-acct { display: none; }
   .exec-harness { order: -1; flex: none; font-size: 12px; color: var(--ink-2); }
