@@ -152,6 +152,13 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	defer func() {
+		select {
+		case <-tracer.release:
+		default:
+			close(tracer.release)
+		}
+	}()
 	racing := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
 	go func() {
@@ -329,7 +336,10 @@ func TestBUnresolvedBalanceSharesRecoveryAcrossPeople(t *testing.T) {
 	bAt(t, &second, at, "g1")
 	callStatus(t, second.mod, &second.runner, second.token, "POST", "/api/agent-accounts/"+other.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: local, WindowKey: "key_cap", Source: "provider", ObservedAt: at, ReadingAt: &at, Remaining: &room, CreditState: "unknown"}}}}), 200, nil)
 	second.route(t, 409)
-	_, body := call(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "")
+	code, body := call(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "")
+	if code != 200 {
+		t.Fatalf("readiness projection status %d", code)
+	}
 	if strings.Contains(body, "money_402") || strings.Contains(body, resource) {
 		t.Fatal("shared balance detail crossed the other owner's privacy")
 	}

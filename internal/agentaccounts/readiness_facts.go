@@ -159,8 +159,14 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 // ordinary check, null-cap response or unrelated bucket cannot clear it.
 func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFactWrite, now time.Time) error {
 	if v.StopKind == "money_402" && a.Harness == "pi" && a.Provider == "openrouter" {
-		if err := tx.QueryRow(ctx, `SELECT r.id::text FROM account_readiness_resources r JOIN account_readiness_memberships m ON m.tenant_id=r.tenant_id AND m.resource_id=r.id WHERE m.account_id=$1 AND m.binding_revision=$2 AND r.kind='shared_balance' AND r.identity_kind='unresolved' ORDER BY r.id LIMIT 1`, a.ID, a.LinkRevision).Scan(&v.ResourceID); err != nil {
+		var kind string
+		if err := tx.QueryRow(ctx, `SELECT kind FROM account_readiness_resources WHERE id=$1`, v.ResourceID).Scan(&kind); err != nil {
 			return err
+		}
+		if kind != "shared_balance" {
+			if err := tx.QueryRow(ctx, `SELECT r.id::text FROM account_readiness_resources r JOIN account_readiness_memberships m ON m.tenant_id=r.tenant_id AND m.resource_id=r.id WHERE m.account_id=$1 AND m.binding_revision=$2 AND r.kind='shared_balance' AND r.identity_kind='unresolved' ORDER BY r.id LIMIT 1`, a.ID, a.LinkRevision).Scan(&v.ResourceID); err != nil {
+				return err
+			}
 		}
 	}
 

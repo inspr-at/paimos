@@ -123,7 +123,11 @@ func admissionFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([
 		facts = append(facts, *vendor)
 	}
 	if c := a.OpenRouterCredits; c != nil && c.Remaining != nil {
-		facts = append(facts, ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "key_cap", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}})
+		resource, err := localReadinessResource(ctx, tx, a)
+		if err != nil {
+			return nil, err
+		}
+		facts = append(facts, ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", StopKind: "none", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}})
 	}
 	return facts, nil
 }
