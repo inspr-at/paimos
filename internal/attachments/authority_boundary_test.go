@@ -270,6 +270,12 @@ func TestAttachmentWriteHoldsAuthorityUntilCommit(t *testing.T) {
 			if !errors.As(err, &pe) || pe.Code != "55P03" {
 				t.Errorf("attachment write did not fence access changes: %v", err)
 			}
+			// A writer already holding this resource must still be able to
+			// append its event (tenant FK key-share) before releasing the row.
+			// An UPDATE tenant lock here would deadlock with undo/import writers.
+			if _, err := blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, p.TenantID); err != nil {
+				t.Fatalf("resource holder cannot finish its tenant FK writes: %v", err)
+			}
 			if err := blocker.Commit(ctx); err != nil {
 				t.Fatal(err)
 			}

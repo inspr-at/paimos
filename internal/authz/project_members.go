@@ -182,6 +182,19 @@ func LockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error 
 	return nil
 }
 
+// LockProjectWrite holds project placement and authority steady for a resource
+// write that does not change bindings. Tree precedes tenant, as for membership
+// edits, but SHARE suffices to fence their UPDATE lock. It remains compatible
+// with tenant FK key-share locks taken by other resource/event writers: those
+// writers can finish without a resource-row/tenant-FK deadlock.
+func LockProjectWrite(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+		return err
+	}
+	var id string
+	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, tenantID).Scan(&id)
+}
+
 func bindableTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) error {
 	var kind, status string
 	var linked bool

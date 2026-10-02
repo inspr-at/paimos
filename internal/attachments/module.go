@@ -117,7 +117,7 @@ func liveNode(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) error {
 	return nil
 }
 
-// requireNodeWrite runs after LockProjectMutation, in the transaction that
+// requireNodeWrite runs after LockProjectWrite, in the transaction that
 // writes metadata and events. Resolve the current project rather than trusting
 // the earlier route scope: a node may have moved while the body was streaming.
 func requireNodeWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID, permission string) error {
@@ -275,7 +275,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]Attachment, 0, len(files))
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
 		if err := requireNodeWrite(r.Context(), tx, p, nodeID, "attachments.write"); err != nil {
@@ -379,7 +379,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	var out Attachment
 	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
 		before, err := scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.TenantID, id))
@@ -427,7 +427,7 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
 		before, err := scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.TenantID, id))
