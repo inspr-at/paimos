@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,6 +41,7 @@ func (s *managedToolServer) Close() error {
 }
 
 type toolBinding struct {
+	reportActivity                        func(string) (string, bool)
 	api                                   RunToolAPI
 	workOrderID, runID, workspace, branch string
 	active                                func() bool
@@ -108,7 +110,30 @@ type terminalArgs struct {
 	Directory string   `json:"directory,omitempty" jsonschema:"root or web; npm runs in web"`
 }
 
+type activityArgs struct {
+	Doing string `json:"doing,omitempty" jsonschema:"Optional public summary of at most 60 characters. Query without doing first; report only when mode is agent_summary."`
+}
+type activityResult struct {
+	Mode     string `json:"mode"`
+	Recorded bool   `json:"recorded"`
+}
+
 func addManagedTools(s *mcp.Server, b toolBinding) {
+	if b.reportActivity != nil {
+		mcp.AddTool(s, &mcp.Tool{Name: "aeon_activity", Description: "Read the workspace activity mode. In agent_summary mode, optionally report what you are doing at a phase change. Off and tool_activity require no summary."}, func(_ context.Context, _ *mcp.CallToolRequest, in activityArgs) (*mcp.CallToolResult, activityResult, error) {
+			if !b.active() {
+				return nil, activityResult{}, errors.New("run is not active")
+			}
+			if in.Doing != "" {
+				if _, valid := agentactivity.CleanSummary(in.Doing); !valid {
+					return nil, activityResult{}, errors.New("invalid public activity summary")
+				}
+			}
+			mode, recorded := b.reportActivity(in.Doing)
+			return nil, activityResult{Mode: mode, Recorded: recorded}, nil
+		})
+	}
+
 	addManagedFileTools(s, b)
 	// Cache qualified library closures only for this managed run.
 	var libraries terminalLibraryCache

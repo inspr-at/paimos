@@ -18,6 +18,12 @@ import TicketWorkers from './TicketWorkers.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
+import QueueAction from './QueueAction.vue'
+import QueueIndicator from './QueueIndicator.vue'
+import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
+import { useWorkQueue } from '../../stores/workQueue'
+import { can } from '../../lib/authz'
+import { queueable } from '../../lib/workQueue'
 import { PLANNING_COLUMNS, planningPresent, planningTip, type PlanningColumn } from '../../lib/planning'
 import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../../lib/eta'
 
@@ -81,6 +87,7 @@ const emit = defineEmits<{
   sort: [field: SortField, additive: boolean]
   status: [row: ListItem, anchor: HTMLElement]
   copy: [row: ListItem]
+  assignee: [row: ListItem, anchor: HTMLElement]
   newTab: [row: ListItem]
   toggleGroup: [key: string]
   openEpic: [epic: EpicRef]
@@ -104,11 +111,11 @@ const emit = defineEmits<{
   showUpdates: []
 }>()
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid', suggested: 'c-suggested' }
 const isPlanning = (id: ColumnId): id is PlanningColumn => (PLANNING_COLUMNS as ColumnId[]).includes(id)
 // Planning cells are not Tab stops. The focused row carries their descriptions.
 function planningDescribedBy(row: ListItem): string {
-  return columns.value.filter(column => isPlanning(column.id) && planningTip(row, column.id)).map(column => `plan-${row.id}-${column.id}`).join(' ')
+  return columns.value.flatMap(column => column.id === 'suggested' ? [`suggested-${row.id}`] : isPlanning(column.id) && planningTip(row, column.id) ? [`plan-${row.id}-${column.id}`] : []).join(' ')
 }
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
@@ -119,6 +126,9 @@ const phone = ref(phoneQuery.matches)
 // One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
 // a ticket with a worker earns Assignee even when nobody is the stored owner.
 const live = useLiveAgents()
+const queue = useWorkQueue()
+const queued = (row: ListItem) => queueable(row) ? queue.entry(props.projectId, row.id) : null
+const mayAssign = computed(() => can('nodes.write', props.projectId) || can('run.create', props.projectId))
 const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
 function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
 // The server names the lead. Other live workers stay in the feed's order after it.
@@ -128,7 +138,8 @@ const present = computed(() => {
   const rows = [...props.rowsById.values()]
   const listed = props.outline ? props.outline.flatMap(entry => entry.type === 'row' ? [entry.row] : []) : rows
   return {
-    assigned: props.showAssignee,
+    assigned: props.showAssignee || !!queue.snapshots[props.projectId]?.items.length,
+    suggested: rows.some(row => ['delivered', 'accepted', 'done', 'in_progress', 'in-progress', 'qa'].includes(row.state) || !!queued(row)),
     workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
     estimate: rows.some(row => row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
@@ -669,7 +680,7 @@ defineExpose({
                   v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1"
                   @click="checkClick($event, entry.row)" @change="emit('select', entry.row, 'toggle')"
                 />
-                <span class="key">{{ entry.row.key }}</span>
+                <button type="button" class="key key-btn" :aria-label="`Copy ${entry.row.key}`" :data-tip="`Copy ${entry.row.key}`" @click.stop="emit('copy', entry.row)">{{ entry.row.key }}</button>
               </div>
             </td>
             <td class="c-title">
@@ -692,7 +703,7 @@ defineExpose({
                   <span v-if="epicChip(entry.row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(entry.row)!.title }}</span>
                   <span v-else class="parent-title mono">{{ epicChip(entry.row)!.key }}</span>
                 </span>
-                <TicketWorkers v-if="!has('assignee') && workersOf(entry.row).length" class="title-workers" variant="cue" :workers="workersOf(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
+                <TicketWorkers v-if="!has('assignee') && assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                 <span v-if="dropTarget === entry.row.id" class="drop-pill"><AppIcon name="arrow" :size="11" />Move into {{ entry.row.key }}</span>
                 <span v-else-if="entry.tree?.stats && entry.tree.stats.scope" class="epic-progress" :data-tip="`${entry.tree.stats.done} of ${entry.tree.stats.scope} done${entry.tree.stats.total - entry.tree.stats.scope ? ` · ${entry.tree.stats.total - entry.tree.stats.scope} cancelled` : ''}`">
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
@@ -700,15 +711,15 @@ defineExpose({
                 </span>
               </div>
               <span class="row-actions">
-                <button type="button" class="icon-btn sm flat" :aria-label="`Copy ${entry.row.key}`" :data-tip="`Copy ${entry.row.key}`" @click.stop="emit('copy', entry.row)"><AppIcon name="copy" :size="13" /></button>
+                <QueueAction :row="entry.row" :project-id="projectId" />
                 <button type="button" class="icon-btn sm flat" :aria-label="`Open ${entry.row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', entry.row)"><AppIcon name="external" :size="13" /></button>
               </span>
             </td>
             <template v-for="column in columns.slice(2)" :key="column.id">
               <td v-if="column.id === 'status'" class="c-status">
-                <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
+                <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
-                  <span>{{ statusMeta(entry.row.state).label }}</span>
+                  <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
                 </button></div>
               </td>
               <td v-else-if="column.id === 'priority'" class="c-prio" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
@@ -718,12 +729,14 @@ defineExpose({
                 </div>
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
-                <div class="cell">
-                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <TicketWorkers v-if="assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
+                <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
+                  <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length || queued(entry.row) }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span v-if="!queued(entry.row)" class="person-name">{{ entry.row.assignee.name }}</span></span>
+                  <QueueIndicator v-if="queued(entry.row)" :entry="queued(entry.row)!" :manual="queue.snapshots[projectId]?.manual_order" />
+                  <span v-else-if="assigneeWorkers(entry.row).length && !entry.row.assignee"><AppIcon name="chevron" :size="12" /></span>
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
-                </div>
+                </button><TicketWorkers v-if="!queued(entry.row) && assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></div>
               </td>
+              <td v-else-if="column.id === 'suggested'" class="c-suggested"><div class="cell"><SuggestedReleaseCell :row="entry.row" :project-id="projectId" :now="now" /></div></td>
               <td v-else-if="column.id === 'epic'" class="c-epic">
                 <div class="cell">
                   <span v-if="epicOf(entry.row)" class="epic-cell" :data-tip="`Epic ${epicOf(entry.row)!.key}\n${epicOf(entry.row)!.title}`">
@@ -930,6 +943,12 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .more-btn:hover { background: var(--row-hover); }
 .more-btn:focus-visible { box-shadow: var(--focus-ring); }
 
+.key-btn { display: inline-flex; align-items: center; height: 22px; margin: 0 -5px; padding: 0 5px; border: 0; border-radius: 6px; background: transparent; cursor: copy; }
+.key-btn:hover { color: var(--teal-ink); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
+.assignee-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; }
+.assignee-btn:hover:not(:disabled) { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
+.assignee-btn:disabled { opacity: 1; }
+.q-pos { color: var(--ink-3); font: 500 11.5px/18px var(--mono); }
 .key { font: 500 11.5px/18px var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
 .ticket-row.open .key, .ticket-row.cursor .key { color: var(--teal-ink); }
 .kind-glyph { color: var(--ink-3); }
@@ -965,12 +984,13 @@ td.c-title { position: relative; overflow: hidden; }
   }
 }
 .ticket-row:hover .row-actions, .ticket-row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
-.row-actions .icon-btn { width: 24px; height: 24px; color: var(--ink-3); }
-.row-actions .icon-btn:hover { color: var(--teal-ink); }
-.compact .row-actions .icon-btn { width: 22px; height: 22px; }
+.row-actions :deep(.icon-btn) { width: 24px; height: 24px; color: var(--ink-3); }
+.row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
+.compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
+.status-btn .q-pos { flex: none; margin-left: -3px; }
 .status-btn:hover, .status-btn[aria-expanded="true"] { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .status-btn:active { background: var(--row-selected); }
 .status-btn:focus-visible { box-shadow: var(--focus-ring); }

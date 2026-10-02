@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"golang.org/x/sys/unix"
 )
@@ -25,12 +26,14 @@ var errAttachTranscript = errors.New("transcript identity or format unsafe; watc
 // A transcript is untrusted data. Pin every path component without following
 // links; hold the opened regular file. Never reopen a replacement or rewind.
 type attachTail struct {
-	file     *os.File
-	path, id string
-	offset   int64
-	partial  []byte
-	discard  bool
-	redactor attachRedactor
+	activityEnabled bool
+	activity        *agentactivity.Activity
+	file            *os.File
+	path, id        string
+	offset          int64
+	partial         []byte
+	discard         bool
+	redactor        attachRedactor
 }
 
 func openAttachTail(path string, uid int) (*attachTail, error) {
@@ -104,6 +107,7 @@ func (t *attachTail) startNow() error {
 	return nil
 }
 func (t *attachTail) next() (string, error) {
+	t.activity = nil
 	if err := t.check(); err != nil {
 		return "", err
 	}
@@ -118,6 +122,11 @@ func (t *attachTail) next() (string, error) {
 	for _, b := range input[:n] {
 		if b == '\n' {
 			if !t.discard {
+				if t.activityEnabled {
+					if a := agentactivity.TranscriptTool(t.partial); a != nil {
+						t.activity = a
+					}
+				}
 				if line, ok := t.redactor.record(t.partial); ok && out.Len()+len(line)+1 <= attachwatch.MaxText {
 					out.WriteString(line)
 					out.WriteByte('\n')

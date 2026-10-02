@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
-import { getNode, listNodes, type ListItem, type ListQuery } from './api'
+import { getNode, listNodes, type ListItem, type ListPage, type ListQuery } from './api'
 import { childMap, epicStats, flattenOutline, missingAncestors, type EpicStats, type OutlineEntry } from './outline'
 import { apiParams, compareRows, effectiveSort, hasFilters, type ListFilters } from './ticketList'
 import { rowStore } from './rowStore'
@@ -11,7 +11,7 @@ import { placeKey, useLiveList, type ListRead, type LiveListOptions, type LiveRe
 
 interface Block { ids: string[]; cursor: string | null; loading: boolean; error: string; paged?: Set<string> }
 type ListApi = { rows: Ref<ListItem[]>; loading: Ref<boolean>; names: Map<string, string>; reads?: Ref<ListRead | null>; load?: () => unknown }
-type LiveOptions = Partial<Pick<LiveListOptions, 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore }
+type LiveOptions = Partial<Pick<LiveListOptions, 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore; fetchList?: (query: ListQuery) => Promise<ListPage> }
 
 // Expansion is remembered per project for the session (memory, not device storage).
 const expandedByProject = new Map<string, Set<string>>()
@@ -306,7 +306,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   })
   async function fetchLive(query: ListQuery, purpose: LiveReadPurpose) {
     const run = generation, sent = rowStore.mark()
-    const page = await listNodes(query)
+    const page = await (options.fetchList ?? listNodes)(query)
     if (!matchMode.value || run !== generation || purpose === 'presence') return page
     // Ancestors place filtered matches even when they do not match themselves.
     // Read them afresh on relevant events; no project-lifetime cache of values.

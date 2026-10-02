@@ -305,8 +305,12 @@ func TestTouchIDDefaultIsMacOnlyUntilSaved(t *testing.T) {
 			t.Fatal("confirmed watch did not activate")
 		}
 	})
-	for _, capability := range []string{attachwatch.LocalAuthNoGUI, attachwatch.LocalAuthPolicy, attachwatch.LocalAuthUnsigned} {
-		t.Run(capability, func(t *testing.T) {
+	for _, capability := range []string{"", attachwatch.LocalAuthUnsupported, attachwatch.LocalAuthNoGUI, attachwatch.LocalAuthPolicy, attachwatch.LocalAuthUnsigned} {
+		name := capability
+		if name == "" {
+			name = "omitted capability"
+		}
+		t.Run(name, func(t *testing.T) {
 			f, key, in, signer := upgradedWatchFixture(t)
 			registerCapability(t, f, key, &in, capability)
 			in.Snapshot.Platform = "darwin"

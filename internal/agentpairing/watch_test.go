@@ -10,12 +10,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestAttachActivityRequiresActiveApprovalAndHonorsPolicy(t *testing.T) {
+	f, key, in := watchFixture(t)
+	doing := "Implementing activity"
+	in.Doing = &doing
+	f.call("POST", "/api/agent-pairing/attach", in, false, key, 400)
+	in.Doing = nil
+	v := activateWatch(t, f, key, &in)
+	if v.AgentActivityMode != agentactivity.Summary {
+		t.Fatal("attach did not return workspace mode")
+	}
+	poll := func(code int) {
+		t.Helper()
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET last_poll=clock_timestamp()-interval '2 seconds' WHERE id=$1`, in.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		in.Sequence++
+		f.call("POST", "/api/agent-pairing/attach", in, false, key, code)
+	}
+	in.Doing = &doing
+	in.ToolActivity = &agentactivity.Activity{Text: "Running Go tests", Source: "auto", At: time.Now().UTC()}
+	poll(200)
+	var summary, observed string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT doing,tool_activity FROM harness_sessions WHERE id=$1`, *v.SessionID).Scan(&summary, &observed); err != nil || summary != doing || observed != "Running Go tests" {
+		t.Fatal("active watch activity not attributed")
+	}
+	in.ToolActivity.Text = "PRIVATE_ARGUMENT"
+	poll(400)
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO harness_settings(tenant_id,agent_activity_mode) VALUES($1,'off') ON CONFLICT (tenant_id) DO UPDATE SET agent_activity_mode='off'`, f.tenantID); err != nil {
+		t.Fatal(err)
+	}
+	doing = "Ignored while off"
+	in.ToolActivity.Text = "Pushing"
+	poll(200)
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT doing,tool_activity FROM harness_sessions WHERE id=$1`, *v.SessionID).Scan(&summary, &observed); err != nil || summary != "Implementing activity" || observed != "Running Go tests" {
+		t.Fatal("Off collected attached activity")
+	}
+}
 
 func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
