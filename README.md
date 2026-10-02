@@ -10,6 +10,119 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Code health audits
+
+AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
+ticket of that epic and produces ticket attachments, rather than committed
+findings. Recurring work and queue dispatch belong to PAIMOS (AEON-573); until
+that integration ships, the coordinator starts these runs manually.
+
+| Run | Trigger | Scope |
+| --- | --- | --- |
+| Delta audit | Each published release | Files changed since the last audited release, by slice |
+| Tool sweep | Weekly | Static analysis compared with the accepted tool baseline |
+| Rolling deep read | Weekly | Two of nine slices in rotation; a complete rotation takes about five weeks |
+| Full audit | Quarterly or on demand | All nine slices plus the tool sweep |
+
+Readers use [the shared rubric](scripts/audit/rubric.md), record each assigned
+file and findings in [the slice schema](scripts/audit/finding.schema.json),
+and obtain independent verification from another model family. Check current
+tickets before reporting known problems. Deduplicate against open findings by
+the emitted `fingerprint` (files + theme + title, ignoring line-number churn,
+title case and whitespace); link existing tickets in `related_tickets`.
+Critical findings get an immediate ticket and operator notice; high findings
+go to their theme's queued ticket; medium/low findings are batched by theme
+with a weekly summary of new themes. This toolkit does not send notices,
+create tickets, run models, schedule work or publish pages.
+
+The tools in `scripts/audit/` use Python 3.10+ and the standard library, Git,
+and Node for the optional renderer smoke check. They run offline, without
+installing packages or invoking analysis tools. Supply locally collected,
+sanitized diagnostics in the shared `T` manifest; never include credentials
+or raw secret scanner output. Tool installation, advisory downloads and
+analysis run separately on the approved build/test runner.
+
+Start with an immutable snapshot and inspect `assigned` in the coverage
+report to dispatch readers. The slice map uses repo-relative, case-sensitive
+globs: `*` stays within one path component and `**` crosses directories.
+`exclude` removes deliberate overlap (S9 excludes S8's views/components).
+Unknown code extensions can be added to `code_extensions`/`code_names`;
+new packages need explicit ownership. Ambiguous ownership and unassigned
+code fail with exit 1, malformed inputs with exit 2. The map covers deploy
+Compose, root/web embeds, web configuration and end-to-end tests as well as
+the original nine areas. Assigned context files also require manifest entries;
+use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
+
+```bash
+AUDIT_DIR=tmp/code-health
+AUDIT_SHA=$(git rev-parse HEAD)
+mkdir -p "$AUDIT_DIR"
+python3 -B scripts/audit/covcheck.py --sha "$AUDIT_SHA" --out "$AUDIT_DIR/assignment.json"
+```
+
+An assignment-only check proves ownership, not reading. Each reader writes
+`S1.json` through `S9.json` with `slice`, `sha`, `coverage`, `findings` and
+`good`. The coordinator then validates the actual manifests. For a rolling
+read, pass `--slice S1 --slice S2` and just those two `--manifest` arguments.
+For a delta audit, pass `--since <last-audited-commit>`; only changed files
+still present at the new snapshot require coverage. Whole-tree ownership is
+still enforced. Deleted paths do not need reading at the new snapshot.
+
+```bash
+# Full audit; all nine manifests must already exist.
+coverage_args=()
+merge_args=()
+for manifest_file in "$AUDIT_DIR"/S[1-9].json; do
+  coverage_args+=(--manifest "$manifest_file")
+  merge_args+=(--manifest "$manifest_file")
+done
+python3 -B scripts/audit/covcheck.py --sha "$AUDIT_SHA" "${coverage_args[@]}" --out "$AUDIT_DIR/coverage.json"
+
+# Weekly sweep: compare first. The checked-in baseline is an empty seed.
+python3 -B scripts/audit/baseline.py compare --input "$AUDIT_DIR/T.json" \
+  --baseline scripts/audit/tool-baseline.json --out "$AUDIT_DIR/T-new.json"
+
+python3 -B scripts/audit/merge.py "${merge_args[@]}" --manifest "$AUDIT_DIR/T-new.json" \
+  --reviews "$AUDIT_DIR/reviews.json" --release 'audited release label' --out "$AUDIT_DIR/merged.json"
+python3 -B scripts/audit/groups.py --audit "$AUDIT_DIR/merged.json" --out "$AUDIT_DIR/grouped.json"
+python3 -B scripts/audit/build.py --audit "$AUDIT_DIR/grouped.json" --out "$AUDIT_DIR/audit.html"
+node scripts/audit/run.cjs "$AUDIT_DIR/audit.html"
+just audit-check
+```
+
+Reviews are a JSON array of objects with `id`, `verdict`, nonempty `evidence`,
+and optional `severity`, `note` and `pass`. Verdicts are `confirmed`, `partly`,
+`refuted` or `duplicate:<finding-id>`; the prototype's `BEGIN-VERIFY`/`END-VERIFY`
+JSONL envelope is also accepted. Review IDs must match candidates from the
+same run, or use `T:<theme>` to verify a tool theme by sampling as in the
+prototype. Individual tool verdicts take precedence over a theme verdict;
+the tool table reports candidate counts and mixed verdicts per theme.
+Missing reviews remain `unverified` in `dropped`; only confirmed or
+partly confirmed findings appear on the page. Original severity and verification
+evidence stay with each finding. Fingerprint duplicates retain merged locations,
+related tickets and aliases, with each original candidate in `dropped`.
+Mixed snapshots, conflicting reviews, duplicate IDs and invalid duplicate
+targets fail rather than silently overwriting evidence.
+
+`groups.py` derives themes from the retained findings. Optional
+`--descriptions PATH` supplies a JSON object keyed by theme, with `title`,
+`summary` and `tickets` for editorial copy; no fixed finding IDs are bundled.
+The page keeps the prototype's search, severity filters, expandable themes,
+coverage, tools, strengths and method. It calculates totals from input, escapes
+audit text and uses local fonts. Identical inputs produce identical JSON/HTML;
+there are no wall-clock timestamps or embedded claims about a previous audit.
+
+Accept a baseline explicitly **after reviewing** the tool candidates:
+`python3 -B scripts/audit/baseline.py accept --input tmp/code-health/T.json
+--baseline scripts/audit/tool-baseline.json --out tmp/code-health/tool-baseline.json`.
+It stores sorted SHA-256 fingerprints only, including the optional `tool`
+producer identity (defaults to the theme), and retains known hashes across
+clean sweeps. Later runs use the latest accepted attachment as `--baseline`;
+acceptance is never implicit during comparison. Findings, reviews, reports
+and accepted baseline attachments stay under ignored `tmp/` or outside the
+checkout, and are attached to the run ticket. The stable living-page link,
+trends and slice-coverage age are coordinator publication concerns.
+
 ## Recurring work
 
 `aeon recur create|list|get|update|pause|resume|run-now|preview` manages
@@ -781,9 +894,11 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Classic colleagues without a sign-in identity can join through **Settings → Access → People → Imported from classic → Invite this person**. The invite starts with their email and imported access; the administrator confirms roles they may grant. On acceptance, one active, unlinked imported account with exactly the same verified email (case-insensitive) in this workspace becomes an alias of the new person, with an audited reason. Classic identities and history remain intact. Multiple unlinked matches require manual **Link to person**, including inactive records or records that already have aliases; already linked, deactivated or existing link-target accounts are never automatically linked. A token alone cannot link an account. Invited access stays authoritative even for project-only invites; sign-in and later imports never restore workspace access from the alias's classic roles.
 
-Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet previews **Ticket worker** and **Coordinator** scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. The same previews and search are available when editing scopes; rotation previews keep every original scope. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
 
-People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
+Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
+
+People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
@@ -1194,7 +1309,7 @@ The ticket-worker set is `nodes.read`, `nodes.write`, `comments.read`, `comments
 aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d
 ```
 
-Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. It never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. Creation, editing and rotation use the same role ceiling: workspace-role permissions plus project-grantable and self-service permissions (`kinds.read`, `profile.read`, `profile.write`, `authz.read`) held through project roles, intersected with the agent-grantable registry. A scope from a project role still requires that project's binding on each request; it grants no workspace access. Rotation never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
 
 For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
 
