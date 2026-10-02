@@ -7,10 +7,17 @@ import { modelCopy, type PrefChoice, type EffectiveModel } from '../../lib/model
 const props = defineProps<{ model: EffectiveModel; label: string; review: boolean; disabled: boolean; choices?: PrefChoice[] }>()
 defineEmits<{ pick: [] }>()
 const copy = computed(() => modelCopy(props.model, props.review, props.choices))
+const mark = computed(() => {
+  const selector = props.model.selector
+  if (selector.mode === 'latest') return { harness: selector.harness ?? '', provider: selector.family }
+  const requested = selector.mode === 'pinned' ? props.choices?.find(c => c.profile.id === selector.profile_id)?.profile : undefined
+  const profile = requested ?? props.model.profile
+  return { harness: profile?.harness ?? '', provider: profile?.provider || profile?.family || props.model.brand }
+})
 </script>
 <template>
   <button type="button" class="model-chip" :class="{ warning: model.unavailable_reason }" :disabled="disabled" :aria-label="`${label}: ${copy.name}`" :data-tip="copy.tip" aria-haspopup="dialog" @click="$emit('pick')">
-    <span class="model-mark"><AppIcon v-if="model.selector.mode === 'auto'" :name="review ? 'compare' : 'sparkle'" :size="16" /><HarnessMark v-else :harness="model.profile?.harness || ''" :provider="model.profile?.provider || model.brand" :size="16" /></span>
+    <span class="model-mark"><AppIcon v-if="model.selector.mode === 'auto'" :name="review ? 'compare' : 'sparkle'" :size="16" /><HarnessMark v-else :harness="mark.harness" :provider="mark.provider" :size="16" /></span>
     <span class="model-text"><b>{{ copy.name }}</b><small><AppIcon v-if="model.unavailable_reason" name="alert" :size="12" /><AppIcon v-else-if="model.follows_latest" name="refresh" :size="12" /><AppIcon v-else-if="model.pinned" name="pin" :size="12" /><span>{{ copy.detail }}</span></small></span>
   </button>
 </template>

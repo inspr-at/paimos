@@ -8,7 +8,7 @@ import { compareModelVersions, pickerReason, profileLine, type ModelSelector, ty
 const props = defineProps<{ label: string; profiles: PrefProfile[]; choices?: PrefChoice[]; candidates: PickerCandidate[]; residency: ResidencyView; review: boolean; selector: ModelSelector; catalogError: string }>()
 const emit = defineEmits<{ close: []; choose: [selector: ModelSelector] }>()
 const initialSelector = props.selector
-const initialEffort = (initialSelector.mode === 'latest' ? initialSelector.effort : initialSelector.mode === 'pinned' ? props.profiles.find(p => p.id === initialSelector.profile_id)?.effort || 'high' : props.review ? 'xhigh' : 'high')
+const initialEffort = (initialSelector.mode === 'latest' ? initialSelector.effort : initialSelector.mode === 'pinned' ? (props.choices?.find(c => c.profile.id === initialSelector.profile_id)?.profile ?? props.profiles.find(p => p.id === initialSelector.profile_id))?.effort || 'high' : props.review ? 'xhigh' : 'high')
 const efforts = ref<Record<string, string>>({})
 const groups = computed(() => {
   const grouped = new Map<string, { key: string; label: string; profile: PrefProfile; line: string; versions: PrefProfile[]; efforts: string[] }>()

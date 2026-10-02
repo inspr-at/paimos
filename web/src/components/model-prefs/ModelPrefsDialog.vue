@@ -22,7 +22,7 @@ const pickedKind = computed(() => doc.value?.kinds.find(k => k.id === picker.val
 const pickedRow = computed(() => view.value?.rows.find(r => r.kind_id === picker.value?.kind))
 const addOpen = ref(false), newKind = ref(''), archiveKind = ref(''), resetAll = ref(false)
 const labelInput = ref<HTMLInputElement>(), content = ref<HTMLElement>()
-const focusedKind = computed(() => doc.value?.kinds.find(k => k.slug === props.context.kind))
+const focusedKind = computed(() => doc.value?.kinds.find(k => !k.archived_at && k.slug === props.context.kind) ?? doc.value?.kinds.find(k => k.system === 'other'))
 const whyRow = computed(() => view.value?.rows.find(r => r.kind_id === focusedKind.value?.id))
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 onMounted(async () => { await editor.load(); await nextTick(); if (props.context.kind) content.value?.querySelector(`[data-kind="${CSS.escape(props.context.kind)}"]`)?.scrollIntoView({ block: 'nearest' }) })
@@ -55,7 +55,7 @@ function keys(event: KeyboardEvent) {
         <div v-if="archiveKind" class="confirmation"><p>Remove {{ doc.kinds.find(k => k.id === archiveKind)?.label }}? Tickets keep their area and use Everything else.</p><button class="btn" type="button" :disabled="busy" @click="editor.archive(archiveKind).then(() => { if (!notice) archiveKind = '' })">Remove kind</button><button class="btn ghost" type="button" :disabled="busy" @click="archiveKind = ''">Cancel</button></div>
         <div v-if="resetAll" class="confirmation"><p>Reset this level? Its settings will be inherited from the broader level.</p><button class="btn" type="button" :disabled="busy" @click="editor.reset()?.then(() => { if (!notice) resetAll = false })">Confirm reset</button><button class="btn ghost" type="button" :disabled="busy" @click="resetAll = false">Cancel</button></div>
         <p v-if="providerWarning(view.residency)" class="warning" role="status"><AppIcon name="alert" :size="15" />{{ providerWarning(view.residency) }}</p>
-        <p v-if="outside.length" class="warning">{{ outside.length }} agents are still running on providers outside this setting. Nothing is stopped automatically. <a href="/agents">Show running agents</a></p>
+        <div v-if="outside.length" class="warning outside"><p>{{ outside.length }} agents are still running on providers outside this setting. Nothing is stopped automatically.</p><div><a v-for="(id, i) in outside" :key="id" :href="`/agents?run=${encodeURIComponent(id)}`">Agent {{ i + 1 }}</a></div></div>
         <section v-if="context.why && whyRow" class="why"><h3>Why this model?</h3><p v-if="context.preview">Shown on the ticket: {{ context.preview }}. These are your current preferences; planning may use the assignee’s settings.</p><p>{{ focusedKind?.label }} · set by {{ whyRow.set_by || 'default' }}{{ whyRow.locked_by ? ` · locked by ${whyRow.locked_by}` : '' }}.</p><p>Normally: {{ modelCopy(whyRow.normal, focusedKind?.system === 'review').tip }}</p><p>If it’s complex: {{ modelCopy(whyRow.complex, focusedKind?.system === 'review').tip }}</p><p>Automatic keeps the ticket’s role. Review family and security rules still apply.</p></section>
       </template>
       <p class="save-status" role="status">{{ busy ? 'Saving…' : notice }}</p><button v-if="!doc && !loading" type="button" class="btn" @click="editor.load">Try again</button>
@@ -78,6 +78,7 @@ function keys(event: KeyboardEvent) {
 .add-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .add-form input { min-width: 0; width: 180px; height: 36px; padding: 0 8px; }
 .confirmation { display: flex; flex-wrap: wrap; gap: 8px; } .confirmation p { width: 100%; font-size: 12px; } .warning { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border-radius: 10px; background: var(--gold-wash); color: var(--warn-ink); font-size: 12px; }
 .warning svg { flex: none; } .why { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); } .why h3 { color: var(--ink); font-size: 13px; }
+.outside { display: grid; } .outside > div { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .save-status { min-height: 18px; font-size: 12px; color: var(--ink-2); }
 @media (max-width: 600px) { .prefs-footer { grid-template-columns: minmax(0, 1fr) 90px; } .summary { grid-column: 1 / -1; min-height: 18px; } .reset-all { width: 100%; } .prefs-lock { min-height: 44px; } .read-only { min-height: 36px; } }
 </style>

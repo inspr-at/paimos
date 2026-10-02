@@ -8,7 +8,7 @@ import { prefsDocument, prefsFixture, PREF_MODELS, prefScope, customKind } from 
 import type { ModelPreferences, PrefLevel, PrefRow } from '../src/lib/modelPrefs'
 import { expectStableControls } from './helpers/stable'
 
-async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean } = {}) {
+async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[] } = {}) {
   const data = fixtures()
   data.preferences['list:p-pharos'] = { visible: ['status', 'model'] }
   const ticket = data.nodes.find(n => n.key === 'PHAROS-11')!
@@ -36,7 +36,7 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
     } else if (method === 'DELETE') state.levels[level] = { ...prefScope(), revision: scope.revision }
     else Object.assign(scope, body)
     state.levels[level]!.revision++
-    return route.fulfill({ json: { level: state.levels[level], revision: state.levels[level]!.revision, running_outside: [], residency: prefsDocument(state, project).views[level]!.residency } })
+    return route.fulfill({ json: { level: state.levels[level], revision: state.levels[level]!.revision, running_outside: options.runningOutside ?? [], residency: prefsDocument(state, project).views[level]!.residency } })
   })
   await page.route('**/api/work-kinds**', route => {
     const method = route.request().method(), path = new URL(route.request().url()).pathname
@@ -151,4 +151,36 @@ test('conflicts refresh honestly and read-only default keeps its explanation', a
   await dialog(page).getByRole('tab', { name: 'Default', exact: true }).click()
   await expect(dialog(page)).toContainText('Only workspace admins change the default')
   await expect(dialog(page).getByRole('radio', { name: /Any provider/ })).toBeDisabled()
+})
+
+test('provider-change notices link to the affected queued run', async ({ page }) => {
+  const id = 'ab000000-0000-4000-8000-000000000001'
+  await setup(page, { runningOutside: [id] })
+  await page.route('**/api/runs?*', route => route.fulfill({ json: { items: [{ id, agent_principal_id: 'agent', work_order_id: 'n-a1', status: 'starting', created_at: new Date().toISOString(), requested_model: 'gpt-6.1-sol' }], next_cursor: null } }))
+  await page.route('**/api/harness-sessions?*', route => route.fulfill({ json: { items: [], next_cursor: null } }))
+  await open(page)
+  await dialog(page).getByRole('radio', { name: /EU-hosted only/ }).click()
+  await expect(dialog(page).locator('.outside')).toContainText('Nothing is stopped automatically')
+  await dialog(page).getByRole('link', { name: 'Agent 1', exact: true }).click()
+  await expect(page.locator(`#run-${id}`)).toBeFocused()
+})
+
+test('Escape leaves a field before closing and browser shortcuts remain native', async ({ page }) => {
+  await setup(page); await open(page)
+  const modal = dialog(page)
+  await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+  await modal.getByRole('button', { name: /Add a kind/ }).click()
+  const field = modal.getByRole('textbox', { name: 'Name', exact: true })
+  await field.fill('Native shortcuts')
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+  const mod = mac ? 'Meta' : 'Control'
+  await field.press(`${mod}+a`)
+  expect(await field.evaluate(el => { const input = el as HTMLInputElement; return input.selectionEnd! - input.selectionStart! })).toBe('Native shortcuts'.length)
+  await page.evaluate(() => {
+    const target = document.activeElement!
+    ;(window as typeof window & { prefsNative: boolean[] }).prefsNative = ['s', 'r', 'd', 'p'].map(key => target.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent), ctrlKey: !/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent), bubbles: true, cancelable: true })))
+  })
+  expect(await page.evaluate(() => (window as typeof window & { prefsNative: boolean[] }).prefsNative)).toEqual([true, true, true, true])
+  await field.press('Escape'); await expect(field).not.toBeFocused(); await expect(modal).toBeVisible()
+  await page.keyboard.press('Escape'); await expect(modal).toHaveCount(0)
 })

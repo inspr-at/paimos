@@ -9,7 +9,7 @@ defineEmits<{ pick: [bucket: 'normal' | 'complex']; reset: []; lock: []; archive
 </script>
 <template>
   <tr class="kind-row" :class="{ here: row.changed_here }" :data-kind="kind.slug">
-    <th scope="row"><div class="kind-label"><b>{{ kind.label }}</b><button v-if="canRemoveKind(kind, level, editable)" type="button" class="icon-btn sm flat" :aria-label="`Remove ${kind.label}`" :disabled="busy" @click="$emit('archive')"><AppIcon name="close" :size="12" /></button></div><small>{{ kind.hint }}</small><small v-if="kind.system === 'review'">Never the author’s family</small><small v-if="kind.system === 'security'">Reviews: security ladder</small></th>
+    <th scope="row"><div class="kind-label"><b>{{ kind.label }}</b><span class="kind-action"><button v-if="canRemoveKind(kind, level, editable)" type="button" class="icon-btn sm flat" :aria-label="`Remove ${kind.label}`" :disabled="busy" @click="$emit('archive')"><AppIcon name="close" :size="12" /></button></span></div><small>{{ kind.hint }}</small><small v-if="kind.system === 'review'">Never the author’s family</small><small v-if="kind.system === 'security'">Reviews: security ladder</small></th>
     <td><span class="phone-label">Normally</span><ModelChip :model="row.normal" :choices="choices" :label="`${kind.label}, normally`" :review="kind.system === 'review'" :disabled="busy || !editable || !!row.locked_by && row.locked_by !== level" @pick="$emit('pick', 'normal')" /></td>
     <td><span class="phone-label">If it’s complex</span><ModelChip :model="row.complex" :choices="choices" :label="`${kind.label}, if complex`" :review="kind.system === 'review'" :disabled="busy || !editable || !!row.locked_by && row.locked_by !== level" @pick="$emit('pick', 'complex')" /></td>
     <td class="by-cell"><SetByBadge :row="row" :level="level" :kind="kind.label" :editable="editable" :busy="busy" :own-locked="ownLocked" @reset="$emit('reset')" @lock="$emit('lock')" /></td>
@@ -21,6 +21,7 @@ defineEmits<{ pick: [bucket: 'normal' | 'complex']; reset: []; lock: []; archive
 .kind-row.here { background: color-mix(in srgb, var(--lv) 7%, transparent); }
 th { width: 23%; text-align: left; font-weight: 400; } th small { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.3; }
 .kind-label { display: flex; align-items: center; gap: 3px; min-height: 28px; } b { font-size: 13px; overflow-wrap: anywhere; } .kind-label button { flex: none; }
+.kind-action { width: 28px; height: 28px; flex: none; }
 td { width: 26%; } .by-cell { width: 21%; } .reset-cell { width: 30px; }
 .phone-label { display: none; }
 @media (max-width: 600px) {
