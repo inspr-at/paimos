@@ -291,7 +291,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.equal(manifest.exceptions.length, 2);
+  assert.equal(manifest.exceptions.length, 3);
   const [entry] = manifest.exceptions;
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   const runKinds = manifest.exceptions[1];
@@ -310,7 +310,7 @@ test('integration exceptions pin the unchanged merged contract and run-kind expa
   assert.equal(destructive(source), true);
 });
 
-test('the current tree requires both exact-byte contract exceptions', () => {
+test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -318,7 +318,8 @@ test('the current tree requires both exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.equal(withoutException.length, 2);
+  assert.equal(withoutException.length, 3);
   assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
   assert.match(withoutException[1], /^1066_run_kinds.sql: non-allowlisted/);
+  assert.match(withoutException[2], /^1104_work_kinds.sql: non-allowlisted/);
 });

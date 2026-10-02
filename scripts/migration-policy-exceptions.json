@@ -13,6 +13,12 @@
       "sha256": "2b8877cc3537051d2095fbdd0e83c0fd9842c317856af9593b51c39fbd586303",
       "ticket": "AEON-501",
       "reason": "Expand-only family widening: replace the existing harness check with its strict superset (media and terminal). No existing value, row, column, or route is removed; nullable execution labels preserve previous-binary writes. The classifier conservatively flags DROP CONSTRAINT. This exact-byte exception is exposed in the draft PR for coordinator review, with previous-binary migration compatibility exercised in CI."
+    },
+    {
+      "file": "1104_work_kinds.sql",
+      "sha256": "dbdd04d67e5958f22f5a9900a2aa8eb1ca8f956ff9b46dad297c0d0cebcf8341",
+      "ticket": "AEON-502",
+      "reason": "Additive work-kind tables and tenant seed with an area-schema widening from the six existing strings to their slug-pattern superset. The classifier conservatively flags the tenant-loop DO backfill and CREATE OR REPLACE of the schema helper. Existing values, rows, and binary writes remain valid; Go area gates remain unchanged until 502c. Exact bytes are exposed in this draft PR for coordinator review; migration compatibility is measured in CI before any merge/release."
     }
   ]
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -151,7 +152,11 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
 		return nil, err
 	}
-	route, err := modelregistry.ResolveReview(ctx, tx, p, family, scope.ProjectID, now)
+	placement := modelprefs.PlacementFields(fields)
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	route, err := modelregistry.ResolveReviewFor(ctx, tx, p, modelregistry.WorkQuery{
+		AuthorFamily: family, ProjectID: scope.ProjectID, PersonID: person, Area: placement.Area, Complexity: placement.Complexity,
+		ComplexitySource: placement.ComplexitySource, TicketRole: placement.RouteRole, TicketResidency: placement.Residency}, now)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +209,7 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	if route.Profile != nil {
-		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID); err != nil {
+		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID, person, route.Residency); err != nil {
 			return nil, err
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -97,14 +98,18 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 		if same {
 			only, exclude = *v.AccountID, ""
 		}
-		advice, err := agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, only, exclude, now)
+		policy, err := modelprefs.RunRequirement(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		advice, err := agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, only, exclude, now, policy.Residency)
 		if err != nil {
 			return err
 		}
 		// If the rest of the pool stays dry, retry the original account once
 		// its reset/backoff has passed, subject to the same admission checks.
 		if len(advice.Accounts) == 0 && !same && at != nil && !now.Before(*at) {
-			advice, err = agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, *v.AccountID, "", now)
+			advice, err = agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, *v.AccountID, "", now, policy.Residency)
 			if err != nil {
 				return err
 			}
@@ -114,7 +119,7 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 			continue
 		}
 		next := advice.Accounts[0]
-		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID))
+		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id,residency,prefs_person_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID, modelprefs.Stamp(policy.Residency), policy.PersonID))
 		if err != nil {
 			return err
 		}

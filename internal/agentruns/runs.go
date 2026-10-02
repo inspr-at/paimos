@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -274,6 +275,11 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = tx.QueryRow(ctx, `SELECT model,harness FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model, &harness); err != nil {
 		return nil, err
 	}
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	requirement, err := modelprefs.OrderRequirement(ctx, tx, o.NodeID, person)
+	if err != nil {
+		return nil, err
+	}
 	if in.Account != nil {
 		var matches bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3 AND (allowed_model_profile_ids IS NULL OR $4::uuid=ANY(allowed_model_profile_ids)))`, *in.Account, in.Agent, harness, in.Profile).Scan(&matches); err != nil {
@@ -283,6 +289,19 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(409, "requested account must belong to the run agent and allow the model profile")
 		}
 	}
+	if in.Account != nil {
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return nil, err
+		}
+		qualifies, err := agentaccounts.AccountMeetsResidency(ctx, tx, *in.Account, in.Profile, requirement, now)
+		if err != nil {
+			return nil, err
+		}
+		if !qualifies {
+			return nil, &modelprefs.ResidencyUnmet{}
+		}
+	}
 	if in.Retry != nil {
 		var orderID, agentID string
 		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
@@ -290,7 +309,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person))
 	if err != nil {
 		return nil, err
 	}
