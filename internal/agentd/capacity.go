@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"

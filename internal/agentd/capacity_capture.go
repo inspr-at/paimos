@@ -3,7 +3,6 @@ package agentd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"

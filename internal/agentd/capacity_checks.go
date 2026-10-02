@@ -255,7 +255,7 @@ func (s *Supervisor) capacityProbeConnection(id string, accepted bool) {
 
 func currentCheckAccount(local EnrolledAccount, remote CapacityCheckAccount, daemon string) bool {
 	return local.ID == remote.ID && local.Key == remote.AccountKey && local.Harness == remote.Harness &&
-		remote.DaemonID == daemon && remote.OngoingUseApproved && remote.State == "available" && !local.DependencyBlocked && remote.LinkRevision >= 0 && len(remote.Resources) <= 16
+		remote.DaemonID == daemon && remote.OngoingUseApproved && remote.State == "available" && !local.DependencyBlocked && remote.LinkRevision >= 0 && len(remote.Resources) > 0 && len(remote.Resources) <= 16
 }
 func checkRequestCurrent(c *CapacityCheckRequest, account CapacityCheckAccount, generation string, now time.Time) bool {
 	return c != nil && c.ID != "" && c.AccountID == account.ID && c.BindingRevision == account.LinkRevision &&
@@ -381,7 +381,9 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		if manual {
 			saved.HandledCheck = account.PendingCheck.ID
 		}
-		saved.NextAttempt = now.Add(checkRetry(saved.Failures + 1))
+		saved.Failures = min(saved.Failures+1, 1000000)
+		saved.NextAttempt = now.Add(checkRetry(saved.Failures))
+		saved.LastResult = "timeout"
 	}
 	s.mu.Lock()
 	s.capacityChecks[local.ID] = saved
@@ -450,6 +452,9 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 			capture.Result = "protocol"
 		}
 	}
+	if report.Result == "unsupported" && identityFailure {
+		report.Result = s.capacityChecks[local.ID].LastResult
+	}
 	saved.LastResult = report.Result
 	saved.CleanupUnconfirmed = capture.CleanupUnconfirmed
 	cleanupBlocked = capture.CleanupUnconfirmed
@@ -458,7 +463,6 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		saved.Failures = 0
 		saved.NextAttempt = now.Add(s.capacityInterval)
 	} else {
-		saved.Failures = min(saved.Failures+1, 1000000)
 		saved.NextAttempt = now.Add(checkRetry(saved.Failures))
 	}
 	completion := capacityCheckCompletion{Generation: s.generation, Report: report}
@@ -466,9 +470,6 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		saved.Pending = &completion
 	}
 	s.mu.Lock()
-	if report.Result == "unsupported" && identityFailure {
-		saved.LastResult = s.capacityChecks[local.ID].LastResult
-	}
 	s.capacityChecks[local.ID] = saved
 	err = s.saveCapacityChecksLocked()
 	if capture.Result == "identity_mismatch" || capture.Result == "authentication_failed" {
