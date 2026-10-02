@@ -6,17 +6,40 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
+func placementAccount(t *testing.T, f *harnessFixture, tx pgx.Tx, h string) error {
+	t.Helper()
+	var account string
+	if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'placement-fixture',$3,$2,now(),true,'fixture',$4) RETURNING id::text`, f.person.TenantID, h, f.agent.ID, f.person.ID).Scan(&account); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, f.person.TenantID, account); err != nil {
+		return err
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+	raw, err := json.Marshal(schedule)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, f.person.TenantID, f.person.ID, account, raw)
+	return err
+}
+
 func TestRegisteredPlacementUsesStarterAndFreezesAcrossReplay(t *testing.T) {
 	f := fixture(t)
 	var profile, alias string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if err := modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID); err != nil {
+			return err
+		}
+		if err := placementAccount(t, f, tx, "claude"); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,linked_to) VALUES($1,'person','Linked starter',$2) RETURNING id::text`, f.person.TenantID, f.person.ID).Scan(&alias); err != nil {
@@ -90,6 +113,9 @@ func TestManagedRegistrationCopiesDispatchPlacementAfterPreferencesChange(t *tes
 	var profile string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if err := modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID); err != nil {
+			return err
+		}
+		if err := placementAccount(t, f, tx, "codex"); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"area":"security","complexity":"L","route_role":"build-hard"}' WHERE id=$1`, f.ticket); err != nil {

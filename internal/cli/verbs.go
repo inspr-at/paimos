@@ -197,7 +197,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&estimate, "estimate-hours", 0, "agent work hours until ready for review (alias of --estimate)")
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
-			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
+			fs.string(&area, "area", 0, "active default or project work-kind slug, including security")
 			fs.string(&complexity, "complexity", 0, "work complexity: S, M, or L")
 			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
