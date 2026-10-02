@@ -62,6 +62,11 @@ func TestFix3UnavailablePreviousTicketDoesNotBlockCorrection(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "moved":
+				// The membership FK requires routing to be detached before a move.
+				// Keep the immutable answer/effect's earlier ticket reference intact.
+				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE desk_askers SET ticket_id=NULL,comment_node_id=question_id WHERE question_id=$1`, q.ID); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, f.hidden); err != nil {
 					t.Fatal(err)
 				}
@@ -172,7 +177,7 @@ func fix3PublicTarget(t *testing.T, f *deliveryFixture, pool *pgxpool.Pool) (*Do
 		t.Fatal(err)
 	}
 	transport := &fix3IndexTransport{t: t, content: content}
-	m := doctrine.New(pool, doctrine.Options{CredentialsDir: dir, GuardKey: bytes.Repeat([]byte{4}, 32), Client: &http.Client{Transport: transport}})
+	m := doctrine.New(pool, doctrine.Options{CredentialsDir: dir, GuardKey: bytes.Repeat([]byte{4}, 32), Client: &http.Client{Transport: transport}, App: doctrine.AppConfig{ID: "8", InstallationID: "9", KeyRef: "fixture-app", TenantID: f.person.TenantID, GateLogin: "fixture-gate", DCOAcknowledged: true}})
 	f.m.WithDoctrine(m)
 	m.Mount(f.mux)
 	w := request(t.Context(), f.mux, f.person, "POST", "/api/rules/doctrine/sources", doctrine.SourceInput{Repository: private, Visibility: "private", Ref: "main", CredentialRef: "fixture-read"})
