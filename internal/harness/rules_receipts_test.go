@@ -182,12 +182,17 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	for _, request := range []harness.RulesReceiptWrite{in, other} {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
-	// Identify the blocker directly. Query text is truncated at PostgreSQL's
+	// Follow the blocker chain: the second waiter can queue behind the first.
+	// Query text is truncated at PostgreSQL's
 	// track_activity_query_size, so widening the session projection must not
 	// hide a real waiter or turn this concurrent CAS assertion into a timeout.
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND $1::integer=ANY(pg_blocking_pids(pid))`, blockerPID).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `WITH RECURSIVE waiting(pid) AS (
+ SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::integer=ANY(pg_blocking_pids(pid))
+ UNION
+ SELECT a.pid FROM pg_stat_activity a JOIN waiting w ON w.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()
+) SELECT count(*) FROM waiting`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}
