@@ -644,19 +644,20 @@ func TestNamedClaudeDenialDoesNotWaitForTheOtherWindow(t *testing.T) {
 	// The weekly window has already been open for an hour, and resets in just under seven days.
 	weeklyReset := now.Add(7*24*time.Hour - time.Hour)
 	no, yes := false, true
+	cause := insertRun(t, person, runner, profile)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,status='cancelled' WHERE id=$1`, cause, a.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{
-		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 90, ReadAt: readAt, ResetsAt: fiveReset, Source: "harness", OrdinaryUsageAllowed: &no},
+		{WindowKind: "5h", Bucket: "five_hour", WindowMinutes: 300, UsedPercent: 90, ReadAt: readAt, ResetsAt: fiveReset, Source: "harness", OrdinaryUsageAllowed: &no, RunID: cause},
 		{WindowKind: "weekly", Bucket: "seven_day", WindowMinutes: 10080, UsedPercent: 10, ReadAt: readAt, ResetsAt: weeklyReset, Source: "harness", OrdinaryUsageAllowed: &yes},
 	}}), 204, nil)
 	stop := readAt.Add(-time.Minute)
-	cause := insertRun(t, person, runner, profile)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
-			return err
-		}
-		// Bind the named denying bucket to the stopped run. Unnamed stops
-		// require controlled inference and cannot be erased by another reading.
-		if _, err := tx.Exec(t.Context(), `UPDATE account_capacity_readings SET run_id=$2 WHERE account_id=$1 AND window_kind='5h' AND read_at=$3`, a.ID, cause, readAt); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)

@@ -88,7 +88,7 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 			}
 		}
 		// A positive ordinary-key cap says nothing about the provider balance.
-		if f.WindowKey == "key_cap" && f.CreditState == "unknown" {
+		if (f.WindowKey == "key_cap" || f.Remaining != nil) && f.CreditState == "unknown" {
 			unknownMeasurement = true
 		}
 		fresh := f.ReadingAt != nil && !in.Now.Before(*f.ReadingAt) && in.Now.Sub(*f.ReadingAt) <= 10*time.Minute && (f.ResetsAt == nil || in.Now.Before(*f.ResetsAt))

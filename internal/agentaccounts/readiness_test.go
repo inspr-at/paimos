@@ -60,6 +60,11 @@ func TestReadinessProjectionUnknownAndHardFacts(t *testing.T) {
 			t.Fatalf("measurement error is not sign-out: %+v", out)
 		}
 	}
+	cap := 10.0
+	input.Facts = []ReadinessFact{{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "ordinary_key", ReadingAt: &now, Remaining: &cap, CreditState: "unknown"}}}
+	if out = ProjectReadiness(input); out.State != "unknown" || !out.CanTry || out.DisplayReason != UsageUnknownReason {
+		t.Fatalf("cap alias implied known total balance: %+v", out)
+	}
 }
 
 func readinessWorld(t *testing.T, slug string, now time.Time) limitFixture {

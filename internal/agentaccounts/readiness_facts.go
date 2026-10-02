@@ -158,6 +158,9 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 // only be cleared by package B's evidenced successful recovery inference. An
 // ordinary check, null-cap response or unrelated bucket cannot clear it.
 func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFactWrite, now time.Time) error {
+	if v.UsedPercent == nil && v.Remaining == nil {
+		v.ReadingAt = nil
+	}
 	if v.StopKind == "money_402" && a.Harness == "pi" && a.Provider == "openrouter" {
 		var kind string
 		if err := tx.QueryRow(ctx, `SELECT kind FROM account_readiness_resources WHERE id=$1`, v.ResourceID).Scan(&kind); err != nil {

@@ -301,12 +301,13 @@ func TestBUnresolvedBalanceSharesRecoveryAcrossPeople(t *testing.T) {
 	f := bPiWorld(t, "b-shared-balance", now)
 	peer := addPrincipal(t, f.admin.TenantID, "person", "Peer", []string{"admin"})
 	var other Account
-	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "peer", "harness": "pi", "provider": "openrouter", "daemon_id": "daemon-a", "label": "Peer", "max_parallel_runs": 3}), 201, &other)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "peer", "harness": "pi", "daemon_id": "daemon-a", "label": "Peer", "max_parallel_runs": 3}), 201, &other)
 	seed(t, f.admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3 WHERE id=$1`, other.ID, peer.ID, now)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3,provider='openrouter' WHERE id=$1`, other.ID, peer.ID, now)
 		return err
 	})
 	other.OwnerPersonID = &peer.ID
+	other.Provider = "openrouter"
 	s := capacity.DefaultSchedule("UTC")
 	for i := range s.Week {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
@@ -362,9 +363,12 @@ func TestBFreshFactBudgetsShareLedgerAndStaleRoomDoesNotFenceClaim(t *testing.T)
 		bAt(t, &f, at, "g1")
 		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "five_hour", Source: "harness", ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: &amount, CreditState: "unknown"}}}}), 200, nil)
 	}
-	// Sprint spends the measured remainder while preserving its hard boundary.
+	// The whole measured window fits today; no invented start fence applies.
 	s := capacity.DefaultSchedule("UTC")
-	s.Override = "sprint"
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
 	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
 	report(now, used)
 	run, out := f.route(t, 200)
@@ -430,5 +434,29 @@ func TestBUnknownScheduleDSTNightsAndRunNow(t *testing.T) {
 				return err
 			})
 		})
+	}
+}
+
+func TestBNullReadingCannotRenewStaleMeasuredRoom(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-null-room", now)
+	resource := bResource(t, f)
+	used := 10.0
+	reset := now.Add(5 * time.Hour)
+	report := func(at time.Time, value *float64) {
+		t.Helper()
+		bAt(t, &f, at, "g1")
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "five_hour", Source: "harness", ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: value, CreditState: "unknown"}}}}), 200, nil)
+	}
+	report(now, &used)
+	later := now.Add(11 * time.Minute)
+	report(later, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='five_hour' AND reading_at=$2 AND used_percent=10`, resource, now) != 1 {
+		t.Fatal("null capture renewed old room timestamp")
+	}
+	var out struct{ Items []AccountReadiness }
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &out)
+	if len(out.Items) != 1 || out.Items[0].State != "unknown" || !out.Items[0].CanTry || len(out.Items[0].MeasuredUsage) != 0 || out.Items[0].DisplayReason != UsageUnknownReason {
+		t.Fatalf("null capture claimed fresh/Ready: %+v", out.Items)
 	}
 }

@@ -320,26 +320,31 @@ func VendorRetryAt(ctx context.Context, tx pgx.Tx, accountID, runID string, now 
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	facts, err := admissionFacts(ctx, tx, a, now)
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	var until time.Time
-	known := true
+	var next *time.Time
 	for _, f := range facts {
-		if f.StopKind == "named_reset" && f.ResetsAt != nil && f.ResetsAt.After(now) {
-			if f.ResetsAt.After(until) {
-				until = *f.ResetsAt
-			}
-		} else if recoverableFact(f) && f.NextAttemptAt != nil {
-			known = false
-			if f.NextAttemptAt.After(until) {
-				until = *f.NextAttemptAt
-			}
+		if recoverableFact(f) && f.NextAttemptAt != nil && (next == nil || f.NextAttemptAt.After(*next)) {
+			next = f.NextAttemptAt
 		}
 	}
-	if !until.IsZero() {
-		return until, known, nil
+	if next != nil {
+		return *next, false, nil
+	}
+	// Only this stopped run can identify its named reset. A prior run's
+	// sibling reading still blocks admission, but never names this stop.
+	var until *time.Time
+	err = tx.QueryRow(ctx, `SELECT max(reset) FROM (
+      SELECT max(resets_at) AS reset FROM (SELECT DISTINCT ON(window_kind,bucket) resets_at,used_percent,ordinary_usage_allowed FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND run_id=$3 AND source<>'estimate' ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r WHERE (ordinary_usage_allowed=false OR used_percent>=100) AND resets_at>$2
+      UNION ALL SELECT max(limit_resets_at) FROM run_telemetry WHERE run_id=$3 AND error_code='vendor_limit' AND limit_resets_at>$2
+    ) named`, accountID, now, runID).Scan(&until)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if until != nil {
+		return *until, true, nil
 	}
 	return now.Add(vendorStopBackoff), false, nil
 }
