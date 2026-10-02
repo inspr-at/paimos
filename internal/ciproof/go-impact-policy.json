@@ -1,0 +1,57 @@
+{
+  "schema": "aeon.ci.go-impact-policy.v1",
+  "revision": "AEON-417-C-shadow-1",
+  "audits": [
+    {
+      "package": "github.com/inspr-at/paimos/internal/runkind",
+      "audit": "Pure label validation; no filesystem, subprocess, environment, database or network reads.",
+      "files": [
+        {
+          "path": "internal/runkind/kind.go",
+          "digest": "sha256:f6333719016bfed7dc10ea13c45945e5c86b55275b17a4b3809a9724d4527585"
+        },
+        {
+          "path": "internal/runkind/kind_test.go",
+          "digest": "sha256:f850c67caf8bc0ac4c10ee4d5206e6934d7b026d9f0217d92202ded78173cb8e"
+        }
+      ],
+      "runtime_paths": []
+    },
+    {
+      "package": "github.com/inspr-at/paimos/internal/scopecode",
+      "audit": "Pure scope encoding; tests read only package-local testdata/v1.json. Fuzz seeds are constants.",
+      "files": [
+        {
+          "path": "internal/scopecode/code.go",
+          "digest": "sha256:c43cd28d26092085aedc3a98e5f6d87ff6b73950c6dc321c649e3ae62677d3cb"
+        },
+        {
+          "path": "internal/scopecode/code_test.go",
+          "digest": "sha256:304d2bad0940a3bcebf2e4f339189b739f3af132a4af4c31af7cdd2fd94fb9a8"
+        },
+        {
+          "path": "internal/scopecode/testdata/v1.json",
+          "digest": "sha256:67d6d0754cf1f742efcc7b39ce1a71d4dfe246743246779e9943b811ff7bc5cd"
+        }
+      ],
+      "runtime_paths": [
+        "internal/scopecode/testdata/"
+      ]
+    },
+    {
+      "package": "github.com/inspr-at/paimos/internal/ticketbenefits",
+      "audit": "Pure JSON validation; tests use in-memory fixtures only.",
+      "files": [
+        {
+          "path": "internal/ticketbenefits/benefits.go",
+          "digest": "sha256:86c760ce45135fa8cd5e3d8f0ea971a1d86aa3242f074d101facfa836d977ca3"
+        },
+        {
+          "path": "internal/ticketbenefits/benefits_test.go",
+          "digest": "sha256:36115abea88ae648c442a5b8a10e317b46e05291020b948664289e7b0b212874"
+        }
+      ],
+      "runtime_paths": []
+    }
+  ]
+}

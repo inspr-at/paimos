@@ -9,6 +9,7 @@ export interface Attachment {
   id: string; node_id: string; name: string; content_type: string; size: number; sha256: string
   width: number | null; height: number | null; caption: string; position: string | number
   created_by: string | { id: string; name: string }; created_at: string; updated_at?: string
+  thumbnail_kind?: 'html-text'
 }
 export const positionOf = (item: Pick<Attachment, 'position'>) => Number(item.position) || 0
 export const byPosition = (a: Attachment, b: Attachment) => positionOf(a) - positionOf(b) || a.id.localeCompare(b.id)
@@ -17,6 +18,23 @@ export type Variant = 'thumb' | 'preview' | 'original'
 
 export const contentUrl = (id: string, variant: Variant = 'preview') => `/api/attachments/${encodeURIComponent(id)}/content?variant=${variant}`
 export const isImage = (item: Pick<Attachment, 'content_type'>) => item.content_type.startsWith('image/')
+export const isHTML = (item: Pick<Attachment, 'content_type'>) => /^text\/html(?:;\s*charset=utf-8)?$/i.test(item.content_type)
+export const hasThumbnail = (item: Attachment) => isImage(item) || item.thumbnail_kind === 'html-text'
+
+export interface HTMLPreview { available: boolean; url?: string; expires_at?: string }
+export async function createHTMLPreview(id: string, signal?: AbortSignal): Promise<HTMLPreview> {
+  const preview = await json<HTMLPreview>(await api(`/attachments/${encodeURIComponent(id)}/preview`, { method: 'POST', signal }))
+  if (!preview.available) return preview
+  // Defense in depth: never let an API fixture/misconfiguration point an
+  // executable frame back into the authenticated app. The server enforces
+  // the stricter registrable-domain boundary.
+  const url = new URL(preview.url ?? '')
+  const expires = Date.parse(preview.expires_at ?? '')
+  if (url.protocol !== 'https:' || url.hostname === location.hostname || url.username || url.password || url.port || url.search || url.hash || !/^\/preview\/[A-Za-z0-9_-]{43}$/.test(url.pathname) || !Number.isFinite(expires) || expires <= Date.now()) {
+    throw new Error('HTML preview unavailable')
+  }
+  return preview
+}
 export function fileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`

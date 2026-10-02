@@ -209,6 +209,8 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Check Docker web inputs without Docker
+        run: node --test scripts/docker-web-inputs.test.mjs
       - working-directory: web
         run: npm ci
       - working-directory: web
@@ -307,6 +309,9 @@ jobs:
       - name: Phone approval regressions
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/phone-approvals.spec.ts --workers=2
+      - name: Morning briefing unit checks
+        working-directory: web
+        run: npx vitest run tests/morning-briefing.unit.test.ts tests/ticket-outcomes.unit.test.ts --maxWorkers=1
 
       - name: Additional harness brands and pairing vocabulary
         working-directory: web
@@ -333,6 +338,10 @@ jobs:
       - name: Scope proposals and key management regressions
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
+
+      - name: Morning briefing regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
@@ -435,6 +444,8 @@ jobs:
         with:
           node-version: "24"
       - run: node scripts/verify-release.mjs
+      - name: Release rehearsal and tag gate regressions
+        run: node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
       - name: Require this release's own frozen product notes
         run: |
           node --test scripts/check-own-release-notes.test.mjs
