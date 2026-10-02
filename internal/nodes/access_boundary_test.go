@@ -26,7 +26,7 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 			node := mustNode(t, p, `{"kind_id":"`+kind.ID+`","title":"Moving"}`)
 			ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 15*time.Second)
 			defer cancel()
-			var identity, alias string
+			var identity, alias, target string
 			if err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
 				if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email)
 					VALUES('https://access.example.test',$1,'invited@example.test') RETURNING id::text`, p.TenantID).Scan(&identity); err != nil {
@@ -34,6 +34,12 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 				}
 				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name)
 					VALUES($1,'person','Synthetic alias') RETURNING id::text`, p.TenantID).Scan(&alias); err != nil {
+					return err
+				}
+				// Keep the link target distinct from the move's audit actor so a
+				// principal FK lock cannot hide the tenant/event-counter cycle.
+				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name)
+					VALUES($1,'person','Synthetic target') RETURNING id::text`, p.TenantID).Scan(&target); err != nil {
 					return err
 				}
 				if operation == "link-tx-bound" {
@@ -77,7 +83,7 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 			accessDone := make(chan error, 1)
 			go func() {
 				if operation == "operator-link" {
-					_, err := principallink.New(appPool).Link(ctx, "access-move", alias, p.ID)
+					_, err := principallink.New(appPool).Link(ctx, "access-move", alias, target)
 					accessDone <- err
 					return
 				}
@@ -86,7 +92,7 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 						_, err := authz.AcceptInvite(ctx, tx, p.TenantID, identity, "invited@example.test", "Invited", "")
 						return err
 					}
-					_, err := principallink.LinkTx(ctx, tx, p.TenantID, alias, p.ID, p.ID, "principal.linked", "principal.unlinked")
+					_, err := principallink.LinkTx(ctx, tx, p.TenantID, alias, target, p.ID, "principal.linked", "principal.unlinked")
 					return err
 				})
 			}()
