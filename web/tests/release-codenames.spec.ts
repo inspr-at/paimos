@@ -241,6 +241,7 @@ for (const width of [1440, 1024, 390, 320]) {
             identity: rect(identity), badgeGap: parseFloat(getComputedStyle(identity).columnGap), badges,
             nameBaseline: baseline(text),
             versionBaseline: baseline(version.querySelector('.version-pretty')!),
+            canonicalBaseline: baseline(version.querySelector('.version-canonical')!),
             renderers: [...layers.children].map(rect),
             ellipsis: getComputedStyle(text).textOverflow,
             ellipsisWidth: canvas.measureText('…').width,
@@ -253,6 +254,7 @@ for (const width of [1440, 1024, 390, 320]) {
         expect(geometry.version.top, label).toBe(geometry.name.top)
         expect(geometry.layers.top, label).toBe(geometry.text.top)
         expect(geometry.versionBaseline, `${label} text baseline`).toBe(geometry.nameBaseline)
+        expect(geometry.canonicalBaseline, `${label} canonical baseline`).toBe(geometry.nameBaseline)
         expect(geometry.heading.height, label).toBe(geometry.version.height)
         expect(geometry.version.right, label).toBeCloseTo(geometry.heading.right, 0)
         expect(geometry.text.right, label).toBeLessThanOrEqual(geometry.version.left)
@@ -307,8 +309,11 @@ for (const width of [1440, 1024, 390, 320]) {
       const copy = row.locator('.row-version').getByRole('button')
       await row.scrollIntoViewIfNeeded()
       await sheet(page).getByRole('grid').focus()
-      const before = await copy.boundingBox()
+      // Home may scroll a partially hidden first row into view. Measure after
+      // that navigation, so the assertion checks selection rather than scrolling.
       await page.keyboard.press('Home')
+      await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
+      const before = await copy.boundingBox()
       await page.keyboard.press('j')
       await expect(row).toHaveAttribute('aria-selected', 'true')
       expect(await copy.boundingBox()).toEqual(before)

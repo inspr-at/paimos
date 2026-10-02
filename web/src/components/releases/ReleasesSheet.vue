@@ -767,15 +767,18 @@ const KINDS = [
 .main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
 /* The version owns its slot, including the canonical reveal and copy icon.
    Only the name gives way; the 44 px copy target keeps the same position. */
-.line1 { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
+.line1 { --row-text-size: 14px; --row-line-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
 .row-identity { --compact-badge-width: 8px; display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
-.row-name { flex: 1; min-height: 44px; font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
+.row-name { flex: 1; min-height: 44px; font-size: var(--row-text-size); line-height: var(--row-line-height); font-weight: 600; letter-spacing: .005em; color: var(--ink); }
 .row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
 .row-identity .live-dot { align-self: center; }
 .row-version { min-width: max-content; justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: 20px; }
-.row-version :deep(.version-layers) { justify-items: end; }
+.row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: var(--row-line-height); }
+/* The name and Pretty version use the same system-font line box. Align the
+   canonical reveal to that baseline instead of centering different metrics. */
+.row-version :deep(.version-pretty) { font-size: var(--row-text-size); }
+.row-version :deep(.version-layers) { justify-items: end; align-items: baseline; grid-template-rows: var(--row-line-height); }
 /* Only measured overflow compacts a badge; its text remains accessible. */
 .row-identity .tag.compact { position: relative; align-self: center; align-items: center; justify-content: center; width: var(--compact-badge-width); height: 12px; padding: 0; }
 .row-identity .tag.compact:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
