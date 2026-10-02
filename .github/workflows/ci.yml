@@ -311,6 +311,13 @@ jobs:
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Controls stay put and affected dialog regressions (AEON-541)
+        working-directory: web
+        run: >-
+          npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure
+          tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
+          tests/accounts-computers.spec.ts tests/agents-top.spec.ts
+          tests/relations.spec.ts tests/ticket-outcomes.spec.ts
       - name: Session linking, approval and security regressions
         working-directory: web
         env:

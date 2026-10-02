@@ -142,7 +142,7 @@ test('phone stop asks before sending, and More reaches Recover and Remove', asyn
 
   await controls(page).getByRole('button', { name: 'Stop', exact: true }).click()
   await expect(stop.getByRole('button', { name: 'Confirm stop' })).toBeVisible()
-  await page.mouse.click(24, 24)
+  await stop.evaluate(el => el.dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await expect(stop).toBeHidden()
   expect(requests).toHaveLength(0)
   await expect(page).toHaveURL(new RegExp(id))

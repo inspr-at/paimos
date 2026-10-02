@@ -41,4 +41,11 @@ scripts/             release checks
 - Go: standard library first, small packages, explicit errors, context everywhere, no global state except in `main`.
 - SQL: every table has `tenant_id` (except `tenants`), RLS policy on `current_setting('aeon.tenant_id')`.
 - Web: Vue 3 `<script setup lang="ts">`, design tokens from `web/src/styles/tokens.css`, SVG icons only (never text glyphs), icons centred in their controls.
+- UI stability (AEON-541): **The control stays put; only content moves, and only inside a scroll area.** Selecting, hovering, typing or toggling never changes a control's size or position, or its neighbours in the same group. Feedback appears in place, never by pushing controls.
+  1. Accept, Decide & next, Skip and Cancel live in a fixed footer; content above uses a fixed-height scrolling body. Longer content means scrolling, never a moved button.
+  2. One dialog size and position for a whole series (1 of N). After next/previous, action buttons stay identical and focus stays on the same button.
+  3. Selectors and option lists keep fixed row heights. Selection explanations and effects occupy a reserved slot below the list, never between options.
+  4. Anything that must grow grows away from the control: below the last control or inside the scroll area. Apply rules 1 → 2 → 3 first.
+  5. Phones use a full-height sheet with the action bar pinned at the bottom, including the safe area. No free-floating buttons.
+  6. Important dialogs must use the reusable Playwright stability guard: measure named selectors, groups, dialog frames and action buttons before/after every option interaction and series step (±0.5 px); user scrolling is measured in scroll-container coordinates, and horizontal overflow fails.
 - Licence: AGPL-3.0-only. SPDX header in new source files.

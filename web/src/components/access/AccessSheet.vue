@@ -72,7 +72,7 @@ defineExpose({ panel })
   border-left: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop);
 }
 .sheet.wide { width: min(640px, 100vw); }
-.center .sheet { width: min(480px, 100%); height: auto; max-height: calc(100dvh - 32px); border: 1px solid var(--glass-edge); border-radius: var(--radius); }
+.center .sheet { width: min(480px, 100%); height: min(680px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); border: 1px solid var(--glass-edge); border-radius: var(--radius); }
 .center .sheet.wide { width: min(580px, 100%); }
 .sheet-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 18px 12px 22px; }
 .sheet-head > :first-child { flex: 1; min-width: 0; }

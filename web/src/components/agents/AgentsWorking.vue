@@ -90,14 +90,14 @@ function tabKeys(event: KeyboardEvent) {
           </div>
         </li>
       </ul>
-      <p v-if="plan.spare.length" class="spare">
-        <span class="spare-lbl">{{ plan.rows.length ? 'Also' : 'Set a target for' }}</span>
+      <p class="spare">
+        <span v-if="plan.spare.length" class="spare-lbl">{{ plan.rows.length ? 'Also' : 'Set a target for' }}</span>
         <button
           v-for="area in plan.spare" :key="area.key" type="button" class="spare-btn" :aria-label="`More agents on ${area.label}`"
           :disabled="plan.full" :data-tip="plan.full ? 'Every agent is assigned; raise the total first' : undefined" @click="stepTarget(area.key, 1)"
         ><AppIcon name="plus" :size="12" />{{ area.label }}</button>
       </p>
-      <p v-if="plan.footLine" class="foot">{{ plan.footLine }}</p>
+      <p class="foot">{{ plan.footLine }}</p>
     </div>
   </section>
 </template>
@@ -105,7 +105,7 @@ function tabKeys(event: KeyboardEvent) {
 <style scoped>
 .working { display: flex; gap: 28px; min-width: 0; padding: 22px 24px; border-radius: 24px; container: working / inline-size; }
 .eyebrow { margin: 0; }
-.total { position: relative; display: flex; flex-direction: column; gap: 10px; flex: none; padding-right: 28px; border-right: 1px solid var(--line); }
+.total { position: relative; display: flex; flex-direction: column; gap: 10px; flex: none; width: 272px; box-sizing: border-box; padding-right: 28px; border-right: 1px solid var(--line); }
 .stepper { position: relative; display: flex; align-items: center; gap: 14px; margin-top: 4px; }
 .step { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); cursor: pointer; transition: transform .12s ease, background .15s ease; }
 .step.big { width: 48px; height: 48px; box-shadow: inset 0 0 0 1px var(--line-2), 0 6px 14px -8px color-mix(in srgb, var(--teal) 50%, transparent); }
@@ -113,7 +113,7 @@ function tabKeys(event: KeyboardEvent) {
 .step:active:not(:disabled) { transform: scale(.94); }
 .step:disabled { opacity: .35; cursor: default; }
 .step:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.big-num { min-width: 96px; text-align: center; font: 800 64px/1 var(--font); letter-spacing: -.04em; font-variant-numeric: tabular-nums; background-image: linear-gradient(100deg, var(--teal-ink) 0%, var(--teal) 38%, var(--aqua) 47%, var(--aqua-wash) 50%, var(--aqua) 53%, var(--teal) 62%, var(--teal-ink) 100%); background-size: 320% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
+.big-num { width: 96px; flex: none; text-align: center; font: 800 64px/1 var(--font); letter-spacing: -.04em; font-variant-numeric: tabular-nums; background-image: linear-gradient(100deg, var(--teal-ink) 0%, var(--teal) 38%, var(--aqua) 47%, var(--aqua-wash) 50%, var(--aqua) 53%, var(--teal) 62%, var(--teal-ink) 100%); background-size: 320% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
 .big-num.unset { background: none; color: var(--ink-3); -webkit-text-fill-color: currentColor; font-weight: 600; }
 .sparkle { position: absolute; pointer-events: none; color: var(--aqua); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--aqua) 90%, transparent)); animation: twinkle 2.8s ease-in-out infinite; }
 .sparkle.s1 { left: 58px; top: -10px; }
@@ -134,8 +134,8 @@ function tabKeys(event: KeyboardEvent) {
 .tabs button { height: 30px; padding: 0 13px; font-size: 13px; }
 .tabs button[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: var(--shadow-btn); }
 .tabs button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.rows { display: grid; gap: 4px; margin: 12px 0 0; padding: 0; list-style: none; }
-.row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 150px; align-items: center; gap: 14px; padding: 9px 10px; border-radius: 14px; background: color-mix(in srgb, var(--surface-raised) 55%, transparent); }
+.rows { height: 240px; overflow: auto; scrollbar-gutter: stable; align-content: start; display: grid; gap: 4px; margin: 12px 0 0; padding: 0; list-style: none; }
+.row { min-height: 56px; box-sizing: border-box; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 150px; align-items: center; gap: 14px; padding: 9px 10px; border-radius: 14px; background: color-mix(in srgb, var(--surface-raised) 55%, transparent); }
 .initial { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 700 13px/1 var(--font); }
 .initial.mark { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); }
 .label { min-width: 0; }
@@ -143,13 +143,13 @@ function tabKeys(event: KeyboardEvent) {
 .sub { margin: 1px 0 0; overflow: hidden; color: var(--ink-3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .row-step { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .target { min-width: 28px; text-align: center; color: var(--ink); font: 700 17px/1 var(--font); font-variant-numeric: tabular-nums; }
-.spare { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; }
+.spare { height: 64px; overflow: auto; align-content: start; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; }
 .spare-lbl { margin-right: 2px; }
 .spare-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); font: 600 12.5px/1 var(--font); cursor: pointer; }
 @media (hover: hover) { .spare-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--teal) 14%, transparent); } }
 .spare-btn:disabled { opacity: .5; cursor: default; }
 .spare-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.foot { margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
+.foot { height: 38px; overflow: auto; margin: 10px 2px 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
 
 @container working (max-width: 760px) {
   .row { grid-template-columns: 34px minmax(0, 1fr) auto; }
@@ -157,7 +157,7 @@ function tabKeys(event: KeyboardEvent) {
 }
 @media (max-width: 720px) {
   .working { flex-direction: column; gap: 18px; padding: 18px 16px; }
-  .total { padding: 0 0 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .total { width: auto; padding: 0 0 18px; border-right: 0; border-bottom: 1px solid var(--line); }
   .stepper { justify-content: center; }
   .now { text-align: center; }
   .dots { justify-content: center; max-width: none; }

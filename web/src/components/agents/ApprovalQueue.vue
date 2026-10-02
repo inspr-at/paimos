@@ -247,7 +247,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
                 :id="`reason-${approval.id}`" ref="reasonField" v-model="reason" class="field" rows="2" maxlength="4000"
                 :placeholder="open.mode === 'approve' ? 'Fine for this run.' : 'Use the staging account instead.'" :disabled="busy" @keydown="reasonKeys($event, approval)"
               />
-              <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+              <div class="decision-feedback"><p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p></div>
               <div class="decision-actions">
                 <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
                 <button type="button" class="btn sm ghost" :disabled="busy" @click="cancel">Cancel</button>
@@ -286,7 +286,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
               :placeholder="open.mode === 'resolve' ? 'Merged it myself after CI.' : 'Not needed; camy already has the lock.'" :disabled="busy" @keydown="noteKeys($event, request)"
             />
             <p class="fine-print">Resolving records your answer. The held message is not delivered.</p>
-            <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+            <div class="decision-feedback"><p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p></div>
             <div class="decision-actions">
               <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
               <button type="button" class="btn sm ghost" :disabled="busy" @click="cancel">Cancel</button>
@@ -405,7 +405,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; align-self: center; min-width: 0; max-width: 100%; }
 .decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
 .decision label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
-.decision textarea { width: 100%; min-height: 58px; resize: vertical; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }
+.decision textarea { width: 100%; height: 58px; min-height: 58px; resize: none; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }
+.decision-feedback { height: 38px; overflow: auto; scrollbar-gutter: stable; }
+.decision-actions .btn[type="submit"] { width: 190px; flex: none; }
 .decision-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .decision-actions .hint { margin-right: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 /* One primary at a time: only the selected request's Approve is filled. */

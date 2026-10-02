@@ -344,16 +344,16 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 </template>
 
 <style scoped>
-.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 96px); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
+.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); height: min(720px, calc(100dvh - 96px)); max-height: calc(100dvh - 96px); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
 .ed.night { width: 580px; }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
 .ed-head h3 { margin: 0 auto 0 0; font: 600 16px/1.3 var(--font); color: var(--ink); }
 .ed-head h3:focus, .ed-head h3:focus-visible { outline: none; box-shadow: none; }
-.ed-body { display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ed p { margin: 0; }
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
-.ed-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 .ed-foot .sp { flex: 1; }
 .ed-err { color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
@@ -433,7 +433,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .pv :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* Phone: a bottom sheet */
-.ed.sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 81; width: auto; max-width: none; max-height: 90dvh; border-radius: 22px 22px 0 0; border-bottom: 0; }
+.ed.sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 81; width: auto; max-width: none; height: 100dvh; max-height: 100dvh; border-radius: 22px 22px 0 0; border-bottom: 0; }
 .sheet .ed-head { padding: 4px 8px 2px 16px; }
 .sheet .ed-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 18px; gap: 14px; }
 .sheet .ed-foot { flex-wrap: wrap; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); }

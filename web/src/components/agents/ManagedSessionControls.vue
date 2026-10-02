@@ -260,16 +260,19 @@ summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px
 .overflow-menu :deep(.mi-text small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3);line-height:1.35}
 .menu-note{margin:4px 10px 6px;padding-top:8px;border-top:1px solid var(--line);overflow-wrap:anywhere}
 .overflow-menu:not(:has([role="menuitem"])) .menu-note{border-top:0;padding-top:0}
-.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:auto;max-height:min(88dvh, var(--vv-h, 88dvh));margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
+.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:var(--vv-h, 100dvh);max-height:var(--vv-h, 100dvh);margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
 .steer-sheet::backdrop{background:var(--scrim)}
-.sheet-card{display:flex;flex-direction:column;max-height:min(88dvh, var(--vv-h, 88dvh));border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
+.sheet-card{display:flex;flex-direction:column;height:100%;max-height:100%;border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
 .grabber{align-self:center;width:40px;height:4px;margin-top:8px;border-radius:999px;background:var(--line-2)}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}
 .sheet-head .icon-btn{width:44px;height:44px}
-.sheet-body{display:grid;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet-body{position:relative;flex:1;min-height:0;overflow:hidden;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
 .sheet-lead{margin:0;font-size:14px}
 .sheet-actions{display:flex;gap:8px}
+.sheet-form{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.sheet-form > .sheet-actions{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));left:16px;right:16px}
+.sheet-form{padding-bottom:60px}
 .sheet-actions .btn{flex:1;min-height:44px}
 @media(max-width:720px){
   .managed-controls{gap:8px;padding-top:8px}

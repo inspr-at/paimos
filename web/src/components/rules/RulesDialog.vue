@@ -47,21 +47,21 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .card { display: flex; flex-direction: column; min-height: 0; background: var(--surface); box-shadow: var(--shadow-pop); border: 1px solid var(--glass-edge); }
 .size-center, .size-wide { width: min(560px, calc(100vw - 24px)); margin: auto; }
 .size-wide { width: min(760px, calc(100vw - 24px)); }
-.size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
+.size-center .card, .size-wide .card { height: min(760px, calc(100dvh - 24px)); max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
 .size-side, .size-sheet { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
 .size-sheet { width: min(860px, 100vw); }
 .size-side .card, .size-sheet .card { height: 100%; border-radius: 16px 0 0 16px; }
-.head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
+.head { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
 .titles { flex: 1; min-width: 0; }
 .head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
 .lede { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .body { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
 .pinned { display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 4px; border-top: 1px solid var(--line); }
 .foot :deep(.btn:disabled) { opacity: .5; filter: saturate(.3); box-shadow: none; cursor: not-allowed; }
-.foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
+.foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
 @media (max-width: 600px) {
   .size-center, .size-wide { width: 100vw; margin: auto 0 0; }
-  .size-center .card, .size-wide .card { max-height: 92dvh; border-radius: 16px 16px 0 0; }
+  .size-center .card, .size-wide .card { height: 100dvh; max-height: 100dvh; border-radius: 16px 16px 0 0; }
   .size-side .card, .size-sheet .card { border-radius: 0; }
   .head { padding: 16px 16px 10px; }
   .body { padding: 4px 16px 14px; }

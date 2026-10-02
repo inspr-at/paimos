@@ -13,24 +13,26 @@ const x = ref(-9999)
 const y = ref(-9999)
 // Until placed (off-screen), the content may take its full height so place() measures it.
 const maxHeight = ref(props.tallest)
+const placedHeight = ref<number>()
 const above = ref(false)
 let placedAnchor: DOMRect | null = null
 
-// keepSide: when the content grows or shrinks (results arriving), stay on the
-// side chosen at opening; above the trigger, the bottom edge stays by it.
+// Reserve the opening frame: results and feedback scroll inside it. In
+// particular, an above-trigger search must not move when its result count changes.
 function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   placedAnchor = rect
-  const height = panel.value.scrollHeight
+  const height = Math.max(panel.value.scrollHeight, panel.value.querySelector('input:not([type=checkbox]):not([type=radio])') ? Math.min(320, props.tallest) : 0)
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
   if (!keepSide) above.value = room < Math.min(height, props.tallest) && rect.top > room
   maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
+  if (!keepSide) placedHeight.value = Math.min(height, maxHeight.value)
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
   x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))
-  y.value = Math.round(above.value ? rect.top - Math.min(height, maxHeight.value) - 6 : rect.bottom + 6)
+  y.value = Math.round(above.value ? rect.top - Math.min(placedHeight.value ?? height, maxHeight.value) - 6 : rect.bottom + 6)
 }
 function outside(event: PointerEvent) {
   const target = event.target as Node
@@ -101,7 +103,7 @@ defineExpose({ place })
 
 <template>
   <Teleport :to="layer">
-    <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
