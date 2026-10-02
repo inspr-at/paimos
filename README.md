@@ -41,7 +41,9 @@ workspace or one project. A project override wins over the workspace override;
 without either, the feature stays off. Resetting an override retains its revision.
 The first flag, `workspace-summary`, shows project and work counts in Workspace
 settings. Enable or disable it on the same page without rebuilding, restarting
-or deploying. Other open pages re-evaluate on focus and navigation.
+or deploying. Selecting a project in Feature flags shows its work summary only
+when that project's effective flag is on, including an explicit project On
+while the workspace is Off. Other open pages re-evaluate on focus and navigation.
 
 `GET /api/features?project_id=<uuid>` reads committed flags for the caller's
 tenant and visible project; omit the query for the workspace baseline. It

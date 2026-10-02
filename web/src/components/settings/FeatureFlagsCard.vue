@@ -2,8 +2,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { APIError, getProjects, type ProjectSummary } from '../../lib/api'
-import { getFeatureSettings, setFeatureOverride, type FeatureSetting } from '../../lib/features'
+import { can } from '../../lib/authz'
+import { canFeature, getFeatureSettings, setFeatureOverride, type FeatureSetting } from '../../lib/features'
 import SettingsCard from './SettingsCard.vue'
+import WorkspaceSummary from './WorkspaceSummary.vue'
 
 const projectId = ref('')
 const projects = ref<ProjectSummary[]>([])
@@ -69,6 +71,7 @@ async function save(item: FeatureSetting, event: Event) {
         <option value="off">Off</option>
       </select>
     </div></template>
+    <WorkspaceSummary v-if="projectId && can('nodes.read') && canFeature('workspace-summary', projectId)" :key="projectId" :project-id="projectId" />
     <p v-if="problem" class="problem" role="alert">{{ problem }} <button type="button" class="btn sm" :disabled="busy" @click="load">Reload</button></p>
     <p v-if="notice" class="hint" role="status">{{ notice }}</p>
   </SettingsCard>
