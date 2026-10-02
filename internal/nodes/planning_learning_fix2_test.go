@@ -206,7 +206,8 @@ func TestPlanningLearningExcludesMixedModelsPlacementsAndCrossProjectWorkers(t *
 				if dimension == "source" {
 					var sources, mismatches int
 					if err := tx.QueryRow(t.Context(), `SELECT count(DISTINCT s.project_id),count(*) FILTER (WHERE s.project_id<>o.project_id)
- FROM harness_sessions s JOIN outcome_events o ON o.ticket_node_id=s.ticket_node_id AND o.kind='ticket_done'
+ FROM harness_sessions s JOIN LATERAL (SELECT project_id FROM outcome_events
+ WHERE ticket_node_id=s.ticket_node_id AND kind='ticket_done' ORDER BY recorded_at DESC,id DESC LIMIT 1) o ON true
  WHERE s.ticket_node_id=$1`, first.ID).Scan(&sources, &mismatches); err != nil {
 						return err
 					}

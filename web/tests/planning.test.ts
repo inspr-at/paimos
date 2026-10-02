@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { compareModelSort, formatDollars, formatTokenCount, listCostCell, modelCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
 import { compareRows } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
@@ -36,6 +37,21 @@ test('frozen default estimates have one uncalibrated basis line', () => {
       assert.notEqual(cell.estimated, '')
     }
   }
+})
+
+test('real capped planner list response keeps legacy figures and explicit history text', () => {
+  // Exact API bytes emitted by TestPlanningTruncatedHistoryListFixture.
+  const page = JSON.parse(readFileSync(new URL('./fixtures/planning-truncated-list.json', import.meta.url), 'utf8')) as { items: ListItem[] }
+  assert.equal(page.items.length, 1)
+  const r = page.items[0]!
+  assert.equal(r.planning!.model_estimate!.state, 'uncalibrated')
+  assert.equal(r.planning!.tokens.calibration!.basis, 'median')
+  assert.equal(r.planning!.tokens.calibration!.level, 'route')
+  const basis = 'median of finished tickets on route codex gpt-6-astra xhigh (n=5); history truncated'
+  assert.equal(tokensCell(r).estimated, '8M')
+  assert.equal(tokensCell(r).tip, `Estimated ~8M tokens · no agent session yet\n${basis}`)
+  assert.equal(listCostCell(r).estimated, '$80')
+  assert.equal(listCostCell(r).tip, `Estimated ~$80 at API list prices ($40.00/h)\nBilling shows once a session reports\n${basis}`)
 })
 
 test('dense figures', () => {
