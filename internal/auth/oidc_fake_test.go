@@ -20,12 +20,13 @@ import (
 )
 
 type pendingCode struct {
-	challenge string
-	nonce     string
-	subject   string
-	email     string
-	name      string
-	badNonce  bool
+	challenge     string
+	nonce         string
+	subject       string
+	email         string
+	name          string
+	badNonce      bool
+	emailVerified *bool
 }
 
 // fakeOIDC is a discovery + JWKS + token endpoint for the authorization-code tests.
@@ -58,14 +59,17 @@ func (f *fakeOIDC) allow(code, challenge, nonce, subject, email, name string, ba
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.codes[code] = pendingCode{
-		challenge: challenge,
-		nonce:     nonce,
-		subject:   subject,
-		email:     email,
-		name:      name,
-		badNonce:  badNonce,
+		challenge:     challenge,
+		nonce:         nonce,
+		subject:       subject,
+		email:         email,
+		name:          name,
+		badNonce:      badNonce,
+		emailVerified: newTrue(),
 	}
 }
+
+func newTrue() *bool { v := true; return &v }
 
 func (f *fakeOIDC) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
@@ -124,17 +128,20 @@ func (f *fakeOIDC) token(w http.ResponseWriter, r *http.Request) {
 		nonce = "wrong-nonce"
 	}
 	now := time.Now().Unix()
-	raw, err := f.sign(map[string]any{
-		"iss":            f.issuer,
-		"sub":            pend.subject,
-		"aud":            f.clientID,
-		"exp":            now + 3600,
-		"iat":            now - 5,
-		"nonce":          nonce,
-		"email":          pend.email,
-		"name":           pend.name,
-		"email_verified": true,
-	})
+	claims := map[string]any{
+		"iss":   f.issuer,
+		"sub":   pend.subject,
+		"aud":   f.clientID,
+		"exp":   now + 3600,
+		"iat":   now - 5,
+		"nonce": nonce,
+		"email": pend.email,
+		"name":  pend.name,
+	}
+	if pend.emailVerified != nil {
+		claims["email_verified"] = *pend.emailVerified
+	}
+	raw, err := f.sign(claims)
 	if err != nil {
 		writeFakeJSON(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
 		return

@@ -110,7 +110,10 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+		// Email-based enrollment, including bootstrap authority, requires proof
+		// of mailbox ownership. Existing issuer/subject members resolved above
+		// keep signing in independently of this enrollment-only condition.
+		if !emailVerified || slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
 			// An invite enrolls only a verified email. The token may select which
 			// invite, but it never substitutes for that address.
 			if emailVerified {

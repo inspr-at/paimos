@@ -38,6 +38,13 @@ func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID string) (
 	if strings.TrimSpace(from) == "" {
 		return out, errors.New("from is required")
 	}
+	// Match access-management and invite acceptance: tenant before alias and
+	// principal locks. Binding removal's last-owner trigger takes this same
+	// tenant lock, so taking it after the alias lock could deadlock acceptance.
+	var lockedTenant string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
+		return out, err
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
 		return out, err
 	}

@@ -29,6 +29,13 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	if !emailPattern.MatchString(email) {
 		return tenant.Principal{}, ErrNoInvite
 	}
+	// Access changes take the tenant row before invite/alias/principal locks.
+	// Hold it through binding inserts so inviter and role grants remain live.
+	// Manual linking (including the operator path) uses tenant then alias too.
+	var lockedTenant string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
+		return tenant.Principal{}, err
+	}
 	var hash any
 	if token != "" {
 		sum := sha256.Sum256([]byte(token))
