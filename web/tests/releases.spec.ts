@@ -366,7 +366,7 @@ test('ticket keys link to the tickets this workspace has; others stay plain', as
   await page.goto(`/releases/${history.releases[2].version}`)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
   await expect(sheet(page).locator('.detail .tickets').getByRole('link')).toHaveCount(0)
-  await page.keyboard.press('k'); await page.keyboard.press('k')
+  await page.keyboard.press('k')
   const tickets = sheet(page).locator('.detail .tickets')
   // AEON is a project here, but AEON-74 is not one of its tickets: no dead link.
   await expect(tickets.getByRole('link', { name: /^PHAROS-11: / })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
