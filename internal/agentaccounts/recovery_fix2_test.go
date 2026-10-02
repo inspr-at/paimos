@@ -89,32 +89,54 @@ func TestBManualAllowanceDoesNotSupplyUnknownMeasurement(t *testing.T) {
 
 func TestBRecoveryPromotesUnimportedLegacyStop(t *testing.T) {
 	base := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
-	f := readinessWorld(t, "b-promote-legacy", base)
-	first, grant := f.route(t, 200)
-	second, _ := f.route(t, 200)
-	cause := insertRun(t, f.admin, f.runner, f.profile)
-	resource := bResource(t, f)
-	// A persisted pre-upgrade denial has no canonical fact yet. Claim must
-	// import its original deadline before binding the durable recovery permit.
-	seed(t, f.admin, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,status='failed' WHERE id=$1`, cause, f.account.ID); err != nil {
-			return err
+	for _, early := range []bool{false, true} {
+		name := "expiry"
+		if early {
+			name = "early"
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, f.admin.TenantID, cause, base)
-		return err
-	})
-	bAt(t, &f, base.Add(time.Hour), "g2")
-	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor'`, resource) != 0 {
-		t.Fatal("fixture imported the legacy stop before claim")
-	}
-	replay := mustRoute(t, f.mod, f.runner, f.token, first, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
-	if replay.Reservations[0].ReservationID != grant.Reservations[0].ReservationID ||
-		scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND recovery_run_id=$2 AND observed_at=$3 AND next_attempt_at=$4`, resource, first, base, base.Add(time.Hour)) != 1 {
-		t.Fatal("legacy promotion replaced the ledger or restarted its wait")
-	}
-	code, response := call(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
-	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: vendor") {
-		t.Fatalf("legacy recovery allowed another queued run: %d %s", code, response)
+		t.Run(name, func(t *testing.T) {
+			f := readinessWorld(t, "b-promote-legacy-"+name, base)
+			first, grant := f.route(t, 200)
+			second, _ := f.route(t, 200)
+			cause := insertRun(t, f.admin, f.runner, f.profile)
+			resource := bResource(t, f)
+			// A persisted pre-upgrade denial has no canonical fact yet. Claim must
+			// import its original deadline before binding the durable recovery permit.
+			seed(t, f.admin, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,status='failed' WHERE id=$1`, cause, f.account.ID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, f.admin.TenantID, cause, base)
+				return err
+			})
+			now := base.Add(time.Hour)
+			if early {
+				now = base.Add(time.Minute)
+			}
+			bAt(t, &f, now, "g2")
+			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor'`, resource) != 0 {
+				t.Fatal("fixture imported the legacy stop before claim")
+			}
+			var check AccountCheck
+			if early {
+				callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("legacy", 0), 202, &check)
+				if !check.EarlyRecoveryRequested {
+					t.Fatal("owner check did not capture the legacy denial's wait")
+				}
+			}
+			replay := mustRoute(t, f.mod, f.runner, f.token, first, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
+			if replay.Reservations[0].ReservationID != grant.Reservations[0].ReservationID ||
+				scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND recovery_run_id=$2 AND observed_at=$3 AND next_attempt_at=$4 AND early_recovery_used=$5`, resource, first, base, base.Add(time.Hour), early) != 1 {
+				t.Fatal("legacy promotion replaced the ledger or restarted its wait")
+			}
+			if early && scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_check_id=$2`, resource, check.ID) != 1 {
+				t.Fatal("legacy promotion lost the early-check identity")
+			}
+			code, response := call(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+			if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: vendor") {
+				t.Fatalf("legacy recovery allowed another queued run: %d %s", code, response)
+			}
+		})
 	}
 }
 
