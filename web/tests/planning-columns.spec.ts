@@ -8,7 +8,7 @@ import type { TicketPlanning } from '../src/lib/planning'
 
 const shots = process.env.PLANNING_SHOTS ?? '../.agent-shots/planning'
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-const route = { label: 'Codex sol · xhigh', profile: 'codex-sol-xhigh', harness: 'codex', model: 'gpt-6-sol', effort: 'xhigh', revision: '3f9a1c2b' }
+const route = { display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', effort_level: 4, label: 'Codex sol · xhigh', profile: 'codex-sol-xhigh', harness: 'codex', model: 'gpt-6-sol', effort: 'xhigh', revision: '3f9a1c2b' }
 // This whole response comes from TestPlanningListHoverFixture, including the
 // server's usage-less session flags. Serve its bytes without a client adapter.
 const serverListBody = readFileSync(new URL('./fixtures/planning-list.json', import.meta.url), 'utf8')
@@ -23,12 +23,12 @@ function world(): Fixtures {
   const set = (key: string, plan: TicketPlanning) => { data.nodes.find(n => n.key === key)!.planning = plan }
   const planned = planning(null, 2_400_000); planned.cost = cost(null, '4.20'); set('PHAROS-11', planned)
   const live = planning(1_100_000, 2_400_000, 1); live.cost = cost('1.93', '4.20')
-  live.models = [{ label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-live', effort: 'xhigh', role: 'worker', running: true, tokens: 1_100_000 }] }]; set('PHAROS-12', live)
+  live.models = [{ display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-live', effort: 'xhigh', effort_level: 4, role: 'worker', running: true, tokens: 1_100_000 }] }]; set('PHAROS-12', live)
   const done = planning(1_900_000, 99_000_000); done.cost = cost('3.33', '999')
-  done.models = [{ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-done', effort: 'high', role: 'worker', running: false, tokens: 1_900_000 }] }, { label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-other', effort: 'xhigh', role: 'worker', running: false, tokens: 0 }] }]
+  done.models = [{ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-done', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1_900_000 }] }, { display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-other', effort: 'xhigh', effort_level: 4, role: 'worker', running: false, tokens: 0 }] }]
   done.estimate_snapshot = { id: 'snapshot', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 3, estimated_tokens: 2_400_000, estimated_cost_usd: '4.20', route, rate_basis: { basis: 'median', tickets: 12, tokens_per_hour: 800_000 } }; set('PHAROS-13', done)
-  const over = planning(2_160_000, 1_600_000); over.models = [{ label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-over', effort: 'xhigh', role: 'worker', running: false, tokens: 2_160_000 }] }]; over.cost = cost('3.78', '2.80'); set('PHAROS-14', over)
-  const plan = planning(1_770_000, 2_000_000); plan.models = [{ label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-plan', effort: 'high', role: 'worker', running: false, tokens: 1_770_000 }] }]; plan.cost = cost('3.10', '3.50', true); set('PHAROS-15', plan)
+  const over = planning(2_160_000, 1_600_000); over.models = [{ display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1', label: 'Codex sol', harness: 'codex', model: 'gpt-6-sol', sessions: [{ id: 's-over', effort: 'xhigh', effort_level: 4, role: 'worker', running: false, tokens: 2_160_000 }] }]; over.cost = cost('3.78', '2.80'); set('PHAROS-14', over)
+  const plan = planning(1_770_000, 2_000_000); plan.models = [{ display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', label: 'Claude opus', harness: 'claude', model: 'opus', sessions: [{ id: 's-plan', effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1_770_000 }] }]; plan.cost = cost('3.10', '3.50', true); set('PHAROS-15', plan)
   data.preferences['list:p-pharos'] = { visible: ['status', 'estimate', 'model', 'tokens', 'list_cost'] }
   return data
 }
@@ -78,20 +78,20 @@ test('approved cells show estimates, running figures, measured checks and sessio
   for (const name of ['Model', 'Tokens', 'Cost']) await expect(page.getByRole('columnheader', { name: new RegExp(`^${name}\\b`) })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: 'Paid', exact: true })).toHaveCount(0)
   await expect(row(page, 'PHAROS-11').locator('.c-tokens .plan-figure')).toHaveText('~2.4M')
-  await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveText('~Codex sol')
+  await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveText('~Sol 6.1')
   await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveAttribute('aria-label', /estimated/)
   await expect(row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')).toHaveText('1.1M/~2.4M')
   await expect(row(page, 'PHAROS-12').locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Measured so far 1.1M · estimated ~2.4M \(46%\) · Codex sol/)
   await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveText('$1.93/~$4.20')
   await expect(row(page, 'PHAROS-12').locator('.c-list-cost .plan-figure')).toHaveAccessibleDescription(/Measured so far \$1.93 · estimated ~\$4.20 \(46%\)\s+API-billed · at list prices/)
-  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Codex sol · xhigh · 1 session, running\nPlanned: Codex sol · xhigh, as used')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Codex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Codex Sol 6.1 · xhigh, as used')
   const measured = row(page, 'PHAROS-13')
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveText('1.9M')
   await expect(measured.locator('.c-tokens .measured')).toHaveCount(1)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleName(/measured/)
   await expect(measured.locator('.c-tokens .plan-figure')).toHaveAccessibleDescription(/Estimated ~2.4M · measured 1.9M \(−21%\)/)
-  await expect(measured.locator('.plan-model')).toHaveText('Claude opus+1')
-  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude opus · high · 1 session · 1.9M\nCodex sol · xhigh · 1 session · 0\nPlanned: Codex sol · xhigh')
+  await expect(measured.locator('.plan-model')).toHaveText('Opus 5.5+1')
+  await expect(measured.locator('.plan-model')).toHaveAttribute('data-tip', 'Used, per session:\nClaude Opus 5.5 · high · Effort high · 3 of 5 · 1 session · 1.9M\nCodex Sol 6.1 · xhigh · Effort xhigh · 4 of 5 · 1 session · 0\nPlanned: Codex Sol 6.1 · xhigh')
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).not.toHaveClass(/over/)
   await expect(row(page, 'PHAROS-14').locator('.c-tokens .plan-figure')).toHaveAttribute('data-tip', /\(\+35%\)/)
   await expect(row(page, 'PHAROS-15').locator('.c-list-cost .plan-figure')).toHaveText('plan$3.10')
@@ -105,8 +105,8 @@ test('approved cells show estimates, running figures, measured checks and sessio
 test('Cursor Grok hovers match profile keys and explain runs without a planned role', async ({ page }) => {
   const data = world()
   const planned = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
-  planned.route = { ...route, label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
-  planned.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 's-grok', effort: 'xhigh', role: 'worker', running: true, tokens: 1_100_000 }] }]
+  planned.route = { ...route, display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
+  planned.models = [{ display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7', sessions: [{ id: 's-grok', effort: 'xhigh', effort_level: 4, role: 'worker', running: true, tokens: 1_100_000 }] }]
   const unplanned = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
   unplanned.route = null
   unplanned.models = planned.models
@@ -115,11 +115,68 @@ test('Cursor Grok hovers match profile keys and explain runs without a planned r
   await mockWork(page, data)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto('/p/PHAROS?sort=key')
-  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Cursor grok-4.7 · xhigh · 1 session, running\nPlanned: Cursor grok-4.7 · xhigh, as used')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh, as used')
   const noPlan = row(page, 'PHAROS-11').locator('.plan-model')
-  await expect(noPlan).toHaveAttribute('data-tip', 'Used: Cursor grok-4.7 · xhigh · 1 session, running\nNo model planned: no role set')
+  await expect(noPlan).toHaveAttribute('data-tip', 'Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
   await noPlan.hover()
-  await expect(page.locator('.tooltip')).toHaveText('Used: Cursor grok-4.7 · xhigh · 1 session, running\nNo model planned: no role set')
+  await expect(page.locator('.tooltip')).toHaveText('Used: Cursor Grok 4.7 · xhigh · Effort xhigh · 4 of 5 · 1 session, running\nNo model planned: no role set')
+})
+
+test('unknown planned and used effort stays undrawn and is explained to hover and screen readers', async ({ page }) => {
+  const data = world()
+  const planned = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
+  planned.route = { ...route, label: 'Cursor Composer · default', display_name: 'Cursor Composer', short_name: 'Composer', model_version: '', harness: 'cursor', model: 'composer', effort: 'default', effort_level: null }
+  const used = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!.models![0]!
+  used.sessions[0]!.effort = 'ultra'
+  delete used.sessions[0]!.effort_level
+  const grouped = data.nodes.find(n => n.key === 'PHAROS-13')!.planning!.models!
+  delete grouped[1]!.sessions[0]!.effort_level
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  for (const key of ['PHAROS-11', 'PHAROS-12']) {
+    const model = row(page, key).locator('.plan-model')
+    await expect(model.locator('.effort')).toHaveCount(0)
+    await expect(model).toHaveAccessibleName(/Effort not reported/)
+    await expect(model).toHaveAccessibleDescription(/Effort not reported/)
+    await model.hover()
+    await expect(page.locator('.tooltip')).toHaveText(/Effort not reported/)
+  }
+  await expect(row(page, 'PHAROS-11').locator('.plan-model')).toHaveText('~Composer')
+  await expect(row(page, 'PHAROS-12').locator('.plan-model')).toHaveAttribute('data-tip', /ultra · Effort not reported/)
+  const mixed = row(page, 'PHAROS-13').locator('.plan-model')
+  await expect(mixed.locator('.effort rect.on')).toHaveCount(3)
+  await expect(mixed).toHaveAccessibleDescription(/Codex Sol 6.1 · xhigh · Effort not reported/)
+  await display(page)
+  await page.getByRole('radiogroup', { name: 'Effort meter', exact: true }).getByRole('radio', { name: 'Off', exact: true }).click()
+  await page.keyboard.press('Escape')
+  for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key).locator('.plan-model')).toHaveAccessibleName(/Effort not reported/)
+  await expect(mixed.locator('.effort')).toHaveCount(0)
+  await expect(mixed).toHaveAccessibleName(/Effort high · 3 of 5/)
+})
+
+test('omitted model versions do not match explicit versions even when version display is hidden', async ({ page }) => {
+  const data = world()
+  const cases = [
+    ['PHAROS-11', undefined, '5.5', false], ['PHAROS-12', '5.5', undefined, false],
+    ['PHAROS-14', undefined, undefined, true], ['PHAROS-15', '', '', true],
+  ] as const
+  for (const [key, plannedVersion, usedVersion] of cases) {
+    const planning = data.nodes.find(n => n.key === key)!.planning!
+    planning.route = { ...route, label: 'Claude Opus · high', display_name: 'Claude Opus', short_name: 'Opus', harness: 'claude', model: 'opus', model_version: plannedVersion, effort: 'high', effort_level: 3 }
+    planning.models = [{ label: 'Claude Opus', display_name: 'Claude Opus', short_name: 'Opus', harness: 'claude', model: 'opus', model_version: usedVersion, sessions: [{ id: `session-${key}`, effort: 'high', effort_level: 3, role: 'worker', running: false, tokens: 1 }] }]
+  }
+  data.preferences['list:display'] = { modelVersion: 'hide' }
+  await mockWork(page, data)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/p/PHAROS?sort=key&closed=1')
+  for (const [key, plannedVersion, , same] of cases) {
+    const model = row(page, key).locator('.plan-model')
+    await expect(model).toHaveText('Opus')
+    const plannedName = ['Claude Opus', plannedVersion].filter(Boolean).join(' ')
+    await expect(model).toHaveAttribute('data-tip', new RegExp(`Planned: ${plannedName.replaceAll('.', '\\.')} · high${same ? ', as used' : ' \\(a different model ran\\)'}$`))
+    await expect(model).toHaveAccessibleDescription(same ? /as used/ : /a different model ran/)
+  }
 })
 
 test('planning hovers match effort, running usage and pre-session calibration', async ({ page }) => {
@@ -127,8 +184,8 @@ test('planning hovers match effort, running usage and pre-session calibration', 
   const estimate = data.nodes.find(n => n.key === 'PHAROS-11')!.planning!
   estimate.tokens.calibration = { basis: 'median', tickets: 12, tokens_per_hour: 800_000 }
   const live = data.nodes.find(n => n.key === 'PHAROS-12')!.planning!
-  live.route = { ...route, label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
-  live.models = [{ label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7-high', sessions: [{ id: 's-high', effort: 'high', role: 'worker', running: true, tokens: 1_100_000 }] }]
+  live.route = { ...route, display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7 · xhigh', profile: 'cursor-grok-4-7-xhigh', harness: 'cursor', model: 'grok-4.7-xhigh' }
+  live.models = [{ display_name: 'Cursor Grok', short_name: 'Grok', model_version: '4.7', label: 'Cursor grok-4.7', harness: 'cursor', model: 'grok-4.7-high', sessions: [{ id: 's-high', effort: 'high', effort_level: 3, role: 'worker', running: true, tokens: 1_100_000 }] }]
   live.tokens.calibration = estimate.tokens.calibration
   const unreported = planning(null, null, 1)
   unreported.route = null
@@ -150,7 +207,7 @@ test('planning hovers match effort, running usage and pre-session calibration', 
   await estimated.hover()
   await expect(page.locator('.tooltip')).toHaveText(estimateTip)
   const model = row(page, 'PHAROS-12').locator('.plan-model')
-  const modelTip = 'Used: Cursor grok-4.7 · high · 1 session, running\nPlanned: Cursor grok-4.7 · xhigh'
+  const modelTip = 'Used: Cursor Grok 4.7 · high · Effort high · 3 of 5 · 1 session, running\nPlanned: Cursor Grok 4.7 · xhigh'
   await expect(model).toHaveAttribute('data-tip', modelTip)
   await model.hover()
   await expect(page.locator('.tooltip')).toHaveText(modelTip)
@@ -269,6 +326,14 @@ test('planning fragment implementation in light and dark; phones retain the card
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     await expect(row(page, 'PHAROS-13')).toBeVisible()
     await page.screenshot({ path: join(shots, `planning-${theme}.png`) })
+    const meter = row(page, 'PHAROS-13').locator('.effort')
+    expect(await meter.locator('rect.on').first().evaluate(el => getComputedStyle(el).fill)).toBe(theme === 'light' ? 'rgb(14, 111, 108)' : 'rgb(164, 229, 223)')
+    const plannedMeter = row(page, 'PHAROS-11').locator('.effort rect.on').first()
+    expect(await plannedMeter.evaluate(el => getComputedStyle(el).fill)).toBe(theme === 'light' ? 'rgba(32, 60, 61, 0.42)' : 'rgba(237, 244, 240, 0.42)')
+    await display(page)
+    await page.getByRole('radiogroup', { name: 'Effort meter', exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(shots, `display-${theme}.png`) })
+    await page.keyboard.press('Escape')
     for (const cls of ['c-tokens', 'c-list-cost']) {
       const clipped = await row(page, 'PHAROS-12').locator(`.${cls} .plan-figure`).evaluate(el => el.scrollWidth > el.clientWidth + 1)
       expect(clipped, cls).toBe(false)
@@ -286,4 +351,34 @@ test('planning fragment implementation in light and dark; phones retain the card
       await page.screenshot({ path: join(shots, `approved-fragment-${theme}.png`), fullPage: true })
     }
   }
+})
+
+test('Display model preferences persist per person and preserve full hovers and effort', async ({ page }) => {
+ const data = world(); await mockWork(page, data)
+ await page.setViewportSize({ width: 1600, height: 1000 })
+ await page.goto('/p/PHAROS?sort=key&closed=1')
+ const model = row(page, 'PHAROS-13').locator('.plan-model')
+ await expect(model).toHaveText('Opus 5.5+1')
+ await expect(model).toHaveAccessibleName(/Claude Opus 5.5, measured, Effort high · 3 of 5/)
+ await expect(model.locator('.effort rect.on')).toHaveCount(3)
+ expect(await model.locator('.effort').evaluate(el => el.getBoundingClientRect().width)).toBe(6.5)
+ expect(await model.locator('.effort').evaluate(el => el.getBoundingClientRect().height)).toBe(12)
+ expect(await page.locator('col.c-model').evaluate(el => el.getBoundingClientRect().width)).toBe(176)
+ await display(page)
+ const panel = page.getByRole('dialog', { name: 'Display options' })
+ for (const [setting,choice] of [['Effort meter','On'],['Model names','Short'],['Version','Show']]) {
+  await expect(panel.getByRole('radiogroup', { name: setting, exact: true }).getByRole('radio', { name: choice, exact: true })).toHaveAttribute('aria-checked','true')
+ }
+ await panel.getByRole('radiogroup',{name:'Model names',exact:true}).getByRole('radio',{name:'Full',exact:true}).click()
+ await expect(model).toHaveText('Claude Opus 5.5+1')
+ await panel.getByRole('radiogroup',{name:'Version',exact:true}).getByRole('radio',{name:'Hide',exact:true}).click()
+ await expect(model).toHaveText('Claude Opus+1')
+ await panel.getByRole('radiogroup',{name:'Effort meter',exact:true}).getByRole('radio',{name:'Off',exact:true}).click()
+ await expect(model.locator('.effort')).toHaveCount(0)
+ await expect(model).toHaveAccessibleDescription(/Claude Opus 5.5.*Effort high · 3 of 5/s)
+ await expect.poll(() => data.preferences['list:display']).toMatchObject({ effortMeter: false, modelNames: 'full', modelVersion: 'hide' })
+ await page.keyboard.press('Escape'); await page.reload()
+ await expect(model).toHaveText('Claude Opus+1'); await expect(model.locator('.effort')).toHaveCount(0)
+ await display(page)
+ await expect(panel.getByRole('radiogroup',{name:'Version',exact:true}).getByRole('radio',{name:'Hide',exact:true})).toHaveAttribute('aria-checked','true')
 })

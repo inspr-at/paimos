@@ -19,6 +19,7 @@ import (
 )
 
 type runRow struct {
+	Residency             string
 	LimitEstimates        map[string]int64
 	CapacityOverride      string
 	Purpose               string
@@ -261,7 +262,7 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
-	eligible, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
+	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
 	if err != nil {
 		return err
 	}
@@ -442,7 +443,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err := rows.Err(); err != nil {
 		return Account{}, nil, nil, err
 	}
-	accounts, err = narrowCandidates(ctx, tx, run, harness, accounts)
+	accounts, _, err = narrowCandidates(ctx, tx, run, harness, accounts)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}

@@ -288,16 +288,21 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
+test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1112_session_service_tiers.sql']);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
-  const runKinds = manifest.exceptions[1];
+  const runKinds = manifest.exceptions.find(entry => entry.file === '1066_run_kinds.sql');
+  assert.ok(runKinds);
   assert.equal(runKinds.file, '1066_run_kinds.sql');
   assert.equal(runKinds.ticket, 'AEON-501');
+  const briefing = manifest.exceptions.find(entry => entry.file === '1087_briefing_autopilot_visibility.sql');
+  assert.ok(briefing);
+  assert.equal(briefing.file, '1087_briefing_autopilot_visibility.sql');
+  assert.equal(briefing.ticket, 'AEON-454');
   const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
   assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
   assert.match(runKinds.reason, /strict superset/);
@@ -349,8 +354,25 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1112_session_service_tiers.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql', '1112_session_service_tiers.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
+});
+
+test('briefing visibility expansion preserves every existing restriction', () => {
+  const original = readFileSync(new URL('../internal/db/migrations/0823_event_reference_visibility.sql', import.meta.url), 'utf8');
+  const expanded = readFileSync(new URL('../internal/db/migrations/1087_briefing_autopilot_visibility.sql', import.meta.url), 'utf8');
+  const addition = "OR type IN ('status_autopilot.changed', 'status_autopilot.skipped')";
+  assert.equal(expanded.split(addition).length, 2);
+  const condition = sql => sql.slice(sql.indexOf('USING ((SELECT aeon_visible_all())')).replace(/\s+/g, ' ').trim();
+  // Removing exactly the two admitted types recovers the original policy.
+  assert.equal(condition(expanded.replace(addition, '')), condition(original));
+  const name = '1087_briefing_autopilot_visibility.sql';
+  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = exceptions.exceptions.find(e => e.file === name);
+  assert.ok(entry);
+  const files = new Map(exceptions.exceptions.map(e => [e.file, readFileSync(new URL(`../internal/db/migrations/${e.file}`, import.meta.url), 'utf8')]));
+  files.set(name, expanded.replace(addition, "OR type LIKE 'status_autopilot.%'"));
+  assert.match(checkMigrations(files, new Map(), null, {exceptions}).join('\n'), /1087_briefing_autopilot_visibility.sql: exception migration changed/);
 });
 
 test('1088 stages every widened check before definition-selected drops', () => {

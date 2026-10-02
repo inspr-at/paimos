@@ -172,6 +172,7 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback(context.Background())
+	blockerPID := int(blocker.Conn().PgConn().PID())
 	if _, err = blocker.Exec(t.Context(), `SELECT id FROM harness_sessions WHERE id=$1 FOR UPDATE`, strings.TrimPrefix(session, "/api/projects/"+f.project+"/harness-sessions/")); err != nil {
 		t.Fatal(err)
 	}
@@ -181,17 +182,17 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	for _, request := range []harness.RulesReceiptWrite{in, other} {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
-	// Match the blocking backend rather than SQL text: PostgreSQL truncates
-	// query text and the session column list grows as the API evolves.
-	// PostgreSQL may queue the second waiter behind the first, so follow the
-	// blocking chain instead of requiring both to name the root directly.
-	var blockerPID int
-	if err = blocker.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
-		t.Fatal(err)
-	}
+	// Follow the blocker chain: the second waiter can queue behind the first.
+	// Query text is truncated at PostgreSQL's
+	// track_activity_query_size, so widening the session projection must not
+	// hide a real waiter or turn this concurrent CAS assertion into a timeout.
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `WITH RECURSIVE blocked(pid) AS (SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) UNION SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()) SELECT count(*) FROM blocked`, blockerPID).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `WITH RECURSIVE waiting(pid) AS (
+ SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::integer=ANY(pg_blocking_pids(pid))
+ UNION
+ SELECT a.pid FROM pg_stat_activity a JOIN waiting w ON w.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()
+) SELECT count(*) FROM waiting`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}

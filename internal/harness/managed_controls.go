@@ -256,7 +256,7 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {
-	if c.ExpectedOwnership == nil || c.Kind == "force_stop" {
+	if (c.ExpectedOwnership == nil && (c.RequestPayload == nil || !c.RequestPayload.StopNow && c.RequestPayload.Level != "pause_quickly")) || c.Kind == "force_stop" {
 		return true, nil
 	}
 	var id string
@@ -264,7 +264,10 @@ func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	if err != nil {
 		return false, err
 	}
-	actor := tenant.Principal{TenantID: p.TenantID, ID: id, Kind: tenant.Person}
+	actor := tenant.Principal{TenantID: p.TenantID, ID: id}
+	if err = tx.QueryRow(r.Context(), `SELECT kind FROM principals WHERE id=$1`, id).Scan(&actor.Kind); err != nil {
+		return false, err
+	}
 	err = authz.RequireTx(r.Context(), tx, actor, "harness.control", authz.Scope{ProjectID: s.ProjectID})
 	if errors.Is(err, authz.ErrForbidden) {
 		return false, nil

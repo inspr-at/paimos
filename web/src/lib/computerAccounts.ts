@@ -142,6 +142,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       case 'state': return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip }
       case 'approval': return { kind: 'paused', text: 'Not allowed for agents', tone: 'mute', tip }
       case 'models': return { kind: 'attention', text: 'No model granted', tone: 'warn', tip }
+      case 'residency': return { kind: 'attention', text: 'Outside allowed providers', tone: 'warn', tip }
       // The server starts nothing here until its run ends or a reading arrives: not ready, nothing to fix.
       case 'capacity': return { kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip }
       case 'reading': return { kind: 'waiting', text: 'Waiting for a reading', tone: 'mute', tip }

@@ -140,8 +140,14 @@ defineExpose({ open })
   <button v-if="allowed && !session.archived_at && !hideTrigger" type="button" class="btn sm ghost" @click="open"><AppIcon name="wrench" :size="14" />Recover</button>
   <dialog ref="dialog" class="recovery-dialog" :aria-labelledby="`${uid}-title`" :aria-describedby="`${uid}-intro`" @cancel.prevent="close">
     <div class="recovery-card">
-      <div class="recovery-body">
       <h2 :id="`${uid}-title`">{{ done ? 'Session archived' : forceControl ? 'Force stop requested' : 'Recover session' }}</h2>
+      <div class="recovery-actions">
+        <button ref="cancelButton" type="button" class="btn" :disabled="busy" @click="close">{{ done || forceControl ? 'Close' : 'Cancel' }}</button>
+        <button v-if="!done && !forceControl && !preview && !loading" type="button" class="btn" @click="refresh">Refresh details</button>
+        <button v-if="forceExpired" type="button" class="btn" @click="refresh">Refresh details</button>
+        <button v-if="!done && !forceControl && available" type="button" class="btn" :class="action === 'force' ? 'danger' : 'primary'" :disabled="!canSubmit" @click="submit">{{ busy ? 'Requesting…' : action === 'force' ? 'Force stop session' : 'Archive session' }}</button>
+      </div>
+      <div class="recovery-body">
       <p v-if="done" :id="`${uid}-intro`" role="status">The registration is closed and its history is retained. Process state is unknown; no process was stopped.</p>
       <p v-else-if="forceControl" :id="`${uid}-intro`" role="status">{{ forceResult }}</p>
       <template v-else>
@@ -179,22 +185,16 @@ defineExpose({ open })
       </template>
       <p v-if="error" class="recovery-error" role="alert">{{ error }}</p>
       </div>
-      <div class="recovery-actions">
-        <button ref="cancelButton" type="button" class="btn" :disabled="busy" @click="close">{{ done || forceControl ? 'Close' : 'Cancel' }}</button>
-        <button v-if="!done && !forceControl && !preview && !loading" type="button" class="btn" @click="refresh">Refresh details</button>
-        <button v-if="forceExpired" type="button" class="btn" @click="refresh">Refresh details</button>
-        <button v-if="!done && !forceControl && available" type="button" class="btn" :class="action === 'force' ? 'danger' : 'primary'" :disabled="!canSubmit" @click="submit">{{ busy ? 'Requesting…' : action === 'force' ? 'Force stop session' : 'Archive session' }}</button>
-      </div>
     </div>
   </dialog>
 </template>
 
 <style scoped>
-.recovery-dialog { width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
+.recovery-dialog { position: fixed; inset: 96px 0 auto; margin: 0 auto; width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 112px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recovery-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 30px); }
-.recovery-body { display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
-h2 { font-size: 19px; line-height: 1.2; }
+.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box; max-height: min(660px, calc(100dvh - 114px)); }
+.recovery-body { flex: 1; align-content: start; display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
+h2 { flex: none; font-size: 19px; line-height: 1.2; }
 p { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .quiet { color: var(--ink-3); }
 .choices { display: grid; gap: 8px; }
@@ -220,6 +220,6 @@ code { display: block; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; colo
 .confirmation-text { padding: 8px 10px; border-radius: 8px; background: var(--code-bg); user-select: all; }
 .recovery-error { color: var(--danger); }
 .recovery-actions { flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.recovery-actions .btn { min-height: 40px; }
-@media (max-width: 500px) { .recovery-card { padding: 18px 16px 16px; gap: 14px; } .recovery-actions .btn { flex: 1; } }
+.recovery-actions .btn { width: 180px; min-height: 40px; }
+@media (max-width: 500px) { .recovery-dialog { inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; border-radius: 0; } .recovery-card { height: 100%; max-height: none; padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); gap: 14px; } .recovery-body { order: 1; } .recovery-actions { order: 2; } .recovery-actions .btn { flex: 1; } }
 </style>
