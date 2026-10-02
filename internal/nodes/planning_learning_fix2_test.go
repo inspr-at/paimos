@@ -151,6 +151,24 @@ func TestPlanningLearningSnapshotSpeedReproducesFrozenTokens(t *testing.T) {
 	}
 }
 
+func TestPlanningLearningEpicKeepsAllUncalibratedEvidence(t *testing.T) {
+	w := planningSetup(t)
+	epic := w.node(t, "ALLPARTIAL-1", "epic", w.root.ID, "open", nil)
+	w.node(t, "ALLPARTIAL-2", "ticket", epic.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	for _, order := range []string{"key", "tokens", "list_cost"} {
+		v := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+order)[epic.Key]
+		if v == nil || v.Children == nil || v.Children.Total != 1 || v.Children.Estimated != 0 || v.Tokens.Estimated != nil || v.Cost != nil {
+			t.Fatalf("uncalibrated epic lost partial evidence: %+v", v)
+		}
+		raw, _ := json.Marshal(v.Children)
+		var children map[string]int
+		_ = json.Unmarshal(raw, &children)
+		if children["uncalibrated"] != 1 {
+			t.Fatalf("missing exclusion count: %s", raw)
+		}
+	}
+}
+
 // Every added session is independently complete before changing exactly one
 // exclusion dimension, so an incomplete run cannot explain the assertion.
 func TestPlanningLearningExcludesMixedModelsPlacementsAndSource(t *testing.T) {

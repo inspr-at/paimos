@@ -795,7 +795,7 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 			view.Cost.PaidMicros = sortMicros(money.paidSpent, paidEst)
 		}
 	}
-	if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil {
+	if view.Route == nil && view.RouteGap == "" && view.Tokens.Sessions == 0 && view.Tokens.Estimated == nil && (view.Children == nil || view.Children.Uncalibrated == 0) {
 		return nil
 	}
 	return view
