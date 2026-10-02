@@ -4242,8 +4242,8 @@
     "261002171043.0.0": {
       "release_channel": "stable",
       "release_sequence": 120,
-      "snapshot_sha256": "2779860562bc27d427ecc0b85a1e8b3777437e0f34f0ec224435922f9639f77e",
-      "captured_at": "2026-10-02T17:34:03Z",
+      "snapshot_sha256": "91ccd899cb4fb961ba356e750f86a42da272e2684aeced66273eb909febe2b71",
+      "captured_at": "2026-10-02T17:38:56Z",
       "release_revision": 1,
       "items": [
         {
@@ -4274,8 +4274,8 @@
           "key": "AEON-460",
           "pill_en": "Touch ID for attach",
           "pill_de": "Touch ID beim Verknüpfen",
-          "benefit_en": "On a supported Mac, after you approve an attach in Aeon, Touch ID and a signed local confirmation are required before the session is linked.",
-          "benefit_de": "Auf einem unterstützten Mac braucht es nach deiner Freigabe in Aeon noch Touch ID und eine signierte lokale Bestätigung, bevor die Sitzung verknüpft wird.",
+          "benefit_en": "On a supported Mac, you can require local authentication, such as Touch ID, and a signed confirmation after approving an attach in Aeon, before the session is linked.",
+          "benefit_de": "Auf einem unterstützten Mac kannst du nach deiner Freigabe in Aeon eine lokale Authentifizierung, etwa per Touch ID, und eine signierte Bestätigung verlangen, bevor die Sitzung verknüpft wird.",
           "group": "features"
         },
         {
