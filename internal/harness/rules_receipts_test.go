@@ -182,9 +182,11 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
 	// pg_stat_activity sees separate connections blocked by the row lock.
+	// Match the stable SELECT prefix: Postgres truncates query text, and the
+	// combined pause/activity projection can put FOR UPDATE beyond that limit.
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM harness_sessions%FOR UPDATE%'`).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id::text,project_id::text,agent_principal_id::text,%'`).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}
