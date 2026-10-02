@@ -9,12 +9,12 @@ import { attachVersionReveal, revealControl } from '../lib/version-reveal'
 
 // A calendar version in the shared INSPR renderer's Pretty display. Standing
 // alone it is the renderer's own pill (hover, focus or tap reveals the seconds;
-// a click copies). Inside a control (a release row, the footer's history button)
+// a click copies). Inside a control (a release row, a journey release button)
 // that control keeps its action and its hover or focus reveals the seconds.
 // Other versions read as text.
 // `full` draws the shared Pretty stamp with seconds already visible, without interaction.
 // `rest` draws the Pretty display as plain text (no copy button, no reveal of the
-// seconds): the stamp a marketing name shows on hover.
+// seconds): the stamp a marketing name shows on hover, or the stationary footer.
 const props = withDefaults(defineProps<{ value: string; scheme?: string; rest?: boolean; full?: boolean }>(), { scheme: CALENDAR_DISPLAY_SCHEME, rest: false, full: false })
 const host = ref<HTMLElement>()
 let reveal: (() => void) | undefined
