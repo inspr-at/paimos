@@ -170,10 +170,17 @@ test('comparison choices and result counts follow their separate scopes', async 
   await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill(history.releases[2].version)
   await expect(rows(page)).toHaveCount(0)
   await expect(sheet(page).locator('.result-count')).toHaveText('1 of 7')
+  await expect(sheet(page).locator('.list-pane .hidden-history')).toHaveText('Hidden in the history. Show reserved versions in Developer settings.')
+  await expect(sheet(page).getByRole('heading', { name: 'No release matches', exact: true })).toHaveCount(0)
+  await expect(sheet(page).getByRole('button', { name: 'Clear search and filters', exact: true })).toHaveCount(0)
   await showReserved(page, true)
   await expect(rows(page)).toHaveCount(1)
   await expect(sheet(page).locator('.result-count')).toHaveText('1 of 7')
   await expect(sheet(page).locator('.hidden-history')).toHaveCount(0)
+  await sheet(page).getByRole('searchbox', { name: 'Search releases' }).fill('no matches')
+  await expect(sheet(page).locator('.result-count')).toHaveText('0 of 7')
+  await expect(sheet(page).getByRole('heading', { name: 'No release matches', exact: true })).toBeVisible()
+  await expect(sheet(page).getByRole('button', { name: 'Clear search and filters', exact: true })).toBeVisible()
 })
 
 test('a direct hidden reservation cannot become a comparison endpoint', async ({ page }) => {

@@ -515,6 +515,7 @@ const KINDS = [
             <h2>{{ copyText.noHistory }}</h2>
             <p>{{ copyText.noHistoryText(current === 'dev') }}</p>
           </div>
+          <p v-else-if="history && matching.length && !visible.length" class="empty hidden-history">Hidden in the history. Show reserved versions in Developer settings.</p>
           <div v-else-if="history && !visible.length" class="empty" :lang="lang">
             <h2>{{ copyText.noMatch }}</h2>
             <p>{{ copyText.noMatchText(releases.length, filter.q.trim()) }}</p>
@@ -757,6 +758,7 @@ const KINDS = [
 .empty { display: grid; justify-items: start; gap: 8px; padding: 28px 12px; }
 .empty h2 { font-size: 17px; }
 .empty p { font-size: 13.5px; }
+.hidden-history { font-size: 13px; color: var(--ink-3); }
 .empty-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); }
 
 /* ---------- A ticket beside the history ---------- */
