@@ -146,7 +146,7 @@ function escape() {
 function keys(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey) return
   const inField = field(event.target)
-  if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); event.stopPropagation(); escape(); return }
+  if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); escape(); return }
   if (event.key === 'Enter') {
     const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
     if (event.shiftKey || (inField ? !modifier : event.metaKey || event.ctrlKey)) return
