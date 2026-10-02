@@ -253,6 +253,17 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 		perms := []string{}
 		if builtin {
 			perms = builtinPermissions(key)
+			// Recurrence automation is an explicit agent grant, even for an
+			// agent bound to Owner/Admin. A custom role and key scope are required.
+			if p.Kind == tenant.Agent {
+				filtered := make([]string, 0, len(perms))
+				for _, permission := range perms {
+					if permission != "recurrences.manage" {
+						filtered = append(filtered, permission)
+					}
+				}
+				perms = filtered
+			}
 		} else if perm != nil {
 			perms = []string{*perm}
 		}

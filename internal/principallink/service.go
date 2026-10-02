@@ -87,6 +87,13 @@ func (s *Service) change(ctx context.Context, slug, from, to string) (Result, er
 		return result, err
 	}
 	err = db.InTenant(ctx, s.pool, tid, func(tx pgx.Tx) error {
+		// Take access ownership before even creating the audit actor. Inserting
+		// it first takes an event-counter lock. NO KEY UPDATE serializes links
+		// while allowing a node writer's tenant FK check to finish first.
+		var lockedTenant string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tid).Scan(&lockedTenant); err != nil {
+			return err
+		}
 		actor, err := operator(ctx, tx, tid)
 		if err != nil {
 			return err

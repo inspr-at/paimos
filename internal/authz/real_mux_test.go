@@ -53,6 +53,7 @@ import (
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
 	"github.com/inspr-at/paimos/internal/questions"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -89,7 +90,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),
 		imports.New(nil), inbox.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil),
 		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), questions.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
-		journey.New(nil), requirements.New(nil), releases.New(nil), statusautopilot.New(nil), intake.New(nil),
+		journey.New(nil), requirements.New(nil), releases.New(nil), recurrences.New(nil), statusautopilot.New(nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),
 		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{},
