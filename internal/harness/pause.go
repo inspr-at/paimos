@@ -391,11 +391,17 @@ type resumeResult struct {
 
 func resumeRecipe(s Session) resumeResult {
 	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover)}
-	return resumeResult{Session: s, Continuation: c, Registration: map[string]any{
+	out := resumeResult{Session: s, Continuation: c, Registration: map[string]any{
 		"succeeds_session_id": s.ID, "agent_principal_id": s.AgentPrincipalID, "harness": s.Harness, "host": s.Host, "management_mode": s.Management, "role": s.Role, "parent_harness_session_id": s.ParentID, "ticket_node_id": s.TicketNodeID, "work_shape": s.WorkShape, "advertised_capabilities": s.Capabilities,
-		"generator": s.Generator, "command": s.Command,
 		"display_label": s.DisplayLabel, "model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel, "harness_version": s.HarnessVersion, "worktree": s.Worktree, "branch": s.Branch, "brief": "Continuation of " + s.ID,
 	}}
+	if s.Generator != nil {
+		out.Registration["generator"] = *s.Generator
+	}
+	if s.Command != nil {
+		out.Registration["command"] = *s.Command
+	}
+	return out
 }
 
 func requestResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (resumeResult, error) {

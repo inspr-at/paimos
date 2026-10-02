@@ -375,7 +375,13 @@ func TestPauseStateMachineSurvivesRestartAndResumesWorker(t *testing.T) {
 	expect(t, f.call(f.person, "POST", base, body, ""), 409) // resume permission has not been requested
 	w = f.call(f.person, "POST", path+"/resume", map[string]any{}, "")
 	expect(t, w, 200)
-	if c := decode(t, w)["continuation"].(map[string]any); !strings.Contains(c["brief"].(string), "remaining checks") {
+	result := decode(t, w)
+	for _, field := range []string{"generator", "command"} {
+		if _, exists := result["registration"].(map[string]any)[field]; exists {
+			t.Fatalf("codex recipe includes absent %s label", field)
+		}
+	}
+	if c := result["continuation"].(map[string]any); !strings.Contains(c["brief"].(string), "remaining checks") {
 		t.Fatal(c)
 	}
 	f.mux = http.NewServeMux()
@@ -424,6 +430,18 @@ func TestPauseProcessRunContinuationRetainsKindLabels(t *testing.T) {
 				finishPaused(t, f, path, lease, control)
 				id := strings.TrimPrefix(path, base+"/")
 				proof := map[string]any{"harness_session_ref": "continued-ref-" + uid(), "worker_lease": "continued-lease-" + uid()}
+				assertRecipe := func(result map[string]any) {
+					t.Helper()
+					registration := result["registration"].(map[string]any)
+					if registration[tc.field] != tc.label {
+						t.Fatal("resume recipe lost the run-kind label")
+					}
+					for _, field := range []string{"generator", "command"} {
+						if _, exists := registration[field]; field != tc.field && exists {
+							t.Fatalf("recipe includes absent %s label", field)
+						}
+					}
+				}
 
 				assertNoSuccessor := func(wantState string) {
 					t.Helper()
@@ -452,9 +470,7 @@ func TestPauseProcessRunContinuationRetainsKindLabels(t *testing.T) {
 					w := f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, "")
 					expect(t, w, 200)
 					result := decode(t, w)
-					if result["registration"].(map[string]any)[tc.field] != tc.label {
-						t.Fatal("atomic resume recipe lost the run-kind label")
-					}
+					assertRecipe(result)
 					next = result["successor"].(map[string]any)
 					expect(t, f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, ""), 200)
 					if strings.Contains(w.Body.String(), proof["worker_lease"].(string)) || strings.Contains(w.Body.String(), proof["harness_session_ref"].(string)) {
@@ -463,9 +479,7 @@ func TestPauseProcessRunContinuationRetainsKindLabels(t *testing.T) {
 				} else {
 					w := f.call(f.person, "POST", path+"/resume", map[string]any{}, "")
 					expect(t, w, 200)
-					if decode(t, w)["registration"].(map[string]any)[tc.field] != tc.label {
-						t.Fatal("resume recipe lost the run-kind label")
-					}
+					assertRecipe(decode(t, w))
 					// Optional metadata and labels must inherit from the predecessor.
 					registration := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.kind, "host": "test", "role": "worker", "management_mode": "unmanaged", "succeeds_session_id": id, "harness_session_ref": proof["harness_session_ref"], "worker_lease": proof["worker_lease"], tc.field: tc.mismatch}
 					w = f.call(f.person, "POST", base, registration, "")
