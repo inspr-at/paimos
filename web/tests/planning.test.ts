@@ -29,7 +29,7 @@ test('dense figures', () => {
 })
 
 test('planning cells distinguish a planned model and measured figures', () => {
-  assert.equal(modelCell(row({ route })).text, 'Codex astra')
+  assert.equal(modelCell(row({ route })).text, 'astra')
   assert.equal(modelCell(row({ route })).state, 'planned')
   assert.match(modelCell(row({ route })).tip, /Model registry, revision 3f9a1c2b/)
   assert.equal(modelCell(row(undefined, {})).tip, 'No agent session yet\nNo model planned: set a role and area')
@@ -49,7 +49,7 @@ test('presence and sort values follow the list API', () => {
   const rows = [row({ route, tokens: tokens(5, null), cost: cost({ list_spent: '1' }) }), row(undefined, {})]
   assert.deepEqual(planningPresent(rows), { model: true, tokens: true, list_cost: true, paid: false })
   assert.deepEqual(planningPresent([row(undefined, {})]), { model: false, tokens: false, list_cost: false, paid: false })
-  assert.equal(planningSortValue(rows[0]!, 'model'), '3:backend')
+  assert.equal(planningSortValue(rows[0]!, 'model'), 'codex astra')
   assert.equal(planningSortValue(rows[1]!, 'model'), null)
   assert.equal(compareModelSort(rows[0]!, rows[1]!, false), -1)
   assert.equal(planningSortValue(rows[0]!, 'tokens'), 5)
@@ -100,21 +100,9 @@ test('cost sort compares micro-dollar integers past the float mantissa', () => {
   }
 })
 
-test('model sort still orders areas when both rows lack a role', () => {
-  const absent = { ...row(undefined, {}), id: 'A' } as ListItem
-  const backend = { ...row(undefined, { area: 'backend' }), id: 'B' } as ListItem
-  const frontend = { ...row(undefined, { area: 'frontend' }), id: 'C' } as ListItem
-  const rows = [absent, frontend, backend]
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['B', 'C', 'A'])
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['C', 'B', 'A'])
-})
-
-test('model sort keeps a missing area last in both directions', () => {
-  const withArea = { ...row(undefined, { route_role: 'build', area: 'frontend' }), id: 'a' } as ListItem
-  const noArea = { ...row(undefined, { route_role: 'build' }), id: 'b' } as ListItem
-  const higher = { ...row(undefined, { route_role: 'build-hard', area: 'backend' }), id: 'c' } as ListItem
-  const none = { ...row(undefined, {}), id: 'd' } as ListItem
-  const rows = [noArea, none, higher, withArea]
+test('model sort uses full identity and version, with absent models last', () => {
+  const item = (id: string, name?: string, version = '') => ({ ...row(name ? { route: { ...route, display_name: name, short_name: name.split(' ').pop(), model_version: version } } : undefined, {}), id }) as ListItem
+  const rows = [item('d'), item('c', 'Codex Sol', '6.1'), item('b', 'Claude Opus', '5.5'), item('a', 'Claude Opus', '5')]
   assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['a', 'b', 'c', 'd'])
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['c', 'a', 'b', 'd'])
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['c', 'b', 'a', 'd'])
 })

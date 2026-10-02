@@ -12725,8 +12725,13 @@ components:
             label: {type: string, description: 'Display name such as "Codex astra · xhigh".'}
             profile: {type: string, description: Profile slug.}
             harness: {type: string}
+            provider: {type: string, description: Registry model provider used by the brand mark.}
             model: {type: string}
             effort: {type: string}
+            display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+            short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+            model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
             revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
         route_gap:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
@@ -12741,7 +12746,11 @@ components:
             properties:
               label: {type: string, description: Short model label without effort.}
               harness: {type: string}
+              provider: {type: string, description: Registry model provider used by the brand mark.}
               model: {type: string}
+              display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+              short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+              model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
               sessions:
                 type: array
                 items:
@@ -12752,6 +12761,7 @@ components:
                     profile_id: {type: string, format: uuid}
                     model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
                     effort: {type: string}
+                    effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, description: 'Resolved from model_profile_id and matching reported effort; null when unregistered or unknown.'}
                     role: {type: string}
                     running: {type: boolean}
                     tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
@@ -13292,6 +13302,9 @@ components:
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
+        display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+        short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+        model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
     ModelProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfileWrite'}
@@ -13301,7 +13314,8 @@ components:
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
-            effort_level: {type: integer, minimum: 0, maximum: 5, description: "Normalized Gemini fixed thinking-budget bucket from the immutable effort pin; omitted when unknown."}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: "Shared effort scale from the immutable effort pin, including Gemini fixed thinking-budget buckets; unknown stays null."}
+            provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]
@@ -15114,7 +15128,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (rung of the route role: scout, mechanical, build, build-hard, review-gate, then area; no role last), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

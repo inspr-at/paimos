@@ -361,6 +361,33 @@ estimate and names the short model without effort. Column fitting
 measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 
+The Display panel saves Effort meter On/Off (default On), Model names Full/Short
+(default Short) and Version Show/Hide (default Show) per person in `list:display`.
+The Model column defaults to 176px. Registry `display_name`, `short_name` and
+`model_version` are separate from the profile's revision `version`; alias versions
+stay unknown unless a new immutable profile explicitly supplies that metadata.
+Hovers, accessible names and model sorting retain the full name and model version.
+Registered aliases with different declared model versions remain separate used
+models. The planned/used comparison requires equal model versions when either
+side declares one; two omitted or empty versions retain legacy identity matching.
+The hover says “as used” only when every session’s effort also matches the plan.
+Sorting follows the leading actual model, then the work-start route or
+live route when no actual model is known.
+Migration 1074 stores model display metadata and effort levels in the immutable,
+tenant-isolated `model_profile_display` table without rewriting profile pins.
+Existing profiles are backfilled under each tenant’s RLS in the migration
+transaction; an insert trigger covers both current and previous-binary writers.
+The registry’s presentation `provider` is separate from its routing `family`: Pi
+profiles with explicit registered Gemini IDs retain family `unknown` and carry
+Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
+Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
+1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
+registered profile only when reported effort matches; unregistered, missing or
+unsupported effort stays null, hides the meter, and says “Effort not reported” in
+the hover and accessible name, including when the meter setting is Off. Raw
+effort words never imply a level. The largest measured session supplies the leading
+model's meter (session ID breaks ties); the hover describes every session.
+
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
 
 Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
