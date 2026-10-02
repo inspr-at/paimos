@@ -69,7 +69,7 @@ type ProfileSnapshot struct {
 	Definition ProfileDefinition `json:"definition"`
 }
 
-// normalized returns the definition with empty lists and maps instead of nil.
+// Normalized returns the definition with empty lists and maps instead of nil.
 func (d ProfileDefinition) Normalized() ProfileDefinition {
 	if d.Fonts == nil {
 		d.Fonts = []Font{}

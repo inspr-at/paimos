@@ -90,6 +90,10 @@ func (m *Module) undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 
 // Archiving or restoring is undone while nothing else changed the quote since.
 func (m *Module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
+	// Acquire the tenant/tree fence before the plugin gate takes share locks.
+	if err := lockQuoteTree(ctx, tx); err != nil {
+		return events.Change{}, err
+	}
 	if err := m.undoGate(ctx, tx, p); err != nil {
 		return events.Change{}, err
 	}
