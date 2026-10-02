@@ -182,6 +182,52 @@ func TestExactAPIScopedSearchIncludesNestedLaterPages(t *testing.T) {
 	}
 }
 
+func TestExactAPIScopedSearchSkipsInvisibleAncestor(t *testing.T) {
+	parent := "hidden-parent"
+	lookups, pages := 0, 0
+	rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/kinds":
+			fmt.Fprint(w, `{"items":[{"id":"project-kind","slug":"project"},{"id":"ticket-kind","slug":"ticket"}]}`)
+		case "/api/nodes":
+			fmt.Fprintf(w, `{"items":[{"id":%q,"key":"PRJ-1","kind_id":"project-kind","fields":{"project_key":"AEON"}}]}`, transcriptProjectID)
+		case "/api/nodes/visible-parent":
+			fmt.Fprintf(w, `{"id":"visible-parent","parent_id":%q}`, parent)
+		case "/api/nodes/" + parent:
+			lookups++
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":"not found"}`)
+		case "/api/search":
+			pages++
+			switch r.URL.Query().Get("cursor") {
+			case "":
+				fmt.Fprintf(w, `{"items":[{"node":{"id":"first","key":"AEON-1","kind_id":"ticket-kind","parent_id":%q}},{"node":{"id":"other","key":"OTHER-1","kind_id":"ticket-kind","parent_id":%q}}],"next_cursor":"next"}`, transcriptProjectID, parent)
+			case "next":
+				fmt.Fprintf(w, `{"items":[{"node":{"id":"other-again","key":"OTHER-2","kind_id":"ticket-kind","parent_id":"visible-parent"}},{"node":{"id":"target","key":"AEON-2","kind_id":"ticket-kind","parent_id":%q}}]}`, transcriptProjectID)
+			default:
+				t.Errorf("unexpected cursor %q", r.URL.Query().Get("cursor"))
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	rt.jsonOut = true
+	if err := rt.searchIssues("target", "AEON", "", 2); err != nil {
+		t.Fatal(err)
+	}
+	var result issueSearchResult
+	if err := json.Unmarshal(rt.stdout.(*bytes.Buffer).Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Issues) != 2 || result.Issues[0].IssueKey != "AEON-1" || result.Issues[1].IssueKey != "AEON-2" || result.HasMore {
+		t.Fatalf("visible matches lost or invisible path included: %+v", result)
+	}
+	if pages != 2 || lookups != 1 {
+		t.Fatalf("pages = %d, hidden parent lookups = %d; want 2 and 1", pages, lookups)
+	}
+}
+
 func TestExactAPIScopedSearchHasMoreRequiresScopedMatch(t *testing.T) {
 	for _, extraMatch := range []bool{false, true} {
 		t.Run(fmt.Sprintf("extra-match-%t", extraMatch), func(t *testing.T) {
