@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { requireRehearsal, requiredJobs, repository, workflow } from './check-release-rehearsal.mjs';
+import { requireRehearsal, requiredJobs, requiredSteps, repository, workflow } from './check-release-rehearsal.mjs';
 
 const sha = 'a'.repeat(40);
 const run = () => ({ id: 42, workflow_id: 7, path: workflow, head_sha: sha, head_branch: 'main',
@@ -10,8 +10,8 @@ const run = () => ({ id: 42, workflow_id: 7, path: workflow, head_sha: sha, head
 function fixture(change = () => {}) {
   const data = { policy: { id: 7, path: workflow, state: 'active' }, runs: [run()],
     jobs: requiredJobs.map(name => ({ name, status: 'completed', conclusion: 'success',
-      steps: [{ name: 'fixture', status: 'completed', conclusion: 'success' }] })),
-    artifacts: [{ name: `release-rehearsal-${sha}-2`, expired: false, size_in_bytes: 100, workflow_run: { head_sha: sha } }] };
+      steps: requiredSteps(name).map(name => ({ name, status: 'completed', conclusion: 'success' })) })),
+    artifacts: [{ name: `release-rehearsal-${sha}-2`, expired: false, size_in_bytes: 100, workflow_run: { head_sha: sha, id: 42 } }] };
   change(data);
   const calls = [];
   const api = async (path, paginate) => {
@@ -50,11 +50,15 @@ for (const [name, mutate] of [
   ['failed step masked by continue-on-error', d => { d.jobs[0].steps[0].conclusion = 'failure'; }],
   ['skipped smoke step', d => { d.jobs[0].steps[0].conclusion = 'skipped'; }],
   ['missing platform', d => { d.jobs.pop(); }],
+  ['empty step inventory', d => { d.jobs[0].steps = []; }],
+  ['missing smoke operation', d => { d.jobs[0].steps = d.jobs[0].steps.filter(s => s.name !== 'Smoke production image'); }],
   ['duplicate job', d => { d.jobs[1] = d.jobs[0]; }],
   ['no receipt', d => { d.artifacts = []; }],
   ['expired receipt', d => { d.artifacts[0].expired = true; }],
   ['receipt from previous attempt', d => { d.artifacts[0].name = `release-rehearsal-${sha}-1`; }],
   ['wrong receipt SHA', d => { d.artifacts[0].workflow_run.head_sha = 'b'.repeat(40); }],
+  ['wrong receipt run', d => { d.artifacts[0].workflow_run.id = 41; }],
+  ['missing receipt size', d => { delete d.artifacts[0].size_in_bytes; }],
   ['duplicate receipt', d => { d.artifacts.push(d.artifacts[0]); }],
 ]) test(`release stays blocked: ${name}`, async () => {
   await assert.rejects(requireRehearsal(sha, fixture(mutate).api));

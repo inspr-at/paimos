@@ -8,11 +8,21 @@ export const workflow = '.github/workflows/release-image-check.yml';
 export const requiredJobs = ['image-dry-run (amd64)', 'image-dry-run (arm64)',
   'agentd-rehearsal (arm64)', 'agentd-rehearsal (amd64)',
   'assets-rehearsal', 'release-rehearsal'];
+export const requiredSteps = name => name.startsWith('image-dry-run')
+  ? ['Check release workflow invariants', 'Validate version and presentation bundle', 'Release history fixture',
+    'Require native platform', 'Build cached smoke image', 'Resolve loaded smoke image', 'Smoke production image',
+    'Export production image with provenance locally', 'Record dry run']
+  : name.startsWith('agentd-rehearsal')
+    ? ['Build darwin paimos-agentd with LocalAuthentication', 'Native unsigned agent qualification']
+    : name === 'assets-rehearsal'
+      ? ['Exact production assets assembly', 'Pin-bot dry-run with offline source and attestation inputs',
+        'Exact production index, attestation and gh draft invocations', 'Tap dry-run fixtures with writes disabled']
+      : ['Require every rehearsal job and record the exact SHA'];
 
 export async function requireRehearsal(sha, api) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Expected the full release commit SHA');
   const policy = await api(`repos/${repository}/actions/workflows/release-image-check.yml`);
-  if (!Number.isSafeInteger(policy.id) || policy.path !== workflow || policy.state !== 'active') {
+  if (!Number.isSafeInteger(policy.id) || policy.id < 1 || policy.path !== workflow || policy.state !== 'active') {
     throw new Error('Rehearsal workflow identity is unavailable');
   }
   // Do not filter success: the newest eligible attempt can revoke an old success.
@@ -23,7 +33,7 @@ export async function requireRehearsal(sha, api) {
     r.path === workflow && r.repository?.full_name === repository && r.head_repository?.full_name === repository);
   runs.sort((a, b) => b.id - a.id);
   const run = runs[0];
-  if (!run || !Number.isSafeInteger(run.id) || !Number.isSafeInteger(run.run_attempt) ||
+  if (!run || !Number.isSafeInteger(run.id) || run.id < 1 || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1 ||
       run.status !== 'completed' || run.conclusion !== 'success') throw new Error('No current green main rehearsal for this exact SHA');
   const jobPages = await api(`repos/${repository}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`, true);
   if (!Array.isArray(jobPages) || jobPages.some(p => !Array.isArray(p.jobs))) throw new Error('Invalid rehearsal job listing');
@@ -31,18 +41,19 @@ export async function requireRehearsal(sha, api) {
   if (jobs.length !== requiredJobs.length || requiredJobs.some(name => {
     const matches = jobs.filter(j => j.name === name);
     return matches.length !== 1 || matches[0].status !== 'completed' || matches[0].conclusion !== 'success' ||
-      !Array.isArray(matches[0].steps) || matches[0].steps.some(s => s.status !== 'completed' || s.conclusion !== 'success');
+      !Array.isArray(matches[0].steps) || matches[0].steps.some(s => s.status !== 'completed' || s.conclusion !== 'success') ||
+      requiredSteps(name).some(step => matches[0].steps.filter(s => s.name === step).length !== 1);
   })) throw new Error('Rehearsal jobs or steps are missing, skipped or failed');
   const artifacts = await api(`repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`, true);
   if (!Array.isArray(artifacts) || artifacts.some(p => !Array.isArray(p.artifacts))) throw new Error('Invalid receipt listing');
   const receipts = artifacts.flatMap(p => p.artifacts).filter(a => a.name === `release-rehearsal-${sha}-${run.run_attempt}`);
-  if (receipts.length !== 1 || receipts[0].expired !== false || receipts[0].size_in_bytes <= 0 ||
-      receipts[0].workflow_run?.head_sha !== sha) throw new Error('Exact-SHA rehearsal receipt is missing or expired');
+  if (receipts.length !== 1 || receipts[0].expired !== false || !Number.isSafeInteger(receipts[0].size_in_bytes) || receipts[0].size_in_bytes < 1 ||
+      receipts[0].workflow_run?.head_sha !== sha || receipts[0].workflow_run?.id !== run.id) throw new Error('Exact-SHA rehearsal receipt is missing or expired');
   return { sha, run_id: run.id, run_attempt: run.run_attempt, url: run.html_url };
 }
 
 function github(path, paginate = false) {
-  const result = spawnSync('gh', ['api', ...(paginate ? ['--paginate', '--slurp'] : []), path],
+  const result = spawnSync('gh', ['api', '--hostname', 'github.com', ...(paginate ? ['--paginate', '--slurp'] : []), path],
     { encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new Error('Rehearsal API read failed; release remains blocked');
   try { return JSON.parse(result.stdout); } catch { throw new Error('Unreadable rehearsal API response'); }
