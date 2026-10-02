@@ -11,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ session: HarnessSession; name: string }>()
 const tiers = useServiceTiers(), auth = useSession()
 const state = computed(() => tiers.state(props.session)), report = computed(() => tiers.report(props.session))
+const rejection = computed(() => tiers.rejection(props.session))
 const options = computed(() => tierOptions(report.value))
 const active = computed(() => options.value.find(t => t.tier === state.value.active_tier))
 const request = computed(() => state.value.requests[0])
@@ -72,7 +73,7 @@ async function decide(decision: 'approve' | 'decline') {
     </div>
     <p class="basis">Same model and effort. Speed estimates apply only to model time; tools, tests and waits keep their time. Last-run comparisons need frozen price and model-time data, which this session has not reported.</p>
     <p v-if="report" class="source">{{ report.model }} · {{ report.harness }} {{ report.harness_version }} · adapter {{ report.adapter_version }} · checked <time :datetime="report.checked_at">{{ report.checked_at }}</time>.<br><a v-if="source" :href="source" target="_blank" rel="noopener noreferrer">Vendor source</a><span v-else>{{ report.source }}</span></p>
-    <p v-if="tiers.errors[session.id] || state.last_change?.outcome === 'rejected'" class="tier-error" role="alert">{{ tiers.errors[session.id] || `The last tier change was rejected: ${state.last_change?.reason || 'reason unavailable'}.` }} <button type="button" class="btn sm ghost" @click="checkResult">Check result</button></p>
+    <p v-if="tiers.errors[session.id] || rejection" class="tier-error" role="alert">{{ tiers.errors[session.id] || `The last tier change was rejected: ${rejection?.reason || 'reason unavailable'}.` }} <button type="button" class="btn sm ghost" @click="checkResult">Check result</button> <button v-if="tiers.canDismissRejection(session)" type="button" class="btn sm ghost" @click="tiers.dismissRejection(session)">Dismiss</button></p>
     <p v-if="tiers.unavailable(session) && session.management_mode === 'managed' && !session.stopped_at" class="rights">{{ tiers.unavailable(session) }}</p>
   </section>
 </template>

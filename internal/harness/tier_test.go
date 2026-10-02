@@ -144,6 +144,13 @@ func TestTierAskApproveDeclineCancelAndAuthorization(t *testing.T) {
 	if decode(t, w)["pending"] != nil || decode(t, w)["requests"].([]any)[0].(map[string]any)["state"] != "pending" {
 		t.Fatal("cancel did not restore the request")
 	}
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	cancelled := decode(t, w)
+	last, ok := cancelled["last_change"].(map[string]any)
+	if !ok || last["id"] != undo["request_id"] || last["state"] != "completed" || last["outcome"] != "applied" || last["reason"] != "tier_cancelled_pending" || cancelled["active_tier"] != "default" || cancelled["pending"] != nil || cancelled["requests"].([]any)[0].(map[string]any)["state"] != "pending" {
+		t.Fatalf("GET after Undo must expose its successful cancellation receipt: %s", w.Body.String())
+	}
 	body = tierChangeBody(t, f, path, "fast", identity)
 	body["decision"] = "decline"
 	w = f.call(f.person, "POST", path+"/tier/requests/"+request+"/decision", body, "")

@@ -6,7 +6,7 @@ import { useAgents } from './agents'
 import { can } from '../lib/authz'
 import type { HarnessSession, ProcessOwnership } from '../lib/agents'
 import { askServiceTier, changeServiceTier, decideServiceTier, readServiceTier } from '../lib/agentRows'
-import { TIER_NAME, sameOwnership, tierPrice, tierReport, tierUnavailable, undoTierAllowed, type ServiceTier, type TierChange, type TierRequest, type TierState } from '../lib/serviceTier'
+import { TIER_NAME, sameOwnership, tierCancelled, tierPrice, tierReport, tierUnavailable, undoTierAllowed, type ServiceTier, type TierChange, type TierRequest, type TierState } from '../lib/serviceTier'
 import { toast } from '../lib/toast'
 
 export const useServiceTiers = defineStore('service-tiers', () => {
@@ -14,6 +14,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   const states = ref<Record<string, TierState>>({})
   const busy = ref<Record<string, boolean>>({})
   const errors = ref<Record<string, string>>({})
+  const dismissed = ref<Record<string, string>>({})
   const uncertain = ref<Record<string, boolean>>({})
   const dialog = shallowRef<{ instance: string; session: HarnessSession; name: string; anchor: HTMLElement; ask: boolean } | null>(null)
   const undo = shallowRef<{ session: string; project: string; name: string; from: ServiceTier; to: ServiceTier; revision: number; control: string; price: string; ownership: ProcessOwnership; actor: string } | null>(null)
@@ -26,7 +27,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   const visible = () => watchers > 0 && (typeof document === 'undefined' || document.visibilityState !== 'hidden')
   function stopTimers() { for (const timer of timers.values()) clearTimeout(timer); timers.clear() }
   watch(viewer, () => {
-    epoch++; reads.clear(); states.value = {}; busy.value = {}; errors.value = {}; uncertain.value = {}; dialog.value = null; undo.value = null
+    epoch++; reads.clear(); states.value = {}; busy.value = {}; errors.value = {}; dismissed.value = {}; uncertain.value = {}; dialog.value = null; undo.value = null
     stopTimers(); following.clear()
   }, { flush: 'sync' })
   onScopeDispose(() => { stopTimers(); following.clear(); epoch++; if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility) })
@@ -36,6 +37,17 @@ export const useServiceTiers = defineStore('service-tiers', () => {
     return { session_id: s.id, revision: s.service_tier_revision ?? 0, active_tier: s.service_tier ?? null, pending: null, read_only: false, reports: s.service_tier_reports ?? [], requests: [] }
   }
   const report = (s: HarnessSession) => tierReport(s, state(s).reports)
+  function rejection(s: HarnessSession) {
+    const current = state(s), last = current.last_change
+    return !busy.value[s.id] && !current.pending && last?.outcome === 'rejected' && !tierCancelled(last) && dismissed.value[s.id] !== last.id ? last : undefined
+  }
+  function dismissRejection(s: HarnessSession) {
+    const last = rejection(s)
+    if (!last || uncertain.value[s.id]) return
+    dismissed.value[s.id] = last.id
+    errors.value[s.id] = ''
+  }
+  const canDismissRejection = (s: HarnessSession) => !!rejection(s) && !uncertain.value[s.id]
   const unavailable = (s: HarnessSession) => uncertain.value[s.id] ? 'The previous tier outcome is unknown. Check its result before changing again.' : tierUnavailable(s, grant.value, Date.now(), state(s))
   const canAsk = (s: HarnessSession) => auth.identity?.principal.kind === 'agent' && auth.identity.principal.id === s.agent_principal_id &&
     s.management_mode === 'managed' && !s.stopped_at && !s.archived_at && !s.watch && s.phase !== 'stopped' && s.phase !== 'stopping' && s.advertised_capabilities.includes('service_tier_v1') && !state(s).read_only
@@ -46,7 +58,16 @@ export const useServiceTiers = defineStore('service-tiers', () => {
     states.value[s.id] = answer
     if (previous?.pending && previous.pending.id !== answer.pending?.id) {
       following.delete(s.id); clearTimeout(timers.get(s.id)); timers.delete(s.id)
-      if (!cancelling && answer.active_tier !== previous.pending.value) {
+      const last = answer.last_change
+      const cancelled = tierCancelled(last) && !answer.pending && (
+        last?.id === previous.pending.id ||
+        (last?.reason === 'tier_cancelled_pending' && answer.revision === previous.revision + 1 && answer.active_tier === previous.active_tier)
+      )
+      if (answer.active_tier !== previous.pending.value && undo.value?.control === previous.pending.id) undo.value = null
+      if (cancelled || cancelling) {
+        errors.value[s.id] = ''
+        if (!cancelling) toast(`Change to ${TIER_NAME[previous.pending.value]} was cancelled.`, { tone: 'info' })
+      } else if (answer.active_tier !== previous.pending.value) {
         const reason = answer.last_change?.id === previous.pending.id ? answer.last_change.reason?.replaceAll('_', ' ') : null
         const message = `Change to ${TIER_NAME[previous.pending.value]} was not applied. ${reason || 'It was rejected, expired, or superseded.'}`
         errors.value[s.id] = message
@@ -161,6 +182,8 @@ export const useServiceTiers = defineStore('service-tiers', () => {
     if (!grant.value.person || !can('harness.control', s.project_id)) return false
     const before = options.snapshot ?? state(s), generation = epoch, actor = viewer.value
     const body = changeBody(s, to, before)
+    // Starting the next change retires the previous rejection for this viewer.
+    if (before.last_change?.outcome === 'rejected') dismissed.value[s.id] = before.last_change.id
     busy.value[s.id] = true; errors.value[s.id] = ''
     reads.delete(s.id)
     try {
@@ -212,5 +235,5 @@ export const useServiceTiers = defineStore('service-tiers', () => {
       if (await change(s, receipt.name, receipt.from, { snapshot: current })) undo.value = null
     } catch (error) { toast(error instanceof Error ? error.message : 'Undo failed.', { tone: 'error' }) }
   }
-  return { states, busy, errors, dialog, undo, state, report, unavailable, canAsk, load, follow, watchPage, reconcile, open, close, change, ask, undoChange }
+  return { states, busy, errors, dialog, undo, state, report, rejection, dismissRejection, canDismissRejection, unavailable, canAsk, load, follow, watchPage, reconcile, open, close, change, ask, undoChange }
 })

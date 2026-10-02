@@ -28,6 +28,12 @@ export interface TierState {
   read_only: boolean; read_only_reason?: string; reports: readonly TierReport[]; requests: TierRequest[]
 }
 export interface TierChange { request_id: string; tier: ServiceTier; expected_revision: number; expected_ownership: ProcessOwnership }
+// The cancelled daemon control and the successful Undo receipt have different
+// outcomes. Neither is a vendor rejection.
+export const tierCancelled = (control?: TierControl | null) => control?.state === 'completed' && (
+  (control.outcome === 'rejected' && control.reason === 'tier_cancelled') ||
+  (control.outcome === 'applied' && control.reason === 'tier_cancelled_pending')
+)
 export const tierReport = (s: Pick<HarnessSessionRow, 'model' | 'harness'>, reports: readonly TierReport[] = []) =>
   reports.find(report => report.model === s.model && report.harness === s.harness)
 export const offeredTier = (t: TierCapability | undefined): t is TierCapability & { offered: true; price_multiplier: number } =>

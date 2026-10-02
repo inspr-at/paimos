@@ -1952,14 +1952,22 @@ producing last-run estimates from the design fragment's sample numbers.
 
 The tier API also returns `last_change`, including the completed control's outcome
 and reason. A rejected, expired or superseded change reports an error and clears
-its Undo receipt. Overlapping tier reads share one result. Confirmation reads
+its Undo receipt. Cancelling an unclaimed change is neutral: its successful Undo
+receipt uses `tier_cancelled_pending`; a cancelled control uses `tier_cancelled`.
+Neither shows a rejection alert. Other viewers following the change get a neutral
+cancellation message. A real rejection can be dismissed for the current viewer;
+starting the next change also retires it, and a later rejection still appears.
+Overlapping tier reads share one result. Confirmation reads
 back off from 1.2 seconds to 30 seconds and stop after two minutes; they stop
 while the tab is hidden or Agents is closed. Live tier revisions and control
 completion events still reconcile the result after that limit, and Check result
 allows an explicit read. Heartbeats alone do not reload the tier panel.
 Pending agent requests are carried by the session list row, so its “asks for”
 hint does not depend on opening the panel. Host controls remain visible in the
-compact layout alongside the tier control. Frozen run-cost labels, tier history
+compact layout alongside the tier control. The session list uses cards below
+760 px container width, including a 1280 px viewport with the panel open;
+1366 px and 1440 px panel-open viewports retain the table. Frozen run-cost labels,
+tier history
 and last-run comparisons are tracked in AEON-609 and must land before paid tiers
 are offered.
 
