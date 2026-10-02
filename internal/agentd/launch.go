@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
+
 	"github.com/inspr-at/paimos/internal/laneprotocol"
 )
 

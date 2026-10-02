@@ -3,6 +3,8 @@ package lanecontrol
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -165,6 +168,11 @@ func oneWinner(t *testing.T, errs []error) {
 	for _, err := range errs {
 		if err == nil {
 			wins++
+		} else {
+			var policy *workorders.Error
+			if !errors.As(err, &policy) || policy.Status != 409 {
+				t.Fatalf("race failed outside admission policy: %v", err)
+			}
 		}
 	}
 	if wins != 1 {
@@ -196,27 +204,16 @@ func TestLastSlotBarrierAndUnknownExit(t *testing.T) {
 		}
 		f.quota(t, in)
 	}
-	// Routed queue reservations occupy slots. Clear their account holds for this
-	// isolated admission test so the race itself decides the final personal slot.
+	// Account routing is advisory for lane starts. Only the atomic claim creates
+	// a person/lane slot; two separately routed candidates cannot deadlock the dial.
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE user_preferences SET value='{"cap":1}'; UPDATE account_reservations SET state='settled',actual_units=10`)
+		_, err := tx.Exec(t.Context(), `UPDATE user_preferences SET value='{"cap":1}'`)
 		return err
 	})
-	// Lane quota must remain measured; restore each request's reservation inside
-	// its serialized claim transaction, emulating route+claim in one admission.
-	admit := func(in Reservation) error {
-		return db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-			if err := authz.LockProjectMutation(t.Context(), tx, f.p.TenantID); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(t.Context(), `UPDATE account_reservations SET state='active',actual_units=NULL WHERE run_id=$1`, in.RunID); err != nil {
-				return err
-			}
-			_, err := ClaimTx(t.Context(), tx, f.p, in.RunID, Capability, in.RunID, "daemon", "generation", f.now)
-			return err
-		})
-	}
-	oneWinner(t, race(t, []func() error{func() error { return admit(a) }, func() error { return admit(b) }}))
+	oneWinner(t, race(t, []func() error{
+		func() error { _, err := f.claim(t.Context(), a, f.now); return err },
+		func() error { _, err := f.claim(t.Context(), b, f.now); return err },
+	}))
 	f.tx(t, func(tx pgx.Tx) error {
 		var run, eid string
 		if err := tx.QueryRow(t.Context(), `SELECT run_id::text,envelope_id::text FROM lane_attempt_grants`).Scan(&run, &eid); err != nil {
@@ -365,6 +362,14 @@ func TestRefusalConditions(t *testing.T) {
 			if err == nil {
 				t.Fatal("unsafe admission succeeded")
 			}
+			expected := map[string]string{"unknown_billing": "known subscription", "api_billing": "known subscription", "quota_reserve": "retain quota reserve", "unknown_quota": "measured quota", "target_unset": "slots unavailable", "paused": "paused", "revision": "revision changed", "window_end": "window closed", "capability": "lane-capable"}
+			if mode == "revoked" {
+				if !errors.Is(err, authz.ErrForbidden) {
+					t.Fatalf("wrong revocation refusal: %v", err)
+				}
+			} else if !strings.Contains(err.Error(), expected[mode]) {
+				t.Fatalf("wrong refusal for %s: %v", mode, err)
+			}
 			f.tx(t, func(tx pgx.Tx) error {
 				var n int
 				var held int64
@@ -381,4 +386,114 @@ func TestRefusalConditions(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestOwnerRevocationFencesConcurrentClaim(t *testing.T) {
+	f := setup(t)
+	in := f.request(t, 60000)
+	if err := f.reserve(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	f.quota(t, in)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	locked := make(chan struct{})
+	commit := make(chan struct{})
+	revoked := make(chan error, 1)
+	go func() {
+		revoked <- db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			if err := authz.LockProjectMutation(ctx, tx, f.p.TenantID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, f.p.ID); err != nil {
+				return err
+			}
+			close(locked)
+			select {
+			case <-commit:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	select {
+	case <-locked:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	begun := make(chan struct{})
+	claimed := make(chan error, 1)
+	go func() {
+		claimed <- db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			close(begun)
+			if err := authz.LockProjectMutation(ctx, tx, f.p.TenantID); err != nil {
+				return err
+			}
+			_, err := ClaimTx(ctx, tx, f.p, in.RunID, Capability, in.RunID, "daemon", "generation", f.now)
+			return err
+		})
+	}()
+	<-begun
+	close(commit)
+	if err := <-revoked; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-claimed; !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("claim after revocation: %v", err)
+	}
+}
+
+func TestSlotsDeduplicateSessionsAcrossVisibilityAndKeepUnknownWorkers(t *testing.T) {
+	f := setup(t)
+	in := f.request(t, 60000)
+	other := f.request(t, 60000)
+	f.tx(t, func(tx pgx.Tx) error {
+		ctx := t.Context()
+		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET status='running',account_id=$2 WHERE id=$1`, other.RunID, f.account); err != nil {
+			return err
+		}
+		// One managed run with two session generations still occupies one slot.
+		for i := 0; i < 2; i++ {
+			if _, err := tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,harness,host,management,role,ref_digest,lease_digest,owner_principal_id) VALUES($1,$2,$3,$4,'codex','fixture','managed','worker',decode($5,'hex'),decode('02','hex'),$6)`, f.p.TenantID, f.project, f.agent, other.RunID, []string{"01", "03"}[i], f.p.ID); err != nil {
+				return err
+			}
+		}
+		// Unknown unmanaged ownership consumes a conservative slot even with a stale
+		// heartbeat; it cannot be inferred to have exited from elapsed wall time.
+		if _, err := tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,phase) VALUES($1,$2,$3,'claude','fixture','unmanaged','worker',decode('04','hex'),decode('05','hex'),'working')`, f.p.TenantID, f.project, f.agent); err != nil {
+			return err
+		}
+		// Internal content-free counts include hidden projects and restore the caller.
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','{}',true)`); err != nil {
+			return err
+		}
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM aeon_lane_working_slots($1,$2)`, f.p.ID, in.RunID).Scan(&n); err != nil {
+			return err
+		}
+		if n != 2 {
+			t.Fatalf("slot count %d; expected one managed plus one unknown", n)
+		}
+		var visibility string
+		if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects')`).Scan(&visibility); err != nil {
+			return err
+		}
+		if visibility != "{}" {
+			t.Fatal("visibility leaked")
+		}
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET status='completed' WHERE id=$1`, other.RunID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM aeon_lane_working_slots($1,$2)`, f.p.ID, in.RunID).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Fatalf("finished process waiting for a person kept a slot: %d", n)
+		}
+		return nil
+	})
 }

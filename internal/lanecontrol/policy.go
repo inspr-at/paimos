@@ -9,11 +9,12 @@ package lanecontrol
 import (
 	"encoding/json"
 	"errors"
-	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"math"
 	"strconv"
 	"time"
 	_ "time/tzdata"
+
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 )
 
 const Capability = laneprotocol.Capability
@@ -58,7 +59,7 @@ func activeWindow(w window, now time.Time) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, bad
 	}
 	parse := func(s string) (int, int, bool) {
-		if len(s) != 5 || s[2] != ':' {
+		if len(s) != 5 || s[2] != ':' || s[0] < '0' || s[0] > '9' || s[1] < '0' || s[1] > '9' || s[3] < '0' || s[3] > '9' || s[4] < '0' || s[4] > '9' {
 			return 0, 0, false
 		}
 		h, e := strconv.Atoi(s[:2])

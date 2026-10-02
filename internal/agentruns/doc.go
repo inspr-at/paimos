@@ -51,6 +51,21 @@
 // cannot take over a live process. Profile and requested model are pinned when
 // queued; effective model is separately retained with vendor evidence.
 //
+// AEON-600 lane enforcement: the scheduler calls lanecontrol.ReserveTx with
+// its durable dispatch ID, then BindRunTx for explicitly budgeted later work.
+// These calls share authz.LockProjectMutation with policy/revocation/target
+// changes and must precede event append. Claim narrows ordinary account
+// admission with live owner permission, policy/window, subscription quota,
+// person allocations and lane slots. The whole dispatch envelope stays held
+// across retries; only confirmed elapsed-process settlement charges it, and
+// CloseTx releases provably unused time. Unknown exits retain their slot/hold.
+// Legacy daemons and unbound child/retry claims fail closed. Vendor automatic
+// continuations and automatic per-ticket reviews cannot launch lane work.
+// Qualification of production adapter boundaries is deliberately separate:
+// the daemon requires an explicit LaneExecutionAdapter and local project map.
+// No current production adapter advertises that qualification. The coordinator
+// must integrate scheduler/lifecycle handoffs before enabling automatic launch.
+//
 // Coordinator contract reconciliation: R2 RunTelemetry lacks fencing fields.
 // This module therefore requires X-Aeon-Daemon-ID and X-Aeon-Daemon-Generation
 // on every telemetry request, matching the claim and current account generation.

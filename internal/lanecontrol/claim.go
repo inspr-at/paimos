@@ -133,9 +133,10 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, capabili
 func loadGrant(ctx context.Context, tx pgx.Tx, runID string, now time.Time) (Grant, error) {
 	var g Grant
 	var settled *int64
-	err := tx.QueryRow(ctx, `SELECT envelope_id::text,run_id::text,project_id::text,workspace_id::text,daemon_id,daemon_generation,expires_at,elapsed_ms FROM lane_attempt_grants WHERE run_id=$1`, runID).Scan(&g.EnvelopeID, &g.RunID, &g.ProjectID, &g.WorkspaceID, &g.DaemonID, &g.Generation, &g.ExpiresAt, &settled)
+	var maximum int64
+	err := tx.QueryRow(ctx, `SELECT envelope_id::text,run_id::text,project_id::text,workspace_id::text,daemon_id,daemon_generation,expires_at,elapsed_ms,maximum_ms FROM lane_attempt_grants WHERE run_id=$1`, runID).Scan(&g.EnvelopeID, &g.RunID, &g.ProjectID, &g.WorkspaceID, &g.DaemonID, &g.Generation, &g.ExpiresAt, &settled, &maximum)
 	g.StopAllowanceMS = StopAllowanceMS
-	g.RemainingMS = max(0, g.ExpiresAt.Sub(now).Milliseconds())
+	g.RemainingMS = min(maximum, max(0, g.ExpiresAt.Sub(now).Milliseconds()))
 	if settled != nil {
 		g.RemainingMS = 0
 	}

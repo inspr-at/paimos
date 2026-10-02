@@ -87,7 +87,7 @@ BEGIN
    AND (coalesce(e.owner_principal_id,a.capacity_owner,requester.id) IS NULL OR coalesce(e.owner_principal_id,a.capacity_owner,requester.id)=owner_id)
    AND (r.status IN ('starting','running','waiting','ownership_lost')
     OR EXISTS(SELECT 1 FROM lane_attempt_grants g WHERE g.run_id=r.id AND g.elapsed_ms IS NULL)
-    OR (r.status='queued' AND EXISTS(SELECT 1 FROM account_reservations ar WHERE ar.run_id=r.id AND ar.state='active')))
+    OR (r.status='queued' AND r.lane_envelope_id IS NULL AND EXISTS(SELECT 1 FROM account_reservations ar WHERE ar.run_id=r.id AND ar.state='active')))
  ), sessions AS (
   SELECT coalesce(n.fields->>'area','') AS area,s.harness
   FROM harness_sessions s LEFT JOIN nodes n ON n.tenant_id=s.tenant_id AND n.id=s.ticket_node_id
