@@ -230,7 +230,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				// The customer may have an unchanged source revision while a newer
 				// contact tries to replace a primary contact chosen in Aeon.
 				if customerSkipped(r.Mappings, orgIDs[c.CustomerID]) && !relatedOrgs[orgIDs[c.CustomerID]] {
-					if err := checkNativeBaseline(ctx, tx, orgIDs[c.CustomerID], "customer"); err != nil {
+					if err := checkNativeBaseline(ctx, tx, actor, orgIDs[c.CustomerID], "customer"); err != nil {
 						return err
 					}
 				}
@@ -288,9 +288,6 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 			}
 			r.Mappings = append(r.Mappings, m)
 		}
-		if err := batch.flush(); err != nil {
-			return err
-		}
 		// Persist a complete final native baseline, including primary-contact
 		// changes, only after every related write in this atomic bundle succeeds.
 		for _, mapping := range r.Mappings {
@@ -301,7 +298,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				return err
 			}
 		}
-		return nil
+		return batch.flush()
 	})
 	if err != nil {
 		return Report{}, err
@@ -384,7 +381,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, instance str
 		}
 	}
 	if id != "" {
-		if err := checkNativeBaseline(ctx, tx, id, r.kind); err != nil {
+		if err := checkNativeBaseline(ctx, tx, p, id, r.kind); err != nil {
 			return "", "", err
 		}
 	}

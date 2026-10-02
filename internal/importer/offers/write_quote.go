@@ -135,17 +135,21 @@ func writeOffer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, orgID st
 		}
 		issuedAt = parsed
 	}
+	eventID, err := nextImportEventID(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO quote_issues(tenant_id,quote_node_id,version,issued_by_principal_id,issued_at,event_id) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`, p.TenantID, id, version, p.ID, issuedAt, eventID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE business_quotes SET state='issued',revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
+		return err
+	}
 	return queueImportEvent(ctx, func() error {
 		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "quote.issued", Before: map[string]any{"state": "draft"}, After: map[string]any{"version": version, "content_sha256": digest, "source_status": o.Status}, At: &issuedAt})
-		if err != nil {
-			return err
+		if err == nil && ev.ID != eventID {
+			return errors.New("import event counter changed before final flush")
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO quote_issues(tenant_id,quote_node_id,version,issued_by_principal_id,issued_at,event_id) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`, p.TenantID, id, version, p.ID, issuedAt, ev.ID); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `UPDATE business_quotes SET state='issued',revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 }

@@ -3,19 +3,22 @@ package offers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 // Baselines live in append-only import events, so they cannot be advanced by a
-// native writer. Historical imports without one fail closed; an operator must
-// reconcile the original source and native edits before starting a new mapping.
-func checkNativeBaseline(ctx context.Context, tx pgx.Tx, id, kind string) error {
-	var baseline []byte
-	err := tx.QueryRow(ctx, `SELECT after->'native_baseline' FROM events WHERE node_id=$1::uuid AND type=$2 ORDER BY id DESC LIMIT 1`, id, "import."+kind).Scan(&baseline)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && len(baseline) == 0 {
+// native writer. A historical import can acquire its first baseline only when
+// no native event follows it. The caller holds the tree and mapped row locks.
+func checkNativeBaseline(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind string) error {
+	var baseline, after []byte
+	var lastImport int64
+	err := tx.QueryRow(ctx, `SELECT id,after->'native_baseline',after FROM events WHERE node_id=$1::uuid AND type=$2 ORDER BY id DESC LIMIT 1`, id, "import."+kind).Scan(&lastImport, &baseline, &after)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("import conflict: %s has no verified native baseline", kind)
 	}
 	if err != nil {
@@ -24,6 +27,22 @@ func checkNativeBaseline(ctx context.Context, tx pgx.Tx, id, kind string) error 
 	current, err := nativeSnapshot(ctx, tx, id, kind)
 	if err != nil {
 		return err
+	}
+	if len(baseline) == 0 || string(baseline) == "null" {
+		var nativeEdit bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1::uuid AND id>$2 AND type NOT LIKE 'import.%')`, id, lastImport).Scan(&nativeEdit); err != nil {
+			return err
+		}
+		if nativeEdit {
+			return fmt.Errorf("import conflict: native %s changed since last import", kind)
+		}
+		var seeded map[string]any
+		if err := json.Unmarshal(after, &seeded); err != nil {
+			return err
+		}
+		seeded["action"] = "baseline"
+		seeded["native_baseline"] = json.RawMessage(current)
+		return event(ctx, tx, p, id, "import."+kind, nil, seeded)
 	}
 	var equal bool
 	if err := tx.QueryRow(ctx, `SELECT $1::jsonb=$2::jsonb`, string(baseline), string(current)).Scan(&equal); err != nil {

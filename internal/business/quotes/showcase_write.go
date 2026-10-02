@@ -696,11 +696,11 @@ func branchQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 	if err != nil {
 		return out, err
 	}
-	sum, err := quotedocument.Digest(v.DigestMode, id, v.Version, v.OfferNo, doc)
+	verified, err := quotedocument.Verify(v.DigestMode, id, v.Version, v.OfferNo, v.ContentSHA256, doc, v.Document)
 	if err != nil {
 		return out, err
 	}
-	if sum != v.ContentSHA256 {
+	if !verified {
 		return out, conflict("source document digest mismatch")
 	}
 	doc.MinimumWriterVersion = documentMinimumWriterVersion(doc)
@@ -767,23 +767,24 @@ func acceptQuoteVersion(ctx context.Context, tx pgx.Tx, p tenant.Principal, id s
 	if v.ContentSHA256 != digest {
 		return out, conflict("quote content digest is stale")
 	}
-	var sum string
+	var verified bool
 	if quotedocument.IsDocument(v.DigestMode) {
 		doc, err := decodeDocument(v.Document)
 		if err != nil {
 			return out, err
 		}
-		sum, err = quotedocument.Digest(v.DigestMode, id, n, v.OfferNo, doc)
+		verified, err = quotedocument.Verify(v.DigestMode, id, n, v.OfferNo, v.ContentSHA256, doc, v.Document)
 		if err != nil {
 			return out, err
 		}
 	} else {
-		sum, err = digestVersion(v)
+		sum, err := digestVersion(v)
 		if err != nil {
 			return out, err
 		}
+		verified = sum == v.ContentSHA256
 	}
-	if sum != v.ContentSHA256 {
+	if !verified {
 		return out, conflict("version digest mismatch")
 	}
 	var allowed bool
