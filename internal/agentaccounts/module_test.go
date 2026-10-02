@@ -564,6 +564,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.manage"}), http.MethodPost, "/api/agent-accounts", `{"account_key":"claimer","harness":"codex","daemon_id":"claimer-daemon","label":"Claimer"}`, http.StatusCreated, &claimerAccount)
 	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.probe"}), http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/probe", `{"daemon_id":"claimer-daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
 	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+	fixtureAlwaysOn(t, mod, admin, claimerAccount.ID)
 	claimed := mustRoute(t, mod, claimer, issueKey(t, claimer, []string{"run.claim"}), fresh, "claimer-daemon", []Account{claimerAccount}, map[string]int64{"requests": 1})
 	if claimed.AccountID != claimerAccount.ID {
 		t.Fatalf("grant route picked %s", claimed.AccountID)
