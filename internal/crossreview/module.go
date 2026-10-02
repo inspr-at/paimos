@@ -290,7 +290,7 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 		v.GateOpen = false
 		v.GateReason = "The effective reviewer model differs from its pinned profile."
 	}
-	if reviewerHarness == nil || reviewerFamily == nil || v.Model == nil || v.ReviewerFamily == nil || *reviewerFamily != *v.ReviewerFamily || !harnesslaunch.FamilyMatches(*reviewerHarness, *v.Model, *reviewerFamily) {
+	if v.ProfileID != nil && (reviewerHarness == nil || reviewerFamily == nil || v.Model == nil || v.ReviewerFamily == nil || *reviewerFamily != *v.ReviewerFamily || !harnesslaunch.FamilyMatches(*reviewerHarness, *v.Model, *reviewerFamily)) {
 		v.GateOpen = false
 		v.GateReason = "The reviewer profile does not establish its provider family."
 	}

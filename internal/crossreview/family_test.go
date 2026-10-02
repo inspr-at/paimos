@@ -68,7 +68,7 @@ func TestLegacyMislabelCannotRecordEvidenceOrKeepGreen(t *testing.T) {
 	f.m.publisher = p
 	profile, run := testID(), testID()
 	var order workorders.Order
-	f.call(t, f.person, "POST", "/api/work-orders", workorders.CreateInput{Title: "Legacy review", Parent: &f.ticket, Assignee: &f.agent.ID}, 201, &order)
+	f.call(t, f.person, "POST", "/api/work-orders", workorders.CreateInput{Title: "Legacy review", Parent: &f.ticket, Assignee: &f.agent.ID, Criteria: []string{"Check independent review"}}, 201, &order)
 	f.tx(t, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'legacy-mislabel','1','claude','xai','review-model','xhigh','frontier')`, f.person.TenantID, profile); err != nil {
 			return err
@@ -102,4 +102,22 @@ func TestLegacyMislabelCannotRecordEvidenceOrKeepGreen(t *testing.T) {
 	if len(p.orders) != 1 || p.orders[0] != order.NodeID {
 		t.Fatal("legacy green status was not revoked")
 	}
+}
+
+func TestMislabelledAuthorRunCannotEstablishIndependence(t *testing.T) {
+	f := newFixture(t)
+	profile, run := testID(), testID()
+	var order workorders.Order
+	f.call(t, f.person, "POST", "/api/work-orders", workorders.CreateInput{Title: "Legacy build", Parent: &f.ticket, Assignee: &f.agent.ID, Criteria: []string{"Implement fixture"}}, 201, &order)
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'legacy-author','1','claude','openai','review-model','xhigh','frontier')`, f.person.TenantID, profile); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,status,effective_model,model_evidence) VALUES($1,$2,$3,$4,$5,'completed','review-model','vendor_reported')`, f.person.TenantID, run, order.NodeID, f.agent.ID, profile)
+		return err
+	})
+	in := f.input()
+	in.AuthorRunID = &run
+	in.AuthorFamily = ""
+	f.call(t, f.agent, "POST", "/api/nodes/"+f.ticket+"/reviews", in, 400, nil)
 }
