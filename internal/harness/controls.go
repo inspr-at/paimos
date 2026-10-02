@@ -260,8 +260,8 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if c.RequestPayload != nil && c.RequestPayload.StopNow && (c.ExpectedGeneration == nil || *c.ExpectedGeneration != s.ID || c.State != "claimed" && c.State != "completed") {
 		return nil, workorders.Fail(409, "stop now requires the claimed exact generation")
 	}
-	if c.Kind == "force_stop" && in.Outcome == "applied" && in.Reason != "owned_group_signalled_root_exited" {
-		return nil, workorders.Fail(400, "verified force-stop result required")
+	if (c.Kind == "force_stop" || c.RequestPayload != nil && c.RequestPayload.StopNow) && in.Outcome == "applied" && in.Reason != "owned_group_signalled_root_exited" {
+		return nil, workorders.Fail(400, "verified owned-process stop result required")
 	}
 	if c.State == "completed" {
 		if c.Outcome != nil && c.Reason != nil && *c.Outcome == in.Outcome && *c.Reason == in.Reason {

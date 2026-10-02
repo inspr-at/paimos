@@ -28,6 +28,7 @@ type Pause struct {
 	StartsAt           *time.Time `json:"starts_at,omitempty"`
 	LeavingID          string     `json:"leaving_request_id,omitempty"`
 	InterruptControlID string     `json:"interrupt_control_id,omitempty"`
+	WakeInMS           int64      `json:"wake_in_ms,omitempty"`
 	StopExpiresInMS    int64      `json:"stop_expires_in_ms,omitempty"`
 	StopControlID      string     `json:"stop_control_id,omitempty"`
 	StopRequested      bool       `json:"stop_requested,omitempty"`
@@ -282,7 +283,7 @@ func sweepPauseDeadlines(ctx context.Context, tx pgx.Tx, tenantID string) error 
 	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions
  WHERE archived_at IS NULL AND pause_record->>'state' IN ('requested','planned')
  AND ((pause_record->>'deadline_at')::timestamptz<=clock_timestamp()+interval '2 minutes' OR pause_record->>'leaving_request_id' IS NOT NULL)
- ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, lostContactBatch)
+ ORDER BY (pause_record->>'deadline_at')::timestamptz,id LIMIT $1 FOR UPDATE SKIP LOCKED`, lostContactBatch)
 	if err != nil {
 		return err
 	}
@@ -585,7 +586,7 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	if !resume && in.Level != "stop_now" {
 		// Unsupported managed workers must not roll back other pauses or
 		// occupy the first page forever when the caller repeats a batch.
-		capable = ` AND ('inbox'=ANY(capabilities) OR 'pause'=ANY(capabilities))`
+		capable = ` AND ('inbox'=ANY(capabilities) OR management='unmanaged' AND 'pause'=ANY(capabilities))`
 	}
 	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+selection+capable+` ORDER BY id LIMIT $6 FOR UPDATE`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, limit+1)
 	if err != nil {
@@ -627,7 +628,7 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	}
 	result := map[string]any{"items": items, "more": more}
 	if !resume {
-		unsupported := ` AND NOT('inbox'=ANY(capabilities) OR 'pause'=ANY(capabilities))`
+		unsupported := ` AND NOT('inbox'=ANY(capabilities) OR management='unmanaged' AND 'pause'=ANY(capabilities))`
 		if in.Level == "stop_now" {
 			unsupported = ` AND false`
 		}

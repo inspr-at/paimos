@@ -448,7 +448,17 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
 		}
-		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
+		wait := interval
+		if !session.pauseWakeAt.IsZero() {
+			until := time.Until(session.pauseWakeAt)
+			if until < time.Millisecond {
+				until = time.Millisecond
+			}
+			if until < wait {
+				wait = until
+			}
+		}
+		if err := dep.wait(ctx, o.OwnerPID, wait); err != nil {
 			return finish()
 		}
 	}
@@ -858,7 +868,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		body["advertised_capabilities"] = []string{"status", "pause"}
 	}
 	if o.OwnedStop {
-		body["advertised_capabilities"] = []string{"status", "stop"}
+		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
 	}
 	putText(body, "generator", o.Generator, true)
 	putText(body, "command", o.CommandLabel, true)
@@ -1251,6 +1261,16 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		session.disk.Sequence--
 		return err
 	}
+	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
+		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
+		if err := dep.stopOwned(ctx, response.Pause, deadline); err != nil {
+			return err
+		}
+	}
+	session.pauseWakeAt = time.Time{}
+	if response.Pause != nil && response.Pause.WakeInMS > 0 && response.Pause.WakeInMS <= 86400000 {
+		session.pauseWakeAt = beatStarted.Add(time.Duration(response.Pause.WakeInMS) * time.Millisecond)
+	}
 	if label, ok := body["display_label"].(string); ok {
 		session.disk.LabelSent = true
 		session.disk.SentLabel = label
@@ -1280,12 +1300,6 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		fmt.Fprintln(rt.stderr, "heartbeat: capacity report failed")
 	} else if reported {
 		session.disk.CapacityStarted = true
-	}
-	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
-		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
-		if err := dep.stopOwned(ctx, response.Pause, deadline); err != nil {
-			return err
-		}
 	}
 	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {

@@ -41,7 +41,7 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 	if deadline.Sub(at) != 2*time.Minute {
 		t.Fatal("quick pause limit is not two minutes")
 	}
-	path, _ = registerPauseWorker(t, f, []string{"stop"})
+	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
 	w = f.call(f.person, "GET", path, nil, "")
 	expect(t, w, 200)
 	out := decode(t, w)
@@ -80,7 +80,7 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	f := fixture(t)
 	waiting, waitingLease := registerPauseWorker(t, f, []string{"pause"})
 	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"})
-	stopOnly, _ := registerPauseWorker(t, f, []string{"stop"})
+	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"})
 	expect(t, f.call(f.agent, "POST", finishing+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "eta_ready_at": time.Now().Add(5 * time.Minute).Format(time.RFC3339Nano)}, finishingLease), 200)
 	deadline := time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano)
 	body := map[string]any{"deadline_at": deadline, "reason": "Leaving", "note": "Continue tomorrow"}
@@ -125,7 +125,7 @@ func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 
 func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {
 	f := fixture(t)
-	path, lease := registerPauseWorker(t, f, []string{"pause", "stop"})
+	path, lease := registerPauseWorker(t, f, []string{"pause", "owned_stop_v1"})
 	w := f.call(f.person, "PUT", "/api/me/leaving-at", map[string]any{"deadline_at": time.Now().Add(15 * time.Minute).UTC()}, "")
 	expect(t, w, 200)
 	id := path[strings.LastIndex(path, "/")+1:]
@@ -162,6 +162,7 @@ func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {
 	if decode(t, w)["stop_in_flight"] != true {
 		t.Fatal("claimed stop was silently recalled")
 	}
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "applied", "reason": "queued"}, lease), 400)
 	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "applied", "reason": "owned_group_signalled_root_exited"}, lease), 200)
 	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, lease), 200)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -176,7 +177,7 @@ func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {
 
 func TestStopOnlyBatchSkipsCooperativeLevelsButAcceptsStopNow(t *testing.T) {
 	f := fixture(t)
-	_, _ = registerPauseWorker(t, f, []string{"stop"})
+	_, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
 	base := "/api/projects/" + f.project + "/harness-sessions/pause"
 	w := f.call(f.person, "POST", base, map[string]any{"level": "pause"}, "")
 	expect(t, w, http.StatusOK)

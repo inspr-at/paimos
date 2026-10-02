@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 

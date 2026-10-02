@@ -14,6 +14,7 @@ import (
 // HarnessPause is the heartbeat projection consumed by the daemon. Keeping
 // this transport type here avoids a dependency on the server's HTTP module.
 type HarnessPause struct {
+	WakeInMS   int64      `json:"wake_in_ms"`
 	Level      string     `json:"level"`
 	Note       string     `json:"note"`
 	StartsAt   *time.Time `json:"starts_at"`

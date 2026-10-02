@@ -36,3 +36,43 @@ func TestLeavingLevelSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestPauseWakeHintsFollowDatabaseClockTransitions(t *testing.T) {
+	now := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
+	start := now.Add(5 * time.Minute)
+	pause := &Pause{State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: now.Add(15 * time.Minute)}
+	s := stampPause(Session{Pause: pause}, now)
+	if s.Pause.Deliver || s.Pause.WakeInMS != (5*time.Minute).Milliseconds() {
+		t.Fatal(s.Pause)
+	}
+	s = stampPause(Session{Pause: pause}, start)
+	if !s.Pause.Deliver || s.Pause.WakeInMS != (8*time.Minute).Milliseconds() {
+		t.Fatal(s.Pause)
+	}
+	pause.Level = "pause_quickly"
+	s = stampPause(Session{Pause: pause}, now.Add(13*time.Minute))
+	if s.Pause.WakeInMS != (2 * time.Minute).Milliseconds() {
+		t.Fatal(s.Pause)
+	}
+	pause.Level, pause.State = "stop_now", "requested"
+	pause.StartsAt = &pause.DeadlineAt
+	s = stampPause(Session{Pause: pause}, now)
+	if s.Pause.Deliver || s.Pause.WakeInMS != (15*time.Minute).Milliseconds() {
+		t.Fatal(s.Pause)
+	}
+	pause.State = "cancelled"
+	if stampPause(Session{Pause: pause}, now).Pause.WakeInMS != 0 {
+		t.Fatal("cancelled deadline still schedules a wake")
+	}
+}
+
+func TestOwnedStopCapabilityKeepsUnmanagedControlFence(t *testing.T) {
+	if _, err := normalizeCaps([]string{"status", "owned_stop_v1"}, "unmanaged"); err != nil {
+		t.Fatal(err)
+	}
+	for _, cap := range []string{"stop", "interrupt", "managed_control_v1"} {
+		if _, err := normalizeCaps([]string{cap}, "unmanaged"); err == nil {
+			t.Fatalf("unmanaged session accepted %s", cap)
+		}
+	}
+}

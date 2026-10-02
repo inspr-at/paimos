@@ -104,6 +104,7 @@ type owned struct {
 	record          Record
 	harness         HarnessSession
 	heartbeatSeq    int64
+	pauseWakeAt     time.Time
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
@@ -1132,6 +1133,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
+	wakeTimer := time.NewTimer(time.Hour)
+	if !wakeTimer.Stop() {
+		<-wakeTimer.C
+	}
+	defer wakeTimer.Stop()
 	var inboxTicks <-chan time.Time
 	if inbox {
 		inboxTicker := time.NewTicker(2 * time.Second)
@@ -1139,6 +1145,24 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		inboxTicks = inboxTicker.C
 	}
 	for {
+		entry.mu.Lock()
+		wake := entry.pauseWakeAt
+		entry.mu.Unlock()
+		var wakeTicks <-chan time.Time
+		if !wakeTimer.Stop() {
+			select {
+			case <-wakeTimer.C:
+			default:
+			}
+		}
+		if !wake.IsZero() {
+			delay := time.Until(wake)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			wakeTimer.Reset(delay)
+			wakeTicks = wakeTimer.C
+		}
 		beat := false
 		select {
 		case <-done:
@@ -1146,6 +1170,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		case <-ticker.C:
 			beat = true
 		case <-inboxTicks:
+		case <-wakeTicks:
+			entry.mu.Lock()
+			entry.pauseWakeAt = time.Time{}
+			entry.mu.Unlock()
+			beat = true
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
@@ -1919,6 +1948,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 		entry.mu.Unlock()
 		var pause *HarnessPause
 		var err error
+		beatStarted := time.Now()
 		if api, ok := s.api.(pauseHeartbeatAPI); ok {
 			pause, err = api.HeartbeatHarnessPause(ctx, session, phase)
 		} else {
@@ -1929,6 +1959,10 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 		}
 		entry.mu.Lock()
 		entry.heartbeatSeq = session.ActivitySequence
+		entry.pauseWakeAt = time.Time{}
+		if pause != nil && pause.WakeInMS > 0 && pause.WakeInMS <= 86400000 {
+			entry.pauseWakeAt = beatStarted.Add(time.Duration(pause.WakeInMS) * time.Millisecond)
+		}
 		for len(entry.metadataPending) > 0 && entry.metadataPending[0].seq <= change.seq {
 			entry.metadataPending = entry.metadataPending[1:]
 		}

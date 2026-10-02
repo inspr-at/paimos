@@ -20,7 +20,9 @@ func ValidPauseLevel(level string) bool {
 	return level == "stop_now" || level == "pause_quickly" || level == "pause" || level == "wrap_up"
 }
 
-func cooperativePause(s Session) bool { return has(s, "inbox") || has(s, "pause") }
+func cooperativePause(s Session) bool {
+	return has(s, "inbox") || s.Management == "unmanaged" && has(s, "pause")
+}
 
 func supportedPauseLevels(s Session) []string {
 	if !cooperativePause(s) {
@@ -63,9 +65,27 @@ func stampPause(s Session, now time.Time) Session {
 	if s.Pause != nil {
 		next := *s.Pause
 		next.Deliver = (next.State == "requested" || next.State == "planned" || next.StopRequested) && (next.StartsAt == nil || !next.StartsAt.After(now))
+		next.WakeInMS = 0
+		if (next.State == "requested" || next.State == "planned") && ValidPauseLevel(next.Level) && !next.StopRequested {
+			wake := next.DeadlineAt
+			if next.StartsAt != nil && next.StartsAt.After(now) {
+				wake = minTime(wake, *next.StartsAt)
+			}
+			quick := next.DeadlineAt.Add(-2 * time.Minute)
+			if next.Level != "stop_now" && next.Level != "pause_quickly" && quick.After(now) {
+				wake = minTime(wake, quick)
+			}
+			if wake.After(now) {
+				next.WakeInMS = (wake.Sub(now) + time.Millisecond - 1).Milliseconds()
+			}
+		}
 		s.Pause = &next
 	}
 	return s
+}
+
+func canonicalPausePerson(ctx context.Context, tx pgx.Tx, p *tenant.Principal) error {
+	return tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, p.ID).Scan(&p.ID)
 }
 
 func resolvePauseDefault(ctx context.Context, tx pgx.Tx, p tenant.Principal, in *pauseRequest) error {
@@ -75,6 +95,9 @@ func resolvePauseDefault(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 	in.Level = "pause"
 	if p.Kind != tenant.Person {
 		return nil
+	}
+	if err := canonicalPausePerson(ctx, tx, &p); err != nil {
+		return err
 	}
 	return tx.QueryRow(ctx, `SELECT coalesce((SELECT default_level FROM person_pause_settings WHERE person_id=$1),'pause')`, p.ID).Scan(&in.Level)
 }
@@ -222,6 +245,9 @@ func (m *Module) getPauseSettings(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "person required")
 	}
+	if err := canonicalPausePerson(r.Context(), tx, &p); err != nil {
+		return nil, err
+	}
 	in := pauseRequest{}
 	if err := resolvePauseDefault(r.Context(), tx, p, &in); err != nil {
 		return nil, err
@@ -232,6 +258,9 @@ func (m *Module) getPauseSettings(r *http.Request, tx pgx.Tx, p tenant.Principal
 func (m *Module) putPauseSettings(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "person required")
+	}
+	if err := canonicalPausePerson(r.Context(), tx, &p); err != nil {
+		return nil, err
 	}
 	var in struct {
 		Level string `json:"default_level"`
@@ -271,6 +300,9 @@ func lockPausePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "person required")
+	}
+	if err := canonicalPausePerson(r.Context(), tx, &p); err != nil {
+		return nil, err
 	}
 	var id *string
 	var deadline *time.Time
@@ -313,6 +345,9 @@ func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "person required")
+	}
+	if err := canonicalPausePerson(r.Context(), tx, &p); err != nil {
+		return nil, err
 	}
 	var in struct {
 		Deadline time.Time `json:"deadline_at"`
@@ -416,6 +451,9 @@ func (m *Module) cancelLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "person required")
 	}
+	if err := canonicalPausePerson(r.Context(), tx, &p); err != nil {
+		return nil, err
+	}
 	ctx := r.Context()
 	if err := lockPausePerson(ctx, tx, p); err != nil {
 		return nil, err
@@ -455,10 +493,10 @@ func (m *Module) cancelLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	return out, nil
 }
 
-// Only a launcher advertising stop may claim this via heartbeat. The plain
+// Only a launcher advertising owned_stop_v1 may claim this via heartbeat. The plain
 // run-heartbeat PID observer advertises no stop: a PID is never signal authority.
 func (m *Module) preparePauseStopHeartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session) (Session, error) {
-	if s.Management != "unmanaged" || !has(s, "stop") || s.Pause == nil || !s.Pause.StopRequested || s.Pause.StopControlID == "" {
+	if s.Management != "unmanaged" || !has(s, "owned_stop_v1") || s.Pause == nil || !s.Pause.StopRequested || s.Pause.StopControlID == "" {
 		return s, nil
 	}
 	c, err := scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE id=$1 AND session_id=$2 FOR UPDATE`, s.Pause.StopControlID, s.ID))

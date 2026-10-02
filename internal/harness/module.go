@@ -158,8 +158,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	SupportedPauseLevels []string      `json:"supported_pause_levels"`
-	PauseCanInterrupt    bool          `json:"pause_can_interrupt"`
+	SupportedPauseLevels []string      `json:"supported_pause_levels,omitempty"`
+	PauseCanInterrupt    *bool         `json:"pause_can_interrupt,omitempty"`
 	Pause                *Pause        `json:"pause,omitempty"`
 	Continuation         *Continuation `json:"continuation,omitempty"`
 	CanReparent          *bool         `json:"can_reparent,omitempty"`
@@ -373,7 +373,8 @@ func scanSession(row pgx.Row) (Session, error) {
 	}
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
 	s.SupportedPauseLevels = supportedPauseLevels(s)
-	s.PauseCanInterrupt = cooperativePause(s) && has(s, "interrupt")
+	canInterrupt := cooperativePause(s) && has(s, "interrupt")
+	s.PauseCanInterrupt = &canInterrupt
 	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -514,7 +515,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}

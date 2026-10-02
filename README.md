@@ -554,7 +554,8 @@ rejects a larger selection before changing any plans.
 
 Stop now uses the existing control queue. Agentd executes it only for its exact
 live generation and owned process identity, with the existing monotonic signal
-fence. `harness run` may stop only the child it launched; a PID-only
+fence. A database-clock wake hint schedules the next heartbeat at each transition.
+`harness run` advertises `owned_stop_v1` and may stop only the child it launched; a PID-only
 `run-heartbeat` observer receives no signal authority. Requests, scheduling,
 escalation, cancellation, defaults and confirmed outcomes are audited. A stop
 request is not a process exit receipt: offline or older launchers can leave an
@@ -594,13 +595,15 @@ session's `id`, `project_id`, optional `display_label` and reason
 `inbox_delivery_unavailable` in `skipped`. Reports are capped at 200 per call;
 `skipped_more` indicates omitted reports. Skips do not consume the 200-pause
 limit or set `more`, so repeating a batch can reach later capable sessions.
-Cursor and Grok daemon runs currently lack that input path; their unmanaged
-CLI heartbeat sessions can still receive pause requests.
+Cursor and Grok daemon runs currently lack that input path. Unmanaged CLI
+heartbeat sessions advertise cooperative pause only with `--print-controls`;
+one-shot `harness run` jobs advertise Stop now only.
 
 An overdue requested or planned pause becomes `cancelled` on the database clock.
-Heartbeat, session/control reads, new pause requests and the periodic sweep
-complete its control with reason `pause_deadline_expired`, allowing a fresh
-pause and deadline. Expiry sends no process signal. Before the deadline, a
+Heartbeat, session/control reads and the periodic sweep complete its cooperative
+control with reason `pause_deadline_expired`. Level-aware requests also queue
+Stop now; historical requests without a level retain cancel-only expiry. Before
+the deadline, a
 `heartbeat_lost` close preserves the pending or claimed pause control so the
 same worker can heartbeat, plan and stop with its handover after revival.
 An unarchived paused or resume-requested generation continues to occupy its

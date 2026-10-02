@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 func TestRemoteHeartbeatExposesDurablePause(t *testing.T) {
@@ -145,5 +146,30 @@ func TestStopNowUsesOwnedExecutorAndRejectsWrongGeneration(t *testing.T) {
 				t.Fatalf("owned stop failed: %v forced=%d", err, proc.forced)
 			}
 		})
+	}
+}
+
+func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
+	s, a, e, _ := managedFixture(t)
+	api := &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{WakeInMS: 250}}
+	s.api = api
+	start := time.Now()
+	if err := s.heartbeatHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	wake := e.pauseWakeAt
+	e.mu.Unlock()
+	if wake.Before(start.Add(250*time.Millisecond)) || wake.After(time.Now().Add(250*time.Millisecond)) {
+		t.Fatal("wake hint was lost")
+	}
+	api.pause = nil
+	if err := s.heartbeatHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.pauseWakeAt.IsZero() {
+		t.Fatal("cancelled hint retained")
 	}
 }

@@ -4915,7 +4915,7 @@ paths:
               additionalProperties: false
               required: [deadline_at]
               properties:
-                deadline_at: {type: string, format: date-time, description: Future UTC deadline within 24 hours, evaluated using the database clock.}
+                deadline_at: {type: string, format: date-time, description: 'Future UTC deadline within 24 hours, evaluated using the database clock.'}
                 reason: {type: string, maxLength: 240}
                 note: {type: string, maxLength: 2000}
       responses:
@@ -12264,7 +12264,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -12597,6 +12597,7 @@ components:
         level: {$ref: '#/components/schemas/HarnessPauseLevel'}
         note: {type: string, maxLength: 2000}
         starts_at: {type: string, format: date-time, description: Do not deliver or plan before this database-clock time.}
+        wake_in_ms: {type: integer, minimum: 1, maximum: 86400000, description: "Relative database-clock delay to the next scheduled transition. Anchor to monotonic request start. A wake hint grants no signal authority."}
         leaving_request_id: {type: string, format: uuid}
         stop_control_id: {type: string, format: uuid}
         interrupt_control_id: {type: string, format: uuid}
