@@ -26,12 +26,12 @@ test('the marketing name leads every row; the brief is its subtitle, and the ver
   const newest = options(page).nth(0)
   await expect(newest.locator('.rn-name')).toHaveText(CODENAMES[5])
   await expect(newest.locator('.headline')).toHaveText('Releases with a name')
-  // A reservation keeps its sequence's name beside its state.
-  const reserved = options(page).nth(2)
-  await expect(reserved.locator('.rn-name')).toHaveText('Bold Booster')
-  await expect(reserved.locator('.headline')).toHaveText('Reserved, never published')
+  // Old servers can return failed attempts; public surfaces still omit them.
+  await expect(options(page)).toHaveCount(6)
+  await expect(sheet(page)).not.toContainText('Bold Booster')
+  await expect(sheet(page)).not.toContainText('Reserved, never published')
   // No brief: the name alone, no version text at rest.
-  const untitled = options(page).nth(3)
+  const untitled = options(page).nth(2)
   await expect(untitled.locator('.rn-name')).toHaveText(CODENAMES[3])
   await expect(untitled.locator('.headline')).toHaveCount(0)
   await expect(untitled.locator('.rn-stamp')).toHaveCSS('opacity', '0')
@@ -69,7 +69,7 @@ test('phones show the name without horizontal scroll', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await open(page)
   await page.getByRole('button', { name: 'All releases' }).click()
-  await expect(options(page).nth(3).locator('.rn-name')).toHaveText(CODENAMES[3])
+  await expect(options(page).nth(2).locator('.rn-name')).toHaveText(CODENAMES[3])
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })

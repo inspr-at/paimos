@@ -10,7 +10,14 @@
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
-    "261001205522.0.0",
     "261001230453.0.0"
+  ],
+  "withdrawn_releases": [
+    {
+      "version": "261001205522.0.0",
+      "digest": "sha256:f478a18877714bf0e62d1ff0f541f55197ef2c80d64bd9c79f8e9ca1163295da",
+      "ticket": "AEON-530",
+      "reason": "Image index published; completion failed before any GitHub release or agent distribution (AEON-526). Never deploy."
+    }
   ]
 }

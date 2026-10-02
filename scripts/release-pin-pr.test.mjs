@@ -38,6 +38,7 @@ function fixture(overrides = {}) {
     base: { ref: "main", repo: { full_name: TARGET } }, head: { ref: branch, sha: headSHA, repo: { full_name: TARGET } },
   };
   const data = { tagRef, tag, sourceMain, ancestry, base, content, comparison, pull, ...overrides };
+  const policyText = JSON.stringify(overrides.policy ?? { product: 'PAIMOS AEON', withdrawn_releases: [], unpublished_reservations: [] });
   const dependencies = {
     jwt: () => "fixture-jwt",
     verify: async inputs => { calls.push({ method: "VERIFY", args: attestationArgs(inputs.VERSION, inputs.DIGEST, inputs.GITHUB_SHA) }); if (overrides.unattested) throw new Error("pin bot: image attestation verification failed"); },
@@ -47,6 +48,7 @@ function fixture(overrides = {}) {
       if (path === "/installation/token" && method === "DELETE") return { status: 204, data: null };
       if (path === `/repos/${SOURCE}/git/ref/tags/v${version}`) return { status: 200, data: data.tagRef };
       if (path === `/repos/${SOURCE}/git/tags/${tagSHA}`) return { status: 200, data: data.tag };
+      if (path === `/repos/${SOURCE}/contents/version.json?ref=${data.sourceMain.object.sha}`) return { status: 200, data: overrides.ledger ?? { type: 'file', encoding: 'base64', content: Buffer.from(policyText).toString('base64'), sha: blob(policyText) } };
       if (path === `/repos/${SOURCE}/git/ref/heads/main`) return { status: 200, data: data.sourceMain };
       if (path.startsWith(`/repos/${SOURCE}/compare/`)) return { status: 200, data: data.ancestry };
       if (path === `/repos/${TARGET}/installation`) return { status: 200, data: { id: 7 } };
@@ -69,6 +71,28 @@ function fixture(overrides = {}) {
   return { calls, data, dependencies };
 }
 const changes = f => f.calls.filter(call => ["POST", "PUT", "PATCH"].includes(call.method) && call.path.startsWith(`/repos/${TARGET}/`) && !call.path.endsWith("/installation"));
+
+for (const write of [false, true]) {
+  for (const [label, policy] of [
+    ['coordinate', { product: 'PAIMOS AEON', withdrawn_releases: [{ version, digest: oldDigest, ticket: 'AEON-530', reason: 'failed completion' }] }],
+    ['digest alias', { product: 'PAIMOS AEON', withdrawn_releases: [{ version: oldVersion, digest, ticket: 'AEON-530', reason: 'failed completion' }] }],
+    ['unpublished', { product: 'PAIMOS AEON', unpublished_reservations: [version] }],
+  ]) test(`current main denies ${label} before verification or target auth (${write ? 'write' : 'dry run'})`, async () => {
+    const f = fixture({ policy, sourceMain: { ref: 'refs/heads/main', object: { type: 'commit', sha: headSHA } } });
+    await assert.rejects(proposePin(env(), { write }, f.dependencies), /never deployable/);
+    assert.ok(f.calls.some(call => call.path === `/repos/${SOURCE}/contents/version.json?ref=${headSHA}`));
+    assert.equal(f.calls.some(call => call.method === 'VERIFY' || call.path?.startsWith(`/repos/${TARGET}/`)), false);
+    assert.deepEqual(changes(f), []);
+  });
+}
+
+test('missing, malformed and mismatched current-main ledgers fail closed', async () => {
+  for (const ledger of [{}, { type: 'file', encoding: 'base64', content: Buffer.from('{}').toString('base64'), sha: blob('{}') }, { type: 'file', encoding: 'base64', content: Buffer.from('{}').toString('base64'), sha: sourceCommit }]) {
+    const f = fixture({ ledger });
+    await assert.rejects(proposePin(env(), { write: true }, f.dependencies));
+    assert.deepEqual(changes(f), []);
+  }
+});
 
 test("pin diff changes one line, preserving comments, whitespace, newline and unrelated bytes", () => {
   const result = plan();

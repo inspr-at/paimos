@@ -36,6 +36,7 @@ func runWithArgs(args []string) error {
 	historic := flags.String("historic", "", "reviewed historic ticket export; freeze public fields for published Git membership")
 	snapshot := flags.String("snapshot", "", "one snapshot export for the reserved version")
 	reserve := flags.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
+	reuseFrom := flags.String("reuse-from", "", "failed coordinate whose exact original historic export is reused")
 	tenant := flags.String("tenant", "", "expected source tenant UUID (required for exports)")
 	project := flags.String("project", "", "expected source AEON project UUID (required for exports)")
 	if err := flags.Parse(args); err != nil {
@@ -52,6 +53,9 @@ func runWithArgs(args []string) error {
 	}
 	if inputs > 0 && (*tenant == "" || *project == "") {
 		return fmt.Errorf("exports require -tenant UUID -project UUID")
+	}
+	if *reuseFrom != "" && (*historic == "" || *reserve == "") {
+		return fmt.Errorf("-reuse-from requires -historic and -reserve")
 	}
 	path := filepath.Join(*repo, releasehistory.ProductNotesPath)
 	bundle := releasehistory.EmptyProductNotes()
@@ -91,7 +95,20 @@ func runWithArgs(args []string) error {
 			if err != nil {
 				return err
 			}
-			if err := bundle.AddReserved(raw, reservation, *tenant, *project); err != nil {
+			add := func() error { return bundle.AddReserved(raw, reservation, *tenant, *project) }
+			if *reuseFrom != "" {
+				failed := false
+				for _, r := range history.Releases {
+					if r.Version == *reuseFrom && r.State != releasehistory.StatePublished {
+						failed = true
+					}
+				}
+				if !failed {
+					return fmt.Errorf("-reuse-from must name an explicitly unpublished or withdrawn coordinate")
+				}
+				add = func() error { return bundle.AddRereserved(raw, reservation, *reuseFrom, *tenant, *project) }
+			}
+			if err := add(); err != nil {
 				return err
 			}
 		} else {

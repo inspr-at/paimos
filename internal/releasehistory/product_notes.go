@@ -132,7 +132,7 @@ func (bundle *ProductNotes) AddHistory(history History) error {
 		return fmt.Errorf("release history does not identify the selected product")
 	}
 	for _, rel := range history.Releases {
-		if !HasSnapshot(rel) {
+		if rel.State != StatePublished || !HasSnapshot(rel) {
 			continue
 		}
 		source := rel.Notes.Source
@@ -176,7 +176,7 @@ func withProductNotes(h History, bundle ProductNotes) History {
 	}
 	h.Releases = append([]Release{}, h.Releases...)
 	for i, rel := range h.Releases {
-		if HasSnapshot(rel) {
+		if rel.State != StatePublished || HasSnapshot(rel) {
 			continue
 		}
 		public, ok := bundle.Releases[rel.Version]

@@ -90,7 +90,7 @@ test('without a presentation: the blocks lead, and a release without them is ver
   await expect(d.locator('.tickets')).toContainText('PHAROS-11')
   await expect(rows(page).nth(1).locator('.headline')).toHaveText('Wide lists')
   await expect(rows(page).nth(1).locator('.headline')).not.toHaveClass(/theme/)
-  await rows(page).nth(3).click()
+  await rows(page).nth(2).click()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.locator('.tickets')).toContainText('PAI-1057')
   // No ticket tells a benefit, so the fix commit is listed under Other.

@@ -9,6 +9,9 @@ import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkQuoteEvidence } from "./check-quote-evidence.mjs";
+import { readPolicy, assertDeployable } from "./release-withdrawals.mjs";
+import { validCalendarVersion } from "./release-calendar.mjs";
+export { validCalendarVersion } from "./release-calendar.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -25,13 +28,6 @@ export function schemeError(scheme, version) {
   if (scheme === SCHEME) return version > LAST_CALVER2 ? "" : `${SCHEME} versions must be later than the last ${CALVER2} version ${LAST_CALVER2}`;
   if (scheme === CALVER2) return version <= LAST_CALVER2 ? "" : `new reservations declare ${SCHEME}; ${CALVER2} is history only (last ${LAST_CALVER2})`;
   return `unknown version scheme ${scheme}`;
-}
-
-export function validCalendarVersion(v) {
-  const m = /^([1-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])([01][0-9]|2[0-3])([0-5][0-9])([0-5][0-9])\.0\.0$/.exec(v || "");
-  if (!m) return false;
-  const d = new Date(Date.UTC(2000 + +m[1], +m[2] - 1, +m[3]));
-  return d.getUTCMonth() + 1 === +m[2] && d.getUTCDate() === +m[3];
 }
 
 export function verifyRelease() {
@@ -59,6 +55,8 @@ export function verifyRelease() {
   const schemeWhy = schemeError(ver.version_scheme, ver.version);
   if (schemeWhy) fail(schemeWhy);
   if (!Number.isInteger(ver.release_sequence) || ver.release_sequence < 1 || !ver.release_channel) fail("release channel and sequence required");
+  const policy = readPolicy(JSON.stringify(ver));
+  if (process.argv.includes('--release')) assertDeployable(ver.version, undefined, policy);
   return { version: ver.version, scheme: ver.version_scheme, sequence: ver.release_sequence, bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` };
 }
 

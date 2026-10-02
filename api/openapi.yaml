@@ -2756,11 +2756,11 @@ paths:
   /releases:
     get:
       operationId: listReleases
-      summary: The release history embedded in this build (inspr.release-history.v1)
+      summary: Published releases embedded in this build (inspr.release-history.v1)
       description: Agent keys need the releases.read scope; people need only a session. Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
       responses:
         '200':
-          description: History, newest first
+          description: Published history, newest first. Unpublished reservations and withdrawn coordinates are available only in offline release diagnostics.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReleaseHistory'}
@@ -2784,7 +2784,7 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Agent key requires the releases.read scope}
         '500': {description: Stored release notes could not be read}
-        '404': {description: No such release in this build's history}
+        '404': {description: No published release with this coordinate in this build's history}
   /releases/{version}/presentation:
     parameters:
       - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v. It need not be in this build yet, so the release agent can write it before deploying.'}
@@ -10159,7 +10159,7 @@ components:
         release_channel: {type: string}
         release_sequence: {type: integer}
         codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
-        state: {type: string, enum: [published, reserved]}
+        state: {type: string, enum: [published, reserved, withdrawn], description: HTTP release lists and details include published entries only. Offline diagnostics retain reserved and withdrawn entries; withdrawn entries have sequence zero and no codename.}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}
         published_at: {type: [string, 'null'], format: date-time}

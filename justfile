@@ -48,6 +48,10 @@ release-history:
 release-codename:
     go run ./internal/releasehistory/codename/stamp -repo .
 
+# Reserve max(published sequence)+1; retries require explicit failed-coordinate classification.
+release-reserve version ticket:
+    go run ./internal/releasehistory/reserve -repo . -version {{version}} -ticket {{ticket}}
+
 # Pack the neutral INSPR quote document profile (AEON-155) into the reproducible
 # tar that `aeon quote-profile apply --bundle -` reads; prints its SHA-256.
 quote-profile-inspr out="dist/quote-profile-inspr.tar":

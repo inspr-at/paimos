@@ -109,4 +109,23 @@ func TestPackHistoricReservation(t *testing.T) {
 	if err := runWithArgs(wrongVersion); err == nil {
 		t.Fatal("accepted a reserve argument different from version.json")
 	}
+	// A retry keeps the original export and both immutable version entries.
+	const retry = "261002120000.0.0"
+	write("version.json", map[string]any{"product": "PAIMOS AEON", "version_scheme": releasehistory.SchemeCalVer3, "version": retry, "release_channel": "stable", "release_sequence": 114, "unpublished_reservations": []string{version}})
+	retryArgs := append([]string{}, args...)
+	retryArgs[5] = retry
+	retryArgs = append(retryArgs, "-reuse-from", version)
+	if err := runWithArgs(retryArgs); err != nil {
+		t.Fatal("re-reserve original export:", err)
+	}
+	reread, _ := os.ReadFile(path)
+	result, err := releasehistory.ReadProductNotes(reread)
+	if err != nil || len(result.Releases) != 2 || result.Releases[retry].SHA256 != n.SHA256 || !result.Releases[retry].CapturedAt.Equal(*n.CapturedAt) {
+		t.Fatal("retry provenance changed", err)
+	}
+	original, _ := json.Marshal(result.Releases[version])
+	frozen, _ := json.Marshal(n)
+	if !bytes.Equal(original, frozen) {
+		t.Fatal("original capture rewritten")
+	}
 }

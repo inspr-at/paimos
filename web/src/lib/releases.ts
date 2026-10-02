@@ -25,7 +25,7 @@ export interface Release {
   // The release's sci-fi codename from its sequence (AEON-430), English in
   // both languages. Absent on a reservation whose sequence another release took.
   codename?: string
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'withdrawn'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }
@@ -42,7 +42,13 @@ export async function getReleases(): Promise<ReleaseHistory> {
   }
   const body = await response.json() as ReleaseHistory
   if (body.schema !== 'inspr.release-history.v1' || !Array.isArray(body.releases)) throw new Error('The server sent an unknown release history format.')
-  return { ...body, releases: body.releases.map(withPublicNoteItems) }
+  return { ...body, releases: publishedReleases(body.releases).map(withPublicNoteItems) }
+}
+
+// Also filters older servers' diagnostic entries before names reach the footer,
+// release sheet, search, numbering or comparisons.
+export function publishedReleases(releases: readonly Release[]): Release[] {
+  return releases.filter(release => release.state === 'published')
 }
 
 // Product notes are portable: the wire shape never invents tenant ticket UUIDs.
@@ -56,7 +62,9 @@ export function withPublicNoteItems(release: Release): Release {
 export async function getRelease(version: string): Promise<Release | null> {
   try {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
-    return response.ok ? withPublicNoteItems(await response.json() as Release) : null
+    if (!response.ok) return null
+    const release = await response.json() as Release
+    return release.state === 'published' ? withPublicNoteItems(release) : null
   } catch { return null }
 }
 
