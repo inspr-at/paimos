@@ -429,10 +429,21 @@ jobs:
             --source-digest "$GITHUB_SHA" \
             --deny-self-hosted-runners
 
-      # Run immediately after index verification, independently of agent assets.
+      - name: Record pushed digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "### Verified multi-arch release index (linux/amd64 + linux/arm64)"
+            echo
+            echo "ghcr.io/inspr-at/aeon@${DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Optional proposal: failures remain visible without blocking agent assets.
       # --write is an explicit coordinator opt-in; otherwise produce a dry run.
       - name: Propose verified nixcfg deployment pin
         id: pin
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -443,21 +454,15 @@ jobs:
           INDEX_PUSHED_AT: ${{ steps.push.outputs.pushed_at }}
         run: |
           set -euo pipefail
+          args=(scripts/release-pin-pr.mjs)
           if [ "$AEON_PIN_BOT_ENABLED" = true ]; then
-            node scripts/release-pin-pr.mjs --write
-          else
-            node scripts/release-pin-pr.mjs
+            args+=(--write)
           fi
-
-      - name: Record pushed digest
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          {
-            echo "### Verified multi-arch release index (linux/amd64 + linux/arm64)"
-            echo
-            echo "ghcr.io/inspr-at/aeon@${DIGEST}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if ! node "${args[@]}"; then
+            echo '::warning::Deployment pin proposal failed; release assets will still be built.'
+            echo 'Deployment pin proposal failed; release assets will still be built.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
   assets:
     needs: [agentd-darwin, image]

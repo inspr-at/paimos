@@ -35,7 +35,7 @@ test('a different brand names the title, header, footer, menu, release history a
   expect(await chromeText(page)).not.toMatch(DEFAULT)
   await page.keyboard.press('Escape')
 
-  await page.locator('footer.app-footer .footer-name').click()
+  await page.locator('footer.app-footer .version-pill').click()
   const sheet = page.getByRole('dialog', { name: 'NOVA DAWN releases' })
   await expect(sheet).toBeVisible()
   // The generation is a label, never a version.

@@ -7,6 +7,7 @@ import type { AgentKey } from '../../lib/settings'
 import { useAccess } from '../../stores/access'
 import AccessSheet from './AccessSheet.vue'
 import AppIcon from '../AppIcon.vue'
+import ScopeCodeField from './ScopeCodeField.vue'
 import ScopeDetails from './ScopeDetails.vue'
 import ScopePresets from './ScopePresets.vue'
 import { problem } from './accessText'
@@ -71,6 +72,14 @@ function unavailableReason(key: string) {
   if (!agentRole.value) return "Not in this agent's project roles"
   return "Not in the key creator's current permissions"
 }
+function codeUnavailable(key: string): string | undefined {
+  if (!access.registry.some(p => p.key === key)) return 'Unknown in this workspace'
+  if (!access.registry.some(p => p.key === key && p.agent_grantable)) return 'Unavailable to agent keys'
+  if (!myPermissions().has(key) || !grantable.value.has(key)) return unavailableReason(key)
+  // Pasting never extends the agent's role. The existing explicit checkbox
+  // and role confirmation flow remains the way to request that separate change.
+  return undefined
+}
 async function save() {
   if (busy.value || !allowed.value || !changed.value || invalid.value || selected.value.size > MAX_KEY_SCOPES) return
   busy.value = true
@@ -91,6 +100,7 @@ onMounted(load)
     <div class="body" :aria-busy="busy">
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
+        <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="selected = $event" />
         <label class="search-field">
           <AppIcon name="search" :size="14" />
           <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
