@@ -6,6 +6,33 @@ info:
 servers:
   - url: /api
 paths:
+  /reviews/github:
+    post:
+      operationId: receiveReviewPullChange
+      description: Host-configured GitHub webhook. Requires an HMAC-SHA256 signature over the original bounded body, the configured installation and repository, and a pull_request edited, synchronize or reopened event. Immediately revokes stale review bindings independently of publication retries. Replays can never approve or revive a review. Missing host configuration disables this route.
+      security: []
+      parameters:
+        - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
+        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, const: pull_request}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, installation, repository, pull_request]
+              properties:
+                action: {type: string, enum: [edited, synchronize, reopened]}
+                installation: {type: object, required: [id], properties: {id: {type: integer}}}
+                repository: {type: object, required: [full_name], properties: {full_name: {type: string}}}
+                pull_request: {type: object, required: [number, head, base], properties: {number: {type: integer, minimum: 1}, head: {type: object, required: [sha], properties: {sha: {type: string}}}, base: {type: object, required: [sha, repo], properties: {sha: {type: string}, repo: {type: object, required: [full_name], properties: {full_name: {type: string}}}}}}}
+      responses:
+        '204': {description: Authenticated signal processed; no approval is published}
+        '400': {description: Unsupported or invalid event}
+        '401': {description: Invalid signature or installation/repository binding}
+        '404': {description: Host webhook configuration absent}
+        '413': {description: Body exceeds 2 MiB}
+        '502': {description: Revocation incomplete; delivery may be retried and the reporter also retries}
   /queue:
     get:
       operationId: listWorkQueue

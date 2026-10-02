@@ -54,17 +54,17 @@ func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	head := workspaceHEAD(t.Context(), r.dir)
 	family, profile := "anthropic", "review-profile"
 	order := WorkOrder{Kind: "review", Review: &reviewgate.Binding{TicketSnapshot: "Ticket: test the tenant boundary", Repository: "example/review-fixture", BaseSHA: base, HeadSHA: head, AuthorFamily: "openai", ReviewerFamily: &family, ProfileID: &profile}}
-	prompt, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family})
+	prompt, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"})
 	if err != nil || !strings.Contains(prompt, "+package main") || !strings.Contains(prompt, base+".."+head) || !strings.Contains(prompt, "tenant boundary") {
 		t.Fatal("review context was not bound to ticket and exact diff")
 	}
 	order.Review.AuthorFamily = family
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); !errors.Is(err, errReviewContext) {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); !errors.Is(err, errReviewContext) {
 		t.Fatal("author reviewed itself")
 	}
 	order.Review.AuthorFamily = "openai"
 	order.Review.Repository = "another/repository"
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); err == nil {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); err == nil {
 		t.Fatal("wrong repository reviewed")
 	}
 	order.Review.Repository = "example/review-fixture"
@@ -74,7 +74,7 @@ func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	r.run("add", "test.env.key")
 	r.run("commit", "-m", "credential path fixture")
 	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); err == nil {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); err == nil {
 		t.Fatal("credential path entered review prompt")
 	}
 }
@@ -90,7 +90,7 @@ func reviewPromptFixture(t *testing.T) (*launchedRepo, WorkOrder, Profile) {
 		BaseSHA:        workspaceHEAD(t.Context(), r.dir),
 		AuthorFamily:   "openai", ReviewerFamily: &family, ProfileID: &profile,
 	}}
-	return r, order, Profile{ID: profile, Family: family}
+	return r, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}
 }
 
 func TestMutationReplaceRefHidesSealedTree(t *testing.T) {

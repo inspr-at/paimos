@@ -27,14 +27,16 @@ import (
 )
 
 type Module struct {
-	pool      *pgxpool.Pool
-	publisher StatusPublisher
+	pool          *pgxpool.Pool
+	publisher     StatusPublisher
+	webhookSecret []byte
 }
 
 func New(pool *pgxpool.Pool, publisher StatusPublisher) *Module {
 	return &Module{pool: pool, publisher: publisher}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/reviews/github", m.pullChanged)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/reviews", workorders.Endpoint(m.pool, "work_orders.read", false, 200, m.list))
 	mux.HandleFunc("POST /api/nodes/{nodeId}/reviews", workorders.Endpoint(m.pool, "work_orders.write", false, 201, m.create))
 }

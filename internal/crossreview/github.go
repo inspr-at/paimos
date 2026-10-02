@@ -178,15 +178,13 @@ func (g *GitHubApp) Publish(ctx context.Context, tenantID string, v Review, stat
 	if err = g.request(ctx, token.Token, "GET", "/repos/"+v.Repository+"/pulls/"+strconv.FormatInt(*v.PullRequest, 10), nil, &pr); err != nil {
 		return "error", err
 	}
-	if pr.Number != *v.PullRequest || pr.Base.Repo.FullName != v.Repository || pr.Head.SHA != v.HeadSHA {
-		return "stale", nil
-	}
-	if pr.Base.SHA != v.BaseSHA {
-		err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": "error", "description": "Review range differs from the pull request base"}, nil)
-		if err != nil {
-			return "error", err
-		}
-		return "stale", nil
+	// A stale binding always revokes the reviewed SHA, including when the PR
+	// moved to another head. No status is posted on the unreviewed new head.
+	// Returning stale with an error keeps revocation retryable and the local
+	// gate closed until GitHub accepts the error status.
+	if v.GitHubStatus == "stale" || pr.Number != *v.PullRequest || pr.Base.Repo.FullName != v.Repository || pr.Head.SHA != v.HeadSHA || pr.Base.SHA != v.BaseSHA {
+		err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": "error", "description": "Review binding differs from the pull request"}, nil)
+		return "stale", err
 	}
 	// A refresh still verifies the PR range and revokes its temporary token,
 	// but need not append another identical success status on every poll.

@@ -301,6 +301,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		reviewPublisher = reviewApp
 	}
 	reviewMod := crossreview.New(pool, reviewPublisher)
+	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
 		Pool:      pool,

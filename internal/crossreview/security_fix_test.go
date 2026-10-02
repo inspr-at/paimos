@@ -22,10 +22,146 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
+
+type blockingPublisher struct {
+	dirty              string
+	entered, refreshed chan struct{}
+}
+
+func (*blockingPublisher) Configured(string, string) bool { return true }
+func (p *blockingPublisher) Publish(ctx context.Context, _ string, v Review, state string) (string, error) {
+	if v.OrderID == p.dirty {
+		close(p.entered)
+		<-ctx.Done()
+		return "error", ctx.Err()
+	}
+	select {
+	case p.refreshed <- struct{}{}:
+	default:
+	}
+	return state, nil
+}
+func TestBindingRefreshRunsWhileDirtyPublicationIsBlocked(t *testing.T) {
+	f := newFixture(t)
+	p := &blockingPublisher{entered: make(chan struct{}), refreshed: make(chan struct{}, 1)}
+	f.m.publisher = p
+	in := f.input()
+	pr := int64(12)
+	in.PullRequest = &pr
+	green := f.completedReview(t, in)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET github_status='success',github_reported_state='success' WHERE work_order_id=$1`, green.OrderID)
+		return err
+	})
+	in.RequestID, in.HeadSHA = testID(), strings.Repeat("d", 40)
+	p.dirty = f.completedReview(t, in).OrderID
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	defer func() { cancel(); <-done }()
+	go func() { defer close(done); f.m.RunStatusReporter(ctx) }()
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dirty lane did not start")
+	}
+	select {
+	case <-p.refreshed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dirty lane delayed green refresh")
+	}
+}
+
+func signedPullRequest(raw string, secret []byte) *http.Request {
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(raw))
+	r := httptest.NewRequest("POST", "/api/reviews/github", strings.NewReader(raw))
+	r.Header.Set("X-GitHub-Event", "pull_request")
+	r.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	return r
+}
+
+func TestWebhookAuthenticationReplayAndFailedRevocation(t *testing.T) {
+	s := newStatusFixture(t)
+	v := s.f.completedReview(t, s.in)
+	s.f.m.reportStatuses(t.Context())
+	secret := []byte("synthetic-webhook-fixture-32-bytes")
+	s.f.m.ConfigureWebhook(secret)
+	authMod, err := auth.New(auth.Config{Env: "dev"}, s.f.d.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := (&httpapi.Server{Modules: []httpapi.Module{s.f.m}, Middleware: []func(http.Handler) http.Handler{authMod.Middleware}}).Handler()
+	raw := fmt.Sprintf(`{"action":"edited","installation":{"id":2},"repository":{"full_name":"example/review-fixture"},"pull_request":{"number":12,"head":{"sha":%q},"base":{"sha":%q,"repo":{"full_name":"example/review-fixture"}}}}`, s.in.HeadSHA, strings.Repeat("c", 40))
+	for _, tc := range []struct {
+		name, body string
+		key        []byte
+		code       int
+	}{
+		{"unsigned", raw, nil, 401},
+		{"wrong signature", raw, []byte("other-fixture"), 401},
+		{"wrong installation", strings.Replace(raw, `"id":2`, `"id":3`, 1), secret, 401},
+		{"foreign repository", strings.Replace(raw, "example/review-fixture", "example/foreign", 1), secret, 401},
+		{"foreign base", strings.ReplaceAll(raw, `"repo":{"full_name":"example/review-fixture"}`, `"repo":{"full_name":"example/foreign"}`), secret, 401},
+		{"unsupported action", strings.Replace(raw, "edited", "labeled", 1), secret, 400},
+		{"bad JSON", raw + "{}", secret, 400},
+		{"oversized", strings.Repeat("x", (2<<20)+1), secret, 413},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, signedPullRequest(tc.body, tc.key))
+			if w.Code != tc.code {
+				t.Fatalf("response %d, want %d", w.Code, tc.code)
+			}
+			if len(s.posts) != 1 {
+				t.Fatal("unauthenticated event changed status")
+			}
+		})
+	}
+	s.fail = true
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, signedPullRequest(raw, secret))
+	if w.Code != 502 {
+		t.Fatalf("failed post response %d", w.Code)
+	}
+	s.f.tx(t, func(tx pgx.Tx) error {
+		got, err := load(t.Context(), tx, v.OrderID)
+		if err == nil && (got.GateOpen || got.GitHubStatus != "stale") {
+			t.Error("failed revocation did not close local gate")
+		}
+		var previous string
+		if err == nil {
+			err = tx.QueryRow(t.Context(), `SELECT github_reported_state FROM work_order_reviews WHERE work_order_id=$1`, v.OrderID).Scan(&previous)
+		}
+		if err == nil && previous != "success" {
+			t.Error("failed revocation erased last posted state")
+		}
+		return err
+	})
+	// Even though the live base has returned to the reviewed SHA, the
+	// authenticated invalidation remains irrevocable and gets retried.
+	s.fail = false
+	s.f.m.reportStatusLane(t.Context(), true)
+	if len(s.posts) != 2 || s.posts[1] != "error" {
+		t.Fatalf("failed signal did not retry: %v", s.posts)
+	}
+	w = httptest.NewRecorder()
+	server.ServeHTTP(w, signedPullRequest(raw, secret))
+	if w.Code != 204 || len(s.posts) != 2 {
+		t.Fatal("replay changed an already revoked review")
+	}
+	s.f.m.ConfigureWebhook(nil)
+	w = httptest.NewRecorder()
+	server.ServeHTTP(w, signedPullRequest(raw, secret))
+	if w.Code != 404 {
+		t.Fatal("unconfigured webhook was available")
+	}
+}
 
 func TestAuthenticatedBaseChangeBypassesDirtyReporter(t *testing.T) {
 	s := newStatusFixture(t)
