@@ -251,10 +251,10 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
               <section class="memo-answer">
                 <template v-if="pending">
                   <h3 id="attach-choice" class="eyebrow">Your decision</h3>
-                  <ol class="choices" role="radiogroup" aria-labelledby="attach-choice">
-                    <li><label class="choice"><input v-model="choice" type="radio" name="attach-choice" value="allow" :disabled="busy || localUnavailable" aria-label="Allow" /><kbd class="keycap">1</kbd><span><strong>Allow</strong><span>{{ strict ? `Then confirm with Touch ID on ${review.snapshot.host}. Nothing is shared before that.` : 'Allow this session to link to its ticket.' }}</span></span></label></li>
-                    <li><label class="choice"><input v-model="choice" type="radio" name="attach-choice" value="decline" :disabled="busy" aria-label="Decline" /><kbd class="keycap">2</kbd><span><strong>Decline</strong><span>Nothing is shared. The terminal says the request ended.</span></span></label></li>
-                  </ol>
+                  <div class="choices" role="radiogroup" aria-labelledby="attach-choice">
+                    <label class="choice"><input v-model="choice" type="radio" name="attach-choice" value="allow" :disabled="busy || localUnavailable" aria-label="Allow" /><kbd class="keycap">1</kbd><span><strong>Allow</strong><span>{{ strict ? `Then confirm with Touch ID on ${review.snapshot.host}. Nothing is shared before that.` : 'Allow this session to link to its ticket.' }}</span></span></label>
+                    <label class="choice"><input v-model="choice" type="radio" name="attach-choice" value="decline" :disabled="busy" aria-label="Decline" /><kbd class="keycap">2</kbd><span><strong>Decline</strong><span>Nothing is shared. The terminal says the request ended.</span></span></label>
+                  </div>
                   <p v-if="localUnavailable" class="limits" role="status">Local confirmation is unavailable on this computer; this setting requires an updated paired Mac daemon.</p>
                 </template>
                 <template v-else>
@@ -332,7 +332,7 @@ h3 { margin: 0; }
 .code-field:focus { border-bottom-color: var(--teal); outline: none; box-shadow: none; }
 .fine, .limits { font-size: 12px; color: var(--ink-3); }
 .choices { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.choices > li { border-bottom: 1px solid var(--line); }
+.choices > .choice { border-bottom: 1px solid var(--line); }
 .choice { display: grid; grid-template-columns: 18px 20px minmax(0, 1fr); gap: 12px; align-items: start; min-height: 96px; padding: 12px 10px; cursor: pointer; }
 .choice:has(input:checked) { background: color-mix(in srgb, var(--teal) 9%, transparent); }
 .choice input { margin: 3px 0 0; accent-color: var(--teal); }
