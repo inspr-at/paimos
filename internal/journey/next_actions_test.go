@@ -79,8 +79,10 @@ func TestBriefingNextActionsIgnoreDeletedMembersAndRestoreThem(t *testing.T) {
 			}
 			if flag == "access-change" {
 				f.setReleaseState(t, release, "deploying")
-				gate := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)
-				renewalChange(t, f, `INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1,$2,$3,'candidate',$4)`, f.tenant, project, release, gate)
+				for _, gate := range []string{"candidate", "deploy"} {
+					approval := f.grant(t, f.agent.ID, f.person.ID, "journey."+gate, release)
+					renewalChange(t, f, `INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1,$2,$3,$4,$5)`, f.tenant, project, release, gate, approval)
+				}
 				f.handoff(t, project, release, "deploy", "deploy", 1, "succeeded", "")
 				f.handoff(t, project, release, "deploy", "verify", 1, "succeeded", "")
 				liveKey, deletedKey = "approve_permit", "plan_next_release"
