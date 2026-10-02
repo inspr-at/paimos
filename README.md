@@ -1247,6 +1247,26 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
+The release history's Highlights eyebrow reads “PAIMOS AEON · Release” (or the
+configured wordmark); generation and release counts stay in Details. The live
+codename leads in light display type with the heading's spacing, above one
+glass dock holding live status and the Pretty version. Its separators use the
+theme's muted ink; resting hours and minutes use primary ink at the renderer's
+80% weight for AA contrast in both themes.
+Hover or keyboard focus crossfades the renderer's characters to the full canonical version over
+one second; reduced motion switches instantly. Click or Enter copies the exact
+canonical value, including `.0.0`, and announces “Version copied”. This character
+crossfade is an Aeon presentation layer over the pinned renderer and its shared
+timing and opacity helpers; the vendor bundle remains unchanged.
+
+Release list rows keep the codename and its badges visible while a separate
+Pretty version sits at the right of the heading. That version uses the same
+crossfade and canonical copy feedback as the dock; copying keeps the current
+selection and address. When the heading is too narrow, the version wraps below
+the codename and stays right-aligned. The history uses interactive grid rows so
+the copy button is available to assistive technology; j/k and arrow keys retain
+the selected-row navigation.
+
 The connect screen keeps Connect available when a selection mixes verifiable
 and unverifiable harnesses. Clicking it offers **Connect without verification**
 for the whole selection or **Leave them out** to keep only the verifiable
