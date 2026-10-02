@@ -189,6 +189,13 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
       <h3 id="ed-title" ref="title" tabindex="-1">{{ titleText }}</h3>
       <button class="icon-btn flat ed-x" type="button" aria-label="Close without saving" @click="emit('close')"><AppIcon name="close" :size="16" /></button>
     </div>
+    <div class="ed-foot">
+      <button class="btn ghost" type="button" @click="reset">Reset to default</button>
+      <span class="sp" />
+      <span class="ed-err" :role="problem ? 'alert' : undefined">{{ problem }}</span>
+      <button class="btn" type="button" @click="emit('close')">Cancel</button>
+      <button class="btn primary" type="button" :disabled="!!problem || saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</button>
+    </div>
     <div class="ed-body">
       <!-- ---------- Work week ---------- -->
       <template v-if="kind === 'week'">
@@ -333,18 +340,11 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
         <p v-if="previewFailed" class="ed-help">The preview could not be updated; Save still applies these settings.</p>
       </div>
     </div>
-    <div class="ed-foot">
-      <button class="btn ghost" type="button" @click="reset">Reset to default</button>
-      <span class="sp" />
-      <span class="ed-err" :role="problem ? 'alert' : undefined">{{ problem }}</span>
-      <button class="btn" type="button" @click="emit('close')">Cancel</button>
-      <button class="btn primary" type="button" :disabled="!!problem || saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</button>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); height: min(720px, calc(100dvh - 96px)); max-height: calc(100dvh - 96px); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
+.ed { position: absolute; z-index: 30; display: flex; flex-direction: column; width: 620px; max-width: calc(100vw - 24px); max-height: min(720px, calc(100dvh - 96px)); border-radius: 16px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); color: var(--ink); text-align: left; }
 .ed.night { width: 580px; }
 .grab { width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line-2); }
 .ed-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 2px 20px; }
@@ -353,7 +353,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .ed-body { flex: 1; scrollbar-gutter: stable; align-content: start; display: grid; gap: 16px; padding: 2px 20px 18px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ed p { margin: 0; }
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
-.ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .ed-foot .sp { flex: 1; }
 .ed-foot .btn.primary { min-width: 88px; }
 .ed-err { flex: 0 1 110px; height: 38px; overflow: auto; color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
@@ -436,8 +436,8 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 /* Phone: a bottom sheet */
 .ed.sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 81; width: auto; max-width: none; height: 100dvh; max-height: 100dvh; border-radius: 22px 22px 0 0; border-bottom: 0; }
 .sheet .ed-head { padding: 4px 8px 2px 16px; }
-.sheet .ed-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 18px; gap: 14px; }
-.sheet .ed-foot { flex-wrap: wrap; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); }
+.sheet .ed-body { order: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 18px; gap: 14px; }
+.sheet .ed-foot { order: 2; border-bottom: 0; border-top: 1px solid var(--line); flex-wrap: wrap; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); }
 .sheet .ed-foot .btn { min-height: 44px; }
 .sheet .ed-foot .btn:not(.ghost) { flex: 1; }
 .sheet .ed-foot .sp { display: none; }

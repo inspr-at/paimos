@@ -178,11 +178,18 @@ test.describe('with motion', () => {
       const section = document.querySelector<HTMLElement>('.agents-page .main-col > .queue')!
       const next = section.nextElementSibling as HTMLElement
       const tops: number[] = []
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.tops = tops; w.sampling = true
+      const w = window as unknown as { tops: number[]; sampling: boolean; foldEnded: boolean }
+      w.tops = tops; w.sampling = true; w.foldEnded = false
       const main = document.getElementById('main')!
       const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop); if (w.sampling) requestAnimationFrame(sample) }
-      requestAnimationFrame(sample)
+      sample()
+      section.addEventListener('transitionend', event => {
+        if (event.target !== section || event.propertyName !== 'height') return
+        // The component removes the card at this same transition end. Sample
+        // its final position on the next frame, then stop without a clock delay.
+        w.sampling = false
+        requestAnimationFrame(() => { sample(); w.foldEnded = true })
+      })
       return { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) }
     })
     await item.getByRole('button', { name: 'Approve permission' }).click()
@@ -191,12 +198,8 @@ test.describe('with motion', () => {
     const decided = page.getByRole('region', { name: 'Decided requests' }).getByRole('button', { name: /^Decided/ })
     await expect(decided).toBeFocused()
     await expect(decided.locator('.mono')).toHaveText(emptyHistory ? '1' : '5')
-    const tops = await page.evaluate(async () => {
-      await new Promise(resolve => setTimeout(resolve, 150))
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.sampling = false
-      return w.tops
-    })
+    await expect.poll(() => page.evaluate(() => (window as unknown as { foldEnded: boolean }).foldEnded)).toBe(true)
+    const tops = await page.evaluate(() => (window as unknown as { tops: number[] }).tops)
     expect(await main.evaluate(el => el.scrollTop)).toBe(80)
     // What followed Needs you rose by exactly its height and gap, over many frames,
     // with no single-frame jump and no snap when the card was removed.

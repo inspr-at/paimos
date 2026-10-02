@@ -37,9 +37,9 @@ const emit = defineEmits<{
           :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)"
         >{{ option.label }}</button>
       </div>
-      <div v-if="grouped" class="pair">
-        <button type="button" class="btn sm" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
-        <button type="button" class="btn sm" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
+      <div class="pair">
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
       </div>
     </template>
     <template v-else>

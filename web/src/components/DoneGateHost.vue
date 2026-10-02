@@ -113,6 +113,10 @@ watch(() => doneGateState.request, async (next) => {
           </p>
         </div>
       </div>
+      <div class="actions">
+        <button type="button" class="btn" @click="settleDoneGate(null)">Not now</button>
+        <button type="submit" class="btn primary">{{ action }}</button>
+      </div>
       <div class="scroll">
         <div class="languages">
           <div v-for="language in languages" :key="language.key" class="language" :lang="language.key">
@@ -150,18 +154,17 @@ watch(() => doneGateState.request, async (next) => {
           Hide from release notes
         </label>
       </div>
-      <div class="actions">
-        <button type="button" class="btn" @click="settleDoneGate(null)">Not now</button>
-        <button type="submit" class="btn primary">{{ action }}</button>
-      </div>
     </form>
   </dialog>
 </template>
 
 <style scoped>
 .gate {
+  position: fixed;
+  inset: 96px 0 auto;
+  margin: 0 auto;
   width: min(680px, calc(100vw - 48px));
-  max-height: calc(100dvh - 48px);
+  max-height: calc(100dvh - 112px);
   padding: 0;
   border: 0;
   background: transparent;
@@ -172,8 +175,8 @@ watch(() => doneGateState.request, async (next) => {
 .card {
   display: flex;
   flex-direction: column;
-  height: min(680px, calc(100dvh - 48px));
-  max-height: 92dvh;
+  box-sizing: border-box;
+  max-height: min(680px, calc(100dvh - 112px));
   padding: 22px 24px 18px;
   border-radius: var(--radius);
   border: 1px solid var(--glass-edge);
@@ -181,7 +184,7 @@ watch(() => doneGateState.request, async (next) => {
   box-shadow: var(--shadow-pop), var(--shadow);
 }
 .grabber { display: none; }
-.head { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.head { flex: none; display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
 .head-copy { min-width: 0; flex: 1; }
 .mark {
   display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 999px;
@@ -206,8 +209,7 @@ textarea.field { height: auto; min-height: 72px; padding-top: 8px; padding-botto
 .hide { display: inline-flex; align-items: center; gap: 8px; justify-self: start; margin-top: 2px; cursor: pointer; }
 .hide input { width: 16px; height: 16px; margin: 0; }
 .actions {
-  display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
-  position: sticky; bottom: 0;
+  flex: none; display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
 }
 @media (min-width: 701px) {
   .languages { grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -234,11 +236,11 @@ textarea.field { height: auto; min-height: 72px; padding-top: 8px; padding-botto
   .grabber { display: block; align-self: center; width: 40px; height: 4px; margin: 8px auto 0; border-radius: 999px; background: var(--line-2); }
   .head { padding: 12px 16px 0; }
   h2 { font-size: 17px; }
-  .scroll { padding: 0 16px; }
+  .scroll { order: 1; padding: 0 16px; }
   .field { height: auto; min-height: 44px; font-size: 16px; }
   textarea.field { min-height: 88px; font-size: 16px; }
   .hide { min-height: 44px; font-size: 15px; }
-  .actions { margin: 12px 0 0; padding: 12px 16px 0; border-top: 1px solid var(--line); background: var(--surface-raised); }
+  .actions { order: 2; margin: 12px 0 0; padding: 12px 16px 0; border-top: 1px solid var(--line); background: var(--surface-raised); }
   .actions .btn { height: 44px; flex: 1; }
 }
 @media (max-width: 700px) and (prefers-reduced-motion: no-preference) {

@@ -17,18 +17,23 @@ const placedHeight = ref<number>()
 const above = ref(false)
 let placedAnchor: DOMRect | null = null
 
-// Reserve the opening frame: results and feedback scroll inside it. In
-// particular, an above-trigger search must not move when its result count changes.
+// Below the trigger, content grows downward. Above it, reserve the opening
+// height so a search field cannot move when its result count changes.
 function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   placedAnchor = rect
-  const height = Math.max(panel.value.scrollHeight, panel.value.querySelector('input:not([type=checkbox]):not([type=radio])') ? Math.min(320, props.tallest) : 0)
+  const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
   if (!keepSide) above.value = room < Math.min(height, props.tallest) && rect.top > room
   maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
-  if (!keepSide) placedHeight.value = Math.min(height, maxHeight.value)
+  if (above.value) {
+    if (!keepSide) {
+      const searchRoom = panel.value.querySelector('input:not([type=checkbox]):not([type=radio])') ? Math.min(320, props.tallest) : 0
+      placedHeight.value = Math.min(Math.max(height, searchRoom), maxHeight.value)
+    }
+  } else placedHeight.value = undefined
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
   x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))

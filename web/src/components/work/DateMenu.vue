@@ -62,8 +62,8 @@ function presetHint(value: DatePreset) {
           <label class="range-field"><span>From</span><input v-model="from" class="field" type="date" :max="to || undefined" /></label>
           <label class="range-field"><span>To</span><input v-model="to" class="field" type="date" :min="from || undefined" /></label>
         </div>
-        <p v-if="rangeError" class="range-error" role="alert">{{ rangeError }}</p>
         <button type="submit" class="btn sm apply" :disabled="!!rangeError || (!from && !to)">Apply range</button>
+        <p v-if="rangeError" class="range-error" role="alert">{{ rangeError }}</p>
       </form>
     </div>
   </FloatingPanel>

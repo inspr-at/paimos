@@ -13,7 +13,7 @@ export interface StableOptions {
 async function box(locator: Locator) {
   await expect(locator).toHaveCount(1)
   await expect(locator).toBeVisible()
-  return locator.evaluate(async element => {
+  const sample = await locator.evaluate(async element => {
     await document.fonts.ready
     await Promise.all(element.getAnimations({ subtree: true })
       .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
@@ -27,15 +27,21 @@ async function box(locator: Locator) {
     }
     return { x, y, width: rect.width, height: rect.height }
   })
+  expect(sample.width, 'sampled control width must be positive').toBeGreaterThan(0)
+  expect(sample.height, 'sampled control height must be positive').toBeGreaterThan(0)
+  return sample
 }
 
 /** Compare named controls against the initial layout after every interaction.
  * Callbacks await actual state changes, without fixed timeout sleeps. Include
- * dialog/group frames, selectors and actions. Locators may match the next series
- * item; pass scrolling bodies to catch horizontal overflow as well.
+ * selector groups, actions and the clicked row. Measure frame height only for a
+ * phone sheet or an already scrolling body; top-anchored short frames may grow
+ * downward. Locators may match the next series item; pass scrolling bodies to
+ * catch horizontal overflow as well.
  */
 export async function expectStableControls({ controls, interactions, scrollAreas = {} }: StableOptions) {
   expect(Object.keys(controls).length, 'name at least one control').toBeGreaterThan(0)
+  expect(interactions.length, 'provide at least one interaction').toBeGreaterThan(0)
   const overflow = async (step: string) => {
     for (const [name, area] of Object.entries(scrollAreas)) {
       const extra = await area.evaluate(el => el.scrollWidth - el.clientWidth)
