@@ -13,7 +13,7 @@ func TestNoteCorrectionsPreserveOriginalAndVisibility(t *testing.T) {
 	if err := b.AddReserved(raw, r, historicTenant, historicProject); err != nil {
 		t.Fatal(err)
 	}
-	h := withProductNotes(History{Product: b.Product, Repository: b.Repository, Releases: []Release{{Version: r.Version, Notes: MissingNotes()}}}, b)
+	h := withProductNotes(History{Product: b.Product, Repository: b.Repository, Releases: []Release{{Version: r.Version, State: StatePublished, Notes: MissingNotes()}}}, b)
 	correction := NoteCorrection{Version: r.Version, Key: "AEON-1", SHA256: b.Releases[r.Version].SHA256, Group: GroupFixes, Reason: "Reviewed repair classification."}
 	layer := func(c []NoteCorrection) []byte {
 		raw, _ := json.Marshal(map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": c})
@@ -61,7 +61,7 @@ func TestReviewedAuditCoversFrozenOccurrences(t *testing.T) {
 	}
 	h := History{Product: b.Product, Repository: b.Repository}
 	for v := range b.Releases {
-		h.Releases = append(h.Releases, Release{Version: v, Notes: MissingNotes()})
+		h.Releases = append(h.Releases, Release{Version: v, State: StatePublished, Notes: MissingNotes()})
 	}
 	h, err = withNoteCorrections(withProductNotes(h, b), b, layer)
 	if err != nil {
