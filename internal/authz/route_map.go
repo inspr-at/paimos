@@ -538,6 +538,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/status-autopilot":                                            "nodes.read",
 	"PUT /api/projects/{projectId}/status-autopilot":                                            "settings.manage",
 	"GET /api/status-autopilot/changes":                                                         "nodes.read",
+	"GET /api/status-autopilot/proposals":                                                       "nodes.read",
+	"PUT /api/status-autopilot/proposals/{eventId}":                                             "settings.manage",
 	"GET /api/settings/agent-activity":                                                          "settings.manage",
 	"PUT /api/settings/agent-activity":                                                          "settings.manage",
 	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",
