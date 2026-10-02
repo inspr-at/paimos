@@ -194,6 +194,9 @@ func validateProfile(in profileWrite) error {
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {
 		return fail(http.StatusBadRequest, "invalid model")
 	}
+	if harnesslaunch.ModelFamily(in.Harness, in.Model) != in.Family {
+		return fail(http.StatusBadRequest, "profile family does not match its harness/provider binding")
+	}
 	if len(in.Effort) > 32 || !effortRE.MatchString(in.Effort) {
 		return fail(http.StatusBadRequest, "invalid effort")
 	}

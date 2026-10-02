@@ -188,6 +188,11 @@ func (g *GitHubApp) Publish(ctx context.Context, tenantID string, v Review, stat
 		}
 		return "stale", nil
 	}
+	// A refresh still verifies the PR range and revokes its temporary token,
+	// but need not append another identical success status on every poll.
+	if state == "success" && v.GitHubStatus == "success" {
+		return state, nil
+	}
 	description := "Independent review pending"
 	switch state {
 	case "success":

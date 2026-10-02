@@ -13283,6 +13283,7 @@ components:
             target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
     ModelProfileWrite:
       type: object
+      description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.
       required: [slug, version, harness, family, model, effort, tier]
       properties:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}

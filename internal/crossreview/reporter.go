@@ -81,46 +81,67 @@ func (m *Module) reportStatuses(ctx context.Context) {
 	if rows.Err() != nil {
 		return
 	}
-	for _, tid := range ids {
-		service := db.AllProjects(ctx, "cross-family review status reporter")
+	// Drain changes/retries before spending network time refreshing green
+	// bindings. Both lanes traverse every latest head with bounded pages.
+	for _, refresh := range []bool{false, true} {
+		for _, tid := range ids {
+			m.reportTenantStatuses(ctx, tid, refresh)
+		}
+	}
+}
+
+func (m *Module) reportTenantStatuses(ctx context.Context, tid string, refresh bool) {
+	service := db.AllProjects(ctx, "cross-family review status reporter")
+	var beforeTime *time.Time
+	var beforeID *string
+	for ctx.Err() == nil {
 		reviews := []Review{}
-		err = db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT v.work_order_id::text FROM work_order_reviews v WHERE v.pull_request IS NOT NULL AND v.github_status<>'unconfigured'
-                AND NOT EXISTS(SELECT 1 FROM work_order_reviews newer WHERE newer.repository=v.repository AND newer.head_sha=v.head_sha AND (newer.created_at,newer.work_order_id)>(v.created_at,v.work_order_id))
-                ORDER BY v.created_at DESC LIMIT 100`)
+		pageSize := 0
+		err := db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT v.work_order_id::text,v.created_at,v.github_reported_state
+                FROM work_order_reviews v WHERE v.pull_request IS NOT NULL AND v.github_status NOT IN ('unconfigured','stale')
+                AND ($1::timestamptz IS NULL OR (v.created_at,v.work_order_id)<($1,$2::uuid))
+                AND NOT EXISTS(SELECT 1 FROM work_order_reviews newer WHERE newer.tenant_id=v.tenant_id AND newer.repository=v.repository AND newer.head_sha=v.head_sha AND (newer.created_at,newer.work_order_id)>(v.created_at,v.work_order_id))
+                ORDER BY v.created_at DESC,v.work_order_id DESC LIMIT 100`, beforeTime, beforeID)
 			if err != nil {
 				return err
 			}
-			orders := []string{}
+			type entry struct {
+				id, previous string
+				created      time.Time
+			}
+			orders := []entry{}
 			for rows.Next() {
-				var id string
-				if err = rows.Scan(&id); err != nil {
+				var e entry
+				if err = rows.Scan(&e.id, &e.created, &e.previous); err != nil {
 					rows.Close()
 					return err
 				}
-				orders = append(orders, id)
+				orders = append(orders, e)
 			}
 			rows.Close()
 			if err = rows.Err(); err != nil {
 				return err
 			}
-			for _, id := range orders {
-				v, err := load(ctx, tx, id)
+			pageSize = len(orders)
+			for _, e := range orders {
+				v, err := load(ctx, tx, e.id)
 				if err != nil {
 					return err
 				}
-				var previous string
-				if err = tx.QueryRow(ctx, `SELECT github_reported_state FROM work_order_reviews WHERE work_order_id=$1`, id).Scan(&previous); err != nil {
-					return err
-				}
-				if previous != statusState(v) && v.GitHubStatus != "stale" {
+				state := statusState(v)
+				if !refresh && e.previous != state || refresh && e.previous == "success" && state == "success" {
 					reviews = append(reviews, v)
 				}
+			}
+			if pageSize > 0 {
+				last := orders[pageSize-1]
+				beforeTime, beforeID = &last.created, &last.id
 			}
 			return nil
 		})
 		if err != nil {
-			continue
+			return
 		}
 		for _, v := range reviews {
 			op, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -138,6 +159,9 @@ func (m *Module) reportStatuses(ctx context.Context) {
 				_, writeErr := tx.Exec(ctx, `UPDATE work_order_reviews SET github_status=$2,github_reported_state=$3 WHERE work_order_id=$1`, v.OrderID, published, recorded)
 				return writeErr
 			})
+		}
+		if pageSize < 100 {
+			return
 		}
 	}
 }

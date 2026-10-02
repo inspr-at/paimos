@@ -23,14 +23,15 @@ import (
 )
 
 type recordingPublisher struct {
-	orders []string
-	fail   bool
+	orders    []string
+	fail      bool
+	failOrder string
 }
 
 func (*recordingPublisher) Configured(string, string) bool { return true }
 func (p *recordingPublisher) Publish(_ context.Context, _ string, v Review, state string) (string, error) {
 	p.orders = append(p.orders, v.OrderID)
-	if p.fail {
+	if p.fail && (p.failOrder == "" || p.failOrder == v.OrderID) {
 		return "error", errors.New("synthetic publication failure")
 	}
 	return state, nil
@@ -134,39 +135,36 @@ func TestReporterPagesPastReportedHeadsAndRetriesOlderFailure(t *testing.T) {
 	f := newFixture(t)
 	p := &recordingPublisher{}
 	f.m.publisher = p
-	// An unavailable route makes these terminal closed reviews inexpensive.
-	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='unavailable',reason='fixture',valid_until=now()+interval '1 hour'`)
-		return err
-	})
 	var oldest Review
 	for i := 0; i < 102; i++ {
 		in := f.input()
 		pr := int64(i + 1)
 		in.PullRequest = &pr
 		in.HeadSHA = fmt.Sprintf("%040x", i+1)
-		var v Review
-		f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", in, 201, &v)
+		v := f.completedReview(t, in)
 		if i == 0 {
 			oldest = v
 		}
 	}
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET github_status='error',github_reported_state=CASE WHEN work_order_id=$1 THEN '' ELSE 'error' END`, oldest.OrderID)
+		_, err := tx.Exec(t.Context(), `UPDATE work_order_reviews SET github_status='success',github_reported_state=CASE WHEN work_order_id=$1 THEN '' ELSE 'success' END`, oldest.OrderID)
 		return err
 	})
 	p.fail = true
+	p.failOrder = oldest.OrderID
 	f.m.reportStatuses(t.Context())
-	if len(p.orders) != 1 || p.orders[0] != oldest.OrderID {
+	if len(p.orders) != 102 || p.orders[0] != oldest.OrderID {
 		t.Fatalf("older dirty review was starved: %v", p.orders)
 	}
 	p.fail = false
+	p.orders = nil
 	f.m.reportStatuses(t.Context())
-	if len(p.orders) != 2 || p.orders[1] != oldest.OrderID {
+	if len(p.orders) != 103 || p.orders[0] != oldest.OrderID {
 		t.Fatalf("older failure was not retried: %v", p.orders)
 	}
+	p.orders = nil
 	f.m.reportStatuses(t.Context())
-	if len(p.orders) != 2 {
-		t.Fatal("unchanged terminal reviews were republished")
+	if len(p.orders) != 102 || p.orders[101] != oldest.OrderID {
+		t.Fatal("binding refresh did not traverse every page")
 	}
 }
