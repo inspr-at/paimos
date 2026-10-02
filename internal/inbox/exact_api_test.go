@@ -26,11 +26,22 @@ func TestExactAPIWebhookPublicNamesContainingX(t *testing.T) {
 			if n < 12 {
 				continue
 			}
-			question := append([]byte(nil), buf[:n]...)
+			// Go's resolver includes an EDNS OPT record after the question.
+			// Copy just the QNAME/QTYPE/QCLASS, then construct our answer.
+			end := 12
+			for end < n && buf[end] != 0 {
+				end += int(buf[end]) + 1
+			}
+			end += 5
+			if end > n {
+				continue
+			}
+			question := append([]byte(nil), buf[:end]...)
 			answer := append([]byte(nil), question...)
 			answer[2] = 0x81
 			answer[3] = 0x80
-			if binary.BigEndian.Uint16(question[n-4:n-2]) == 1 {
+			answer[10], answer[11] = 0, 0
+			if binary.BigEndian.Uint16(question[end-4:end-2]) == 1 {
 				answer[7] = 1
 				answer = append(answer, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 8, 8, 8, 8)
 			}
@@ -80,12 +91,12 @@ func TestExactAPIDeliverySettingsAtomicAuditAndNoop(t *testing.T) {
 		t.Fatalf("no-op audit count %d: %v", count, err)
 	}
 	// Force an event failure after the settings UPSERT: the settings must roll back.
-	_, err := w.db.Admin.Exec(t.Context(), `CREATE FUNCTION reject_delivery_settings_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='inbox.delivery_settings_changed' THEN RAISE EXCEPTION 'injected event failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_delivery_settings_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_delivery_settings_event()`)
+	_, err := w.db.Admin.Exec(t.Context(), `CREATE FUNCTION reject_delivery_settings_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='inbox.delivery_settings_changed' THEN RAISE EXCEPTION 'injected event failure' USING ERRCODE='XX000'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_delivery_settings_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_delivery_settings_event()`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if put(strings.Replace(first, `"max_attempts":1`, `"max_attempts":2`, 1)) != 500 {
-		t.Fatal("failed audit reported success")
+	if status := put(strings.Replace(first, `"max_attempts":1`, `"max_attempts":2`, 1)); status != 500 {
+		t.Fatalf("failed audit returned %d", status)
 	}
 	status, body := do(t, srv, w.admin.ID, "GET", "/api/settings/inbox-delivery", "", nil)
 	if status != 200 || mustJSON[DeliverySettings](t, body) != (DeliverySettings{120, 900, 1}) {
