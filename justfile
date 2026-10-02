@@ -40,6 +40,11 @@ release-check:
 rules-check:
     go run ./scripts/rules-bootstrap check
 
+# Offline audit toolkit contracts, renderer smoke tests and tracked-file ownership
+audit-check:
+    python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
+    python3 -B scripts/audit/covcheck.py --summary
+
 # Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
 release-history:
     go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline
