@@ -7,14 +7,14 @@ import (
 	"regexp"
 )
 
-const Accepted = "codex, claude, pi, cursor, grok, media, terminal"
+const Accepted = "codex, claude, pi, cursor, grok, gemini, opencode, media, terminal"
 
 var generatorLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}$`)
 var commandLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/+ -]{0,119}$`)
 
 func Valid(harness string) bool {
 	switch harness {
-	case "codex", "claude", "pi", "cursor", "grok", "media", "terminal":
+	case "codex", "claude", "pi", "cursor", "grok", "gemini", "opencode", "media", "terminal":
 		return true
 	}
 	return false

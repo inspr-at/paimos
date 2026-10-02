@@ -33,6 +33,8 @@ func TestRulesRendererPreservesExactBytes(t *testing.T) {
 		want := "AGENTS.md"
 		if h == "claude-code" {
 			want = "CLAUDE.md"
+		} else if h == "gemini" {
+			want = "GEMINI.md"
 		}
 		if r.SuggestedPath != want {
 			t.Fatal("harness mismatch")

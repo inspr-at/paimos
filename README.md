@@ -10,6 +10,29 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Ticket work queue
+
+`aeon queue list`, `add <ticket>`, `remove <ticket>`, `move <ticket> <position>`,
+`reset` and `next` manage ticket work on the existing agent run queue. People
+need `run.create` in the ticket's project; coordinator agents need their live
+coordinator role and scoped key. Plain workers cannot manage the queue.
+
+New and Backlog become Open when queued; Blocked retains its place until
+unblocked. Tickets need an estimate, acceptance criteria and a named blocker
+when blocked. `aeon queue readiness <ticket>` returns missing fields and an
+estimate suggestion. `POST /api/queue/{nodeId}/estimate` explicitly applies a
+missing estimate; acceptance criteria and blockers use the existing ticket
+edit/relation APIs. No acceptance evidence is invented.
+
+Priority then FIFO is the default. Manual moves persist until Reset; arrivals
+append during manual order. `add <ticket> --agent UUID --profile UUID` is the
+advanced Start now path, first in that agent's separate line. Optional
+`--account UUID` pins an account and never overrides its allowances. `next`
+routes ready work; existing daemon reservation and fenced claim checks perform
+pickup atomically, move the ticket to In progress and remove its queue marker.
+Ticket API and CLI JSON include `queued: {position, by, at, …}` while waiting.
+Capacity hours are advice, not a reservation or a hard cap.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open
@@ -490,7 +513,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/2.1`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker classifies expansion of an existing enum as a major change, so strict reporters must explicitly accept this contract before rollout.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.1`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -1647,7 +1670,9 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.1`:
+The reporter contract is `harness-session/2.1`, declared by the response-only
+`Aeon-Contract` header. Existing reporters keep working without a Pharos or
+Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

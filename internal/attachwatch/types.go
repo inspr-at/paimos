@@ -102,7 +102,7 @@ func (s Snapshot) Valid() bool {
 	if s.Mode == ModeLease {
 		content = s.Transcript == "" && s.FileID == ""
 	}
-	return content && (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok")
+	return content && (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok" || s.Harness == "gemini" || s.Harness == "opencode")
 }
 
 type DeviceRequest struct {

@@ -18,11 +18,13 @@ import (
 )
 
 const (
-	Codex  = "codex"
-	Claude = "claude"
-	Pi     = "pi"
-	Cursor = "cursor"
-	Grok   = "grok"
+	Codex    = "codex"
+	Claude   = "claude"
+	Pi       = "pi"
+	Cursor   = "cursor"
+	Grok     = "grok"
+	Gemini   = "gemini"
+	OpenCode = "opencode"
 )
 
 var (
@@ -319,6 +321,8 @@ type ProbeStatus struct {
 const (
 	ProbeAuthFailed  = "auth_failed"
 	ProbeUnavailable = "unavailable"
+	// ProbeUnverified is local evidence, not a confirmed vendor sign-out.
+	ProbeUnverified = "sign_in_unverified"
 )
 
 // AccountStatusProber is the optional richer prober; adapters without it

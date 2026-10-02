@@ -8,7 +8,7 @@ import { api, APIError, RequestFailure, StaleRequestError } from './api.ts'
 import { capacityWaitText, type CapacityWait } from './capacityWait.ts'
 import type { LimitUse } from './accountLimits.ts'
 
-export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Pool = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode'
 export type OffDays = 'rest' | 'expire' | 'normal'
 export type NightModel = 'daynight' | 'shifts' | 'blocks'
 export type Override = '' | 'sprint' | 'hold' | 'away'
@@ -357,15 +357,15 @@ export interface AccountRow {
   sharedQuotaName?: string
   disconnecting?: boolean
 }
-export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
-export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi']
+export const HARNESS_NAME: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi', gemini: 'Gemini CLI', opencode: 'OpenCode' }
+export const POOL_ORDER = ['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode']
 /** Stable IDs remain one shell word in fish, zsh and bash, regardless of the display label. */
 export function accountUseCommand(account: { id: string; harness: string }): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(account.id) || !POOL_ORDER.includes(account.harness)) return ''
   return `aeon use ${account.harness} ${account.id}`
 }
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
-export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login' }
+export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login', gemini: 'gemini', opencode: 'opencode auth login' }
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
 /** The long window is the bar; the 5-hour window, when there is another, is the small line under it. */

@@ -177,3 +177,27 @@ func TestRuleSafeFilesRejectLinksBoundsAndOverwrite(t *testing.T) {
 		t.Fatal("public cache accepted")
 	}
 }
+
+func TestRuleFilesRefuseAdditionalVendorStores(t *testing.T) {
+	for _, vendor := range []string{".gemini", ".opencode"} {
+		root := filepath.Join(t.TempDir(), vendor)
+		if err := os.Mkdir(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, "settings.json")
+		body := []byte(`{"fixture":"preserve vendor store"}`)
+		if err := os.WriteFile(path, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadFile(path, 1024); err == nil {
+			t.Fatal("vendor store read accepted")
+		}
+		if err := WriteFile(path, []byte(`{}`), true); err == nil {
+			t.Fatal("vendor store overwritten")
+		}
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, body) {
+			t.Fatal("vendor store changed")
+		}
+	}
+}
