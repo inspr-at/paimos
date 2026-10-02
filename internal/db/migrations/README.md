@@ -44,6 +44,24 @@ RLS also applies to the migration owner. Each tenant commits independently;
 `ON CONFLICT DO NOTHING` makes a partially completed run safe to retry. The
 filename is recorded only after every tenant succeeds. Key scopes are unchanged.
 
+AEON-502 A (1104–1107) adds work kinds, sparse model preferences, run
+residency/starter stamps, session placement and profile retirements. An empty
+matrix preserves existing role ladders. Model locks bound Default → You →
+Project selection; residency locks allow any narrower choice and flag loosening.
+Ticket requirements and existing run stamps remain floors. Account routing
+recomputes the canonical starter's live requirement before every reservation,
+recheck and vendor retry; no account evidence means class `any` until AEON-473.
+Pairing verification remains exempt. Preference endpoints, planning callers
+and UI editing follow in 502b–e.
+
+Migration 1104's tenant-loop seed and replacement area-schema helper require an
+exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+slug pattern includes every previous area, and current Go area validation stays
+unchanged. Coordinator review and previous-binary compatibility CI remain
+required before merge/release. Before rolling back below this fence, set all
+residency requirements to `any` or pause dispatch; older binaries cannot enforce
+these stamps.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

@@ -460,7 +460,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
         <span class="seg" role="radiogroup" aria-labelledby="days-lbl" @keydown="daysKey">
           <button
             v-for="n in ([5, 6, 7] as const)" :key="n" type="button" role="radio" :data-v="n" :aria-checked="days.preset === n" :tabindex="(days.preset ?? 5) === n && days.preset !== null ? 0 : -1"
-            :disabled="!mayManage || busy" :data-tip="mayManage ? undefined : manageTip" @click="setPreset(n)"
+            :disabled="!mayManage" :aria-disabled="busy" :data-tip="mayManage ? undefined : manageTip" @click="setPreset(n)"
           >{{ n }}</button>
           <button v-if="days.preset === null" type="button" role="radio" data-v="custom" aria-checked="true" tabindex="0" :disabled="!mayManage" @click="openEditor('week')">{{ days.custom }}</button>
         </span>
@@ -476,7 +476,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
       </div>
       <div class="setting nights">
         <span id="nights-lbl" class="lbl" @click="toggleNights">Agents at night</span>
-        <button class="tog" type="button" role="switch" :aria-checked="schedule.nights" aria-labelledby="nights-lbl" :disabled="!mayManage || busy" :data-tip="mayManage ? undefined : manageTip" @click="toggleNights" />
+        <button class="tog" type="button" role="switch" :aria-checked="schedule.nights" aria-labelledby="nights-lbl" :disabled="!mayManage" :aria-disabled="busy" :data-tip="mayManage ? undefined : manageTip" @click="toggleNights" />
         <span class="hint" :class="{ off: !schedule.nights }">{{ nightLabel(schedule) }}</span>
         <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'night'" aria-label="Customize night and shifts" :data-tip="mayManage ? 'Customize night and shifts' : manageTip" :disabled="!mayManage" @click="openEditor('night')"><AppIcon name="gear" :size="15" /></button>
       </div>

@@ -3,12 +3,12 @@
 // Unicode 17.0.0. See unicodegen/LICENSE for the Unicode data license.
 // Source URLs and verified input hashes are pinned in the generator.
 
-package doctrine
+package unicodeguard
 
-const unicodeGuardVersion = "17.0.0"
-const unicodeGuardTableSHA256 = "bf9fd87b8aff230935c6dccc3a306b844a80f0448bd65c28e32df5a831afd0cd"
+const Version = "17.0.0"
+const TableSHA256 = "bf9fd87b8aff230935c6dccc3a306b844a80f0448bd65c28e32df5a831afd0cd"
 
-var unicodeConfusables = map[rune]string{
+var Confusables = map[rune]string{
 	0x22:    "\U00000027\U00000027",
 	0x25:    "\U000000ba\U0000002f\U00002080",
 	0x30:    "\U0000004f",
@@ -6576,7 +6576,7 @@ var unicodeConfusables = map[rune]string{
 	0x31E7C: "\U00007dc7",
 }
 
-var unicodeSmallCapitals = map[rune]string{
+var SmallCapitals = map[rune]string{
 	0x262:  "\U00000067",
 	0x26A:  "\U00000069",
 	0x274:  "\U0000006e",
@@ -6604,7 +6604,7 @@ var unicodeSmallCapitals = map[rune]string{
 	0xA7AF: "\U00000071",
 }
 
-var unicodeDefaultIgnorables = [...][2]rune{
+var DefaultIgnorables = [...][2]rune{
 	{0xAD, 0xAD},
 	{0x34F, 0x34F},
 	{0x61C, 0x61C},
