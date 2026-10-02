@@ -10,10 +10,10 @@ import (
 
 func TestJournalHoldLookupIsBoundedByAdmission(t *testing.T) {
 	f := newWorld(t, generous())
-	id := f.hold(1, 100)
+	id := text(object(f.success("ledger", "admit", "POST", f.admitBody(1, 100), nil)["body"])["hold_id"])
 
 	// Seed many immutable acknowledgements for other holds, ahead of the target.
-	// Their invalid field shape must never be decoded by this exact lookup.
+	// The target is appended last; unrelated acknowledgements must stay unread.
 	_, err := f.database.Admin.Exec(t.Context(), `INSERT INTO aithema_journal_records(tenant_id,sid,seq,client_event_id,contract,kind,original_bytes,document)
   SELECT $1,$2,g,gen_random_uuid(),'aithema.journal.record','budget.hold',convert_to('{}','UTF8'),convert_to(jsonb_set($3::jsonb,'{data,hold_id}',to_jsonb('00000000-0000-4000-8000-000000000000'::text))::text,'UTF8') FROM generate_series(1,2000) g`, f.claims.TenantID, f.claims.SessionID, marshal(f.journalHold(id)))
 	if err != nil {

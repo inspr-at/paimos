@@ -145,6 +145,9 @@ type timelineCandidate struct {
 }
 
 func (m *module) read(ctx context.Context, p tenant.Principal, node string, limit int, c *cursor) (Page, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ctx = db.WithReadStatementTimeout(ctx, 5*time.Second)
 	page := Page{Items: []Item{}}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var found string
