@@ -144,6 +144,9 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		}
 	}
 	q.Role = strings.TrimSpace(q.Role)
+	if q.PersonID == nil {
+		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
+	}
 	if q.Role == "review-gate" || q.Role == "review-gate-security" {
 		if q.AuthorFamily == "" {
 			return WorkResolution{}, fail(400, "review-gate requires author_family")
@@ -159,9 +162,6 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 	role, ok := roleByName(q.Role)
 	if !ok {
 		return WorkResolution{}, fail(400, "unknown model role")
-	}
-	if q.PersonID == nil {
-		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	chain, trace, requirement, err := placementTrace(ctx, tx, q)
 	if err != nil {

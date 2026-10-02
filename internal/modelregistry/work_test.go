@@ -170,6 +170,47 @@ func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 	})
 }
 
+func TestResolveWorkReviewInfersCanonicalStarter(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		var alias, agent string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,linked_to)
+   VALUES($1,'person','Linked reviewer',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&alias); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name)
+   VALUES($1,'agent','Review starter') RETURNING id::text`, p.TenantID).Scan(&agent); err != nil {
+			return err
+		}
+		eu := "eu"
+		if _, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "person", PersonID: &p.ID, Residency: &eu}); err != nil {
+			return err
+		}
+		for _, tc := range []struct {
+			name       string
+			who        tenant.Principal
+			wantPerson bool
+		}{
+			{"person", p, true},
+			{"linked person", tenant.Principal{ID: alias, TenantID: p.TenantID, Kind: tenant.Person}, true},
+			{"creator key", tenant.Principal{ID: agent, TenantID: p.TenantID, Kind: tenant.Agent, KeyCreatorID: alias}, true},
+			{"operator key", tenant.Principal{ID: agent, TenantID: p.TenantID, Kind: tenant.Agent}, false},
+		} {
+			got, err := ResolveWork(t.Context(), tx, tc.who, WorkQuery{Role: "review-gate", AuthorFamily: "openai"}, time.Now())
+			if err != nil {
+				return err
+			}
+			if tc.wantPerson {
+				if got.Trace.PersonID == nil || *got.Trace.PersonID != p.ID || got.Residency != "eu" {
+					t.Fatal(tc.name, "lost canonical starter", got)
+				}
+			} else if got.Trace.PersonID != nil || got.Residency != "any" {
+				t.Fatal("operator key gained You scope", got)
+			}
+		}
+		return nil
+	})
+}
+
 func expectConstraint(t *testing.T, tx pgx.Tx, code, sql string, args ...any) {
 	t.Helper()
 	nested, err := tx.Begin(t.Context())
