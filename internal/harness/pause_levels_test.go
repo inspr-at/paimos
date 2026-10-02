@@ -149,8 +149,9 @@ func TestLeavingAtDeadlinePrecisionAndReplacement(t *testing.T) {
 	}
 	w := f.call(f.person, "GET", path, nil, "")
 	expect(t, w, 200)
-	if decode(t, w)["pause"].(map[string]any)["deadline_at"] != first["deadline_at"] {
-		t.Fatal("session and person deadlines differ")
+	sessionDeadline, err := time.Parse(time.RFC3339Nano, decode(t, w)["pause"].(map[string]any)["deadline_at"].(string))
+	if err != nil || !sessionDeadline.Equal(stored) {
+		t.Fatalf("session deadline %v differs from person deadline %v (parse error: %v)", sessionDeadline, stored, err)
 	}
 	// A retry may carry the original input, the returned deadline, a different
 	// zone, or nanoseconds within the same stored microsecond.
