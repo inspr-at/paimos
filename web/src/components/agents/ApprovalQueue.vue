@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { metadataOnlyAttach, type AttachQueueRow, type AttachReview } from '../../lib/attachWatch'
 import type { Approval, ProjectMessage } from '../../lib/agents'
 import { HARNESS_NAME, LOGIN_COMMAND, type AccountRow } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
@@ -22,14 +23,14 @@ const { appearance } = useAgentAppearance()
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
   pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; canResolve: boolean; canRevoke: boolean; loaded: boolean
-  signins?: AccountRow[]; historyOnly?: boolean
+  signins?: AccountRow[]; historyOnly?: boolean; attaches?: AttachQueueRow[]; attachHistory?: AttachQueueRow[]
   asker: (principalId: string, fallbackName?: string | null) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<Pick<Approval, 'decision'>>
   revoke: (approval: Approval) => Promise<void>
   resolve: (request: Held, decision: 'resolved' | 'dismissed', note: string) => Promise<void>
 }>()
 // settling: a decided card is still on screen, so the page keeps this card mounted.
-const emit = defineEmits<{ focusRow: [id: string]; openAgent: [principalId: string]; settling: [active: boolean]; announce: [text: string] }>()
+const emit = defineEmits<{ focusRow: [id: string]; openAgent: [principalId: string]; settling: [active: boolean]; announce: [text: string]; reviewAttach: [request: AttachReview]; dismissAttach: [id: string] }>()
 
 type Mode = 'approve' | 'deny' | 'resolve' | 'dismiss'
 const open = ref<{ id: string; mode: Mode } | null>(null)
@@ -96,8 +97,14 @@ const rows = computed(() => {
     return { approval, settled: entry && entry.phase !== 'confirming' ? entry : undefined }
   })
 })
+// Attach approvals use the same queue shape, ordered with permissions by expiry.
+const orderedRows = computed(() => [
+  ...rows.value.map(permission => ({ permission, attach: null as AttachQueueRow | null, expiry: permission.approval.expires_at, key: `a:${permission.approval.id}` })),
+  ...(props.attaches ?? []).map(attach => ({ attach, permission: null, expiry: attach.review.expires_at, key: `t:${attach.review.request_id}` })),
+].sort((a, b) => Date.parse(a.expiry) - Date.parse(b.expiry)))
 // Decided takes a request when its card starts to fold, so the count ticks then.
 const decided = computed(() => props.history.filter(item => !decisions.holding(item.id)))
+const decidedCount = computed(() => decided.value.length + (props.attachHistory?.length ?? 0))
 const ticks = ref(0)
 watch(() => decided.value.length, (count, before) => { if (count > before) ticks.value++ })
 
@@ -152,9 +159,9 @@ async function revoke(approval: Approval) {
   catch (e) { error.value = e instanceof Error ? e.message : 'Revoking did not work. Please try again.' }
 }
 const outcome = (approval: Approval) => revoked.value.has(approval.id) ? 'Revoked' : approval.decision === 'approved' ? 'Approved' : approval.decision === 'denied' ? 'Denied' : 'Expired'
-const count = computed(() => props.pending.length + props.held.length + (props.signins?.length ?? 0))
+const count = computed(() => props.pending.length + props.held.length + (props.signins?.length ?? 0) + (props.attaches?.filter(row => row.outcome === 'waiting').length ?? 0))
 // What the card shows: a decided request counts as waiting until it folds.
-const shown = computed(() => rows.value.length + props.held.length + (props.signins?.length ?? 0))
+const shown = computed(() => rows.value.length + props.held.length + (props.signins?.length ?? 0) + (props.attaches?.length ?? 0))
 const badge = computed(() => count.value + rows.value.filter(row => !props.pending.includes(row.approval) && decisions.holding(row.approval.id)).length)
 const vendor = (row: AccountRow) => HARNESS_NAME[row.harness] ?? row.harness
 async function copyLogin(row: AccountRow) {
@@ -172,9 +179,10 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   <section v-if="historyOnly" class="decided" aria-label="Decided requests">
     <div class="history">
       <button type="button" class="history-toggle" :aria-expanded="showHistory" aria-controls="approval-history" @click="showHistory = !showHistory">
-        <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span :key="ticks" class="mono" :class="{ tick: ticks }">{{ decided.length }}</span>
+        <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span :key="ticks" class="mono" :class="{ tick: ticks }">{{ decidedCount }}</span>
       </button>
       <ul v-if="showHistory" id="approval-history" class="history-list">
+        <li v-for="row in attachHistory ?? []" :key="`t:${row.review.request_id}`" class="past attach-past" :class="{ approved: row.outcome === 'approved' }"><AppIcon :name="row.outcome === 'approved' ? 'check' : row.outcome === 'expired' ? 'clock' : 'close'" :size="13" class="past-icon" /><span class="past-what">Attach {{ row.what }}</span><span class="past-who">{{ row.ticket.key }}</span><span class="past-outcome">{{ row.outcome === 'approved' ? 'Allowed' : row.outcome === 'declined' ? 'Declined' : row.outcome === 'expired' ? 'Expired' : 'Cancelled' }}</span></li>
         <li v-for="approval in decided.slice(0, 20)" :key="approval.id" class="past" :class="outcome(approval).toLowerCase()">
           <AppIcon :name="outcome(approval) === 'Approved' ? 'check' : outcome(approval) === 'Expired' ? 'clock' : 'close'" :size="13" class="past-icon" />
           <span class="past-what">{{ scopeLabel(approval.scope) }}</span>
@@ -197,7 +205,21 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
     </div>
 
     <ul v-else-if="shown" class="items" aria-label="Requests waiting for you">
-      <template v-for="{ approval, settled } in rows" :key="approval.id">
+      <template v-for="entry in orderedRows" :key="entry.key">
+        <li v-if="entry.attach" class="item attach-item" :class="{ settled: entry.attach.outcome !== 'waiting', approved: entry.attach.outcome === 'approved' }" :data-row="entry.key" :data-outcome="entry.attach.outcome" aria-label="Attach request">
+          <span class="mark" aria-hidden="true"><HarnessMark v-if="entry.attach.outcome === 'waiting'" :harness="entry.attach.review.snapshot.harness" :size="16" /><AppIcon v-else :name="entry.attach.outcome === 'approved' ? 'check' : entry.attach.outcome === 'expired' ? 'clock' : 'close'" :size="15" /></span>
+          <div class="body">
+            <template v-if="entry.attach.outcome === 'waiting'">
+              <p class="line1"><strong class="what">Attach {{ entry.attach.what }}{{ metadataOnlyAttach(entry.attach.review.snapshot) ? ', status only' : ' and share its conversation' }}</strong><time class="expiry" :class="{ soon: entry.attach.soon }" :datetime="entry.attach.review.expires_at">{{ entry.attach.left }}</time></p>
+              <p class="line2"><span class="who">{{ metadataOnlyAttach(entry.attach.review.snapshot) ? 'Status only' : 'Watch the conversation' }}</span><span class="asks">for</span><span class="res-key plain">{{ entry.attach.ticket.key }}</span><span class="res-title" :title="entry.attach.ticket.title">{{ entry.attach.ticket.title }}</span></p>
+              <p class="attach-terminal"><AppIcon name="terminal" :size="13" />Your terminal on {{ entry.attach.review.snapshot.host }} waits</p>
+            </template>
+            <template v-else><p class="settled-line"><strong class="settled-word">{{ entry.attach.outcome === 'approved' ? 'Allowed' : entry.attach.outcome === 'expired' ? 'Expired' : entry.attach.outcome === 'declined' ? 'Declined' : 'Cancelled' }}</strong><span class="sep">·</span>{{ entry.attach.what }}</p><p class="attach-detail">{{ entry.attach.detail }}</p></template>
+          </div>
+          <div class="row-actions"><button v-if="entry.attach.outcome === 'waiting'" type="button" class="btn sm ghost answer" @click="emit('reviewAttach', entry.attach.review)">Review…</button><span v-else-if="entry.attach.outcome === 'approved'" class="wait-mac">{{ entry.attach.review.consent_mode === 'local_auth' ? 'Waiting for the Mac' : 'Connecting…' }}</span><button v-else type="button" class="dismiss" aria-label="Dismiss this attach request" @click="emit('dismissAttach', entry.attach.review.request_id)"><AppIcon name="close" :size="14" /></button></div>
+        </li>
+        <template v-else-if="entry.permission">
+        <template v-for="{ approval, settled } in [entry.permission]" :key="approval.id">
         <!-- Confirmed by the server: the outcome in the card's own place, then the fold. -->
         <li
           v-if="settled" class="item settled" :class="[settled.decision, settled.phase]" :data-settled="approval.id"
@@ -262,6 +284,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
           </div>
         </li>
+        </template>
+        </template>
       </template>
       <li
         v-for="request in held" :key="request.id" class="item held agent-state-surface" :class="{ active: cursor === `m:${request.id}`, open: open?.id === request.id }" :data-row="`m:${request.id}`" tabindex="-1"
@@ -320,9 +344,10 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
          insert a footer below a card whose original height is still held (AEON-505). -->
     <footer v-if="loaded" class="history">
       <button ref="decidedToggle" type="button" class="history-toggle" :aria-expanded="showHistory" aria-controls="approval-history" @click="showHistory = !showHistory">
-        <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span :key="ticks" class="mono" :class="{ tick: ticks }">{{ decided.length }}</span>
+        <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span :key="ticks" class="mono" :class="{ tick: ticks }">{{ decidedCount }}</span>
       </button>
       <ul v-if="showHistory" id="approval-history" class="history-list">
+        <li v-for="row in attachHistory ?? []" :key="`t:${row.review.request_id}`" class="past attach-past" :class="{ approved: row.outcome === 'approved' }"><AppIcon :name="row.outcome === 'approved' ? 'check' : row.outcome === 'expired' ? 'clock' : 'close'" :size="13" class="past-icon" /><span class="past-what">Attach {{ row.what }}</span><span class="past-who">{{ row.ticket.key }}</span><span class="past-outcome">{{ row.outcome === 'approved' ? 'Allowed' : row.outcome === 'declined' ? 'Declined' : row.outcome === 'expired' ? 'Expired' : 'Cancelled' }}</span></li>
         <li v-for="approval in decided.slice(0, 20)" :key="approval.id" class="past" :class="outcome(approval).toLowerCase()">
           <AppIcon :name="outcome(approval) === 'Approved' ? 'check' : outcome(approval) === 'Expired' ? 'clock' : 'close'" :size="13" class="past-icon" />
           <span class="past-what">{{ scopeLabel(approval.scope) }}</span>
@@ -339,6 +364,11 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 
 <style scoped>
 .queue { overflow: clip; container: queue / inline-size; }
+.attach-terminal { display: flex; align-items: center; gap: 6px; color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
+.attach-item .expiry:not(.soon), .attach-item .res-title { color: var(--ink-2); }
+.attach-detail { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.wait-mac { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.dismiss { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); }
 /* Something waits: a warm full tint and a soft gold ring, never an edge bar. */
 .queue:not(.clear) { background: linear-gradient(165deg, color-mix(in srgb, var(--gold-2) 16%, var(--surface-raised-2)), color-mix(in srgb, var(--gold-2) 10%, var(--glass)) 60%); box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--gold) 38%, transparent); }
 .queue:not(.clear) .item + .item { box-shadow: 0 -1px 0 color-mix(in srgb, var(--gold) 18%, transparent); }
@@ -349,7 +379,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .card-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 18px 8px; }
 .queue.clear .card-head { padding-bottom: 10px; }
 .card-head h2 { font-size: 17px; font-weight: 600; }
-.count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--gold); color: #fff; font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.count-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--agent-waiting); color: var(--surface-raised); font: 700 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .all-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-3); }
 .skeleton-rows { display: grid; gap: 4px; padding: 0 8px 8px; }
 .sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 10px; }
