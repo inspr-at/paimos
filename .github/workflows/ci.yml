@@ -257,9 +257,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
+      - name: Work queue regressions and theme screenshots
+        working-directory: web
+        run: npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1
+      - name: Work queue screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: work-queue-${{ github.sha }}
+          path: .agent-shots/queue/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Ticket dispatch, panel and worker regressions
+        working-directory: web
+        run: npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2
+
       - name: Session linking unit checks
         working-directory: web
-        run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
+        run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts tests/account-link.test.ts
 
       - name: Additional harness brands and pairing vocabulary
         working-directory: web
@@ -275,7 +290,14 @@ jobs:
         env:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts --workers=2
+        run: npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
+      - name: Preserve account linking screenshots and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: account-link-browser-evidence
+          path: web/test-results/
+          retention-days: 7
       - name: Scope proposals and key management regressions
         working-directory: web
         run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
@@ -388,6 +410,8 @@ jobs:
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
+      - name: Full UI QA workflow regressions
+        run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
@@ -487,7 +511,8 @@ jobs:
       - working-directory: web
         env:
           STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts --workers=1
+          AGENT_ACTIVITY_SHOTS: ${{ runner.temp }}/status-autopilot-shots/activity
+        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
       - uses: actions/upload-artifact@v7
         if: always()
         with:

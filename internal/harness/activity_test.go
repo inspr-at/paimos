@@ -3,6 +3,7 @@
 package harness_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -111,4 +112,86 @@ func TestActivityNotesValidationHistoryAndIsolation(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestActivityNotesRejectCredentialsAndRevalidateStoredText(t *testing.T) {
+	f := fixture(t)
+	lease := "note-privacy-lease-" + uid()
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.agent, "POST", base, map[string]any{
+		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "activity-test",
+		"harness_session_ref": "note-privacy-ref-" + uid(), "worker_lease": lease,
+		"management_mode": "unmanaged", "role": "worker",
+	}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	path := base + "/" + id
+	beat := func(sequence int, note string, status int) {
+		t.Helper()
+		expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{
+			"phase": "working", "activity_sequence": sequence, "activity_note": note,
+		}, lease), status)
+	}
+	for i, bad := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live"} {
+		beat(i*2+1, "Reviewing the change", 200)
+		beat(i*2+2, bad, 400)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var note string
+			if err := tx.QueryRow(t.Context(), `SELECT activity_note FROM harness_sessions WHERE id=$1`, id).Scan(&note); err != nil {
+				return err
+			}
+			if note != "Reviewing the change" {
+				t.Fatal("rejected note was saved")
+			}
+			var count int
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_activity_notes WHERE session_id=$1 AND note=$2`, id, bad).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Fatal("rejected note entered history")
+			}
+			// Simulate values retained from a reporter predating this filter.
+			if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET activity_note=$2 WHERE id=$1`, id, bad); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO harness_activity_notes(tenant_id,session_id,note) VALUES($1,$2,$3)`, f.person.TenantID, id, bad); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO harness_current_activity(tenant_id,session_id,text,source,at) VALUES($1,$2,$3,'agent',now())`, f.person.TenantID, id, bad)
+			return err
+		})
+		detail := decode(t, f.call(f.person, "GET", path, nil, ""))
+		if detail["activity_note"] != nil || detail["current_activity"] != nil {
+			t.Fatal("unsafe stored note was returned as activity")
+		}
+		for _, field := range []string{"activity_history", "current_activity_history"} {
+			items, _ := detail[field].([]any)
+			for _, item := range items {
+				row := item.(map[string]any)
+				if row["note"] == bad || row["text"] == bad {
+					t.Fatal("unsafe stored text was returned in history")
+				}
+			}
+		}
+		for _, endpoint := range []string{base, "/api/harness-sessions", "/api/harness-sessions/live"} {
+			w := f.call(f.person, "GET", endpoint, nil, "")
+			expect(t, w, 200)
+			var rows []any
+			if endpoint == base {
+				if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				rows = decode(t, w)["items"].([]any)
+			}
+			if len(rows) != 1 || rows[0].(map[string]any)["activity_note"] != nil {
+				t.Fatal("unsafe stored note was returned by a session list")
+			}
+		}
+	}
+	beat(100, "Editing planning.ts", 200)
+	detail := decode(t, f.call(f.person, "GET", path, nil, ""))
+	if detail["activity_note"] != "Editing planning.ts" {
+		t.Fatal("public note was hidden")
+	}
 }
