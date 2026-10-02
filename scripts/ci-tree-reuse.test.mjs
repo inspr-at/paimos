@@ -33,7 +33,7 @@ function check(f, overrides = {}) {
   return decide({ event: 'merge_group', tree, repository, readRecord: async () => f.record, api: f.api, ...overrides });
 }
 
-test('equal trees reuse even though merge commit and source commit differ', async () => {
+test('equal target and verified source trees reuse', async () => {
   const f = fixture();
   const result = await check(f);
   assert.equal(result.reuse, 'tree');

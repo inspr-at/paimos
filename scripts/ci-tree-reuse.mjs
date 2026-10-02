@@ -181,7 +181,7 @@ async function main(mode, vars) {
   // Diverged/fork PRs are ineligible, not failed writes. Establish eligibility first.
   let record;
   try { record = await verifyRun(repository, event.workflow_run.id, api); }
-  catch { console.log('No eligible successful full-suite tree to publish'); return; }
+  catch { console.log('No verified successful full-suite tree available; no record published'); return; }
   const store = await registry(repository, token, actor, request, true);
   await publish(record, api, store);
   console.log(`Recorded tree=${record.tree} run=${record.run}`);
