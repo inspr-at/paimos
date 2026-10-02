@@ -66,21 +66,25 @@ for (const width of [1440, 1024, 390]) {
     await page.route('**/api/projects/*/harness-sessions/*/controls/*', route => route.fulfill({ json: { id: request.request_id, session_id: session(1), kind: request.kind, state: 'completed', outcome: 'applied', reason: 'native_interrupt_acknowledged' } }))
     await page.goto(`/agents/${session(1)}`)
     const controls = page.getByRole('region', { name: 'Session controls' })
-    const interrupt = controls.getByRole('button', { name: 'Interrupt', exact: true }), stop = controls.getByRole('button', { name: 'Stop', exact: true })
+    const more = controls.getByRole('button', { name: 'More session controls', exact: true })
+    const interrupt = page.getByRole('menuitem', { name: /^Interrupt this step/ })
+    const stop = page.getByRole('button', { name: 'Stop now…', exact: true })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    await more.click()
     await expectStableControls({
-      controls: { interrupt, stop },
+      controls: { interrupt, more, stop },
       interactions: [
-        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied') } },
-        { name: 'open and cancel Stop', run: async () => { await stop.click(); await page.getByRole('button', { name: 'Confirm stop' }).hover(); await page.getByRole('button', { name: 'Cancel', exact: true }).click() } },
+        { name: 'interrupt receipt', run: async () => { await interrupt.click(); await expect(controls.getByRole('status')).toContainText('Interrupt applied'); await more.click() } },
+        { name: 'open and cancel Stop now', run: async () => { await more.click(); await stop.click(); await dialog.getByRole('button', { name: /^Stop now/ }).hover(); await dialog.getByRole('button', { name: /^Cancel/ }).click(); await more.click() } },
       ],
     })
     if (width === 390) {
+      await more.click()
       await stop.click()
-      const sheet = page.getByRole('dialog', { name: 'Stop', exact: true })
       await expectStableControls({
-        controls: { sheet, close: sheet.getByRole('button', { name: 'Close' }), confirm: sheet.getByRole('button', { name: 'Confirm stop' }), cancel: sheet.getByRole('button', { name: 'Cancel' }) },
-        scrollAreas: { body: sheet.locator('.sheet-body') },
-        interactions: [{ name: 'hover confirmation', run: () => sheet.getByRole('button', { name: 'Confirm stop' }).hover() }],
+        controls: { sheet: dialog, close: dialog.getByRole('button', { name: 'Close pause dialog' }), confirm: dialog.getByRole('button', { name: /^Stop now/ }), cancel: dialog.getByRole('button', { name: /^Cancel/ }), footer: dialog.locator('.pause-actions') },
+        scrollAreas: { body: dialog.locator('.pause-body') },
+        interactions: [{ name: 'hover confirmation', run: () => dialog.getByRole('button', { name: /^Stop now/ }).hover() }],
       })
     }
   })
@@ -110,16 +114,17 @@ for (const width of [1440, 1024, 390]) {
     await page.goto('/agents')
     async function open(n: number) {
       await page.locator(`[data-row="s:${session(n)}"]`).getByRole('button', { name: /^Actions for/ }).click()
-      await page.getByRole('menuitem', { name: /Stop session/ }).click()
-      await expect(page.locator('.confirm[open]')).toBeVisible()
+      await page.getByRole('menuitem', { name: 'Stop now…', exact: true }).click()
+      await expect(page.getByRole('dialog', { name: /^Stop now / })).toBeVisible()
     }
     await open(1)
-    const dialog = page.locator('.confirm[open]')
-    const cancel = dialog.getByRole('button', { name: 'Cancel' })
+    const dialog = page.getByRole('dialog', { name: /^Stop now / })
+    const cancel = dialog.getByRole('button', { name: /^Cancel/ })
+    const stop = dialog.getByRole('button', { name: /^Stop now/ })
     await expectStableControls({
-      controls: { ...(width === 390 ? { dialog } : {}), cancel, stop: dialog.getByRole('button', { name: 'Stop session' }) },
-      scrollAreas: { body: dialog.locator('#confirm-body') },
-      interactions: [2, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(cancel).toBeFocused() } })),
+      controls: { ...(width === 390 ? { dialog } : {}), cancel, stop },
+      scrollAreas: { body: dialog.locator('.pause-body') },
+      interactions: [2, 1].map(n => ({ name: `next/previous session ${n}`, run: async () => { await cancel.click(); await open(n); await expect(stop).toBeFocused() } })),
     })
   })
 
