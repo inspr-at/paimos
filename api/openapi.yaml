@@ -4613,7 +4613,7 @@ paths:
           description: Personal plan and running counts
           content: {application/json: {schema: {$ref: '#/components/schemas/AgentsPlanSnapshot'}}}
         '401': {description: Authentication required}
-        '403': {description: Missing scope, live role permission or person creator}
+        '403': {description: 'Missing scope, live role permission or person creator'}
         '500': {description: Invalid stored plan or database operation failed}
   /preferences/{key}:
     parameters:
