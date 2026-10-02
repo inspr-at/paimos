@@ -39,24 +39,57 @@ func TestRawResponseInclusiveCap(t *testing.T) {
 		}
 	}
 }
-func TestAttachmentLookupIsOneRequest(t *testing.T) {
+func TestCurlRejectsResponseOverCapWithoutOutput(t *testing.T) {
 	isolate(t)
-	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.URL.Path != "/api/attachments/"+id {
-			http.Error(w, "unexpected tenant walk", 500)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(attachmentView{ID: id, Name: "file", Size: 4})
+		_, _ = io.Copy(w, &repeatingReader{remaining: maxRawResponseBytes + 1})
 	}))
 	defer server.Close()
 	t.Setenv("AEON_URL", server.URL)
 	t.Setenv("AEON_API_KEY", testKey)
-	code, _, err := runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing.yaml"), "--json", "attach", "get", id}, "")
-	if code != 0 || calls != 1 {
-		t.Fatalf("metadata lookup: code=%d requests=%d error=%s", code, calls, err)
+	code, out, _ := runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing.yaml"), "curl", "/api/bytes"}, "")
+	if code == 0 || out != "" {
+		t.Fatal("oversized curl response escaped as a successful prefix")
+	}
+}
+func TestAttachmentLookupIsOneRequest(t *testing.T) {
+	for _, nodes := range []int{1, 2000} {
+		t.Run(fmt.Sprint(nodes), func(t *testing.T) {
+			isolate(t)
+			id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path == "/api/nodes" {
+					items := make([]apiNode, nodes)
+					for i := range items {
+						items[i].ID = fmt.Sprintf("%08d-aaaa-4aaa-8aaa-aaaaaaaaaaaa", i)
+					}
+					_ = json.NewEncoder(w).Encode(nodePage{Items: items})
+					return
+				}
+				if strings.HasPrefix(r.URL.Path, "/api/nodes/") {
+					attachments := []attachmentView{}
+					if strings.Contains(r.URL.Path, fmt.Sprintf("%08d-aaaa-4aaa-8aaa-aaaaaaaaaaaa", nodes-1)) {
+						attachments = append(attachments, attachmentView{ID: id, Name: "file", Size: 4})
+					}
+					_ = json.NewEncoder(w).Encode(attachments)
+					return
+				}
+				if r.URL.Path != "/api/attachments/"+id {
+					http.Error(w, "unexpected tenant walk", 500)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(attachmentView{ID: id, Name: "file", Size: 4})
+			}))
+			defer server.Close()
+			t.Setenv("AEON_URL", server.URL)
+			t.Setenv("AEON_API_KEY", testKey)
+			code, _, err := runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing.yaml"), "--json", "attach", "get", id}, "")
+			if code != 0 || calls != 1 {
+				t.Fatalf("metadata lookup: code=%d requests=%d error=%s", code, calls, err)
+			}
+		})
 	}
 }
 func TestAttachmentDownloadPublishesOnlyVerifiedBytes(t *testing.T) {
