@@ -4238,6 +4238,143 @@
           "group": "features"
         }
       ]
+    },
+    "261002171043.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 120,
+      "snapshot_sha256": "91ccd899cb4fb961ba356e750f86a42da272e2684aeced66273eb909febe2b71",
+      "captured_at": "2026-10-02T17:38:56Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-432",
+          "pill_en": "Bigger rule budgets",
+          "pill_de": "Größere Regelbudgets",
+          "benefit_en": "You can give your agents up to 500 KB of rules and see the estimated token cost of the whole budget; an older client gets a clear error when locked rules exceed what it can handle.",
+          "benefit_de": "Du kannst deinen Agenten bis zu 500 KB Regeln geben und siehst die geschätzten Token-Kosten des ganzen Budgets; ein älterer Client bekommt eine klare Fehlermeldung, wenn gesperrte Regeln sein Limit überschreiten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-440",
+          "pill_en": "Easy attach approval",
+          "pill_de": "Freigabe der Sitzungsverknüpfung",
+          "benefit_en": "When you attach to a session, Aeon shows you right away where to approve it, without searching.",
+          "benefit_de": "Wenn du eine laufende Sitzung verknüpfst, zeigt Aeon dir sofort, wo du die Verknüpfung freigibst, ohne Suchen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-454",
+          "pill_en": "Morning briefing",
+          "pill_de": "Briefing am Morgen",
+          "benefit_en": "Open a briefing of what your agents recorded since your last visit (the first one covers 24 hours) and what needs you.",
+          "benefit_de": "Öffne ein Briefing mit dem, was deine Agenten seit deinem letzten Besuch festgehalten haben (das erste umfasst 24 Stunden), und mit dem, was dich braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-460",
+          "pill_en": "Touch ID for attach",
+          "pill_de": "Touch ID beim Verknüpfen",
+          "benefit_en": "On a supported Mac, you can require local authentication, such as Touch ID, and a signed confirmation after approving an attach in Aeon, before the session is linked.",
+          "benefit_de": "Auf einem unterstützten Mac kannst du nach deiner Freigabe in Aeon eine lokale Authentifizierung, etwa per Touch ID, und eine signierte Bestätigung verlangen, bevor die Sitzung verknüpft wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-511",
+          "pill_en": "Estimates versus real numbers",
+          "pill_de": "Schätzung oder echter Wert",
+          "benefit_en": "Where the ticket list shows token, cost and model columns, each value says whether it is an estimate or measured.",
+          "benefit_de": "Wo die Ticketliste Token-, Kosten- und Modellspalten zeigt, sagt jeder Wert, ob er geschätzt oder gemessen ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-524",
+          "pill_en": "Pause agents",
+          "pill_de": "Agenten pausieren",
+          "benefit_en": "You can request a pause for supported agents, one by one or all at once; a completed pause saves a handover so a later run can continue from there.",
+          "benefit_de": "Du kannst für unterstützte Agenten eine Pause anfordern, einzeln oder alle auf einmal; eine abgeschlossene Pause speichert eine Übergabe, damit ein späterer Lauf dort weitermachen kann.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-541",
+          "pill_en": "Nothing jumps around",
+          "pill_de": "Nichts springt mehr",
+          "benefit_en": "Controls stay where they are while you choose, so you never have to chase a button with the mouse.",
+          "benefit_de": "Bedienelemente bleiben beim Auswählen an ihrem Platz, du musst keinem Knopf mit der Maus hinterherjagen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-542",
+          "pill_en": "Clear release badge",
+          "pill_de": "Klares Release-Abzeichen",
+          "benefit_en": "The release badge in the footer reads cleanly and says what it is at a glance.",
+          "benefit_de": "Das Release-Abzeichen in der Fußzeile ist sauber lesbar und sagt auf einen Blick, was es ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-556",
+          "pill_en": "Hide reserved versions",
+          "pill_de": "Reservierte ausblenden",
+          "benefit_en": "The release history shows only versions that were actually published; developers can still show reserved ones.",
+          "benefit_de": "Die Versionshistorie zeigt nur tatsächlich veröffentlichte Versionen; Entwickler können reservierte weiterhin einblenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-558",
+          "pill_en": "Safer access changes",
+          "pill_de": "Sicherere Rechteänderungen",
+          "benefit_en": "Access changes take effect immediately, also for invitations and uploads in flight.",
+          "benefit_de": "Rechteänderungen wirken sofort, auch für laufende Einladungen und Uploads.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-559",
+          "pill_en": "Robust image uploads",
+          "pill_de": "Robuste Bild-Uploads",
+          "benefit_en": "One oversized image can no longer tie up the server's memory.",
+          "benefit_de": "Ein übergroßes Bild kann den Arbeitsspeicher des Servers nicht mehr blockieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-561",
+          "pill_en": "Secret check for rules",
+          "pill_de": "Geheimnisprüfung für Regeln",
+          "benefit_en": "Publishing a rule now rejects text that looks like a password or key.",
+          "benefit_de": "Beim Veröffentlichen einer Regel wird jetzt Text abgelehnt, der wie ein Passwort oder Schlüssel aussieht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-573",
+          "pill_en": "Recurring work",
+          "pill_de": "Wiederkehrende Arbeit",
+          "benefit_en": "Recurring tasks, like a weekly check or work after each release, now create their own tickets on a schedule; missed runs after downtime are combined, and a run can be skipped while the previous ticket is still open.",
+          "benefit_de": "Wiederkehrende Aufgaben wie eine wöchentliche Prüfung oder Arbeit nach jedem Release erstellen ihre Tickets jetzt nach Plan; verpasste Läufe nach einer Pause werden zusammengefasst, und ein Lauf kann ausfallen, solange das vorige Ticket noch offen ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-576",
+          "pill_en": "Tidier release list",
+          "pill_de": "Aufgeräumte Versionsliste",
+          "benefit_en": "Each release in the history reads on one line: name, badge and version side by side.",
+          "benefit_de": "Jede Version in der Historie steht in einer Zeile: Name, Kennzeichen und Versionsnummer nebeneinander.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-583",
+          "pill_en": "Cleaner agent stops",
+          "pill_de": "Saubereres Beenden von Agenten",
+          "benefit_en": "Supervised agent runs now enforce deadlines on tool input and output and clean up their own child processes when they hang.",
+          "benefit_de": "Beaufsichtigte Agentenläufe erzwingen jetzt Fristen für Tool-Ein- und -Ausgaben und räumen ihre eigenen Kindprozesse auf, wenn sie hängen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-586",
+          "pill_en": "Fewer deadlocks",
+          "pill_de": "Weniger Blockaden",
+          "benefit_en": "Several concurrent edit paths now avoid known deadlocks; affected CLI edits report a conflict instead of overwriting a newer revision.",
+          "benefit_de": "Mehrere gleichzeitige Bearbeitungswege vermeiden jetzt bekannte Blockaden; betroffene CLI-Bearbeitungen melden einen Konflikt, statt eine neuere Version zu überschreiben.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
