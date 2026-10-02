@@ -135,6 +135,57 @@ publication exists in A; current workflows and runner routing are unchanged.
 Future authority/executor and selection packages must establish those boundaries
 before any omission. Run the foundation tests with `go test ./internal/ciproof`.
 
+AEON-417 C adds `scripts/ci-go-impact`, a **shadow-only** Go selection and
+full-result comparison tool. The complete foundation/authority plan remains
+unchanged: every action is `run`, every required check and job remains present,
+and timing/static run fresh. `ci-go-impact shadow --mirror <absolute-bare-mirror>
+--git <absolute-reviewed-git> --plan <full-plan.json> --analysis-context
+<installed-context.json> --base-metadata <base-go-list.json> --candidate-metadata
+<candidate-go-list.json> --record <private-shadow.jsonl>` records a separate
+selection hint. This command consumes bounded artifacts and immutable Git blobs;
+it never launches candidate code or `go list` on the controller host. Missing,
+invalid, incomplete or unsupported metadata produces a full selection. Without
+metadata, omit the three analysis options to record that fallback explicitly.
+
+The metadata recipe is `/opt/aeon/bin/go list -mod=readonly -deps -test -json
+./...` in B's disposable offline Linux/amd64 guest. Collect base and candidate
+separately under the same pinned image/environment. The context has `goos`,
+`goarch`, `tags` (empty), `toolchain_digest`, `dependency_digest` and
+`environment_digest`. The decoder covers production/test/external-test imports,
+test variants, ignored source files and production/test embeds; immutable source
+imports independently widen the graph so a supplied artifact cannot remove
+edges. Unsupported targets/tags, cgo/assembly, workspaces/replacements, missing
+objects, malformed metadata and graph limits fall back to full work. A sealed B
+metadata observation has a separate validation API; raw CLI artifacts remain
+diagnostic. The reviewed analysis image and actual hosted boot proof still need
+coordinator provisioning before any trusted collection claim.
+
+The union of both graphs retains removed imports, files and packages. Changes to
+testdata, embedded files and declared runtime fixtures select owners and reverse
+dependants. Shared CI/harness/module/migration/OpenAPI/web-embed/version inputs
+and unmapped paths select the full inventory. The compiled
+`internal/ciproof/go-impact-policy.json` initially audits only `runkind`,
+`scopecode` and `ticketbenefits`, with byte pins and explicit runtime inputs.
+Changed or unknown runtime closures remain selected; candidate policy edits
+force full selection. Every selected package retains **all** ordinary shard rows
+in both recorded layouts. A scheduling hint never permits omission without a
+verified passing baseline receipt: `required_fresh_packages` always includes the
+complete live package inventory while optimization is disabled.
+
+Add `--results <full-run.json>` to compare the hint with actual full-run terminal
+results. The diagnostic input schema `aeon.ci.go-full-run.v1` binds `plan_id`,
+`candidate_commit`, `environment_digest`, `run_id`, `attempt` (1) and `layout`
+(7 for PRs; 4 is allowed for full main runs). Its `results` array has
+`obligation_id`, `package`, and `result` (`success`, `failure`, `skipped` or
+`cancelled`) for every live row of that layout, including all split-package rows.
+New packages without rows use their `go-package/<import-path>` obligation.
+Missing/skipped/cancelled rows make the comparison incomplete and leave
+`omitted_failure_count` null; a complete comparison must have zero omitted
+failures. The CLI records the comparison before exiting nonzero for incomplete
+coverage or omitted failures. These unsigned diagnostic records do not mint
+receipts, baseline credit, certificates or success checks. No workflow, required
+check, runner route, queue reuse, timing reuse or UI selection changes in C.
+
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
 `?section=knowledge` retains its background section. Tickets is the default,
