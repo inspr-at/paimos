@@ -443,6 +443,10 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 	if err := rows.Err(); err != nil {
 		return Account{}, nil, nil, err
 	}
+	accounts, err = attachWindows(ctx, tx, accounts)
+	if err != nil {
+		return Account{}, nil, nil, err
+	}
 	accounts, _, err = narrowCandidates(ctx, tx, run, harness, accounts)
 	if err != nil {
 		return Account{}, nil, nil, err
@@ -471,6 +475,11 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
 			continue
+		}
+		if run.Purpose != "pairing_verification" {
+			if err := reconcileVendorStop(ctx, tx, account, now); err != nil {
+				return Account{}, nil, nil, err
+			}
 		}
 		var active []Window
 		if run.Purpose == "pairing_verification" {
@@ -546,6 +555,11 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 			continue
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,burst_ratio,capacity_kind,capacity_read_at,capacity_allowed,capacity_source,capacity_bucket) SELECT tenant_id,id,$2,$3,'percent',1,0,'unrestricted',0,$5,$4,true,'estimate',$6 FROM agent_accounts WHERE id=$1 RETURNING id::text`, w.AccountID, w.StartsAt, w.EndsAt, w.capacityReadAt, w.capacityKind, w.capacityBucket).Scan(&w.ID); err != nil {
+			return Account{}, nil, nil, err
+		}
+	}
+	for _, w := range picks[0].windows {
+		if err := consumeRecovery(ctx, tx, run.ID, w.recoveryPermits); err != nil {
 			return Account{}, nil, nil, err
 		}
 	}

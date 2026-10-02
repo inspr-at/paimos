@@ -209,5 +209,10 @@
 // harness reset details use the same current accountprivacy policy. If a
 // successful mutation's response cannot be delivered safely, the error states
 // "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
-
+//
+// Package B uses per-run provisional ledgers for unknown usage, with no start
+// counter or serial quota fence. Real slots, schedules and manual limits bind.
+// Unnamed vendor and provider 402 waits grant one durable resource-scoped
+// recovery at expiry or on a current owner check. Failed inference advances
+// 1/2/4/8-hour backoff; only evidenced successful inference clears a 402.
 package agentaccounts

@@ -351,6 +351,24 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
 	}
+	if c := before.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if c := in.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
 	if in.Readiness != nil {
 		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
 			return Account{}, fail(409, "readiness daemon generation changed")

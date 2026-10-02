@@ -38,6 +38,7 @@ type ReadinessFactWrite struct {
 }
 
 type ReadinessFact struct {
+	recoveryRunID *string
 	legacyReading *capacity.Reading // Original legacy bucket/duration; never serialized.
 	ReadinessFactWrite
 	ReadingError       string     `json:"reading_error,omitempty"`
@@ -130,7 +131,7 @@ func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessR
 }
 
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 	out := []ReadinessFact{}
 	for rows.Next() {
 		var v ReadinessFact
-		if err := rows.Scan(&v.ResourceID, &v.WindowKey, &v.Source, &v.ObservedAt, &v.ResetsAt, &v.ReadingAt, &v.UsedPercent, &v.CreditState, &v.Remaining, &v.StopKind, &v.DenialReason, &v.ReadingError, &v.FailureCount, &v.CheckNextAttemptAt, &v.BackoffStep, &v.NextAttemptAt, &v.WaitID, &v.EarlyRecoveryUsed); err != nil {
+		if err := rows.Scan(&v.ResourceID, &v.WindowKey, &v.Source, &v.ObservedAt, &v.ResetsAt, &v.ReadingAt, &v.UsedPercent, &v.CreditState, &v.Remaining, &v.StopKind, &v.DenialReason, &v.ReadingError, &v.FailureCount, &v.CheckNextAttemptAt, &v.BackoffStep, &v.NextAttemptAt, &v.WaitID, &v.EarlyRecoveryUsed, &v.recoveryRunID); err != nil {
 			return nil, err
 		}
 		if v.ReadingAt != nil {

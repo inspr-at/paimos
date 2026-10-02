@@ -10613,7 +10613,8 @@ components:
       description: Windows are withheld unless current account privacy permits quota detail; accounts retain labels and state only. Declared allowance, explicit reservations and schedule capacity stay numbers. Used, headroom and hard remaining are null while a window is provisional, including mixed settled evidence. Null and overflow are never zero.
       required: [state, windows]
       properties:
-        state: {type: string, enum: [visible, withheld, none]}
+        state: {type: string, enum: [visible, partial, withheld, none], description: Partial when some windows are withheld or the result is truncated.}
+        truncated: {type: boolean, description: True when more than 1024 active windows exist; retained accounts and windows are bounded.}
         accounts:
           type: array
           maxItems: 1024
@@ -12925,7 +12926,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, unavailable]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -14125,7 +14126,7 @@ components:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
         priority: {type: integer, minimum: 1}
         profile_id: {type: string, format: uuid}
-        state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
+        state: {type: string, enum: [available, conserved, budget_limited]}
         reason: {type: string}
         valid_until: {type: [string, 'null'], format: date-time}
     ModelResolution:
@@ -14650,7 +14651,7 @@ components:
         last_probe_at: {type: [string, 'null'], format: date-time}
         last_probe_ok: {type: [boolean, 'null']}
         available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
-        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models, unavailable]}}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
         remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
         default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
         windows:

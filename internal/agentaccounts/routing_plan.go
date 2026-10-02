@@ -59,6 +59,12 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 				*dest = &end
 			}
 		}
+		if synthetic(w) {
+			if len(w.recoveryPermits) > 0 {
+				p.slots = min(p.slots, 1)
+			}
+			continue
+		}
 		available := float64(allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)) - w.Used - w.Reserved)
 		if w.capacityBudget != nil {
 			available = math.Min(available, *w.capacityBudget-float64(w.Reserved))

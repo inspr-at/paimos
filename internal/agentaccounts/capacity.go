@@ -828,7 +828,7 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 func applyCapacityPacing(ctx context.Context, tx pgx.Tx, a Account, windows []Window, now time.Time, s capacity.Schedule) error {
 	for i := range windows {
 		w := &windows[i]
-		if w.capacityReadAt == nil {
+		if w.capacityReadAt == nil || synthetic(*w) {
 			continue
 		}
 		ws := s

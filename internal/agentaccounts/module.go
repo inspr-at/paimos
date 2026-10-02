@@ -90,6 +90,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID); err != nil {
+			return err
+		}
 		if err := agentpairing.Lock(ctx, tx); err != nil {
 			return err
 		}
@@ -138,7 +141,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						return err
 					}
-					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3`, a.ID, a.LinkRevision, now.Add(-CheckTTL)))
+					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3 AND daemon_generation IS NOT DISTINCT FROM $4`, a.ID, a.LinkRevision, now.Add(-CheckTTL), a.daemonGeneration))
 					if err != nil && !isNoRows(err) {
 						return err
 					}

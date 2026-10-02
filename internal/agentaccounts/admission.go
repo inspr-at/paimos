@@ -29,7 +29,7 @@ func waitFor(code string) *CapacityWait { return &CapacityWait{Code: code} }
 
 // blindDayPolicy is the single Q3 switch: false selects unrestricted day use.
 // The parallel cap and vendor stop remain authoritative in either policy.
-func blindDayPolicy(s capacity.Schedule, now time.Time) bool { return s.WorkingAt(now) }
+func blindDayPolicy(_ capacity.Schedule, _ time.Time) bool { return false }
 
 func synthetic(w Window) bool { return w.capacityKind == "refresh" || w.capacityKind == "blind" }
 
@@ -76,17 +76,16 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if err != nil {
 		return nil, nil, err
 	}
-	blindHarness := a.Harness == "grok" || a.Harness == "cursor" || a.Harness == "pi"
-	block, err := loadVendorBlock(ctx, tx, a, now)
-	if err != nil {
-		return nil, nil, err
+	if s.ActiveOverride(now) == "hold" {
+		return nil, &CapacityWait{Code: "hold", Until: s.OverrideUntil, Timezone: s.Timezone}, nil
 	}
-	// A denial still in force is vendor truth. Run now cannot skip it.
-	if block.waiting(now) {
-		return nil, &CapacityWait{Code: "vendor", Until: block.until, ReadAt: block.readAt, Timezone: s.Timezone}, nil
+	permits, wait, err := readinessAdmission(ctx, tx, a, now, run, claiming)
+	if err != nil || wait != nil {
+		return nil, wait, err
 	}
-	// Omit synthetic grants from the next job's budget. They are never quota
-	// observations and a settled/released grant must not replenish itself.
+	if len(permits) > 0 && slots > 0 {
+		return nil, waitFor("capacity"), nil
+	}
 	regular := make([]Window, 0, len(all))
 	var own *Window
 	for _, w := range all {
@@ -97,13 +96,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			}
 			continue
 		}
-		if !w.pairingVerification {
-			regular = append(regular, w)
+		// Room readings expire; their old percentages and refresh fences cannot
+		// impose a fictitious budget. Hard stops were checked independently.
+		if w.pairingVerification || w.capacityReadAt != nil && (w.capacitySource == "estimate" || now.Sub(*w.capacityReadAt) > 10*time.Minute) {
+			continue
 		}
+		regular = append(regular, w)
 	}
 	active := activeWindows(regular, now)
-	// A person-scheduled manual budget must not be substituted with a first
-	// reading grant before that budget opens (pairing verification is separate).
 	if len(active) == 0 {
 		for _, w := range regular {
 			if w.capacityReadAt == nil && w.StartsAt.After(now) {
@@ -111,133 +111,37 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			}
 		}
 	}
-	if own != nil && len(active) == 0 {
-		active = []Window{*own}
-	}
-	// After the vendor's reset, or a bounded backoff when it named none, one
-	// run may refresh. The same once-per-generation and no-concurrent fences
-	// as the first reading apply. A new denial (new read time) can be probed
-	// again; a spent epoch cannot.
-	if len(active) == 0 && block.refreshDue(now) {
-		if peers := allowedOpenWindows(regular, now); len(peers) > 0 {
-			active = peers
-		} else {
-			granted, wait, err := recoveryGrant(ctx, tx, a, s, block, now, slots)
-			if err != nil {
-				return nil, nil, err
-			}
-			if wait != nil {
-				return nil, wait, nil
-			}
-			active = granted
-		}
-	}
-	if len(active) == 0 {
-		if refresh := expiredCapacityRefresh(a, all, now); refresh != nil {
-			active = []Window{*refresh}
-		}
-	}
-	if len(active) == 0 && (a.Harness == "codex" || a.Harness == "claude") {
-		var observed, granted bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`)),
- EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id IN (`+quotaAccounts+`) AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bootstrapBucket(a)).Scan(&observed, &granted)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !observed && !granted && a.daemonGeneration != nil {
-			if slots > 0 {
-				return nil, waitFor("reading"), nil
-			}
-			w := provisionalWindow(a.ID, now, "refresh")
-			w.capacityBucket = bootstrapBucket(a)
-			active = []Window{w}
-		}
-	}
-	// A recovery run that cleared the denial without a new reading gets one
-	// more provisional reading, keyed to that clearing time and generation.
-	// A second slot waits, and a spent grant does not mint another.
-	if len(active) == 0 && (a.Harness == "codex" || a.Harness == "claude") && a.daemonGeneration != nil && *a.daemonGeneration != "" {
-		cleared, ok, err := recoveryClearedAt(ctx, tx, a.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if ok {
-			bucket := "reread:" + *a.daemonGeneration + ":" + cleared.UTC().Format(time.RFC3339Nano)
-			var granted bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_allowance_windows WHERE account_id=$1 AND capacity_kind='refresh' AND capacity_bucket=$2)`, a.ID, bucket).Scan(&granted); err != nil {
-				return nil, nil, err
-			}
-			if granted || slots > 0 {
-				return nil, waitFor("reading"), nil
-			}
-			w := provisionalWindow(a.ID, now, "refresh")
-			w.capacityBucket = bucket
-			active = []Window{w}
-		}
-	}
-	blind := false
-	if blindHarness {
-		if blindDayPolicy(s, now) && slots > 0 {
-			return nil, waitFor("capacity"), nil
-		}
-		var observed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate')`, a.ID).Scan(&observed); err != nil {
-			return nil, nil, err
-		}
-		// The recovery grant is the next real queued run. It is not a paced
-		// budget and not one of the three daytime attempts. Measured
-		// Codex/Claude recovery stays on the paced path.
-		recovering := containsRecovery(active)
-		blind = !observed && (recovering || len(active) == 0 || own != nil && own.capacityKind == "blind")
-		if blind && !recovering {
-			runs, err := countBlindDayRuns(ctx, tx, a.ID, run.ID, s, now)
-			if err != nil {
-				return nil, nil, err
-			}
-			if blindDayPolicy(s, now) {
-				if slots > 0 {
-					return nil, waitFor("capacity"), nil
-				}
-				if runs >= 3 {
-					loc, _ := time.LoadLocation(s.Timezone)
-					local := now.In(loc)
-					d := s.Week[(int(local.Weekday())+6)%7]
-					end := time.Date(local.Year(), local.Month(), local.Day(), int(d.End), int(d.End*60)%60, 0, 0, loc)
-					return nil, &CapacityWait{Code: "allowance", Until: &end, Timezone: s.Timezone}, nil
-				}
-			}
-			if len(active) == 0 {
-				active = []Window{provisionalWindow(a.ID, now, "blind")}
-			}
-		}
-	}
-	if len(active) == 0 {
-		return nil, &CapacityWait{Code: "reading", ReadAt: lastRead(all)}, nil
-	}
-	stale := false
+	measured := false
 	for _, w := range active {
-		if w.capacityReadAt != nil && (w.capacityKind == "refresh" || now.Sub(*w.capacityReadAt) > 10*time.Minute && w.capacitySource != "estimate") {
-			stale = true
+		measured = measured || w.capacityReadAt != nil
+	}
+	if len(active) == 0 || len(permits) > 0 {
+		w := provisionalWindow(a.ID, now, "blind")
+		w.capacitySource = "estimate"
+		w.capacityBucket = "unknown:" + run.ID
+		if len(permits) > 0 {
+			w.capacityBucket = "recover:" + run.ID
 		}
-		if w.capacityReadAt != nil && !w.capacityAllowed {
-			return nil, &CapacityWait{Code: "vendor", Until: &w.EndsAt, Timezone: s.Timezone}, nil
+		if own != nil {
+			w = *own
 		}
+		w.recoveryPermits = permits
+		active = append(active, w)
 	}
-	if stale && slots > 0 {
-		return nil, &CapacityWait{Code: "reading", ReadAt: lastRead(all)}, nil
-	}
-	if s.ActiveOverride(now) == "hold" {
-		return nil, &CapacityWait{Code: "hold", Until: s.OverrideUntil, Timezone: s.Timezone}, nil
-	}
-	// Blind accounts use Q3 at night/off days, not a fictitious vendor window.
 	if run.CapacityOverride == "now" {
 		s.Override = "sprint"
 		s.OverrideUntil = nil
 	}
-	if !blind {
-		if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
-			return nil, nil, err
+	// Unknown usage cannot enforce a numeric reserve, but the person's clock
+	// and explicit Hold remain real gates. Sprint/Away/Run now retain meaning.
+	if !measured && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
+		next := s.NextStart(now, s.OffDays == "normal")
+		if next == nil || next.After(now) {
+			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
 		}
+	}
+	if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
+		return nil, nil, err
 	}
 	// Hard allowance wins over a schedule wait, in a stable window order, so
 	// "Run now once" is offered only when it can help.
@@ -279,7 +183,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			}
 		}
 		metric := windowLearning.metric(v, now, s, profile)
-		// Stale measured windows retain their one-run refresh fence.
+		// Only fresh measured windows enter this path.
 		if now.Sub(*w.capacityReadAt) <= 10*time.Minute || w.capacitySource == "estimate" {
 			w.capacityHold = int64(math.Ceil(metric.HoldPercent))
 		}
@@ -570,7 +474,7 @@ func recoveryClearedAt(ctx context.Context, tx pgx.Tx, accountID string) (time.T
 
 func containsRecovery(windows []Window) bool {
 	for _, w := range windows {
-		if w.capacityKind == "refresh" && strings.HasPrefix(w.capacityBucket, "recover:") {
+		if synthetic(w) && strings.HasPrefix(w.capacityBucket, "recover:") {
 			return true
 		}
 	}

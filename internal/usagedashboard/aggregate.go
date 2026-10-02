@@ -120,9 +120,10 @@ type UsageTicket struct {
 
 // AllowanceReport is pacing from registered windows, or an explicit withhold.
 type AllowanceReport struct {
-	State    string             `json:"state"`
-	Windows  []AllowanceWindow  `json:"windows"`
-	Accounts []AllowanceAccount `json:"accounts"`
+	Truncated bool               `json:"truncated"`
+	State     string             `json:"state"`
+	Windows   []AllowanceWindow  `json:"windows"`
+	Accounts  []AllowanceAccount `json:"accounts"`
 }
 
 // AllowanceAccount retains identity and state without exposing quota windows.
@@ -750,6 +751,10 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		if err := rows.Scan(&w.AccountID, &w.Label, &w.Harness, &w.AccountState, &w.WindowID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
 			return out, err
 		}
+		if len(windows) == 1024 {
+			out.Truncated = true
+			break
+		}
 		w.StartsAt, w.EndsAt = w.StartsAt.UTC(), w.EndsAt.UTC()
 		applyMeasuredAvailability(&w, used, now)
 		windows = append(windows, w)
@@ -763,9 +768,6 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		return out, err
 	}
 	rows.Close()
-	if len(windows) > 1024 {
-		return out, errors.New("too many allowance windows")
-	}
 	policy, err := accountprivacy.Load(ctx, tx, p, ids)
 	if err != nil {
 		return out, err
@@ -779,6 +781,9 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		out.State = "none"
 	} else if len(out.Windows) > 0 {
 		out.State = "visible"
+		if out.Truncated || len(out.Windows) < len(windows) {
+			out.State = "partial"
+		}
 	}
 	return out, nil
 }
