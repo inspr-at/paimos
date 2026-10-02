@@ -29,9 +29,18 @@ func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
 	if _, err := m.startSession(t.Context(), iid, tid, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	// A later subject with the same mailbox still needs verification.
-	if _, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "later", "admin@example.com", "Later", false, ""); !errors.Is(err, errNotMember) {
-		t.Fatalf("later subject: %v", err)
+	// Mailbox verification cannot transfer the first issuer/subject's access.
+	for _, later := range []struct {
+		issuer, subject string
+		verified        bool
+	}{
+		{"https://issuer.example", "later", false},
+		{"https://issuer.example", "later", true},
+		{"https://other-issuer.example", "verified", true},
+	} {
+		if _, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", later.issuer, later.subject, "admin@example.com", "Later", later.verified, ""); !errors.Is(err, errNotMember) {
+			t.Errorf("later issuer/subject (%s, %s, verified=%t): %v", later.issuer, later.subject, later.verified, err)
+		}
 	}
 	for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
 		want := 1
@@ -56,7 +65,7 @@ func TestBootstrapCallbackRequiresVerifiedEmail(t *testing.T) {
 	m := newMod(t, Config{Env: envDev, OIDCIssuer: issuer.issuer, OIDCClientID: "aeon-public", SessionKey: bytes.Repeat([]byte{5}, 32), BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
 	app := startApp(t, m)
 	m.cfg.PublicURL = app.URL
-	for _, claim := range []string{"absent", "false", "true", "later-absent", "later-false"} {
+	for _, claim := range []string{"absent", "false", "true", "later-absent", "later-false", "later-true"} {
 		t.Run(claim, func(t *testing.T) {
 			c := newHTTPClient()
 			login, err := c.Get(app.URL + "/api/auth/login")
@@ -96,7 +105,7 @@ func TestBootstrapCallbackRequiresVerifiedEmail(t *testing.T) {
 				}
 			}
 			count := 0
-			if claim == "true" || claim == "later-absent" || claim == "later-false" {
+			if claim == "true" || claim == "later-absent" || claim == "later-false" || claim == "later-true" {
 				count = 1
 			}
 			for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
