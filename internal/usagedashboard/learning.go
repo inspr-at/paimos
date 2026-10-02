@@ -54,6 +54,7 @@ type LearningSample struct {
 // identity are excluded rather than attributed to a guessed model. Wall time
 // and elapsed_seconds include waits and must never substitute for active_ms.
 // visible gates both the source project and the outcome project.
+//
 // LoadLearningSamples preserves the sample-only API; callers displaying hints
 // use LoadLearningHistory to retain the explicit truncation state.
 func LoadLearningSamples(ctx context.Context, tx pgx.Tx, targets []LearningCell, project string, visible func(string) bool) ([]LearningSample, error) {
@@ -68,26 +69,44 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
 		return nil, false, nil
 	}
 	profileRows, err := tx.Query(ctx, `SELECT id::text,harness,family,model,effort FROM model_profiles
- WHERE family=ANY($1::text[])`, learningFamilies(targets))
+ WHERE family=ANY($1::text[]) LIMIT 4097`, learningFamilies(targets))
 	if err != nil {
 		return nil, false, err
 	}
 	profiles := []string{}
-	cells := []map[string]string{}
-	for _, c := range targets {
-		cells = append(cells, map[string]string{"profile": c.ProfileID, "kind": c.Kind, "bucket": c.Bucket, "effort": c.Effort})
+	type targetCell struct {
+		Profile  string   `json:"profile"`
+		Kind     string   `json:"kind"`
+		Bucket   string   `json:"bucket"`
+		Effort   string   `json:"effort"`
+		Profiles []string `json:"profiles"`
 	}
+	cells := []targetCell{}
+	for _, c := range targets {
+		cells = append(cells, targetCell{c.ProfileID, c.Kind, c.Bucket, c.Effort, []string{}})
+	}
+	profileCount := 0
 	for profileRows.Next() {
+		profileCount++
+		if profileCount > 4096 {
+			profileRows.Close()
+			return nil, true, nil
+		}
 		var p modelregistry.Profile
 		if err := profileRows.Scan(&p.ID, &p.Harness, &p.Family, &p.Model, &p.Effort); err != nil {
 			profileRows.Close()
 			return nil, false, err
 		}
-		for _, c := range targets {
-			if c.ProfileID == p.ID || (c.Family == p.Family && c.Line == CellFor(p, c.Kind, c.Bucket).Line && c.Effort == strings.ToLower(p.Effort)) {
-				profiles = append(profiles, p.ID)
-				break
+		wanted := false
+		for i, c := range targets {
+			sameLine := c.Family == p.Family && c.Line == CellFor(p, c.Kind, c.Bucket).Line && c.Effort == strings.ToLower(p.Effort)
+			if sameLine {
+				cells[i].Profiles = append(cells[i].Profiles, p.ID)
 			}
+			wanted = wanted || sameLine || c.ProfileID == p.ID
+		}
+		if wanted {
+			profiles = append(profiles, p.ID)
 		}
 	}
 	err = profileRows.Err()
@@ -112,11 +131,12 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
   AND newer.ticket_node_id=o.ticket_node_id AND newer.kind='ticket_done' AND newer.session_id IS NOT NULL
   AND (newer.recorded_at,newer.id)>(o.recorded_at,o.id))
  AND EXISTS (SELECT 1 FROM harness_sessions s
-  CROSS JOIN jsonb_to_recordset($3::jsonb) c(profile text,kind text,bucket text,effort text)
+  CROSS JOIN jsonb_to_recordset($3::jsonb) c(profile text,kind text,bucket text,effort text,profiles uuid[])
   WHERE s.tenant_id=o.tenant_id AND s.ticket_node_id=o.ticket_node_id AND s.role='worker'
    AND s.created_at<=o.recorded_at AND s.model_profile_id=ANY($2::uuid[])
    AND (s.model_profile_id::text=c.profile OR
-    (s.work_placement->>'kind'=c.kind AND s.work_placement->>'bucket'=c.bucket AND lower(coalesce(s.reasoning_effort,''))=c.effort)))
+    (s.model_profile_id=ANY(c.profiles) AND s.work_placement->>'kind'=c.kind AND s.work_placement->>'bucket'=c.bucket
+     AND lower(coalesce(s.reasoning_effort,'')) IN ('',c.effort))))
  ORDER BY o.recorded_at DESC,o.ticket_node_id LIMIT 12001`, project, profiles, string(rawCells))
 	if err != nil {
 		return nil, false, err
@@ -192,7 +212,6 @@ func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell,
  SELECT t.*,p.harness,p.family,p.model,p.effort AS profile_effort,
  row_number() OVER (PARTITION BY p.id,t.raw,t.effort,t.kind,t.bucket ORDER BY t.recorded_at DESC,t.ticket_node_id) AS rn
  FROM tickets t JOIN model_profiles p ON p.tenant_id=current_setting('aeon.tenant_id')::uuid AND p.id=t.profile_id::uuid
-
 )
 SELECT project_id::text,source_project,profile_id,harness,family,model,profile_effort,raw,effort,kind,bucket,hours,tokens,estimate
 FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, ids, project)
