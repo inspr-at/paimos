@@ -15,6 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
+
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -187,7 +189,7 @@ func readVersion(ctx context.Context, tx pgx.Tx, id string, n int) (version, err
 		}
 	}
 	v.Lines = []line{}
-	if v.DigestMode == "document-v1" {
+	if quotedocument.IsDocument(v.DigestMode) {
 		err = tx.QueryRow(ctx, `SELECT document,offer_no,validity_time_zone FROM quote_version_snapshots WHERE quote_node_id=$1::uuid AND version=$2`, id, n).Scan(&v.Document, &v.OfferNo, &v.ValidityTimeZone)
 		if err != nil {
 			return v, err
@@ -274,6 +276,10 @@ func (m *Module) freeze(w http.ResponseWriter, r *http.Request) {
 		}
 		if q.Revision != in.ExpectedRevision {
 			return conflict("quote revision is stale")
+		}
+		// The legacy rate-backed freeze endpoint shares the document edit fence.
+		if q.Archived {
+			return conflict("quote is archived")
 		}
 		if q.State == "void" {
 			return conflict("quote is void")

@@ -15,7 +15,7 @@ export interface QuoteProjection {
 }
 export interface QuoteVersion {
   quote_node_id: string; version: number; currency: string; title: string; content_sha256: string
-  created_by_principal_id: string; created_at: string; digest_mode: 'r4-v1' | 'document-v1'; pricing_mode: 'rate-4' | 'cent-half-up-v1'
+  created_by_principal_id: string; created_at: string; digest_mode: 'r4-v1' | 'document-v1' | 'document-v2'; pricing_mode: 'rate-4' | 'cent-half-up-v1'
   total: string; document?: QuoteDocumentData; offer_no?: string; validity_time_zone?: string
 }
 export interface PublicLink {

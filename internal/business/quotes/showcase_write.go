@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
+
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -483,7 +485,7 @@ func setQuoteVisibility(ctx context.Context, tx pgx.Tx, p tenant.Principal, q qu
 	if err != nil {
 		return quote{}, err
 	}
-	if err = appendEvent(ctx, tx, p, q.QuoteNodeID, "quote.visibility_changed", map[string]any{"archived": q.Archived}, map[string]any{"archived": out.Archived}); err != nil {
+	if err = appendEvent(ctx, tx, p, q.QuoteNodeID, "quote.visibility_changed", map[string]any{"archived": q.Archived, "revision": q.Revision}, map[string]any{"archived": out.Archived, "revision": out.Revision}); err != nil {
 		return quote{}, err
 	}
 	return out, nil
@@ -622,7 +624,7 @@ func issueQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if recipient.ContactNodeID != "" {
 		contact = recipient.ContactNodeID
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO quote_versions(tenant_id,quote_node_id,version,recipient_contact_node_id,currency,title,subtotal,tax_total,total,content_sha256,created_by_principal_id,digest_mode,pricing_mode) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7::numeric,0,$7::numeric,$8,$9::uuid,'document-v1','cent-half-up-v1')`, p.TenantID, id, versionNo, contact, doc.Currency, doc.Title, decimalCents(subtotal), digest, p.ID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO quote_versions(tenant_id,quote_node_id,version,recipient_contact_node_id,currency,title,subtotal,tax_total,total,content_sha256,created_by_principal_id,digest_mode,pricing_mode) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7::numeric,0,$7::numeric,$8,$9::uuid,'document-v2','cent-half-up-v1')`, p.TenantID, id, versionNo, contact, doc.Currency, doc.Title, decimalCents(subtotal), digest, p.ID); err != nil {
 		return out, "", err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO quote_version_snapshots(tenant_id,quote_node_id,version,document,sender,recipient,legal,layout,offer_no,customer_no,project_ref,offer_date,valid_until,validity_time_zone,document_schema_version,renderer_version) VALUES($1::uuid,$2::uuid,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12::date,$13::date,$14,1,'document-v1')`, p.TenantID, id, versionNo, string(raw), string(doc.Sender), string(doc.Recipient), string(doc.Legal), string(doc.Layout), q.OfferNo, customerNo, doc.ProjectRef, doc.OfferDate, doc.ValidUntil, settings.NumberingTimeZone); err != nil {
@@ -687,18 +689,18 @@ func branchQuoteDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 	if err != nil {
 		return out, err
 	}
-	if v.DigestMode != "document-v1" || v.ContentSHA256 != expectedDigest {
+	if !quotedocument.IsDocument(v.DigestMode) || v.ContentSHA256 != expectedDigest {
 		return out, conflict("source document digest is stale")
 	}
 	doc, err := decodeDocument(v.Document)
 	if err != nil {
 		return out, err
 	}
-	sum, err := documentDigest(id, v.Version, v.OfferNo, doc)
+	verified, err := quotedocument.Verify(v.DigestMode, id, v.Version, v.OfferNo, v.ContentSHA256, doc, v.Document)
 	if err != nil {
 		return out, err
 	}
-	if sum != v.ContentSHA256 {
+	if !verified {
 		return out, conflict("source document digest mismatch")
 	}
 	doc.MinimumWriterVersion = documentMinimumWriterVersion(doc)
@@ -765,23 +767,24 @@ func acceptQuoteVersion(ctx context.Context, tx pgx.Tx, p tenant.Principal, id s
 	if v.ContentSHA256 != digest {
 		return out, conflict("quote content digest is stale")
 	}
-	var sum string
-	if v.DigestMode == "document-v1" {
+	var verified bool
+	if quotedocument.IsDocument(v.DigestMode) {
 		doc, err := decodeDocument(v.Document)
 		if err != nil {
 			return out, err
 		}
-		sum, err = documentDigest(id, n, v.OfferNo, doc)
+		verified, err = quotedocument.Verify(v.DigestMode, id, n, v.OfferNo, v.ContentSHA256, doc, v.Document)
 		if err != nil {
 			return out, err
 		}
 	} else {
-		sum, err = digestVersion(v)
+		sum, err := digestVersion(v)
 		if err != nil {
 			return out, err
 		}
+		verified = sum == v.ContentSHA256
 	}
-	if sum != v.ContentSHA256 {
+	if !verified {
 		return out, conflict("version digest mismatch")
 	}
 	var allowed bool

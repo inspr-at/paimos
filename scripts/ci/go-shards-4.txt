@@ -151,6 +151,7 @@
 2 41269 github.com/inspr-at/paimos/internal/approvals
 2 76918 github.com/inspr-at/paimos/internal/auth
 2 7973 github.com/inspr-at/paimos/internal/business/directory
+2 0 github.com/inspr-at/paimos/internal/business/quotedocument
 2 0 github.com/inspr-at/paimos/internal/business/quotes/confirmation
 2 0 github.com/inspr-at/paimos/internal/business/quotes/profiletar
 2 52220 github.com/inspr-at/paimos/internal/business/quotes/public

@@ -20,7 +20,7 @@ import (
 // AEON-274: a nil list or map in a profile definition must never be stored as
 // null, and stored JSON with null lists must be refused.
 func TestProfileDefinitionNeverEncodesNullLists(t *testing.T) {
-	raw, err := json.Marshal(profileDefinition{Schema: "inspr.document-profile.v1"}.normalized())
+	raw, err := json.Marshal(profileDefinition{Schema: "inspr.document-profile.v1"}.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}
