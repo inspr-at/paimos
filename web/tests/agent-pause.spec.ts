@@ -4,15 +4,17 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { pairingView } from './agent-pairing-fixtures'
 const NOW = Date.parse('2026-10-02T09:30:00Z')
 const world: AgentWorld = { me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' }, 'n-1': { key: 'PHAROS-11', title: 'Provisioning' }, 'n-2': { key: 'PHAROS-12', title: 'Restore' }, 'n-a1': { key: 'AEON-1', title: 'Foundation' } } }
-async function setup(page: Page, readonly = false) {
+async function setup(page: Page, readonly = false, configure?: (data: ReturnType<typeof agentData>) => void) {
   await page.clock.setSystemTime(NOW)
   await mockWork(page, fixtures(), { admin: !readonly, readOnly: readonly })
-  const data = agentData(world), calls: { path: string; body: Record<string, unknown> }[] = []
+  const data = agentData(world), calls: { path: string; body: Record<string, unknown> }[] = [], deletes: string[] = []
   data.approvals = []; data.messages = []; data.accounts = []
   data.sessions = data.sessions.filter(s => s.phase !== 'stopped').slice(0, 3)
-  for (const [index, s] of data.sessions.entries()) Object.assign(s, { host: index < 2 ? 'studio' : 'build', display_label: `worker-${index + 1}`, advertised_capabilities: index === 2 ? [] : ['pause', 'inbox'], supported_pause_levels: index === 2 ? ['stop_now'] : ['stop_now', 'pause_quickly', 'pause', 'wrap_up'], row_version: 1, pause_progress: { reported_at: new Date(NOW).toISOString(), next_point_in_min: 3, next_point: 'after tests', finish_in_min: 6, finish_outcome: 'finishes the ticket', interrupt: true }, phase: 'working', stopped_at: null, parent_harness_session_id: null })
+  for (const [index, s] of data.sessions.entries()) Object.assign(s, { owner_principal_id: me.id, host: index < 2 ? 'studio' : 'build', display_label: `worker-${index + 1}`, advertised_capabilities: index === 2 ? [] : ['pause', 'inbox'], supported_pause_levels: index === 2 ? ['stop_now'] : ['stop_now', 'pause_quickly', 'pause', 'wrap_up'], row_version: 1, pause_progress: { reported_at: new Date(NOW).toISOString(), next_point_in_min: 3, next_point: 'after tests', finish_in_min: 6, finish_outcome: 'finishes the ticket', interrupt: true }, phase: 'working', stopped_at: null, parent_harness_session_id: null })
+  configure?.(data)
   await mockAgents(page, data)
   let leaving: Record<string, unknown> = { deadline_at: null, request_id: null, hosts: 'all', stop_in_flight: false }, ids: string[] = []
   await page.route('**/api/me/host-labels', route => route.fulfill({ json: [{ host: 'studio', label: 'Markus’s studio' }, { host: 'build', label: 'Build machine' }] }))
@@ -21,11 +23,12 @@ async function setup(page: Page, readonly = false) {
   await page.route('**/api/me/leaving-at', async route => {
     const method = route.request().method()
     if (method === 'PUT') {
-      const body = route.request().postDataJSON(); calls.push({ path: 'leaving', body }); leaving = { ...body, request_id: 'wind-request', stop_in_flight: false }
-      ids = data.sessions.filter(s => s.phase !== 'stopped' && (body.hosts === 'all' || (body.agents ? body.agents.includes(s.id) : body.hosts.includes(s.host)))).map(s => s.id as string)
+      const body = route.request().postDataJSON(); calls.push({ path: 'leaving', body })
+      ids = data.sessions.filter(s => s.owner_principal_id === me.id && s.phase !== 'stopped' && (body.agents ? body.agents.includes(s.id) : body.hosts === 'all' || body.hosts.includes(s.host))).map(s => s.id as string)
+      leaving = { ...body, agents: ids, request_id: 'wind-request', stop_in_flight: false }
       for (const s of data.sessions.filter(s => ids.includes(s.id as string))) Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${s.id}`, state: 'requested', level: 'pause', requested_at: new Date(NOW).toISOString(), deadline_at: body.deadline_at, deliver: true, leaving_request_id: 'wind-request' } })
-    } else if (method === 'DELETE') { leaving = { deadline_at: null, request_id: null, hosts: 'all', stop_in_flight: false }; for (const s of data.sessions) { const p = s.pause as Record<string, unknown> | undefined; if (p?.state === 'requested') Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { ...p, state: 'cancelled' } }) } }
-    return route.fulfill({ json: { ...leaving, items: data.sessions.filter(s => ids.includes(s.id as string)) } })
+    } else if (method === 'DELETE') { deletes.push(String(leaving.request_id)); leaving = { deadline_at: null, request_id: null, hosts: 'all', stop_in_flight: false }; for (const s of data.sessions) { const p = s.pause as Record<string, unknown> | undefined; if (p?.state === 'requested') Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { ...p, state: 'cancelled' } }) }; ids = [] }
+    return route.fulfill({ json: { ...leaving, owner_principal_id: me.id, items: data.sessions.filter(s => ids.includes(s.id as string)) } })
   })
   await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/(pause|resume)$/, async route => {
     const path = new URL(route.request().url()).pathname, id = path.split('/').at(-2)!, s = data.sessions.find(s => s.id === id)!, body = route.request().postDataJSON(); calls.push({ path, body })
@@ -33,7 +36,7 @@ async function setup(page: Page, readonly = false) {
     Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${id}`, state: 'requested', level: body.level, note: body.note, requested_at: new Date(NOW).toISOString(), deadline_at: new Date(NOW + 600000).toISOString(), deliver: true, stop_requested: body.level === 'stop_now' } })
     return route.fulfill({ json: s })
   })
-  return { data, calls }
+  return { data, calls, deletes }
 }
 async function bounds(locator: Locator) { const b = await locator.boundingBox(); expect(b).not.toBeNull(); return b! }
 async function stable(locator: Locator, before: Awaited<ReturnType<typeof bounds>>) { const after = await bounds(locator); for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[key] - before[key]), key).toBeLessThan(1) }
@@ -49,6 +52,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await page.locator('.wind-row').evaluate(el => el.scrollIntoView({ block: 'center' }))
     await expect(sw).toBeInViewport({ ratio: 1 }); await expect(minutes).toBeInViewport({ ratio: 1 })
     const positions = [await bounds(sw), await bounds(scope), await bounds(minutes)]
+    await expect(page.locator('.time-value')).toHaveText('15 min')
+    await expect(minutes.locator('option[value="15"]')).toHaveText(/^15 min · by \d{1,2}:\d{2}(?:\s?[AP]M)?$/)
+    await expect(page.locator('.wind-timing .by')).toHaveText(/^by \d{1,2}:\d{2}(?:\s?[AP]M)?$/)
     await sw.check(); await expect(page.locator('.wind-confirm')).toBeVisible(); expect(mock.calls).toHaveLength(0)
     await stable(sw, positions[0]!); await stable(scope, positions[1]!); await stable(minutes, positions[2]!)
     const confirm = page.locator('.wind-confirm'), confirmBounds = await bounds(confirm)
@@ -62,7 +68,11 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await picker.getByRole('button', { name: 'None', exact: true }).click(); await stable(header, headBounds); await stable(footer, footBounds)
     await picker.getByRole('checkbox').filter({ hasText: 'worker-1' }).click(); await expect(picker.getByRole('checkbox').filter({ hasText: 'Markus’s studio' }).first()).toHaveAttribute('aria-checked', 'mixed')
     await picker.getByRole('radio', { name: 'State', exact: true }).click(); await stable(header, headBounds); await stable(footer, footBounds)
+    await expect(picker.getByRole('heading')).toHaveText(['Hosts and agents', 'Running agents'])
     await expect(picker.getByRole('checkbox').filter({ hasText: 'worker-1' })).toHaveAttribute('aria-checked', 'true')
+    await picker.getByRole('button', { name: /^Done/ }).click()
+    await expect(scope).toHaveText('1 agent on Markus’s studio'); await stable(scope, positions[1]!); await stable(confirm, confirmBounds)
+    await scope.click()
     await picker.getByRole('radio', { name: 'Host', exact: true }).click(); await picker.getByRole('checkbox').filter({ hasText: 'Markus’s studio' }).first().click()
     await picker.getByRole('button', { name: /^Done/ }).click(); await stable(scope, positions[1]!); await stable(confirm, confirmBounds)
     await screenshot(page, `${width}-${theme}-preview`)
@@ -102,5 +112,80 @@ test('deadline alone never announces completion; reload shows durable handovers 
   await dialog.getByRole('checkbox', { name: 'Resume worker-3', exact: true }).uncheck(); await stable(bar, before)
   await expect(dialog).toContainText('Tests passed; work committed.'); await dialog.locator('[data-submit]').click()
   await expect.poll(() => mock.calls.filter(c => c.path.endsWith('/resume')).length).toBe(2); await expect(page.getByText(/resume requests saved · awaiting continuation/)).toBeVisible()
+})
+test('State groups running agents, idle hosts and offline hosts in that order', async ({ page }) => {
+  const mock = await setup(page)
+  const computers = [
+    pairingView({ computer_name: 'idle', computer_id: 'd0000000-0000-4000-8000-000000000001', state: 'redeemed', computer_state: 'connected', connectivity: 'online', setup_state: 'connected' }),
+    pairingView({ computer_name: 'offline', computer_id: 'd0000000-0000-4000-8000-000000000002', state: 'redeemed', computer_state: 'connected', connectivity: 'offline', setup_state: 'connected' }),
+  ]
+  await page.route('**/api/agent-pairing/computers', route => route.fulfill({ json: { computers } }))
+  await page.goto('/agents'); await page.locator('.scope-button').click()
+  const picker = page.getByRole('dialog', { name: 'Hosts to wind down' })
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'idle' }).first()).toBeVisible()
+  await picker.getByRole('button', { name: 'None', exact: true }).click()
+  await picker.getByRole('checkbox').filter({ hasText: 'worker-1' }).click()
+  await picker.getByRole('radio', { name: 'State', exact: true }).click()
+  await expect(picker.getByRole('heading')).toHaveText(['Hosts and agents', 'Running agents', 'Idle hosts', 'Offline hosts'])
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'worker-1' })).toContainText('Markus’s studio')
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'worker-1' })).toHaveAttribute('aria-checked', 'true')
+  await picker.getByRole('checkbox').filter({ hasText: 'offline' }).click()
+  await picker.getByRole('radio', { name: 'Host', exact: true }).click()
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'offline' }).first()).toHaveAttribute('aria-checked', 'true')
+  for (const s of mock.data.sessions) Object.assign(s, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), row_version: Number(s.row_version) + 1 })
+  await page.reload(); await page.locator('.scope-button').click()
+  await picker.getByRole('radio', { name: 'State', exact: true }).click()
+  await expect(picker.getByRole('heading')).toHaveText(['Hosts and agents', 'Idle hosts', 'Offline hosts'])
+})
+test('wind-down previews only owned work and a reloaded all-host report leaves new agents unticked', async ({ page }) => {
+  const mock = await setup(page, false, data => {
+    data.sessions[1]!.owner_principal_id = 'other-person'
+    data.sessions[2]!.owner_principal_id = null
+  })
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '21111111-1111-4111-8111-111111111111', name: me.name, kind: 'person', roles: ['admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  let release!: () => void, observed!: () => void, waiting = true
+  const barrier = new Promise<void>(resolve => { release = resolve }), requested = new Promise<void>(resolve => { observed = resolve })
+  await page.route('**/api/me/leaving-at', async route => {
+    if (waiting && route.request().method() === 'GET') {
+      waiting = false; observed(); await barrier
+      return route.fulfill({ json: { owner_principal_id: me.id, deadline_at: null, request_id: null, hosts: 'all', agents: [], stop_in_flight: false, items: [] } })
+    }
+    return route.fallback()
+  })
+  await page.goto('/agents'); await page.getByRole('switch', { name: 'Wind down', exact: true }).check()
+  await requested
+  await expect(page.locator('.wind-confirm')).toBeDisabled()
+  await expect(page.locator('.plan-summary')).toHaveText('Reading owned sessions…')
+  release()
+  await expect(page.locator('.wind-plan .plan-agent')).toHaveCount(1)
+  await expect(page.locator('.plan-summary')).toHaveText('0 hand over · 1 finish · 0 stop, no handover')
+  await page.locator('.scope-button').click()
+  const picker = page.getByRole('dialog', { name: 'Hosts to wind down' })
+  await expect(picker.locator('.picker-foot')).toContainText('1 of 1 agent · 1 of 1 host')
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'worker-2' })).toHaveCount(0)
+  await picker.press('Escape'); await page.locator('.wind-confirm').click()
+  expect(mock.calls[0]?.body).toMatchObject({ hosts: 'all' }); expect(mock.calls[0]?.body.agents).toBeUndefined()
+  mock.data.sessions.push({ ...mock.data.sessions[0]!, id: 'new-owned-session', display_label: 'new-worker', pause: undefined })
+  await page.reload(); await page.locator('.scope-button').click()
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'worker-1' })).toHaveAttribute('aria-checked', 'true')
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'new-worker' })).toHaveAttribute('aria-checked', 'false')
+  await expect(picker.getByRole('checkbox').filter({ hasText: 'Markus’s studio' }).first()).toHaveAttribute('aria-checked', 'mixed')
+  await picker.press('Escape')
+  await expect(page.locator('.wind-plan .plan-agent')).toHaveCount(1)
+  await expect(page.locator('.wind-plan .untouched')).toContainText('new-worker')
+  await expect(page.locator('.wind-plan')).not.toContainText('worker-2')
+})
+test('dismissing a completed report before its deadline has no withdrawal toast or Undo', async ({ page }) => {
+  const mock = await setup(page)
+  await page.goto('/agents'); await page.getByRole('switch', { name: 'Wind down', exact: true }).check(); await page.locator('.wind-confirm').click()
+  await expect.poll(() => mock.calls.length).toBe(1)
+  for (const s of mock.data.sessions) Object.assign(s, { row_version: Number(s.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW + 5 * 60_000).toISOString(), stop_reason: 'paused', pause: { ...(s.pause as object), state: 'paused' } })
+  await page.clock.setSystemTime(NOW + 5 * 60_000); await page.reload()
+  await page.getByRole('region', { name: 'Wind down agents' }).getByRole('button', { name: 'Dismiss', exact: true }).click()
+  await expect.poll(() => mock.deletes).toEqual(['wind-request'])
+  await expect(page.getByRole('switch', { name: 'Wind down', exact: true })).not.toBeChecked()
+  await expect(page.getByText(/Pending wind-down requests withdrawn/)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
+  expect(mock.calls).toHaveLength(1)
 })
 test('without control permission pause actions and wind-down are hidden', async ({ page }) => { await setup(page, true); await page.goto('/agents'); await expect(page.locator('.agents-page .row').first()).toBeVisible(); await expect(page.getByRole('switch', { name: 'Wind down', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: /^Pause worker/ })).toHaveCount(0) })

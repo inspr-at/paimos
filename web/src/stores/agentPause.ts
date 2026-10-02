@@ -44,6 +44,7 @@ export const useAgentPause = defineStore('agentPause', () => {
     report.value = null; reportIds.value = []; leavingError.value = ''; leavingBusy.value = false; defaultLevel.value = 'pause'; interval.value = null; settingsError.value = ''
   }, { flush: 'sync' })
   const permitted = (s: HarnessSession) => person.value && !s.watch && can('harness.control', s.project_id)
+  const windDownPermitted = (s: HarnessSession) => permitted(s) && s.owner_principal_id === (report.value?.owner_principal_id ?? session.identity?.principal.id)
   const rows = computed(() => targets.value.map(t => ({ target: t, session: agents.sessionById(t.id) })).filter((row): row is { target: Target; session: HarnessSession } => !!row.session))
   const eligible = (s: HarnessSession, intent: PauseMode) => permitted(s) && (intent.includes('resume') ? pausedSession(s) : liveSession(s) && (intent !== 'pause' || cooperative(s)) && (intent === 'stop' || !s.pause || ['cancelled', 'resumed'].includes(s.pause.state)))
   function open(intent: PauseMode, sessions: readonly HarnessSession[], trigger?: HTMLElement | null) {
@@ -96,28 +97,29 @@ export const useAgentPause = defineStore('agentPause', () => {
     } catch (e) { if (turn === epoch) leavingError.value = message(e); return false }
     finally { if (turn === epoch) leavingBusy.value = false }
   }
-  async function cancelWindDown() {
+  async function clearWindDown(quiet: boolean) {
     if (!person.value || leavingBusy.value || !report.value?.deadline_at) return
     const previous = report.value, identity = owner.value, turn = epoch
     leavingBusy.value = true; reads++; leavingError.value = ''
     try {
       const answer = await leavingReport('DELETE')
-      if (turn !== epoch) return
+      if (turn !== epoch || report.value?.request_id !== previous.request_id) return
       report.value = answer.report; reportIds.value = agents.admitSessions(answer.items).map(s => s.id); void agents.afterWrite()
+      if (quiet) return
+      const cancelledRead = reads
       toast(answer.report.stop_in_flight ? 'Pending wind-down requests withdrawn. A claimed stop cannot be recalled.' : 'Pending wind-down requests withdrawn. Already paused agents stay paused.', {
-        action: Date.parse(previous.deadline_at!) > Date.now() ? { label: 'Undo', run: () => {
-          void (async () => {
-          if (owner.value !== identity || report.value?.request_id || report.value?.deadline_at || leavingBusy.value) return
+        action: Date.parse(previous.deadline_at!) > Date.now() ? { label: 'Undo', run: async () => {
+          if (owner.value !== identity || reads !== cancelledRead || report.value?.request_id || report.value?.deadline_at || leavingBusy.value) return
           await refreshLeaving()
-          if (owner.value !== identity || leavingError.value || report.value?.request_id || report.value?.deadline_at || Date.parse(previous.deadline_at!) <= Date.now()) return
+          if (owner.value !== identity || reads !== cancelledRead + 1 || leavingError.value || report.value?.request_id || report.value?.deadline_at || Date.parse(previous.deadline_at!) <= Date.now()) return
           await windDown(previous.deadline_at!, { hosts: previous.hosts, ...(previous.agents ? { agents: previous.agents } : {}) })
-          })()
         } } : undefined,
       })
-    } catch (e) { if (turn === epoch) leavingError.value = message(e) }
+    } catch (e) { if (turn === epoch && report.value?.request_id === previous.request_id) leavingError.value = message(e) }
     finally { if (turn === epoch) leavingBusy.value = false }
   }
-  async function dismissReport() { await cancelWindDown() }
+  async function cancelWindDown() { await clearWindDown(settled.value) }
+  async function dismissReport() { if (settled.value) await clearWindDown(true) }
   function selectedLevel(s: HarnessSession): PauseLevel | 'keep' {
     if (mode.value === 'stop') return 'stop_now'
     if (overrides.value[s.id]) return overrides.value[s.id]!
@@ -156,5 +158,5 @@ export const useAgentPause = defineStore('agentPause', () => {
     if (failures.length) { targets.value = targets.value.filter(t => !succeeded.includes(t.id)); resumeIds.value = resumeIds.value.filter(id => !succeeded.includes(id)); error.value = `${succeeded.length} accepted; ${failures.length} failed. ${failures.join(' ')}` }
     else close()
   }
-  return { workersIncluded, workerOptions, includeWorkers, resumeIds, person, defaultLevel, interval, settingsError, loadSettings, setDefault, permitted, eligible, mode, targets, rows, open, close, busy, error, level, note, overrides, selectedLevel, submit, report, reportIds, settled, completedAt, leavingError, leavingBusy, refreshLeaving, windDown, cancelWindDown, dismissReport }
+  return { workersIncluded, workerOptions, includeWorkers, resumeIds, person, defaultLevel, interval, settingsError, loadSettings, setDefault, permitted, windDownPermitted, eligible, mode, targets, rows, open, close, busy, error, level, note, overrides, selectedLevel, submit, report, reportIds, settled, completedAt, leavingError, leavingBusy, refreshLeaving, windDown, cancelWindDown, dismissReport }
 })

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimates, hostTick, normalizeScope, prediction, predictWindDown, toggleScope } from '../src/lib/agentPause.ts'
+import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope } from '../src/lib/agentPause.ts'
 import { assessAgentState } from '../src/lib/agentSignals.ts'
 import type { HarnessSessionRow } from '../src/lib/agentRows.ts'
 const now = Date.parse('2026-10-02T09:30:00Z'), minute = 60_000
@@ -27,6 +27,20 @@ test('wind-down chooses fitting wrap-up before quick pause and respects margins 
   assert.deepEqual(predictWindDown(row(), now, now + 15 * minute, 10), { level: 'pause', starts: now + 5 * minute })
   assert.equal(predictWindDown(row({ pause_progress: progress({ interrupt: false, command_left_min: 14, next_point_in_min: 1 }) }), now, now + 2 * minute, 10).level, 'pause')
   assert.deepEqual(predictWindDown(row({ advertised_capabilities: [] }), now, now + 15 * minute, 10), { level: 'stop_now', starts: now + 15 * minute })
+})
+test('effective agent lists override all hosts, including an explicit empty list', () => {
+  const sessions = [row(), row({ id: 'b' }), row({ id: 'c', host: 'build' })]
+  const scope = { hosts: 'all' as const, agents: ['a'] }
+  assert.equal(selectedAgent(sessions[0]!, scope), true)
+  assert.equal(selectedAgent(sessions[1]!, scope), false)
+  assert.equal(selectedAgent(sessions[2]!, scope), false)
+  assert.equal(hostTick('studio', scope, sessions), 'mixed')
+  assert.equal(hostTick('build', scope, sessions), 'false')
+  assert.equal(hostTick('idle', scope, sessions), 'true')
+  assert.deepEqual(normalizeScope(scope, sessions, ['studio', 'build']), scope)
+  assert.equal(selectedAgent(row(), { hosts: 'all', agents: [] }), false)
+  assert.equal(hostTick('studio', { hosts: 'all', agents: [] }, sessions), 'false')
+  assert.equal(selectedAgent(row(), { hosts: 'all' }), true)
 })
 test('planning counts down from its report and stale or cleared snapshots never revive legacy ETA', () => {
   const s = row({ eta_ready_at: new Date(now + 2 * minute).toISOString(), eta_reported_at: new Date(now).toISOString(), pause_progress: { reported_at: new Date(now - minute).toISOString(), finish_in_min: 4 } })

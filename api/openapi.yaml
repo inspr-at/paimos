@@ -8604,7 +8604,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.4']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.5']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12847,6 +12847,7 @@ components:
       type: object
       required: [deadline_at, request_id, items, stop_in_flight]
       properties:
+        owner_principal_id: {type: string, format: uuid, readOnly: true, description: 'Canonical person whose deadline and plans this report describes, including when signed in through a linked identity.'}
         deadline_at: {type: [string, 'null'], format: date-time}
         request_id: {type: [string, 'null'], format: uuid}
         items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
@@ -12991,6 +12992,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
         model_raw: {type: [string, 'null'], maxLength: 128, readOnly: true, description: Original cleaned model string before separating an effort suffix; retained for audit.}

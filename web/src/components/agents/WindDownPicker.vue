@@ -33,7 +33,10 @@ const name = (s: HarnessSession) => s.display_label || s.agent?.name || s.host
 const openedAt = Date.now()
 const state = (s: HarnessSession) => assessAgentState(s, openedAt).state
 const stateLabel = (s: HarnessSession) => STATE_LABEL[state(s)].toLowerCase()
-const stateRows = computed(() => (['problem', 'unresponsive', 'waiting', 'awaiting', 'throttled', 'pausing', 'working', 'idle', 'stale'] as const).map(word => ({ word: STATE_LABEL[word], sessions: running.value.filter(s => state(s) === word) })).filter(g => g.sessions.length))
+const hostGroups = computed(() => [
+  { label: 'Idle hosts', hosts: props.hosts.filter(h => !hostRows(h.id).length && h.online) },
+  { label: 'Offline hosts', hosts: props.hosts.filter(h => !hostRows(h.id).length && !h.online) },
+].filter(g => g.hosts.length))
 function toggle(kind: 'host' | 'agent', id: string) { if (!props.readonly) emit('change', toggleScope(props.scope, kind, id, props.sessions, props.hosts.map(h => h.id))) }
 let groupWrite = Promise.resolve()
 function setGroup(value: 'host' | 'state') {
@@ -76,11 +79,11 @@ onBeforeUnmount(() => { groupEpoch++; dialog.value?.close(); window.removeEventL
           </section>
         </template>
         <template v-else>
-          <section v-for="g in stateRows" :key="g.word"><h3>{{ g.word }}</h3><button v-for="s in g.sessions" :key="s.id" type="button" class="picker-row" role="checkbox" :aria-checked="selectedAgent(s, scope)" :aria-disabled="readonly" :data-name="name(s)" @click="toggle('agent', s.id)"><span class="tickbox"><AppIcon v-if="selectedAgent(s, scope)" name="check" :size="12" /></span><span class="row-copy"><strong>{{ name(s) }}</strong><small>{{ hostName(s.host) }} · {{ HARNESS_LABEL[s.harness] || s.harness }}</small></span></button></section>
-          <section v-for="g in ['idle', 'offline']" :key="g"><h3>{{ g }} hosts</h3><button v-for="host in hosts.filter(h => !hostRows(h.id).length && (g === 'idle' ? h.online : !h.online))" :key="host.id" type="button" class="picker-row" role="checkbox" :aria-checked="hostTick(host.id, scope, sessions)" :aria-disabled="readonly" :data-name="host.label" @click="toggle('host', host.id)"><span class="tickbox"><AppIcon v-if="hostTick(host.id, scope, sessions) === 'true'" name="check" :size="12" /></span><span class="row-copy"><strong>{{ host.label }}</strong><small>{{ host.meta }}</small></span></button></section>
+          <section v-if="running.length"><h3>Running agents</h3><button v-for="s in running" :key="s.id" type="button" class="picker-row" role="checkbox" :aria-checked="selectedAgent(s, scope)" :aria-disabled="readonly" :data-name="name(s)" @click="toggle('agent', s.id)"><span class="tickbox"><AppIcon v-if="selectedAgent(s, scope)" name="check" :size="12" /></span><span class="row-copy"><strong>{{ name(s) }}</strong><small>{{ hostName(s.host) }} · {{ HARNESS_LABEL[s.harness] || s.harness }}</small></span></button></section>
+          <section v-for="g in hostGroups" :key="g.label"><h3>{{ g.label }}</h3><button v-for="host in g.hosts" :key="host.id" type="button" class="picker-row" role="checkbox" :aria-checked="hostTick(host.id, scope, sessions)" :aria-disabled="readonly" :data-name="host.label" @click="toggle('host', host.id)"><span class="tickbox"><AppIcon v-if="hostTick(host.id, scope, sessions) === 'true'" name="check" :size="12" /></span><span class="row-copy"><strong>{{ host.label }}</strong><small>{{ host.meta }}</small></span></button></section>
         </template>
       </div>
-      <footer class="picker-foot"><span>{{ readonly ? 'Turn off wind-down to change this.' : `${chosen} of ${running.length} agents · ${hostCount} of ${hosts.length} hosts` }}</span><button type="button" class="btn sm primary" @click="close">Done<span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></footer>
+      <footer class="picker-foot"><span>{{ readonly ? 'Turn off wind-down to change this.' : `${chosen} of ${running.length} agent${running.length === 1 ? '' : 's'} · ${hostCount} of ${hosts.length} host${hosts.length === 1 ? '' : 's'}` }}</span><button type="button" class="btn sm primary" @click="close">Done<span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button></footer>
     </div>
   </dialog></Teleport>
 </template>

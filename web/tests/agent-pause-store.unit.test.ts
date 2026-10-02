@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { beforeEach, expect, it, vi } from 'vitest'
-import { reactive } from 'vue'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAgentPause } from '../src/stores/agentPause'
 import type { HarnessSessionRow } from '../src/lib/agentRows'
@@ -17,7 +17,11 @@ vi.mock('../src/stores/agents', () => ({ useAgents: () => agents }))
 vi.mock('../src/stores/session', () => ({ useSession: () => identity }))
 const row = (id: string, fields: Partial<HarnessSessionRow> = {}) => ({ id, project_id: 'project', run_id: null, host: 'host', display_label: id, role: 'worker', advertised_capabilities: ['pause'], management_mode: 'unmanaged', phase: 'working', stopped_at: null, ...fields }) as HarnessSession
 const trigger = { focus: vi.fn() } as unknown as HTMLElement
-beforeEach(() => { setActivePinia(createPinia()); identity = reactive({ identity: { principal: { id: 'person', kind: 'person' }, tenant: { id: 'tenant' } } }); sessions = [row('a'), row('b')]; toasts.splice(0); vi.clearAllMocks(); calls.pause.mockImplementation(async (_project, id) => ({ ...sessions.find(s => s.id === id), pause: { control_id: 'accepted', state: 'requested' } })) })
+const NOW = Date.parse('2026-10-02T09:30:00Z')
+const report = () => ({ deadline_at: new Date(NOW + 15 * 60_000).toISOString(), request_id: 'request', hosts: 'all' as const, agents: ['a', 'b'], stop_in_flight: false })
+const cleared = () => ({ report: { deadline_at: null, request_id: null, hosts: 'all' as const, stop_in_flight: false }, items: [] })
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); setActivePinia(createPinia()); identity = reactive({ identity: { principal: { id: 'person', kind: 'person' }, tenant: { id: 'tenant' } } }); sessions = [row('a'), row('b')]; toasts.splice(0); vi.resetAllMocks(); calls.pause.mockImplementation(async (_project, id) => ({ ...sessions.find(s => s.id === id), pause: { control_id: 'accepted', state: 'requested' } })) })
+afterEach(() => vi.useRealTimers())
 it('reports partial batch results and retries only failed targets', async () => {
   const pause = useAgentPause(); calls.pause.mockRejectedValueOnce(new Error('not owned'))
   pause.open('pause-all', sessions, trigger); await pause.submit()
@@ -56,4 +60,59 @@ it('Resume all sends only the selected paused generations', async () => {
   calls.resume.mockImplementation(async (_project, id) => ({ session: sessions.find(s => s.id === id) }))
   const pause = useAgentPause(); pause.open('resume-all', sessions, trigger); pause.resumeIds = ['b']; await pause.submit()
   expect(calls.resume.mock.calls.map(c => c[1])).toEqual(['b'])
+})
+it('wind-down eligibility matches ownership while bulk permissions stay available', () => {
+  const pause = useAgentPause()
+  expect(pause.windDownPermitted(row('mine', { owner_principal_id: 'person' }))).toBe(true)
+  for (const owner_principal_id of ['other-person', null, undefined]) {
+    const s = row('other', { owner_principal_id })
+    expect(pause.windDownPermitted(s)).toBe(false)
+    expect(pause.eligible(s, 'pause-all')).toBe(true)
+  }
+  identity.identity.principal.id = 'other-person'
+  expect(pause.windDownPermitted(row('mine', { owner_principal_id: 'person' }))).toBe(false)
+  pause.report = { ...cleared().report, owner_principal_id: 'person' }
+  expect(pause.windDownPermitted(row('mine', { owner_principal_id: 'person' }))).toBe(true)
+  expect(pause.windDownPermitted(row('not-mine', { owner_principal_id: 'other-person' }))).toBe(false)
+})
+it.each(['dismissReport', 'cancelWindDown'] as const)('%s clears a settled report quietly before its deadline', async action => {
+  sessions = sessions.map(s => row(s.id, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused' }))
+  const pause = useAgentPause(); pause.report = report(); pause.reportIds = ['a', 'b']; await nextTick(); toasts.splice(0)
+  expect(pause.settled).toBe(true); calls.leaving.mockResolvedValueOnce({ ...cleared(), items: sessions })
+  await pause[action]()
+  expect(calls.leaving).toHaveBeenCalledExactlyOnceWith('DELETE')
+  expect(pause.report?.deadline_at).toBeNull(); expect(pause.reportIds).toEqual(['a', 'b'])
+  expect(toasts).toHaveLength(0)
+})
+it('an in-progress cancellation retains Undo with its captured scope', async () => {
+  const pause = useAgentPause(); pause.report = report(); pause.reportIds = ['a', 'b']
+  calls.leaving.mockResolvedValueOnce(cleared()).mockResolvedValueOnce(cleared()).mockResolvedValueOnce({ report: report(), items: sessions })
+  await pause.cancelWindDown()
+  const undo = toasts.at(-1)!.actions[0]!
+  expect(toasts.at(-1)?.message).toContain('Pending wind-down requests withdrawn'); expect(undo.label).toBe('Undo')
+  await undo.run()
+  expect(calls.leaving.mock.calls).toEqual([['DELETE'], [], ['PUT', { deadline_at: report().deadline_at, hosts: 'all', agents: ['a', 'b'] }]])
+})
+it('Undo cannot revive an earlier request after another cancellation', async () => {
+  const pause = useAgentPause(); pause.report = report(); pause.reportIds = ['a', 'b']
+  calls.leaving.mockResolvedValue(cleared()); await pause.cancelWindDown()
+  const undo = toasts.at(-1)!.actions[0]!
+  pause.report = { ...report(), request_id: 'replacement' }; await pause.cancelWindDown()
+  await undo.run()
+  expect(calls.leaving.mock.calls).toEqual([['DELETE'], ['DELETE']])
+})
+it('a failed dismissal preserves the completed report and reports the failure', async () => {
+  sessions = sessions.map(s => row(s.id, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused' }))
+  const pause = useAgentPause(); pause.report = report(); pause.reportIds = ['a', 'b']; await nextTick(); toasts.splice(0)
+  calls.leaving.mockRejectedValueOnce(new Error('could not clear')); await pause.dismissReport()
+  expect(pause.report?.request_id).toBe('request'); expect(pause.leavingError).toBe('could not clear'); expect(toasts).toHaveLength(0)
+})
+it('dismissal ignores a late response after the person changes', async () => {
+  sessions = sessions.map(s => row(s.id, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused' }))
+  const pause = useAgentPause(); pause.report = report(); pause.reportIds = ['a', 'b']; await nextTick(); toasts.splice(0)
+  let release!: (value: unknown) => void
+  calls.leaving.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const writing = pause.dismissReport(); identity.identity.principal.id = 'other-person'
+  release(cleared()); await writing
+  expect(pause.report).toBeNull(); expect(toasts).toHaveLength(0)
 })

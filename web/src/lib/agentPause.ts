@@ -20,7 +20,7 @@ export interface AgentPause {
   handover?: Handover; successor_session_id?: string
 }
 export interface WindDownScope { hosts: 'all' | readonly string[]; agents?: readonly string[] }
-export interface LeavingReport extends WindDownScope { deadline_at: string | null; request_id: string | null; stop_in_flight: boolean }
+export interface LeavingReport extends WindDownScope { owner_principal_id?: string; deadline_at: string | null; request_id: string | null; stop_in_flight: boolean }
 export const LEVELS: readonly { value: PauseLevel; name: string; rule: string }[] = [
   { value: 'stop_now', name: 'Stop now', rule: 'Requests an immediate stop. No handover; work in progress may be lost.' },
   { value: 'pause_quickly', name: 'Pause quickly', rule: 'Hands over quickly, with work in progress. Limit 3 min.' },
@@ -63,15 +63,14 @@ export function prediction(s: DeepReadonly<HarnessSessionRow>, level: PauseLevel
   return { time, outcome, detail }
 }
 export function selectedAgent(s: DeepReadonly<HarnessSessionRow>, scope: WindDownScope) {
-  return scope.hosts === 'all' || (scope.agents ? scope.agents.includes(s.id) : scope.hosts.includes(s.host))
+  return scope.agents ? scope.agents.includes(s.id) : scope.hosts === 'all' || scope.hosts.includes(s.host)
 }
 export function hostTick(host: string, scope: WindDownScope, sessions: readonly DeepReadonly<HarnessSessionRow>[]): 'true' | 'mixed' | 'false' {
-  if (scope.hosts === 'all') return 'true'
   const running = sessions.filter(s => s.host === host && liveSession(s)), count = running.filter(s => selectedAgent(s, scope)).length
-  return running.length ? count === running.length ? 'true' : count ? 'mixed' : 'false' : scope.hosts.includes(host) ? 'true' : 'false'
+  return running.length ? count === running.length ? 'true' : count ? 'mixed' : 'false' : scope.hosts === 'all' || scope.hosts.includes(host) ? 'true' : 'false'
 }
 export function normalizeScope(scope: WindDownScope, sessions: readonly DeepReadonly<HarnessSessionRow>[], hosts: readonly string[]): WindDownScope {
-  if (scope.hosts === 'all') return { hosts: 'all' }
+  if (scope.hosts === 'all') return { hosts: 'all', ...(scope.agents ? { agents: [...scope.agents] } : {}) }
   const running = sessions.filter(liveSession), agents = running.filter(s => selectedAgent(s, scope)).map(s => s.id)
   const chosen = hosts.filter(host => { const rows = running.filter(s => s.host === host); return rows.length ? rows.every(s => agents.includes(s.id)) : scope.hosts.includes(host) })
   return chosen.length === hosts.length && agents.length === running.length && hosts.length > 0 ? { hosts: 'all' } : { hosts: chosen, agents }

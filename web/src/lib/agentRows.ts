@@ -44,6 +44,7 @@ export interface HarnessSessionRow {
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import('./attachWatch').AttachStatus
   id: string; project_id: string; agent_principal_id: string
+  owner_principal_id?: string | null
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string
   generator?: string | null; command?: string | null

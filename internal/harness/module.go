@@ -173,8 +173,8 @@ type Session struct {
 	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
 	doing, toolActivity     *string
 	doingAt, toolActivityAt *time.Time
-	CanReparent             *bool `json:"can_reparent,omitempty"`
-	ownerID                 *string
+	CanReparent             *bool                  `json:"can_reparent,omitempty"`
+	OwnerPrincipalID        *string                `json:"owner_principal_id,omitempty"`
 	HandedOverToID          *string                `json:"handed_over_to_id,omitempty"`
 	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
 	Controls                []Control              `json:"controls,omitempty"`
@@ -364,7 +364,7 @@ func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress)
 	if err != nil {
 		return s, err
 	}
@@ -840,7 +840,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		owner = p.ID
 	}
 	if owner != "" {
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
+		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.OwnerPrincipalID, &s.RowVersion); err != nil {
 			return nil, err
 		}
 	}
