@@ -11,7 +11,20 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/capacity"
 )
+
+// Budget isolation fixtures use explicit hours: manual caps are not vendor
+// measurements and cannot exempt a managed run from the person's schedule.
+func fixtureWorkHours(t *testing.T, f *fixture, accountID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule("UTC")
+	s.Reserve = capacity.ReserveOff
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": accountID, "schedule": s}, true, "", 204)
+}
 
 func routeWithUnits(t *testing.T, f *fixture, v agentpairing.View, e agentpairing.Enrollment, key, run string, units map[string]int, status int) agentaccounts.RouteResult {
 	t.Helper()
@@ -51,6 +64,7 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	offer := offerLink(t, f, p, key, e.AccountID)
 	review := reviewLink(t, f, offer)
 	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
+	fixtureWorkHours(t, f, e.AccountID)
 	var verificationWindow string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT id::text FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, e.AccountID).Scan(&verificationWindow); err != nil {
 		t.Fatal(err)

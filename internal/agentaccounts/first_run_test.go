@@ -1023,12 +1023,16 @@ func TestUnstartedRecoveryReleasesPermit(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := insertRun(t, person, runner, profile)
+	// Setup uses the real clock; the assertions below restore the default
+	// schedule and evaluate its gates at the fixed day/night instants.
+	fixtureAlwaysOn(t, mod, person, a.ID)
 	mustRoute(t, mod, runner, token, recovery, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		return Release(t.Context(), tx, runner, recovery, "", "")
 	}); err != nil {
 		t.Fatal(err)
 	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
 	admit := func(at time.Time) *CapacityWait {
 		t.Helper()
 		var wait *CapacityWait

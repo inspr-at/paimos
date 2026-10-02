@@ -312,6 +312,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	if account.LastProbeOK == nil || !*account.LastProbeOK {
 		t.Fatal("probe was not recorded")
 	}
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 
 	var requests Window
 	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, &requests)
@@ -424,6 +425,7 @@ func TestAllowanceProvisionalWithoutMeasuredUnit(t *testing.T) {
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"local","harness":"codex","daemon_id":"daemon","label":"Codex"}`, http.StatusCreated, &account)
 	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 	start, end := time.Now().Add(-time.Minute).UTC(), time.Now().Add(time.Hour).UTC()
 	for _, unit := range []string{"requests", "cost_micros"} {
 		var window Window
@@ -497,6 +499,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	for _, account := range []Account{low, high} {
 		callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, account.DaemonID), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+		fixtureAlwaysOn(t, mod, admin, account.ID)
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows w SET used = 40 FROM agent_accounts a WHERE a.id = w.account_id AND a.account_key = 'high'`)
@@ -594,6 +597,7 @@ func TestRouteOnlyClaimsLocalDaemonEnrollment(t *testing.T) {
 			fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, daemon), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows",
 			windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+		fixtureAlwaysOn(t, mod, admin, account.ID)
 		return account
 	}
 	local := register(runner, "local", "daemon-a")
