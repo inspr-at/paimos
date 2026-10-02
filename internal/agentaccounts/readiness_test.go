@@ -651,6 +651,60 @@ func TestFix2KnownKeyCapKeepsTotalBalanceUnknown(t *testing.T) {
 	}
 }
 
+func TestFix2ReadinessNullChecksPreserveHardStopObservation(t *testing.T) {
+	for _, stop := range []string{"named_reset", "money_402"} {
+		t.Run(stop, func(t *testing.T) {
+			now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+			f := readinessWorld(t, "fix2-stop-observation-"+stop, now)
+			var resource string
+			if err := adminPool.QueryRow(t.Context(), `SELECT resource_id::text FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID).Scan(&resource); err != nil {
+				t.Fatal(err)
+			}
+			used, reset := 100.0, now.Add(time.Hour)
+			fact := ReadinessFactWrite{ResourceID: resource, WindowKey: "provider", Source: "provider", ObservedAt: now, ReadingAt: &now, UsedPercent: &used, CreditState: "unknown", StopKind: stop, DenialReason: "quota_exhausted"}
+			if stop == "named_reset" {
+				fact.ResetsAt = &reset
+			} else {
+				fact.UsedPercent = nil
+				fact.CreditState = "exhausted"
+				fact.DenialReason = "money_exhausted"
+			}
+			path := "/api/agent-accounts/" + f.account.ID + "/probe"
+			report := ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}
+			probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &report}
+			callStatus(t, f.mod, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			if stop == "money_402" {
+				if _, err := adminPool.Exec(t.Context(), `UPDATE account_readiness_facts SET backoff_step=3,next_attempt_at=$2,early_recovery_used=true WHERE resource_id=$1 AND window_key='provider'`, resource, now.Add(8*time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fact.ObservedAt = now.Add(20 * time.Minute)
+			fact.ReadingAt, fact.UsedPercent = nil, nil
+			fact.CreditState, fact.StopKind, fact.DenialReason = "unknown", "none", ""
+			report.Facts = []ReadinessFactWrite{fact}
+			later := fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+			callStatus(t, later, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			var observed time.Time
+			if err := adminPool.QueryRow(t.Context(), `SELECT observed_at FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider'`, resource).Scan(&observed); err != nil || !observed.Equal(now) {
+				t.Fatalf("null check moved hard-stop evidence: observed=%v want=%v err=%v", observed, now, err)
+			}
+			roomAt, room := now.Add(15*time.Minute), 20.0
+			fact.ObservedAt = now.Add(21 * time.Minute)
+			fact.ReadingAt, fact.UsedPercent = &roomAt, &room
+			report.Facts = []ReadinessFactWrite{fact}
+			later = fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+			callStatus(t, later, &f.runner, f.token, "POST", path, encoded(t, probe), 200, nil)
+			if stop == "named_reset" {
+				if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider' AND stop_kind='none' AND used_percent=20`, resource) != 1 {
+					t.Fatal("newer same-window room could not clear stop after a null check")
+				}
+			} else if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='provider' AND stop_kind='money_402' AND observed_at=$2 AND wait_id IS NOT NULL AND backoff_step=3 AND next_attempt_at=$3 AND early_recovery_used`, resource, now, now.Add(8*time.Hour)) != 1 {
+				t.Fatal("ordinary check changed money-stop evidence or spent recovery state")
+			}
+		})
+	}
+}
+
 func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 	p := tenant.Principal{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", TenantID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Kind: tenant.Person}
 	r := httptest.NewRequest("POST", "/api/agent-accounts", nil).WithContext(tenant.WithPrincipal(t.Context(), p))

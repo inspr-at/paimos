@@ -106,3 +106,17 @@ func TestNullKeyCapDoesNotImplyBalance(t *testing.T) {
 		t.Fatal("null cap became credit evidence")
 	}
 }
+
+func TestFix2ZeroKeyCapWithoutRemainingIsExhausted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/key" {
+			t.Error("key check requested broader credentials")
+		}
+		fmt.Fprint(w, `{"data":{"usage":0,"limit":0}}`)
+	}))
+	defer server.Close()
+	credits, err := (Client{Base: server.URL}).CheckKey(t.Context(), "synthetic-key-value")
+	if err != nil || credits == nil || credits.Limit == nil || *credits.Limit != 0 || credits.Remaining == nil || *credits.Remaining != 0 {
+		t.Fatalf("zero declared cap lost exhaustion: %+v err=%v", credits, err)
+	}
+}

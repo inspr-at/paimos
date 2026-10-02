@@ -558,3 +558,77 @@ func TestCapacityCheckRestartKeepsIdentityFenceBeforeHealthPoll(t *testing.T) {
 		t.Fatal("restart briefly opened identity fence")
 	}
 }
+
+func TestFix2CapacityCheckKeepsIdentityAndSignOutDistinct(t *testing.T) {
+	for _, result := range []string{"identity_mismatch", "authentication_failed"} {
+		t.Run(result, func(t *testing.T) {
+			s, api, a, clock := checkFixture(t)
+			a.result = result
+			tickChecks(t, s, clock)
+			want := ProbeIdentityMismatch
+			if result == "authentication_failed" {
+				want = ProbeAuthFailed
+			}
+			if len(api.reports) != 1 || api.reports[0].Result != result || api.statuses[0].Failure != want || s.probeFailureReasons["account"] != want || !s.blockedAccounts["account"] {
+				t.Fatalf("wrong identity repair: result=%s reports=%+v statuses=%+v local=%s blocked=%t", result, api.reports, api.statuses, s.probeFailureReasons["account"], s.blockedAccounts["account"])
+			}
+		})
+	}
+}
+
+func TestFix2CapacityCheckNewIdentityEvidenceReplacesOldCause(t *testing.T) {
+	s, api, a, clock := checkFixture(t)
+	a.result = "authentication_failed"
+	tickChecks(t, s, clock)
+	clock.Add(time.Minute)
+	a.result = "identity_mismatch"
+	tickChecks(t, s, clock)
+	if a.calls != 2 || len(api.reports) != 2 || api.reports[1].Result != "identity_mismatch" || s.capacityChecks["account"].LastResult != "identity_mismatch" || !s.blockedAccounts["account"] {
+		t.Fatalf("fresh mismatched login retained an old sign-out: %+v", api.reports)
+	}
+}
+
+func TestFix2RemoteCapacityCheckIdentityWireCategories(t *testing.T) {
+	for _, result := range []string{"identity_mismatch", "authentication_failed", "timeout", "protocol", "launch_failed"} {
+		t.Run(result, func(t *testing.T) {
+			var body struct {
+				Available bool                `json:"available"`
+				Failure   string              `json:"failure"`
+				Readiness CapacityCheckReport `json:"readiness"`
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			status := ProbeStatus{OK: true}
+			wantFailure := ""
+			if result == "identity_mismatch" {
+				status = ProbeStatus{Failure: ProbeIdentityMismatch}
+				wantFailure = ProbeUnavailable
+			}
+			if result == "authentication_failed" {
+				status = ProbeStatus{Failure: ProbeAuthFailed}
+				wantFailure = ProbeAuthFailed
+			}
+			report := CapacityCheckReport{BindingRevision: 0, Result: result}
+			if err := NewRemote(server.URL, "synthetic-daemon-key").ReportCapacityCheck(t.Context(), "account", "daemon", "generation", status, report); err != nil {
+				t.Fatal(err)
+			}
+			if body.Available != status.OK || body.Failure != wantFailure || body.Readiness.Result != result {
+				t.Fatalf("identity and measurement categories collapsed: %+v", body)
+			}
+		})
+	}
+}
+
+func TestFix2CapacityCheckZeroDeclaredCapIsHardFact(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	zero := 0.0
+	facts := capacityCheckFacts(CapacityCheckAccount{Resources: []CapacityResource{{ID: "key", Kind: "key_cap"}}}, CapacityCapture{Credits: &openrouter.Credits{ObservedAt: now, Limit: &zero}}, now)
+	if len(facts) != 1 || facts[0].Remaining == nil || *facts[0].Remaining != 0 || facts[0].CreditState != "exhausted" || facts[0].StopKind != "unnamed" || facts[0].DenialReason != "key_cap_exhausted" {
+		t.Fatalf("declared zero cap became unknown availability: %+v", facts)
+	}
+}
