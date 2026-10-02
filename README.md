@@ -1520,7 +1520,9 @@ customer, quote-version and session-chat reads ignore results from a previous
 record. Hours approval displays entries and digest from one stable read, then
 uses that displayed revision and digest after confirmation. Account changes
 cancel pending preference reads, timers and writes and clear earlier toast
-actions. CRM and quote mutation responses carry `X-Aeon-Event-Ids`, listing the
+actions. Changing person or workspace, or starting sign-out, cancels open
+confirmation dialogs so their captured actions cannot proceed in the new session.
+CRM and quote mutation responses carry `X-Aeon-Event-Ids`, listing the
 exact accepted events in undo order. Undo uses only this receipt; missing
 receipts and intervening changes refuse Undo without a latest-event lookup.
 

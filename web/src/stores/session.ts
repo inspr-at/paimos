@@ -8,6 +8,7 @@ import { clearSignInReturn } from '../lib/signInReturn'
 import { dropAttachCode } from '../lib/attachLink'
 import { followAuthentication, OIDC_PENDING_KEY } from '../lib/authTabs'
 import { resetToasts } from '../lib/toast'
+import { settleConfirm } from '../lib/confirm'
 import { setPreferenceOwner } from '../lib/preferences'
 import { resetPositions } from '../lib/position'
 
@@ -34,7 +35,10 @@ export const useSession = defineStore('session', () => {
   function authenticationCurrent() { return tabs.current() }
   watch(identity, (who, before) => {
     const same = !!who && !!before && who.tenant.id === before.tenant.id && who.principal.id === before.principal.id
-    if (!same) resetToasts()
+    if (!same) {
+      resetToasts()
+      settleConfirm(false)
+    }
     setPreferenceOwner(who, authenticationCurrent)
   }, { immediate: true, flush: 'sync' })
 
@@ -107,6 +111,7 @@ export const useSession = defineStore('session', () => {
     const started = ++epoch
     setPreferenceOwner(null, authenticationCurrent)
     resetToasts()
+    settleConfirm(false)
     dropAttachCode()
     revokePermissions()
     tabs.publish()
