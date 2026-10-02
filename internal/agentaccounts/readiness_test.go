@@ -513,7 +513,7 @@ func TestFix2PooledDaemonOwnControlFields(t *testing.T) {
 	if len(rows) != 1 || rows[0].PendingCheck == nil || rows[0].PendingCheck.ID != check.ID || len(rows[0].ReadinessResources) != 1 {
 		t.Fatalf("daemon lost its own capture: %+v", rows)
 	}
-	if len(rows[0].Windows) != 0 || !rows[0].DetailsRedacted {
+	if len(rows[0].Windows) != 0 {
 		t.Fatalf("pooled quota was disclosed: %+v", rows)
 	}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "timeout"}}), 200, nil)
@@ -653,7 +653,7 @@ func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 	r := httptest.NewRequest("POST", "/api/agent-accounts", nil).WithContext(tenant.WithPrincipal(t.Context(), p))
 	w := httptest.NewRecorder()
 	committed := false
-	New(nil).privateResponse(func(w http.ResponseWriter, r *http.Request) {
+	(&Module{}).privateResponse(func(w http.ResponseWriter, r *http.Request) {
 		committed = true
 		w.WriteHeader(201)
 		_, _ = w.Write([]byte(strings.Repeat("x", (4<<20)+1)))

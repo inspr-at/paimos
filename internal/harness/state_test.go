@@ -193,6 +193,14 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='failed' WHERE id=$1`, run)
 		return err
 	})
+	var account string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at) VALUES($1,'reset-privacy','codex','daemon',$2,'Private account',$3,now()) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.person.ID).Scan(&account); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2 WHERE id=$1`, run, account)
+		return err
+	})
 	check(false, true, "failed")
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,limit_window,limit_resets_at) VALUES($1,$2,1,'finished','vendor_limit','5h',now()+interval '1 hour')`, f.person.TenantID, run)
@@ -211,14 +219,6 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 
 	// An exact run's availability remains visible; reset details require its
 	// account owner's sharing, even for a workspace administrator.
-	var account string
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at) VALUES($1,'reset-privacy','codex','daemon',$2,'Private account',$3,now()) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.person.ID).Scan(&account); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2 WHERE id=$1`, run, account)
-		return err
-	})
 	viewer := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Teammate')`, viewer.TenantID, viewer.ID)
