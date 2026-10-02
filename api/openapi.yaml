@@ -6,6 +6,101 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/questions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: askQuestion
+      description: >-
+        Requires questions.ask and questions.read in an accessible project. Authenticated principal
+        is the asker; an optional session must be that principal's active generation in this project.
+        Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
+        changed input returns 409. anyway_reason deliberately skips future matching, never permissions.
+        Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
+        Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuestionInput'}
+      responses:
+        '201': {description: Stored question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '200': {description: Idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: 'Project, ticket, blocked work or source not accessible'}
+        '409': {description: 'code replay_conflict or session_ended'}
+        '413': {description: Body exceeds 64 KiB}
+    get:
+      operationId: listQuestions
+      description: Questions in this project with current questions.read permission. Stable oldest-first order; agents see only questions they asked and only their own membership.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+      responses:
+        '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /questions/{questionId}:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getQuestion
+      security: [{session: []}, {agentKey: []}]
+      description: Requires current questions.read permission; agents must be an asker. Inaccessible questions return 404 at the service boundary.
+      responses:
+        '200': {description: Question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /questions/{questionId}/status:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: questionStatus
+      security: [{session: []}, {agentKey: []}]
+      description: Same authorized durable projection as getQuestion; works after the original session ends and never waits for an answer.
+      responses:
+        '200': {description: Current durable state, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /questions/{questionId}/decision:
+    parameters:
+      - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: decideQuestion
+      security: [{session: []}]
+      description: >-
+        Person-only questions.decide plus questions.read; key-backed callers cannot decide.
+        Serializes on the question and requires expected_revision (initial revision 1).
+        An identical decision request_id replays even with its old expected_revision; altered input conflicts.
+        Appends an immutable answer revision and durable pending effect/delivery rows due database-now + 10 seconds.
+        Re-deciding replaces pending work and restarts the deadline; dispatched revisions require the P3 correction adapter.
+        P1 accepts Once only. Always, Requirement and Doctrine return outcome_unavailable until their P4 adapters exist;
+        their suggestions remain available on asks. No active Always authority, external side effect or delivery is claimed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuestionDecisionInput'}
+      responses:
+        '200': {description: Recorded answer with pending delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'code revision_conflict, replay_conflict or correction_unavailable'}
+        '422': {description: 'code outcome_unavailable'}
+  /decision-desk:
+    get:
+      operationId: listDecisionDeskQuestions
+      security: [{session: []}, {agentKey: []}]
+      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Later packages add other item types and held-work ordering.
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+      responses:
+        '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /queue:
     get:
       operationId: listWorkQueue
@@ -1396,7 +1491,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -1428,7 +1523,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -1522,7 +1617,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
         required: true
@@ -3133,11 +3228,11 @@ paths:
               type: object
               required: [file, crop]
               properties:
-                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB'}
+                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB, 4194304 pixels and 4096 pixels per side; dimensions and crop are checked before decoding'}
                 crop: {$ref: '#/components/schemas/AvatarCrop'}
       responses:
         '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
-        '400': {description: Invalid crop or image}
+        '400': {description: 'Invalid crop or image; at most 4,194,304 pixels, 4096 pixels per side and a square crop up to 2048 pixels per side'}
         '413': {description: Upload too large}
     delete:
       operationId: deleteMyAvatar
@@ -3905,7 +4000,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     post:
       operationId: addNodeAttachments
-      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default).
+      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default). Images are limited to 16777216 pixels and 8192 pixels per side, checked before decoding. Image processing shares a server-wide memory budget with avatar uploads.
       security: *auth
       requestBody:
         required: true
@@ -3941,6 +4036,39 @@ paths:
       responses:
         '204': {description: Soft deleted}
         '404': {$ref: '#/components/responses/Error'}
+  /attachments/{id}/preview:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: createAttachmentPreview
+      summary: Mint a short-lived HTML preview capability for a browser session
+      description: |
+        Person session only; attachments.read and current node/project visibility are
+        checked at issuance and every content request. No request body. The capability
+        is bound to the session, tenant, project, node, attachment and immutable digest.
+        It is not an API credential. Do not persist, log, share or cache the returned URL.
+        Missing/unsafe sandbox configuration returns available=false; originals remain
+        downloadable. The sandbox origin serves no app/auth routes or cookies.
+        Use iframe sandbox="allow-scripts" and referrerpolicy="no-referrer".
+        Inline scripts/styles and data images/fonts only. Frame self-navigation remains
+        possible; this is an origin isolation boundary, not a network sandbox.
+      security: *auth
+      responses:
+        '200':
+          description: Private, no-store preview availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: {type: boolean}
+                  url: {type: string, format: uri}
+                  expires_at: {type: string, format: date-time}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /attachments/{id}/content:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     get:
@@ -5038,7 +5166,7 @@ paths:
               schema: {$ref: '#/components/schemas/HarnessSessionHierarchy'}
         '400': {description: Invalid registration or label}
         '403': {description: Scope required or another agent requested}
-        '409': {description: 'Active harness_session_ref has a different worker lease or registration metadata, vendor_session_ref is already active for this agent in the tenant across any harness, or hierarchy/predecessor binding conflicts. Private references and leases are never returned.'}
+        '409': {description: 'Active harness_session_ref has a different worker lease or registration metadata, vendor_session_ref is already active for this agent in the tenant across any harness, or hierarchy/predecessor binding conflicts. Vendor binding conflicts identify the supplied reference by the first 16 hex characters of its domain-separated SHA-256 digest. Private references and leases are never returned.'}
   /projects/{projectId}/harness-sessions/{sessionId}:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6362,6 +6490,7 @@ paths:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
+        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -8617,6 +8746,109 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    QuestionOption:
+      type: object
+      additionalProperties: false
+      required: [id, title, description, answer]
+      properties:
+        id: {type: string, pattern: '^[a-zA-Z0-9_-]{1,40}$'}
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 1000}
+        answer: {type: string, minLength: 1, maxLength: 4000}
+    QuestionOutcome:
+      type: string
+      enum: [once, always, requirement, doctrine]
+    QuestionInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, question, options, meanwhile]
+      properties:
+        request_id: {type: string, format: uuid}
+        question: {type: string, minLength: 1, maxLength: 2000}
+        context: {type: string, maxLength: 16000}
+        findings: {type: string, maxLength: 8000}
+        options: {type: array, minItems: 1, maxItems: 9, items: {$ref: '#/components/schemas/QuestionOption'}}
+        recommend: {type: string, maxLength: 40, description: Existing option ID}
+        why: {type: string, maxLength: 2000}
+        meanwhile: {type: string, enum: [carries_on, parked, paused, stopped]}
+        meanwhile_text: {type: string, maxLength: 2000}
+        blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
+        source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}
+        source_handover_id: {type: string, format: uuid, description: Reserved for a verified AEON-524 adapter; currently returns source_unavailable}
+        anyway_reason: {type: string, minLength: 1, maxLength: 2000}
+    QuestionDecisionInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, expected_revision, outcome]
+      properties:
+        request_id: {type: string, format: uuid}
+        expected_revision: {type: integer, minimum: 1}
+        option_id: {type: string, maxLength: 40}
+        answer: {type: string, maxLength: 8000, description: Required for a custom answer; omit to use the option answer}
+        reason: {type: string, maxLength: 2000}
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+    QuestionAsker:
+      type: object
+      required: [id, principal_id, request_id, reply_root_id, comment_node_id, created_at, input]
+      properties:
+        id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        request_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        reply_root_id: {type: string, format: uuid, description: Server-reserved per-asker correlation root. P3 materializes the inbox counterpart for the answering person; until then this is not a public tell --reply-to message ID. Never infer a newer session.}
+        comment_node_id: {type: string, format: uuid, description: Linked ticket or the question node for ticketless asks}
+        created_at: {type: string, format: date-time}
+        input: {$ref: '#/components/schemas/QuestionInput'}
+    QuestionAnswer:
+      type: object
+      required: [id, revision, answer, outcome, decided_by, created_at, deliver_after]
+      properties:
+        id: {type: string, format: uuid, description: Protected decision node ID}
+        revision: {type: integer, minimum: 2}
+        option_id: {type: string}
+        answer: {type: string}
+        reason: {type: string}
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        decided_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        deliver_after: {type: string, format: date-time}
+    QuestionPending:
+      type: object
+      required: [id, revision, kind, state, deliver_after]
+      properties:
+        id: {type: string, format: uuid}
+        asker_id: {type: string, format: uuid}
+        revision: {type: integer}
+        kind: {type: string, enum: [inbox, comment, outcome]}
+        state: {type: string, enum: [pending, delivered, failed, replaced]}
+        deliver_after: {type: string, format: date-time}
+        effect_ref: {type: string}
+        error_code: {type: string}
+    Question:
+      type: object
+      required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        state: {type: string, enum: [open, answered]}
+        input: {$ref: '#/components/schemas/QuestionInput'}
+        suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        suggestion_reason: {type: string, enum: [agent_suggestion, ticket_default, project_default]}
+        askers: {type: array, items: {$ref: '#/components/schemas/QuestionAsker'}}
+        answer: {$ref: '#/components/schemas/QuestionAnswer'}
+        pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    QuestionPage:
+      type: object
+      required: [items, has_more]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Question'}}
+        has_more: {type: boolean}
     StatusAutopilotRule:
       type: object
       required: [enabled]
@@ -10405,7 +10637,7 @@ components:
       properties:
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
-        size: {type: integer, minimum: 1}
+        size: {type: integer, minimum: 1, maximum: 2048}
     PersonalProfilePatch:
       type: object
       additionalProperties: false
@@ -12432,6 +12664,7 @@ components:
             gate_open: {type: boolean}
             gate_reason: {type: string}
             result: {$ref: '#/components/schemas/ReviewResult'}
+            trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
             ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
             cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
             duration_seconds: {type: [integer, 'null'], format: int64}
@@ -12460,7 +12693,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -13504,6 +13737,7 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
         queue_node_id: {type: [string, 'null'], format: uuid}
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
         queue_routed_at: {type: [string, 'null'], format: date-time}
@@ -13673,6 +13907,40 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+    ModelPreferenceTrace:
+      type: object
+      description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
+      properties:
+        person_id: {type: [string, 'null'], format: uuid}
+        residency:
+          type: object
+          required: [value, set_by, loosened_lock]
+          properties:
+            value: {type: string, enum: [any, eu, local]}
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            lock_value: {type: string, enum: [any, eu, local]}
+            loosened_lock: {type: boolean}
+            loosened_locks:
+              type: array
+              items: {type: object, required: [level, value], properties: {level: {type: string, enum: [default, person]}, value: {type: string, enum: [any, eu, local]}}}
+        kind: {type: string}
+        kind_source: {type: string}
+        complexity: {type: string}
+        complexity_source: {type: string}
+        bucket: {type: string, enum: [normal, complex]}
+        set_by: {type: string}
+        locked_by: {type: string}
+        mode: {type: string, enum: [auto, latest, pinned]}
+        prefs_revision: {type: integer, format: int64}
+        qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+        preferred_candidates: {type: array, items: {type: object, properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: string}
+        blocked: {type: string}
+        prefs: {type: string}
+        hard: {type: array, items: {type: string}}
     CapacityEvidence:
       type: object
       additionalProperties: false
@@ -14817,6 +15085,7 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
+        thumbnail_kind: {type: string, enum: [html-text], description: Bounded inert text rendition of HTML; not a browser screenshot. Available as variant=thumb.}
     StatusHelp:
       type: object
       required: [definitions, queued, autopilot, triage, limits_source]

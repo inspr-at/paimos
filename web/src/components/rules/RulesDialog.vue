@@ -4,7 +4,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 
 // One modal for the rules page: a title, one short line, a body that scrolls on
-// its own and a footer that always stays in view with the dialog's one action.
+// its own. Centered task actions precede the body; side/phone actions stay below.
 // 'side' slides in from the right (preview, history); 'center' is a task dialog.
 const props = withDefaults(defineProps<{ title: string; lede?: string; size?: 'center' | 'wide' | 'side' | 'sheet'; busy?: boolean }>(), { lede: '', size: 'center', busy: false })
 const emit = defineEmits<{ close: [] }>()
@@ -34,9 +34,9 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
         </div>
         <button type="button" class="icon-btn sm flat" :aria-label="`Close ${title.toLowerCase()}`" data-tip="Close · Esc" :disabled="busy" @click="close"><AppIcon name="close" :size="16" /></button>
       </header>
-      <div class="body"><slot /></div>
       <div v-if="$slots.pinned" class="pinned"><slot name="pinned" /></div>
       <footer v-if="$slots.footer" class="foot"><slot name="footer" /></footer>
+      <div class="body"><slot /></div>
     </div>
   </dialog>
 </template>
@@ -45,23 +45,29 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .rules-dialog { padding: 0; border: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; overflow: visible; }
 .rules-dialog::backdrop { background: var(--scrim); }
 .card { display: flex; flex-direction: column; min-height: 0; background: var(--surface); box-shadow: var(--shadow-pop); border: 1px solid var(--glass-edge); }
-.size-center, .size-wide { width: min(560px, calc(100vw - 24px)); margin: auto; }
+.size-center, .size-wide { position: fixed; inset: 96px 0 auto; width: min(560px, calc(100vw - 24px)); margin: 0 auto; }
 .size-wide { width: min(760px, calc(100vw - 24px)); }
-.size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 24px)); border-radius: 16px; }
+.size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 112px)); border-radius: 16px; }
 .size-side, .size-sheet { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
 .size-sheet { width: min(860px, 100vw); }
 .size-side .card, .size-sheet .card { height: 100%; border-radius: 16px 0 0 16px; }
-.head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
+.head { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
 .titles { flex: 1; min-width: 0; }
 .head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
 .lede { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .body { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
-.pinned { display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 4px; border-top: 1px solid var(--line); }
+.pinned { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 4px; border-top: 1px solid var(--line); }
+.size-side .body, .size-sheet .body { order: 1; }
+.size-side .pinned, .size-sheet .pinned { order: 2; }
+.size-side .foot, .size-sheet .foot { order: 3; }
 .foot :deep(.btn:disabled) { opacity: .5; filter: saturate(.3); box-shadow: none; cursor: not-allowed; }
-.foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
+.foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); background: var(--surface); }
 @media (max-width: 600px) {
-  .size-center, .size-wide { width: 100vw; margin: auto 0 0; }
-  .size-center .card, .size-wide .card { max-height: 92dvh; border-radius: 16px 16px 0 0; }
+  .size-center, .size-wide { inset: 0; width: 100vw; margin: 0; }
+  .body { order: 1; }
+  .pinned { order: 2; }
+  .foot { order: 3; }
+  .size-center .card, .size-wide .card { height: 100dvh; max-height: 100dvh; border-radius: 16px 16px 0 0; }
   .size-side .card, .size-sheet .card { border-radius: 0; }
   .head { padding: 16px 16px 10px; }
   .body { padding: 4px 16px 14px; }
