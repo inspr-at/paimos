@@ -61,3 +61,10 @@ func TestLearningCapDegradesWithoutAggregation(t *testing.T) {
 		t.Fatalf("hint cap must degrade before aggregation: samples=%v error=%v aggregated=%v", samples, err, tx.aggregated)
 	}
 }
+
+func TestLearningHistoryCapIsExplicit(t *testing.T) {
+	samples, truncated, err := LoadLearningHistory(t.Context(), &learningLimitTx{}, []LearningCell{{ProfileID: "00000000-0000-0000-0000-000000000001", Family: "openai", Line: "astra", Effort: "xhigh", Kind: "backend", Bucket: "complex"}}, "", func(string) bool { return true })
+	if err != nil || !truncated || len(samples) != 0 {
+		t.Fatalf("history truncation not explicit: %+v %v %v", samples, truncated, err)
+	}
+}

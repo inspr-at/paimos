@@ -483,8 +483,17 @@ func TestListPlanningColumns(t *testing.T) {
 		}
 	}
 
-	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
-		t.Fatalf("tokens sort: %v", got)
+	// Measured values lead; uncalibrated estimates and absent values tie by ID.
+	known := []nodeJSON{w.nodes["PLN-1"], w.nodes["PLN-2"]}
+	missing := []nodeJSON{w.nodes["PLN-4"], w.nodes["PLN-6"], w.nodes["PLN-7"], w.nodes["PLN-8"], w.nodes["PLN-9"]}
+	slices.SortFunc(known, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(missing, func(a, b nodeJSON) int { return strings.Compare(a.ID, b.ID) })
+	wantTokens := []string{"PLN-5", known[0].Key, known[1].Key}
+	for _, n := range missing {
+		wantTokens = append(wantTokens, n.Key)
+	}
+	if got := keys(w.admin, "-tokens"); !slices.Equal(got, wantTokens) {
+		t.Fatalf("tokens sort: %v want %v", got, wantTokens)
 	}
 	if got := keys(w.admin, "-paid"); got[0] != "PLN-5" || slices.Index(got, "PLN-9") < 3 {
 		t.Fatalf("paid sort: %v", got)

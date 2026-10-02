@@ -313,7 +313,7 @@ func TestPlanningCostMicrosAgree(t *testing.T) {
 	// This rounding test needs a calibrated estimate, not a hidden default.
 	for i := range 5 {
 		n := w.node(t, fmt.Sprintf("MICROTRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
-		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 5_000_000, 0, 0, "api", "")
+		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 4_900_000, 100_000, 4_500_000, "api", "")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions s SET created_at='2026-09-01T12:00:00Z',stopped_at='2026-09-01T13:00:00Z' FROM nodes n WHERE s.ticket_node_id=n.id AND n.key LIKE 'MICROTRAIN-%'`)

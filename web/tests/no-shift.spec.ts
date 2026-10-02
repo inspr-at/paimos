@@ -430,10 +430,6 @@ for (const width of [1440, 1024]) {
 
 for (const width of [390, 1440]) {
   test(`model estimate picker hints and selection hold every control at ${width}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 844 })
-    await mockWork(page, fixtures())
-    await page.goto('/p/PHAROS')
-    await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
     await mountShell(page, 'model-picker', width)
     const picker = page.getByRole('dialog', { name: 'Fixture picker' })
     const options = picker.getByRole('option')

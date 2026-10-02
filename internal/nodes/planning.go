@@ -241,7 +241,11 @@ func newPlanningPlanner(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds
 			return nil, err
 		}
 	}
-	pl := &planner{routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
+	placements := map[string]planRow{}
+	for _, seed := range seeds {
+		placements[seed.placementKey()] = seed
+	}
+	pl := &planner{placements: placements, routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
 	if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
 		return nil, err
 	}
@@ -260,7 +264,8 @@ func (pl *planner) rates(ctx context.Context, tx pgx.Tx) (json.RawMessage, error
 			continue
 		}
 		c := pl.calibration(route)
-		rate := planSortRate{Calibrated: c.basis != "default", Placement: key, Kind: route.cell.Kind, Bucket: route.cell.Bucket, Tokens: c.tokensPerHour * c.speed, List: scaledRate(c.listPerHour, c.speed)}
+		seed := pl.placements[key]
+		rate := planSortRate{Role: seed.role, Project: seed.project, Person: seed.person, Residency: seed.residency, Calibrated: c.basis != "default", Placement: key, Kind: route.cell.Kind, Bucket: route.cell.Bucket, Tokens: c.tokensPerHour * c.speed, List: scaledRate(c.listPerHour, c.speed)}
 		switch pl.billing[route.view.Harness].mode {
 		case "subscription":
 			zero := 0.0
@@ -644,6 +649,7 @@ type planBilling struct{ mode, plan string }
 // planner holds what one list page's estimates share: the resolved placements, the
 // calibration samples and each routed harness's billing.
 type planner struct {
+	placements    map[string]planRow
 	routes        map[string]*planRoute
 	learningIssue string
 	learning      []usagedashboard.LearningSample

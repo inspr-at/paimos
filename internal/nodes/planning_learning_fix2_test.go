@@ -117,6 +117,40 @@ func TestPlanningLearningEpicExcludesDefaultChildren(t *testing.T) {
 	}
 }
 
+func TestPlanningLearningSnapshotSpeedReproducesFrozenTokens(t *testing.T) {
+	w := planningSetup(t)
+	for i := range 5 {
+		seedLearningTicket(t, w, i+1, int64(4*3600000), false)
+	}
+	n := placementNode(t, w, "SPEEDBASIS-1", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 3})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if err := CapturePlanningStart(t.Context(), tx, n.ID, "session"); err != nil {
+			return err
+		}
+		var raw []byte
+		if err := tx.QueryRow(t.Context(), `SELECT snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$1`, n.ID).Scan(&raw); err != nil {
+			return err
+		}
+		var frozen struct {
+			Hours  float64 `json:"estimate_hours"`
+			Tokens int64   `json:"estimated_tokens"`
+			Rate   struct {
+				Speed float64 `json:"speed"`
+				Rate  float64 `json:"tokens_per_hour"`
+			} `json:"rate_basis"`
+		}
+		if err := json.Unmarshal(raw, &frozen); err != nil {
+			return err
+		}
+		if frozen.Rate.Speed != 2 || float64(frozen.Tokens) != frozen.Hours*frozen.Rate.Rate*frozen.Rate.Speed {
+			t.Fatalf("missing/non-reproducible frozen speed: %s", raw)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Every added session is independently complete before changing exactly one
 // exclusion dimension, so an incomplete run cannot explain the assertion.
 func TestPlanningLearningExcludesMixedModelsPlacementsAndSource(t *testing.T) {
