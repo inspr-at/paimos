@@ -134,9 +134,12 @@ func TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms(t *testing.T) {
 	agent := f.p
 	agent.Kind = tenant.Agent
 	f.confirm(agent, 403)
-	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "admin")
-	f.confirm(f.p, 403) // settings.manage alone must not end the grace period.
-	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "owner")
+	admin := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Person, Name: "Workspace admin"}
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Workspace admin') RETURNING id::text`, admin.TenantID).Scan(&admin.ID)
+	})
+	dbtest.BindRole(t, f.d, admin.TenantID, admin.ID, "admin")
+	f.confirm(admin, 403) // settings.manage alone must not end the grace period.
 	f.confirm(f.p, 200)
 	f.run(f.now) // Same UTC day must rescan after confirmation.
 	if f.state(ids[0]).State != "open" || f.state(ids[1]).State != "accepted" || !f.state(ids[2]).Marks["triage_list"] || len(f.proposals()) != 0 {
