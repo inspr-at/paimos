@@ -111,6 +111,9 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		return q, false, err
 	}
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := treeLock(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
 		if err := permit(ctx, tx, p, project, "questions.ask"); err != nil {
 			return err
 		}
@@ -118,9 +121,6 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 			return err
 		}
 		if err := checkProject(ctx, tx, p, project); err != nil {
-			return err
-		}
-		if err := treeLock(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
 		var id, previous string
@@ -207,7 +207,7 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,q.input,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
- WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt)
+ WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL FOR SHARE OF q`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt)
 	if err != nil {
 		return q, err
 	}

@@ -80,6 +80,9 @@ func (rt *runtime) cmdAsk() *Command {
 					return err
 				}
 			}
+			if !validUUID(in.RequestID) {
+				return usagef("request_id must be a UUID")
+			}
 			// Print before the request so even a lost response can be retried exactly.
 			fmt.Fprintln(rt.stderr, "request_id:", in.RequestID)
 			q, err := rt.sendQuestion(context.Background(), project, ticket, in)

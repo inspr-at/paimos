@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-562. Node identities remain in the tree. Authority/content lives only in
 -- these service-owned projections, never in generic node/knowledge fields.
-ALTER TABLE nodes ADD CONSTRAINT nodes_tenant_project_id_unique UNIQUE (tenant_id,project_id,id);
-ALTER TABLE inbox_compat_messages ADD CONSTRAINT inbox_compat_project_id_unique UNIQUE (tenant_id,project_id,id);
+CREATE UNIQUE INDEX nodes_tenant_project_id_unique ON nodes(tenant_id,project_id,id);
+CREATE UNIQUE INDEX inbox_compat_project_id_unique ON inbox_compat_messages(tenant_id,project_id,id);
 
 CREATE TABLE desk_questions (
  tenant_id uuid NOT NULL REFERENCES tenants(id), project_id uuid NOT NULL, node_id uuid NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE desk_answers (
  option_id text NOT NULL DEFAULT '', answer text NOT NULL CHECK(octet_length(answer) BETWEEN 1 AND 8000), reason text NOT NULL DEFAULT '',
  outcome text NOT NULL CHECK(outcome IN ('once','always','requirement','doctrine')),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(), deliver_after timestamptz NOT NULL,
- PRIMARY KEY (tenant_id,node_id), UNIQUE (tenant_id,project_id,question_id,revision),
+ PRIMARY KEY (tenant_id,node_id), UNIQUE (tenant_id,project_id,node_id), UNIQUE (tenant_id,project_id,question_id,revision),
  UNIQUE (tenant_id,question_id,decided_by,request_id),
  FOREIGN KEY (tenant_id,project_id,node_id) REFERENCES nodes(tenant_id,project_id,id),
  FOREIGN KEY (tenant_id,project_id,question_id) REFERENCES desk_questions(tenant_id,project_id,node_id),
@@ -56,7 +56,7 @@ CREATE TABLE desk_decisions (
  effect_ref text NOT NULL DEFAULT '',
  PRIMARY KEY (tenant_id,question_id,revision),
  FOREIGN KEY (tenant_id,project_id,question_id,revision) REFERENCES desk_answers(tenant_id,project_id,question_id,revision),
- FOREIGN KEY (tenant_id,superseded_by) REFERENCES desk_answers(tenant_id,node_id)
+ FOREIGN KEY (tenant_id,project_id,superseded_by) REFERENCES desk_answers(tenant_id,project_id,node_id)
 );
 CREATE TABLE desk_pending (
  tenant_id uuid NOT NULL REFERENCES tenants(id), project_id uuid NOT NULL, id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -71,14 +71,46 @@ CREATE TABLE desk_pending (
 );
 CREATE INDEX desk_pending_due ON desk_pending(tenant_id,deliver_after,id) WHERE state='pending';
 
-DO $$ DECLARE tbl text; BEGIN
- FOREACH tbl IN ARRAY ARRAY['desk_questions','desk_askers','desk_answers','desk_decisions','desk_pending'] LOOP
-  EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',tbl);
-  EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY',tbl);
-  EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (tenant_id=NULLIF(current_setting(''aeon.tenant_id'',true),'''')::uuid) WITH CHECK (tenant_id=NULLIF(current_setting(''aeon.tenant_id'',true),'''')::uuid)',tbl);
-  EXECUTE format('CREATE POLICY project_visibility ON %I AS RESTRICTIVE USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[])) WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))',tbl);
- END LOOP;
-END $$;
+ALTER TABLE desk_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desk_questions FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON desk_questions
+ USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+ WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY project_visibility ON desk_questions AS RESTRICTIVE
+ USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
+ALTER TABLE desk_askers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desk_askers FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON desk_askers
+ USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+ WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY project_visibility ON desk_askers AS RESTRICTIVE
+ USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
+ALTER TABLE desk_answers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desk_answers FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON desk_answers
+ USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+ WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY project_visibility ON desk_answers AS RESTRICTIVE
+ USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
+ALTER TABLE desk_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desk_decisions FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON desk_decisions
+ USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+ WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY project_visibility ON desk_decisions AS RESTRICTIVE
+ USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
+ALTER TABLE desk_pending ENABLE ROW LEVEL SECURITY;
+ALTER TABLE desk_pending FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON desk_pending
+ USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
+ WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+CREATE POLICY project_visibility ON desk_pending AS RESTRICTIVE
+ USING ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]))
+ WITH CHECK ((SELECT aeon_visible_all()) OR project_id=ANY((SELECT aeon_visible_projects())::uuid[]));
 
 -- Transaction capability set only by the authorized question service. Generic
 -- CRUD, bulk writes, kind conversion, imports and undo have no such capability.
@@ -93,11 +125,11 @@ BEGIN
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
  RETURN NEW;
 END $$;
-DO $$ DECLARE tbl text; BEGIN
- FOREACH tbl IN ARRAY ARRAY['desk_questions','desk_askers','desk_answers','desk_decisions','desk_pending'] LOOP
-  EXECUTE format('CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard()',tbl);
- END LOOP;
-END $$;
+CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON desk_questions FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard();
+CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON desk_askers FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard();
+CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON desk_answers FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard();
+CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON desk_decisions FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard();
+CREATE TRIGGER desk_write_guard BEFORE INSERT OR UPDATE OR DELETE ON desk_pending FOR EACH ROW EXECUTE FUNCTION aeon_desk_write_guard();
 CREATE FUNCTION aeon_desk_node_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE protected boolean := false;
 BEGIN

@@ -505,3 +505,101 @@ func TestQuestionRealAgentKeyBoundary(t *testing.T) {
 		t.Fatal("decision authority is key-grantable")
 	}
 }
+
+func TestQuestionPermissionFilteredPageAndRollback(t *testing.T) {
+	f := newFixture(t)
+	// Both projects are visible through nodes.read. Only one grants questions.read.
+	reader := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person, Name: "restricted reader"}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, reader.TenantID, reader.Name).Scan(&reader.ID); err != nil {
+		t.Fatal(err)
+	}
+	for i, project := range []string{f.project, f.hidden} {
+		var role string
+		if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,$2) RETURNING id::text`, reader.TenantID, fmt.Sprintf("question_reader_%d", i)).Scan(&role); err != nil {
+			t.Fatal(err)
+		}
+		perms := []string{"nodes.read"}
+		if i == 0 {
+			perms = append(perms, "questions.read")
+		}
+		for _, p := range perms {
+			if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, reader.TenantID, role, p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, reader.TenantID, reader.ID, role, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hidden := question(t, request(t.Context(), f.mux, f.person, "POST", "/api/projects/"+f.hidden+"/questions", input()), 201)
+	visible := f.ask(t, input())
+	if w := request(t.Context(), f.mux, reader, "GET", "/api/questions/"+hidden.ID, nil); w.Code != 404 {
+		t.Fatal("nodes.read became questions.read")
+	}
+	w := request(t.Context(), f.mux, reader, "GET", "/api/decision-desk?limit=1", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var page Page
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != visible.ID || page.HasMore {
+		t.Fatal("page or has_more leaked unauthorized project")
+	}
+	if w := request(t.Context(), f.mux, reader, "POST", "/api/questions/"+visible.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: 1, OptionID: "a", Outcome: "once"}); w.Code != 404 {
+		t.Fatal("reader gained decide authority")
+	}
+	// Fail the atomic event append; no question identity/membership may escape.
+	if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_question_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='question.asked' THEN RAISE EXCEPTION 'fixture event failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_question_test BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_question_test()`); err != nil {
+		t.Fatal(err)
+	}
+	var before, after int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", input()); w.Code != 500 {
+		t.Fatal("event failure not propagated")
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatal("question node survived event rollback")
+	}
+}
+
+func TestQuestionSourceCorrelation(t *testing.T) {
+	f := newFixture(t)
+	var source string
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.person), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		var eventID int64
+		if err := tx.QueryRow(t.Context(), `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,'message.sent','{}') RETURNING id`, f.person.TenantID, f.agent.ID, f.project).Scan(&eventID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO inbox_compat_messages(tenant_id,project_id,sender_principal_id,recipient_principal_id,recipient_address,body,key_digest,request_digest,sent_event_id,is_action_request,expects_reply,delivery_level,sender_session_id)
+ VALUES($1,$2,$3,$4,'test:person','held context','test-key','test-request',$5,true,true,'simple',$6) RETURNING id::text`, f.person.TenantID, f.project, f.agent.ID, f.person.ID, eventID, f.session).Scan(&source)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := input()
+	in.SessionID = f.session
+	in.SourceRequestID = source
+	q := f.ask(t, in)
+	if q.Askers[0].Input.SourceRequestID != source || q.Askers[0].SessionID != f.session {
+		t.Fatal("lost original source route")
+	}
+	in.RequestID = uid()
+	in.SessionID = ""
+	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", in); w.Code != 404 {
+		t.Fatal("source session mismatch accepted")
+	}
+	in.RequestID = uid()
+	in.SessionID = f.otherSession
+	if w := request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", in); w.Code != 404 {
+		t.Fatal("source asker mismatch accepted")
+	}
+	// Known source ids cannot weaken held-message reply semantics; P3 must create
+	// its explicit authorized bridge. P1 only stores the owned provenance.
+}
