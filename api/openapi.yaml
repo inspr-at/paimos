@@ -14701,7 +14701,7 @@ components:
       required: [daemon_id, daemon_generation, available]
       properties:
         readiness: {$ref: "#/components/schemas/ReadinessReport"}
-        measurement_only: {type: boolean, default: false, description: 'Scoped daemon measurement or generation heartbeat. Preserves last_probe_at, last_probe_ok, failure and legacy credit snapshot under the account write fence. Readiness reports require the generation already established by a plain heartbeat; available and failure remain compatibility fields and do not update health in this mode.'}
+        measurement_only: {type: boolean, default: false, description: 'Scoped daemon measurement or generation heartbeat. Preserves last_probe_at, last_probe_ok, failure and legacy credit snapshot under the account write fence. Readiness reports require the generation already established by a measurement-only heartbeat without readiness; available and failure remain compatibility fields and do not update health in this mode.'}
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}

@@ -843,11 +843,11 @@ capture before that deadline. Every completion is persisted before delivery.
 Lost automatic observations replay unchanged after restart while their binding
 and resource membership remain current; manual completions keep their original
 generation, revision and check ID and are dropped when expired or invalidated.
-A restarted daemon sends a measurement-only generation heartbeat before handling
-checks. Measurement reports and this heartbeat preserve the health probe's
+A restarted daemon sends a generation heartbeat with `measurement_only: true`
+before handling checks. Measurement reports and this heartbeat preserve the health probe's
 timestamp, availability, failure and legacy credit snapshot under the server's
-account write fence, so delayed observations cannot clear a newer health failure. Consent
-and binding are checked again after capture; the final server write enforces
+account write fence, so delayed observations cannot clear a newer health failure.
+Consent and binding are checked again after capture; the final server write enforces
 revocation. Unknown usage never introduces a start limit; identity mismatch
 remains a hard failure. Recovery execution belongs to admission, not this loop.
 
