@@ -98,7 +98,12 @@ async function submit() {
   if (blocked.value) { error.value = expired.value ? 'This request expired.' : current.unavailable || 'You do not have permission to decide this item.'; return }
   const unavailable = (current.kind === 'question' || current.kind === 'handover') && outcomeUnavailable(current, sentDraft.outcome)
   if (unavailable) { error.value = unavailable; return }
-  if (!answerFor(current, sentDraft)) { error.value = 'Set an answer before deciding.'; void focusField('answer'); return }
+  if (!answerFor(current, sentDraft)) {
+    const hasAnswerField = current.choices.find(choice => choice.id === sentDraft.optionId)?.field
+    error.value = hasAnswerField ? 'Set an answer before deciding.' : 'Choose an answer above.'
+    if (hasAnswerField) void focusField('answer')
+    return
+  }
   if ((current.kind === 'rule' && sentDraft.optionId === 'dismiss') && !sentDraft.reason.trim()) { error.value = 'Give the proposer a reason.'; void focusField('reason'); return }
   const capturedId = current.id, capturedRevision = current.revision, capturedIndex = index.value
   const payload = { ...sentDraft }, requestId = crypto.randomUUID()
