@@ -557,7 +557,6 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   await expect(page.locator('footer.app-footer .version-pill .footer-codename')).toBeVisible()
 })
 
-
 test('the running candidate shows frozen features and fixes with honest pending evidence', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const history = releaseHistory()
@@ -577,8 +576,8 @@ test('the running candidate shows frozen features and fixes with honest pending 
   const detail = sheet(page).locator('article.detail')
   await expect(detail.getByText('Candidate release', { exact: true })).toBeVisible()
   await expect(detail.getByText('Publication pending', { exact: true })).toBeVisible()
-  await expect(detail.getByRole('heading', { name: 'Features', exact: true })).toBeVisible()
-  await expect(detail.getByRole('heading', { name: 'Fixes', exact: true })).toBeVisible()
+  await expect(detail.getByRole('region', { name: 'Features, 1' })).toBeVisible()
+  await expect(detail.getByRole('region', { name: 'Fixes, 1' })).toBeVisible()
   await expect(detail.getByText('Frozen feature', { exact: true })).toBeVisible()
   await expect(detail.getByText('Frozen fix', { exact: true })).toBeVisible()
   await expect(detail.locator('.live-line')).toContainText('reserved')

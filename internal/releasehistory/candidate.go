@@ -39,13 +39,16 @@ func withCandidate(h History, head versionFile, opts Options, git func(...string
 			return History{}, fmt.Errorf("candidate is listed as an unpublished reservation")
 		}
 	}
-	previous := ""
+	// Once the tag exists the normal builder wins, byte for byte, including
+	// when newer tags have since been fetched. A later build fills evidence
+	// without rewriting the original image manifest.
 	for _, rel := range h.Releases {
-		// Once the tag exists the normal builder wins, byte for byte. A later
-		// build fills evidence without rewriting the original image manifest.
 		if rel.Version == v {
 			return h, nil
 		}
+	}
+	previous := ""
+	for _, rel := range h.Releases {
 		if rel.State == StatePublished {
 			if rel.Version >= v || rel.ReleaseSequence >= head.ReleaseSequence {
 				return History{}, fmt.Errorf("candidate must follow published release history")

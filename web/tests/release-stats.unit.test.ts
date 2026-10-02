@@ -296,7 +296,6 @@ describe('cadence over a range', () => {
   })
 })
 
-
 it('a candidate reservation is not reported as a tag or publication', () => {
   const candidate = rel(NOW - HOUR, { state: 'candidate', tagged_at: null, published_at: null })
   const since = releaseStats([candidate], NOW).find(stat => stat.key === 'since')!
