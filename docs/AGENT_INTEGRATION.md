@@ -844,6 +844,8 @@ Lost automatic observations replay unchanged after restart while their binding
 and resource membership remain current, including after outages longer than 24
 hours. Replay preserves the original observation and reading times, so old room
 stays stale, unresolved hard stops remain recorded and newer facts win.
+A replay acknowledgement lets the next automatic refresh or Check now capture
+new evidence.
 Manual completions retain the 24-hour observation bound and keep their original
 generation, revision and check ID and are dropped when expired or invalidated.
 A restarted daemon sends a generation heartbeat with `measurement_only: true`
