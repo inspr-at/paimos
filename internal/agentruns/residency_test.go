@@ -67,6 +67,7 @@ func TestTicketQueueStampsYouResidencyAndRejectsDisallowedAccount(t *testing.T) 
 
 func TestRunStoresLoosenedResidencyLockTrace(t *testing.T) {
 	f := setup(t)
+	f.queueAccount(t, 1000000)
 	ticket := f.ticket(t, "open", "high", nil)
 	project := uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
