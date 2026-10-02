@@ -546,6 +546,16 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 	if err != nil {
 		return err
 	}
+	if p.TouchIDConfirmation != "" {
+		if _, err := fmt.Fprintln(out, "Touch ID confirmation: "+p.TouchIDConfirmation); err != nil {
+			return err
+		}
+		if p.TouchIDUpgradeCommand != "" {
+			if _, err := fmt.Fprintln(out, "Pairing upgrade (new, empty state folder; approve in Aeon): "+p.TouchIDUpgradeCommand+"\nKeep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
+				return err
+			}
+		}
+	}
 	// One line per harness that is not ready, then per blocked account; both
 	// use the shared reason codes and fix commands.
 	harnesses := make([]string, 0, len(p.HarnessDetails))

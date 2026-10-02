@@ -77,7 +77,8 @@
 // in-flight requests across unmark/re-mark; all handler transactions recheck the
 // current key, pairing, role and creator under the tenant fence.
 //
-// High-risk writes return 428 with a two-minute, single-use challenge. The proof
+// High-risk writes return 428 with only code, challenge_id and expires_at for a
+// two-minute, single-use challenge. The proof
 // is standard-base64 ASN.1 ECDSA P-256/SHA-256 over the UTF-8 concatenation of the
 // nonce and action_digest hex strings, passed as Aeon-Step-Up: id.signature.
 // The digest binds tenant/key/agent/computer, method, URI/query, body hash and
@@ -88,14 +89,17 @@
 // the stored server summary/nonce/digest through GET /api/agentd/step-ups/{id}
 // using its exact paired runtime key plus Aeon-Computer-ID and Aeon-Device-Proof.
 // The requesting agent passes only the challenge ID to agentd; its forwarded
-// summary is never trusted for the Touch ID prompt.
+// summary is never trusted for the Touch ID prompt. The server summary uses a
+// fixed action template, method, escaped route and stored member/key/role names
+// when identified by the route. Labels are quoted, stripped of control/format
+// characters and shortened as needed to fit the daemon's 256 UTF-8 byte limit.
 //
 // DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
 // metadata; workstation_computer_id is a personal device link, located by
 // (tenant_id,principal_id,id). owner_workstation_challenges is tenant scoped;
 // key_id/principal_id/computer_id are personal links, nonce is a short-lived
-// secret, public_key/action_digest/id/expires_at/summary are security metadata (the summary
-// is a fixed action template and escaped route, never submitted prose). No body,
+// secret, summary is personal data (may include stored target names), and
+// public_key/action_digest/id/expires_at are security metadata. No body,
 // signature, Touch ID biometric or submitted prose is retained. Audit events
 // use the existing append-only events retention and principal locator.
 package auth

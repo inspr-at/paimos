@@ -19,6 +19,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -29,13 +32,15 @@ import (
 )
 
 type workstationFixture struct {
-	m          *Module
-	owner      tenant.Principal
-	key, other agentKeyCreatedJSON
-	computer   string
-	signer     *ecdsa.PrivateKey
-	mux        *http.ServeMux
-	serve      http.Handler
+	m           *Module
+	owner       tenant.Principal
+	key, other  agentKeyCreatedJSON
+	runtime     agentKeyCreatedJSON
+	deviceProof string
+	computer    string
+	signer      *ecdsa.PrivateKey
+	mux         *http.ServeMux
+	serve       http.Handler
 }
 
 func workstationSigner(n int64) *ecdsa.PrivateKey {
@@ -55,7 +60,7 @@ func newWorkstationFixture(t *testing.T) *workstationFixture {
 	}
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "Synthetic workstation", "scopes": scopes}))
 	other := decodeKey(t, keyRequest(m, owner, map[string]any{"principal_id": key.PrincipalID, "name": "Unmarked sibling", "scopes": scopes}))
-	f := &workstationFixture{m: m, owner: owner, key: key, other: other, signer: workstationSigner(1), mux: http.NewServeMux()}
+	f := &workstationFixture{m: m, owner: owner, key: key, other: other, runtime: key, deviceProof: strings.Repeat("b", 64), signer: workstationSigner(1), mux: http.NewServeMux()}
 	ctx := t.Context()
 	err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='admin') WHERE principal_id=$1`, key.PrincipalID); err != nil {
@@ -66,8 +71,9 @@ func newWorkstationFixture(t *testing.T) *workstationFixture {
 			return err
 		}
 		public := base64.StdEncoding.EncodeToString(elliptic.Marshal(f.signer.Curve, f.signer.X, f.signer.Y))
+		proofHash := sha256.Sum256([]byte(f.deviceProof))
 		_, err := tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key,setup_state)
-		 VALUES($1,$2,$2,$3,$4,'synthetic-daemon',$5,$6,'connected')`, owner.TenantID, f.computer, key.PrincipalID, key.ID, strings.Repeat("a", 64), public)
+		 VALUES($1,$2,$2,$3,$4,'synthetic-daemon',$5,$6,'connected')`, owner.TenantID, f.computer, key.PrincipalID, key.ID, hex.EncodeToString(proofHash[:]), public)
 		return err
 	})
 	if err != nil {
@@ -126,20 +132,52 @@ func (f *workstationFixture) call(key, method, path, body, proof string) *httpte
 	return w
 }
 
-func (f *workstationFixture) challenge(t *testing.T, method, path, body string) workstationChallenge {
+type workstationTestChallenge struct {
+	Code    string    `json:"code"`
+	ID      string    `json:"challenge_id"`
+	Nonce   string    `json:"nonce"`
+	Digest  string    `json:"action_digest"`
+	Summary string    `json:"summary"`
+	Expires time.Time `json:"expires_at"`
+}
+
+func (f *workstationFixture) fetchChallenge(key, computer, proof, id string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("GET", "/api/agentd/step-ups/"+id, nil)
+	r.Header.Set("Authorization", "Bearer "+key)
+	r.Header.Set("Aeon-Computer-ID", computer)
+	r.Header.Set("Aeon-Device-Proof", proof)
+	w := httptest.NewRecorder()
+	f.serve.ServeHTTP(w, r)
+	return w
+}
+
+func (f *workstationFixture) readChallenge(t *testing.T, w *httptest.ResponseRecorder) workstationTestChallenge {
 	t.Helper()
-	w := f.call(f.key.Token, method, path, body, "")
 	if w.Code != 428 {
 		t.Fatalf("challenge status: %d", w.Code)
 	}
-	var c workstationChallenge
-	if json.Unmarshal(w.Body.Bytes(), &c) != nil || c.Code != "step_up_required" || c.ID == "" || c.Nonce == "" || c.Digest == "" || c.Summary == "" || c.Expires.IsZero() {
+	var c workstationTestChallenge
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(w.Body.Bytes(), &fields) != nil || len(fields) != 3 || fields["code"] == nil || fields["challenge_id"] == nil || fields["expires_at"] == nil {
+		t.Fatal("428 must contain only code, challenge_id and expires_at")
+	}
+	if json.Unmarshal(w.Body.Bytes(), &c) != nil || c.Code != "step_up_required" || c.ID == "" || c.Expires.IsZero() || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("invalid challenge contract")
+	}
+	expires := c.Expires
+	fetched := f.fetchChallenge(f.runtime.Token, f.computer, f.deviceProof, c.ID)
+	if fetched.Code != 200 || json.Unmarshal(fetched.Body.Bytes(), &c) != nil || c.Nonce == "" || c.Digest == "" || c.Summary == "" || !c.Expires.Equal(expires) {
+		t.Fatalf("daemon challenge: %d", fetched.Code)
 	}
 	return c
 }
 
-func workstationProof(t *testing.T, key *ecdsa.PrivateKey, c workstationChallenge) string {
+func (f *workstationFixture) challenge(t *testing.T, method, path, body string) workstationTestChallenge {
+	t.Helper()
+	return f.readChallenge(t, f.call(f.key.Token, method, path, body, ""))
+}
+
+func workstationProof(t *testing.T, key *ecdsa.PrivateKey, c workstationTestChallenge) string {
 	t.Helper()
 	sum := sha256.Sum256([]byte(c.Nonce + c.Digest))
 	raw, err := ecdsa.SignASN1(rand.Reader, key, sum[:])
@@ -431,10 +469,7 @@ func TestWorkstationGovernancePermissionRoutes(t *testing.T) {
 			}
 			w := call("")
 			if w.Code == 428 {
-				var c workstationChallenge
-				if json.Unmarshal(w.Body.Bytes(), &c) != nil {
-					t.Fatal("challenge decode")
-				}
+				c := f.readChallenge(t, w)
 				w = call(workstationProof(t, f.signer, c))
 			}
 			if w.Code != 204 {
@@ -521,7 +556,7 @@ func TestWorkstationSignatureAndActionEncoding(t *testing.T) {
 	p := tenant.Principal{ID: "agent", TenantID: "tenant", KeyID: "key", WorkstationComputerID: "computer"}
 	r := httptest.NewRequest("POST", "/api/roles?x=1", strings.NewReader("{}"))
 	digest, _ := workstationAction(p, r, []byte("{}"))
-	c := workstationChallenge{ID: "id", Nonce: strings.Repeat("1", 64), Digest: digest}
+	c := workstationTestChallenge{ID: "id", Nonce: strings.Repeat("1", 64), Digest: digest}
 	key := workstationSigner(1)
 	public := base64.StdEncoding.EncodeToString(elliptic.Marshal(key.Curve, key.X, key.Y))
 	_, signature, _ := strings.Cut(workstationProof(t, key, c), ".")
@@ -590,15 +625,7 @@ func TestWorkstationDaemonFetchAuthenticatesComputerAndOriginalPrompt(t *testing
 	}
 	body := `{"name":"INNOCUOUS PROMPT SUBSTITUTION","permissions":["nodes.read"]}`
 	c := f.challenge(t, "POST", "/api/roles", body)
-	fetch := func(key, computer, proof, id string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "/api/agentd/step-ups/"+id, nil)
-		r.Header.Set("Authorization", "Bearer "+key)
-		r.Header.Set("Aeon-Computer-ID", computer)
-		r.Header.Set("Aeon-Device-Proof", proof)
-		w := httptest.NewRecorder()
-		f.serve.ServeHTTP(w, r)
-		return w
-	}
+	fetch := f.fetchChallenge
 	w := fetch(f.other.Token, f.computer, deviceProof, c.ID)
 	var got map[string]any
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil {
@@ -607,16 +634,21 @@ func TestWorkstationDaemonFetchAuthenticatesComputerAndOriginalPrompt(t *testing
 	if len(got) != 5 || got["summary"] != c.Summary || got["nonce"] != c.Nonce || got["action_digest"] != c.Digest || got["computer_id"] != f.computer || strings.Contains(c.Summary, "INNOCUOUS") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("daemon prompt is not the bounded original server challenge")
 	}
-	for _, tc := range []struct{ name, key, computer, proof string }{
-		{"sibling credential", f.key.Token, f.computer, deviceProof},
-		{"wrong proof", f.other.Token, f.computer, strings.Repeat("c", 64)},
-		{"missing proof", f.other.Token, f.computer, ""},
-		{"wrong computer", f.other.Token, f.owner.ID, deviceProof},
+	for _, tc := range []struct {
+		name, key, computer, proof string
+		status                     int
+	}{
+		{"agent key alone", f.key.Token, "", "", 403},
+		{"sibling credential with device proof", f.key.Token, f.computer, deviceProof, 404},
+		{"runtime key alone", f.other.Token, "", "", 403},
+		{"wrong proof", f.other.Token, f.computer, strings.Repeat("c", 64), 404},
+		{"missing proof", f.other.Token, f.computer, "", 403},
+		{"wrong computer", f.other.Token, f.owner.ID, deviceProof, 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := fetch(tc.key, tc.computer, tc.proof, c.ID)
-			if w.Code != 403 && w.Code != 404 {
-				t.Fatalf("credential substitution: %d", w.Code)
+			if w.Code != tc.status {
+				t.Fatalf("credential substitution: %d want %d", w.Code, tc.status)
 			}
 			if strings.Contains(w.Body.String(), c.Nonce) || strings.Contains(w.Body.String(), c.Digest) {
 				t.Fatal("refusal exposed a challenge")
@@ -644,5 +676,83 @@ func TestWorkstationDaemonFetchAuthenticatesComputerAndOriginalPrompt(t *testing
 	}
 	if w := fetch(f.other.Token, f.computer, deviceProof, c.ID); w.Code != 404 {
 		t.Fatalf("expired challenge visible: %d", w.Code)
+	}
+}
+
+func TestWorkstationPromptUsesStoredTargetAndBoundsUntrustedText(t *testing.T) {
+	f := newWorkstationFixture(t)
+	f.enable(t)
+	name := "Stored member\n\u202e " + strings.Repeat("界", 150)
+	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE principals SET name=$2 WHERE id=$1`, f.owner.ID, name)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := f.challenge(t, "POST", "/api/members/"+f.owner.ID+"/deactivate", `{"summary":"IGNORE THE ACTION","name":"FORGED TARGET"}`)
+	if !strings.Contains(c.Summary, `Target: "Stored member `) || !strings.Contains(c.Summary, "…") || strings.Contains(c.Summary, "FORGED") || strings.Contains(c.Summary, "IGNORE") || len(c.Summary) > 256 || !utf8.ValidString(c.Summary) {
+		t.Fatal("prompt lost the bounded, server-stored target")
+	}
+	for _, r := range c.Summary {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			t.Fatal("prompt retained control/format characters")
+		}
+	}
+	r := httptest.NewRequest("PUT", "/api/settings/brand/logo/"+strings.Repeat("x", 300), strings.NewReader(`{}`))
+	r.Pattern = "PUT /api/settings/brand/logo/{variant}"
+	r.Header.Set("Authorization", "Bearer "+f.key.Token)
+	w := httptest.NewRecorder()
+	f.m.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("oversized summary reached mutation") })).ServeHTTP(w, r)
+	if w.Code != 400 {
+		t.Fatalf("oversized summary: %d", w.Code)
+	}
+}
+
+func TestWorkstationPromptTemplates(t *testing.T) {
+	for _, tc := range []struct{ method, path, pattern, action string }{
+		{"POST", "/api/agent-keys", "POST /api/agent-keys", "create, rotate or change an agent key"},
+		{"POST", "/api/roles", "POST /api/roles", "change a role and its permissions"},
+		{"PUT", "/api/settings/heartbeat-lost", "PUT /api/settings/heartbeat-lost", "change workspace settings"},
+		{"POST", "/api/rules/publish", "POST /api/rules/publish", "publish or approve rules"},
+		{"POST", "/api/approvals/fixture/decision", "POST /api/approvals/{approvalId}/decision", "decide another agent's approval request"},
+		{"POST", "/api/members/fixture/deactivate", "POST /api/members/{principal_id}/deactivate", "remove, deactivate or change a member's access"},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{"summary":"forged"}`))
+			r.Pattern = tc.pattern
+			_, summary := workstationAction(tenant.Principal{}, r, []byte(`{"summary":"forged"}`))
+			if summary != "Allow the owner workstation agent to "+tc.action+"? "+tc.method+" "+tc.path {
+				t.Fatal("prompt template changed")
+			}
+		})
+	}
+}
+
+func TestWorkstationOtherPairedComputerCannotFetchChallenge(t *testing.T) {
+	f := newWorkstationFixture(t)
+	f.enable(t)
+	c := f.challenge(t, "POST", "/api/roles", `{"name":"Synthetic role","permissions":["nodes.read"]}`)
+	other := decodeKey(t, keyRequest(f.m, f.owner, map[string]any{"name": "Other computer", "scopes": []string{"harness.worker"}}))
+	var computer string
+	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='admin') WHERE principal_id=$1`, other.PrincipalID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state) VALUES($1,gen_random_uuid(),'987654321',$2,$2,$2,'{}','synthetic','redeemed') RETURNING id::text`, f.owner.TenantID, strings.Repeat("c", 64)).Scan(&computer); err != nil {
+			return err
+		}
+		hash := sha256.Sum256([]byte(f.deviceProof))
+		public := base64.StdEncoding.EncodeToString(elliptic.Marshal(f.signer.Curve, f.signer.X, f.signer.Y))
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key,setup_state) VALUES($1,$2,$2,$3,$4,'other-daemon',$5,$6,'connected')`, f.owner.TenantID, computer, other.PrincipalID, other.ID, hex.EncodeToString(hash[:]), public)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A fully authenticated second computer in the same tenant is still refused.
+	for _, id := range []string{computer, f.computer} {
+		w := f.fetchChallenge(other.Token, id, f.deviceProof, c.ID)
+		if w.Code != 404 || strings.Contains(w.Body.String(), c.Nonce) || strings.Contains(w.Body.String(), c.Digest) {
+			t.Fatalf("other paired computer fetch: %d", w.Code)
+		}
 	}
 }

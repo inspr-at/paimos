@@ -15,8 +15,10 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -34,9 +36,6 @@ type workstationSignerKey struct{}
 type workstationChallenge struct {
 	Code    string    `json:"code"`
 	ID      string    `json:"challenge_id"`
-	Nonce   string    `json:"nonce"`
-	Digest  string    `json:"action_digest"`
-	Summary string    `json:"summary"`
 	Expires time.Time `json:"expires_at"`
 }
 
@@ -83,6 +82,58 @@ func workstationAction(p tenant.Principal, r *http.Request, body []byte) (string
 	}
 	summary := "Allow the owner workstation agent to " + action + "? " + r.Method + " " + r.URL.EscapedPath()
 	return hex.EncodeToString(digest[:]), summary
+}
+
+// Resolve only identifiers from the matched route, after the live permission
+// fence. Body text can never supply a confirmation label. The escaped route
+// remains intact even if a long stored name needs shortening.
+func workstationSummary(ctx context.Context, tx pgx.Tx, r *http.Request, summary string) (string, error) {
+	_, pattern, _ := strings.Cut(r.Pattern, " ")
+	parts, values := strings.Split(pattern, "/"), strings.Split(r.URL.Path, "/")
+	if len(parts) != len(values) {
+		return summary, nil
+	}
+	var query, id string
+	for i, part := range parts {
+		if !uuidRe.MatchString(values[i]) {
+			continue
+		}
+		switch {
+		case part == "{principal_id}":
+			query, id = `SELECT left(name,256) FROM principals WHERE id=$1`, values[i]
+		case part == "{id}" && strings.HasPrefix(pattern, "/api/agent-keys/"):
+			query, id = `SELECT left(name,256) FROM agent_keys WHERE id=$1`, values[i]
+		case part == "{id}" && strings.HasPrefix(pattern, "/api/roles/"):
+			query, id = `SELECT left(name,256) FROM roles WHERE id=$1`, values[i]
+		}
+	}
+	if query == "" {
+		return summary, nil
+	}
+	var name string
+	if err := tx.QueryRow(ctx, query, id).Scan(&name); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return summary, nil // The action handler owns missing-target errors.
+		}
+		return "", err
+	}
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, name)
+	// Quote labels to distinguish stored data from the fixed action instruction.
+	label := strconv.Quote(name)
+	for len(summary)+len(" Target: ")+len(label) > 256 && len(name) > 0 {
+		runes := []rune(name)
+		name = string(runes[:len(runes)-1])
+		label = strconv.Quote(name + "…")
+	}
+	if name != "" {
+		summary += " Target: " + label
+	}
+	return summary, nil
 }
 
 func verifyWorkstationSignature(public, nonce, digest, signature string) bool {
@@ -190,6 +241,14 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		digest, summary := workstationAction(p, r, body)
+		if len(summary) > 256 {
+			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
+				writeInternal(w)
+				return
+			}
+			writeBadRequest(w, "action summary exceeds 256 bytes")
+			return
+		}
 		r = r.WithContext(context.WithValue(r.Context(), workstationDigestKey{}, digest))
 		var challenge workstationChallenge
 		var approvedSigner string
@@ -203,15 +262,19 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 				return err
 			}
 			if proof == "" {
+				summary, err = workstationSummary(r.Context(), tx, r, summary)
+				if err != nil {
+					return err
+				}
 				var nonce [32]byte
 				if _, err := rand.Read(nonce[:]); err != nil {
 					return err
 				}
-				challenge = workstationChallenge{Code: "step_up_required", Nonce: hex.EncodeToString(nonce[:]), Digest: digest, Summary: summary}
+				challenge = workstationChallenge{Code: "step_up_required"}
 				return tx.QueryRow(r.Context(), `INSERT INTO owner_workstation_challenges(tenant_id,key_id,principal_id,computer_id,nonce,action_digest,public_key,summary,expires_at)
 				 VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+interval '2 minutes')
 				 ON CONFLICT(tenant_id,key_id) DO UPDATE SET id=gen_random_uuid(),nonce=EXCLUDED.nonce,action_digest=EXCLUDED.action_digest,public_key=EXCLUDED.public_key,summary=EXCLUDED.summary,expires_at=EXCLUDED.expires_at
-				 RETURNING id::text,expires_at`, p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, challenge.Nonce, digest, public, summary).Scan(&challenge.ID, &challenge.Expires)
+				 RETURNING id::text,expires_at`, p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, hex.EncodeToString(nonce[:]), digest, public, summary).Scan(&challenge.ID, &challenge.Expires)
 			}
 			id, signature, ok := strings.Cut(proof, ".")
 			if !ok || len(proof) > 181 || !uuidRe.MatchString(id) || len(r.Header.Values("Aeon-Step-Up")) != 1 {
