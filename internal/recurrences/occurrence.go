@@ -13,10 +13,10 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
+	"github.com/inspr-at/paimos/internal/workstate"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -217,7 +217,7 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	}
 	if reason == "" && r.OverlapPolicy == "skip" && !(len(forceOverlap) > 0 && forceOverlap[0]) {
 		var open bool
-		cte, join, predicate := nodes.WorkNotClosedSQL("n", "cfg")
+		cte, join, predicate := workstate.ReadSQL("n", "cfg")
 		err = tx.QueryRow(ctx, `WITH `+cte+` SELECT EXISTS(SELECT 1 FROM recurrence_occurrences o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.node_id`+join+` WHERE o.recurrence_id=$1 AND n.deleted_at IS NULL AND `+predicate+`)`, r.ID).Scan(&open)
 		if err != nil {
 			return Occurrence{}, err

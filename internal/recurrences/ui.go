@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workstate"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -99,7 +99,7 @@ func results(ctx context.Context, tx pgx.Tx, items []Recurrence, apply func([]Re
 		ids[i] = item.ID
 		indices[item.ID] = i
 	}
-	cte, join, predicate := nodes.WorkNotClosedSQL("n", "cfg")
+	cte, join, predicate := workstate.ReadSQL("n", "cfg")
 	rows, err := tx.Query(ctx, `WITH `+cte+` SELECT DISTINCT ON (o.recurrence_id,kind) o.recurrence_id::text,kind,to_jsonb(o)-'tenant_id',coalesce(n.key,''),coalesce(n.title,''),coalesce(n.state,'')
  FROM recurrence_occurrences o LEFT JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.node_id AND n.deleted_at IS NULL
  `+join+` CROSS JOIN LATERAL (SELECT 'last' AS kind UNION ALL SELECT 'open' WHERE n.id IS NOT NULL AND `+predicate+`) k
