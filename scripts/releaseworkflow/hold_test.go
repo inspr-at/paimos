@@ -73,10 +73,14 @@ func TestMainRunsCompleteUIWhileQueueRemainsBounded(t *testing.T) {
 	}
 	for _, id := range []string{"web", "e2e", "footer-ui", "status-help-ui", "status-autopilot-ui"} {
 		j := w.Jobs[id]
-		if j.Steps[0].With["fetch-depth"] != "0" { t.Fatalf("%s lacks immutable queue base history", id) }
+		if j.Steps[0].With["fetch-depth"] != "0" {
+			t.Fatalf("%s lacks immutable queue base history", id)
+		}
 		for _, s := range j.Steps {
 			if (strings.Contains(s.Run, "npx playwright test") || strings.Contains(s.Run, "npm test --") || strings.Contains(s.Run, "npm run e2e")) &&
-				!strings.Contains(s.Run, "ci-lane.mjs playwright --") { t.Fatalf("%s bypasses queue selection", id) }
+				!strings.Contains(s.Run, "ci-lane.mjs playwright --") {
+				t.Fatalf("%s bypasses queue selection", id)
+			}
 		}
 	}
 }
