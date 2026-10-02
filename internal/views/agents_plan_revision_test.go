@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -155,7 +156,10 @@ func TestAgentsPlanRevisionCheckedSaves(t *testing.T) {
 		assertStatus(owner, saveBody(1, before), 403)
 		var saved []byte
 		must(d.Admin.QueryRow(ctx, `SELECT value FROM user_preferences WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, owner.ID).Scan(&saved))
-		if string(saved) != string(before.Value) {
+		var savedValue, beforeValue any
+		must(json.Unmarshal(saved, &savedValue))
+		must(json.Unmarshal(before.Value, &beforeValue))
+		if !reflect.DeepEqual(savedValue, beforeValue) {
 			t.Fatal("revoked caller changed the plan")
 		}
 	})
