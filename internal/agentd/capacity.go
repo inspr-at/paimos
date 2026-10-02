@@ -302,11 +302,19 @@ func (p *codexProcess) emitCapacityReadings(readings []capacity.Reading, phase s
 // run. The vendor owns authentication; identity is checked on the same process
 // before reading quota. No credential files or auth response are published.
 func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
+	return a.captureCapacity(ctx, key, func(home string) (*wireProcess, error) {
+		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
+	})
+}
+
+// A per-call launcher lets tests block transport writes without a real clock or
+// replacing the process launcher globally.
+func (a *CodexAdapter) captureCapacity(ctx context.Context, key string, launch func(string) (*wireProcess, error)) []capacity.Reading {
 	home, err := localHome(a.Homes, key)
 	if err != nil || strings.TrimSpace(a.Emails[key]) == "" {
 		return nil
 	}
-	p, err := launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, capacityEnvironment("CODEX_HOME", home, a.Path), "jsonrpc", func(AdapterEvent) {})
+	p, err := launch(home)
 	if err != nil {
 		return nil
 	}
