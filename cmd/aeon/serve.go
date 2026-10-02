@@ -279,6 +279,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	statusAuto := statusautopilot.New(pool)
 	go statusAuto.Run(ctx)
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
+	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
+		return fmt.Errorf("account linking: %w", err)
+	}
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,

@@ -11,13 +11,13 @@ const props = defineProps<{
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
   mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
-  trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean; canStartAgent?: boolean
+  trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
   // The peek dock: a labeled way into the project, and a way back to the view it covered.
   openInProject?: boolean; backLabel?: string
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []; convert: []
-  back: [steps: number]; edit: []; save: []; cancel: []; startAgent: []; openInProject: []
+  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // The trail shows its last two steps; older ones fold into an ellipsis.
@@ -89,7 +89,7 @@ void props
       <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? 'Cmd' : 'Ctrl'} Enter`" @click="emit('save')"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : 'Save' }}</button>
     </template>
     <template v-else>
-    <button v-if="canStartAgent" type="button" class="icon-btn sm flat" aria-label="Start agent" data-tip="Start agent on this ticket" @click="emit('startAgent')"><AppIcon name="agent" :size="16" /></button>
+    <slot name="queue" />
     <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" />Edit</button>
     <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat wide-only" aria-label="Open as full page" data-tip="Full page · f" @click="emit('expand')"><AppIcon name="expand" :size="14" /></button>
     <button v-else type="button" class="icon-btn sm flat wide-only" aria-label="Show beside the list" data-tip="Side panel · f" @click="emit('collapse')"><AppIcon name="collapse" :size="14" /></button>

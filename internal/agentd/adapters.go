@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -481,14 +482,16 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 			observe(ev)
 		}
 		var frame struct {
-			Type string `json:"type"`
+			Type     string          `json:"type"`
+			ToolName string          `json:"toolName"`
+			Args     json.RawMessage `json:"args"`
 		}
 		if json.Unmarshal(raw, &frame) == nil {
 			if frame.Type == "agent_end" {
 				observe(AdapterEvent{Kind: "turn"})
 			}
 			if frame.Type == "tool_execution_start" {
-				observe(AdapterEvent{Kind: "tool"})
+				observe(toolActivityEvent(frame.ToolName, frame.Args))
 			}
 		}
 	})
@@ -898,6 +901,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			Kind            string             `json:"kind"`
 			Reason          string             `json:"reason"`
 			CorrelationID   string             `json:"correlation_id"`
+			ActivityText    string             `json:"activity_text"`
 			EffectiveModel  string             `json:"effective_model"`
 			EffectiveEffort string             `json:"effective_effort"`
 			ModelEvidence   string             `json:"model_evidence_status"`
@@ -1011,7 +1015,11 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
-			observe(AdapterEvent{Kind: "tool"})
+			ev := AdapterEvent{Kind: "tool"}
+			if agentactivity.ValidAuto(frame.ActivityText) {
+				ev.ToolActivity = &agentactivity.Activity{Text: frame.ActivityText, Source: "auto", At: time.Now().UTC()}
+			}
+			observe(ev)
 		case "control_applied", "control_failed":
 			cp.controlMu.Lock()
 			ch := cp.controls[frame.CorrelationID]
