@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1021,7 +1020,7 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 	if err != nil {
 		return issueSearchResult{}, err
 	}
-	q := url.Values{"q": {query}, "limit": {strconv.Itoa(limit)}}
+	q := url.Values{"q": {query}, "limit": {"200"}}
 	if typ != "" {
 		k, ok := kinds.bySlug[typ]
 		if !ok {
@@ -1062,14 +1061,16 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 				return false, fmt.Errorf("incomplete search: ancestry lookup bound exceeded")
 			}
 			lookups++
-			if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(id), nil, &n); err != nil {
+			var ancestor apiNode
+			if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(id), nil, &ancestor); err != nil {
 				return false, err
 			}
+			n = ancestor
 		}
 		return false, fmt.Errorf("incomplete search: ancestry depth exceeded")
 	}
 	result := issueSearchResult{Issues: []issueView{}}
-	seenCursors := map[string]bool{}
+	seenCursors := map[string]bool{"": true}
 	for count := 0; count < 50; count++ {
 		var page struct {
 			Items []struct {
@@ -1079,6 +1080,12 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 		}
 		if err := rt.do(http.MethodGet, "/api/search?"+q.Encode(), nil, &page); err != nil {
 			return issueSearchResult{}, err
+		}
+		if page.NextCursor != nil && *page.NextCursor != "" {
+			if seenCursors[*page.NextCursor] {
+				return issueSearchResult{}, fmt.Errorf("incomplete search: repeated cursor")
+			}
+			seenCursors[*page.NextCursor] = true
 		}
 		for i, hit := range page.Items {
 			if !issueKinds[kinds.slug(hit.Node.KindID)] {
@@ -1100,10 +1107,6 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 		if page.NextCursor == nil || *page.NextCursor == "" {
 			return result, nil
 		}
-		if seenCursors[*page.NextCursor] {
-			return issueSearchResult{}, fmt.Errorf("incomplete search: repeated cursor")
-		}
-		seenCursors[*page.NextCursor] = true
 		q.Set("cursor", *page.NextCursor)
 	}
 	return issueSearchResult{}, fmt.Errorf("incomplete search: exceeds 50 pages")

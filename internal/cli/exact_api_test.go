@@ -114,20 +114,24 @@ func TestExactAPIOnboardChecksRenderedContentAndOptions(t *testing.T) {
 	t.Setenv("AEON_API_KEY", testKey)
 	path := filepath.Join(t.TempDir(), "onboard.txt")
 	args := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "onboard", "--project", "AEON", "--out", path}
-	for _, change := range []string{"body", "header", "--include-low", "--reading-list-size", "--format"} {
+	for _, change := range []string{"body", "header", "timestamp", "--include-low", "--reading-list-size", "--format"} {
 		t.Run(change, func(t *testing.T) {
 			if code, _, stderr := runCLI(args, ""); code != 0 {
 				t.Fatal(stderr)
 			}
 			check := append(append([]string{}, args...), "--check")
 			switch change {
-			case "body", "header":
+			case "body", "header", "timestamp":
 				raw, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if change == "body" {
 					raw = append(raw, []byte("tampered\n")...)
+				} else if change == "timestamp" {
+					line, rest, _ := strings.Cut(string(raw), "\n")
+					at := strings.LastIndex(line, " at ")
+					raw = []byte(line[:at] + " at -->\n" + rest)
 				} else {
 					raw = bytes.Replace(raw, []byte(" at "), []byte(" [agent=forged] at "), 1)
 				}
@@ -281,5 +285,24 @@ func TestExactAPIMCPKnowledgeToolsReachHTTP(t *testing.T) {
 	calls = nil
 	if _, _, err := rt.toolIssueUpdate(ctx, nil, issueUpdateArgs{Ref: "MEM-1", Title: "Late"}); err == nil || len(calls) != 0 {
 		t.Fatal("cancelled mutation reached HTTP")
+	}
+}
+
+func TestExactAPISearchRejectsCyclingCursor(t *testing.T) {
+	calls := 0
+	rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/kinds" {
+			fmt.Fprint(w, `{"items":[{"id":"ticket-kind","slug":"ticket"}]}`)
+			return
+		}
+		calls++
+		if calls == 1 {
+			fmt.Fprint(w, `{"items":[],"next_cursor":"same"}`)
+		} else {
+			fmt.Fprint(w, `{"items":[{"node":{"id":"duplicate","kind_id":"ticket-kind"}}],"next_cursor":"same"}`)
+		}
+	})
+	if _, err := rt.searchIssuesResult("text", "", "", 1); err == nil || !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatal("cycling search reported a successful result")
 	}
 }
