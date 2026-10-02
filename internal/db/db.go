@@ -52,23 +52,30 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // visibility from AllProjects or OnlyProjects, else the visibility of the
 // principal in ctx, else none (fail closed).
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	return InTenantWithBootstrap(ctx, ctx, pool, tenantID, fn)
+}
+
+// InTenantWithBootstrap bounds pool acquisition, BEGIN and tenant setup with
+// bootstrap. Established transactions use ctx, including COMMIT and ROLLBACK;
+// callers can retain an uncanceled cleanup context with server SQL timeouts.
+func InTenantWithBootstrap(ctx, bootstrap context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
-		tx, err = parent.Begin(ctx)
+		tx, err = parent.Begin(bootstrap)
 	} else {
-		tx, err = pool.Begin(ctx)
+		tx, err = pool.Begin(bootstrap)
 	}
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := enterTenant(ctx, tx, tenantID); err != nil {
+	if err := enterTenant(bootstrap, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok {
-		if err := SetLocalStatementTimeout(ctx, tx, limit.duration); err != nil {
+		if err := SetLocalStatementTimeout(bootstrap, tx, limit.duration); err != nil {
 			return fmt.Errorf("set read statement timeout: %w", err)
 		}
 	}

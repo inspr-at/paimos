@@ -104,6 +104,46 @@ func decodeRecord(raw []byte) (record, error) {
 	return v, err
 }
 
+// Each page fetches a bounded candidate batch. Revisions and each imported
+// history baseline use indexed point/keyset lookups, fenced at the watermark.
+const maxTimelineCandidates = 1000
+const timelineCandidatesSQL = `SELECT e.id,aeon_activity_at(e.type,e.after,e.at),e.type,
+ CASE WHEN e.type='import.comment' THEN coalesce(latest.actor_principal_id,e.actor_principal_id) ELSE e.actor_principal_id END::text,
+ e.before,CASE WHEN e.type IN ('import.comment','comment.created') THEN coalesce(latest.after,e.after) ELSE e.after END,
+ e.metadata,previous.id,previous.at,previous.actor_principal_id::text,previous.after
+ FROM events e
+ LEFT JOIN LATERAL (
+    SELECT r.after,r.type,r.actor_principal_id FROM events r
+    WHERE r.tenant_id=e.tenant_id AND r.node_id=e.node_id AND r.id<=$3
+    AND ((e.type='comment.created' AND r.type IN ('comment.updated','comment.deleted') AND r.after->>'comment_id'=e.id::text)
+      OR (e.type='import.comment' AND r.type='import.comment'
+        AND aeon_activity_source(r.type,r.after)=aeon_activity_source(e.type,e.after)
+        AND coalesce(nullif(r.after->'record'->>'id',''),r.id::text)=coalesce(nullif(e.after->'record'->>'id',''),e.id::text)))
+    ORDER BY r.id DESC LIMIT 1
+ ) latest ON e.type IN ('comment.created','import.comment')
+ LEFT JOIN LATERAL (
+    SELECT r.id,r.at,r.actor_principal_id,r.after FROM events r
+    WHERE r.tenant_id=e.tenant_id AND r.node_id=e.node_id AND r.id<=$3 AND r.type='import.history'
+    AND jsonb_typeof(r.after->'record'->'snapshot')='object'
+    AND aeon_activity_source(r.type,r.after)=aeon_activity_source(e.type,e.after)
+    AND (r.at,r.id)<(e.at,e.id) ORDER BY r.at DESC,r.id DESC LIMIT 1
+ ) previous ON e.type='import.history'
+ WHERE e.tenant_id=$1 AND e.node_id=$2 AND e.id<=$3
+ AND e.type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped')
+ AND ($4::timestamptz IS NULL OR (aeon_activity_at(e.type,e.after,e.at),e.id)<($4,$5))
+ AND coalesce(latest.type,'')<>'comment.deleted'
+ AND (e.type<>'import.comment' OR NOT EXISTS (
+    SELECT 1 FROM events first WHERE first.tenant_id=e.tenant_id AND first.node_id=e.node_id AND first.type='import.comment' AND first.id<e.id
+    AND aeon_activity_source(first.type,first.after)=aeon_activity_source(e.type,e.after)
+    AND coalesce(nullif(first.after->'record'->>'id',''),first.id::text)=coalesce(nullif(e.after->'record'->>'id',''),e.id::text)
+ ))
+ ORDER BY aeon_activity_at(e.type,e.after,e.at) DESC,e.id DESC LIMIT $6`
+
+type timelineCandidate struct {
+	event    activityEvent
+	previous *activityEvent
+}
+
 func (m *module) read(ctx context.Context, p tenant.Principal, node string, limit int, c *cursor) (Page, error) {
 	page := Page{Items: []Item{}}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -111,25 +151,34 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, p.TenantID, node).Scan(&found); err != nil {
 			return err
 		}
-		// The node index bounds work to this ticket, not the tenant's event log.
-		// A single statement captures a consistent event set; the cursor then
-		// fences later inserts, including backdated import rows and comment edits.
 		watermark := int64(0)
 		if c != nil {
 			watermark = c.Watermark
+		} else if err := tx.QueryRow(ctx, `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1 AND node_id=$2`, p.TenantID, node).Scan(&watermark); err != nil {
+			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after,metadata FROM events
-		 WHERE tenant_id=$1 AND node_id=$2 AND ($3::bigint=0 OR id<=$3)
-		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','comment.updated','comment.deleted','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped')
-		 ORDER BY id`, p.TenantID, node, watermark)
+		var at *time.Time
+		var id int64
+		if c != nil {
+			at = &c.At
+			id = c.ID
+		}
+		candidates := []timelineCandidate{}
+		peopleEvents := []activityEvent{}
+		// Reading limit+1 ordinary candidates gives a cheap common path; sparse
+		// histories can continue using a raw candidate cursor, without rescanning.
+		batch := min(maxTimelineCandidates, max(limit+1, 64))
+		rows, err := tx.Query(ctx, timelineCandidatesSQL, p.TenantID, node, watermark, at, id, batch+1)
 		if err != nil {
 			return err
 		}
-		var evs []activityEvent
 		for rows.Next() {
 			var e activityEvent
-			var before, after, meta []byte
-			if err := rows.Scan(&e.id, &e.at, &e.typ, &e.actor, &before, &after, &meta); err != nil {
+			var before, after, meta, previousAfter []byte
+			var previousID *int64
+			var previousAt *time.Time
+			var previousActor *string
+			if err := rows.Scan(&e.id, &e.at, &e.typ, &e.actor, &before, &after, &meta, &previousID, &previousAt, &previousActor, &previousAfter); err != nil {
 				rows.Close()
 				return err
 			}
@@ -143,52 +192,88 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 				rows.Close()
 				return err
 			}
-			evs = append(evs, e)
-			if c == nil && e.id > watermark {
-				watermark = e.id
+			candidate := timelineCandidate{event: e}
+			peopleEvents = append(peopleEvents, e)
+			if previousID != nil {
+				previous := activityEvent{id: *previousID, at: *previousAt, typ: "import.history", actor: *previousActor}
+				previous.after, err = decodeRecord(previousAfter)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				candidate.previous = &previous
+				peopleEvents = append(peopleEvents, previous)
 			}
+			candidates = append(candidates, candidate)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		people, err := readPeople(ctx, tx, p.TenantID, evs)
+		people, err := readPeople(ctx, tx, p.TenantID, peopleEvents)
 		if err != nil {
 			return err
 		}
-		items := project(evs, people)
-		automatic, err := statusautopilot.ChangesTx(ctx, tx, p, node, false, 0)
-		if err != nil {
-			return err
+		moreCandidates := len(candidates) > batch
+		if moreCandidates {
+			candidates = candidates[:batch]
 		}
-		automaticByID := map[int64]statusautopilot.Change{}
-		for _, change := range automatic {
-			automaticByID[change.EventID] = change
-		}
-		for i := range items {
-			id, _ := strconv.ParseInt(items[i].ID, 10, 64)
-			if change, ok := automaticByID[id]; ok {
-				items[i].AutomaticChange = &change
+		automaticIDs := []int64{}
+		var last *activityEvent
+		for i := range candidates {
+			candidate := &candidates[i]
+			last = &candidate.event
+			input := []activityEvent{candidate.event}
+			if candidate.previous != nil {
+				input = append([]activityEvent{*candidate.previous}, input...)
+			}
+			projected := project(input, people)
+			for _, item := range projected {
+				eventID, _ := strconv.ParseInt(item.ID, 10, 64)
+				if eventID != candidate.event.id {
+					continue
+				}
+				if len(page.Items) == limit {
+					setNextCursor(&page, p.TenantID, node, watermark, page.Items[len(page.Items)-1].At, mustItemID(page.Items[len(page.Items)-1]))
+					return attachAutomatic(ctx, tx, p, node, &page, automaticIDs)
+				}
+				page.Items = append(page.Items, item)
+				if strings.HasPrefix(candidate.event.typ, "status_autopilot.") {
+					automaticIDs = append(automaticIDs, eventID)
+				}
 			}
 		}
-		for _, item := range items {
-			id, _ := strconv.ParseInt(item.ID, 10, 64)
-			if c != nil && (item.At.After(c.At) || (item.At.Equal(c.At) && id >= c.ID)) {
-				continue
-			}
-			if len(page.Items) == limit {
-				last := page.Items[limit-1]
-				lastID, _ := strconv.ParseInt(last.ID, 10, 64)
-				b, _ := json.Marshal(cursor{Tenant: p.TenantID, Node: node, Watermark: watermark, At: last.At, ID: lastID})
-				next := base64.RawURLEncoding.EncodeToString(b)
-				page.NextCursor = &next
-				break
-			}
-			page.Items = append(page.Items, item)
+		if moreCandidates && last != nil {
+			setNextCursor(&page, p.TenantID, node, watermark, last.at, last.id)
 		}
-		return nil
+		return attachAutomatic(ctx, tx, p, node, &page, automaticIDs)
 	})
 	return page, err
+}
+func mustItemID(item Item) int64 { id, _ := strconv.ParseInt(item.ID, 10, 64); return id }
+func setNextCursor(page *Page, tenantID, node string, watermark int64, at time.Time, id int64) {
+	b, _ := json.Marshal(cursor{Tenant: tenantID, Node: node, Watermark: watermark, At: at, ID: id})
+	next := base64.RawURLEncoding.EncodeToString(b)
+	page.NextCursor = &next
+}
+func attachAutomatic(ctx context.Context, tx pgx.Tx, p tenant.Principal, node string, page *Page, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	changes, err := statusautopilot.ChangesForEventsTx(ctx, tx, p, node, ids)
+	if err != nil {
+		return err
+	}
+	byID := map[int64]statusautopilot.Change{}
+	for _, change := range changes {
+		byID[change.EventID] = change
+	}
+	for i := range page.Items {
+		if change, ok := byID[mustItemID(page.Items[i])]; ok {
+			page.Items[i].AutomaticChange = &change
+		}
+	}
+	return nil
 }
 
 // Fetch only referenced principals. Classic identity subjects include the
@@ -225,6 +310,7 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
    SELECT min(after->'principal'->>'id') AS principal_id,
      (after->'classic'->>'source_id')||':'||(after->'classic'->>'username') AS alias
    FROM events WHERE tenant_id=$1 AND type IN ('import.user_created','import.user_updated')
+   AND (after->'classic'->>'source_id')||':'||(after->'classic'->>'username')=ANY($4::text[])
    GROUP BY (after->'classic'->>'source_id')||':'||(after->'classic'->>'username')
    HAVING count(DISTINCT after->'principal'->>'id')=1
  ) aliases ON aliases.principal_id=p.id::text

@@ -4018,6 +4018,16 @@ paths:
         '415': {$ref: '#/components/responses/Error'}
   /attachments/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAttachment
+      summary: Read one visible attachment by UUID
+      description: Requires attachments.read and current live node visibility; missing, deleted, hidden and foreign attachments return 404.
+      security: *auth
+      responses:
+        '200': {description: Attachment metadata, content: {application/json: {schema: {$ref: '#/components/schemas/Attachment'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
     patch:
       operationId: updateAttachment
       description: Tenant staff people only. Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.
@@ -7137,12 +7147,13 @@ paths:
     get:
       operationId: getProjectIntake
       summary: Read intake history
-      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible.
+      description: Aithema's source, transcript and draft history. Delegated calls require exact intake.read, session tid/pid/sid and current auth_epoch; reads do not check gen. Accepted and superseded proposals remain visible. Each snapshot admits at most 200 sources, turns and drafts; oversized history fails with 422 without returning a partial snapshot. node_id narrows draft history.
       security: [{session: []}, {agentKey: []}, {aithemaDelegated: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}, description: Return accepted drafts for this node or the requirement that generated this ticket; sources and turns are empty. Requires the same intake.read permission.}
       responses:
+        '422': {$ref: '#/components/responses/IntakeError'}
         '400': {$ref: '#/components/responses/IntakeError'}
         '401': {$ref: '#/components/responses/IntakeError'}
         '503': {$ref: '#/components/responses/IntakeError'}
@@ -7550,10 +7561,15 @@ paths:
   /crm/organisations/{organisationId}/contacts:
     get:
       operationId: listCRMContacts
+      description: Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results.
       security: *auth
-      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: Previous page X-Next-Cursor; retain the other selectors.}
       responses:
-        '200': {description: Contacts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContact'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: Contacts, headers: {X-Next-Cursor: {description: More rows available; send this UUID as after_id., schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContact'}}}}}
     post:
       operationId: createCRMContact
       security: [{session: []}]
@@ -8489,10 +8505,17 @@ paths:
     get:
       operationId: listTimePeriods
       summary: List time periods
+      description: Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results.
       security: *auth
-      parameters: [{name: principal_id, in: query, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: principal_id, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: Previous page X-Next-Cursor; retain the other selectors.}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: Inclusive lower date bound; periods default to the past year.}
+        - {name: until, in: query, schema: {type: string, format: date-time}, description: Exclusive upper date bound.}
       responses:
-        '200': {description: Periods, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: Periods, headers: {X-Next-Cursor: {description: More rows available; send this UUID as after_id., schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
     post:
       operationId: createTimePeriod
       summary: Open a time period for one principal
@@ -8525,13 +8548,19 @@ paths:
     get:
       operationId: listTimeEntries
       summary: List time entries with period, principal or node filters
+      description: Bounded keyset page. The array shape is preserved; X-Next-Cursor explicitly indicates more results.
       security: *auth
       parameters:
         - {name: period_id, in: query, schema: {type: string, format: uuid}}
         - {name: principal_id, in: query, schema: {type: string, format: uuid}}
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after_id, in: query, schema: {type: string, format: uuid}, description: Previous page X-Next-Cursor; retain the other selectors.}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: Inclusive lower date bound; periods default to the past year.}
+        - {name: until, in: query, schema: {type: string, format: date-time}, description: Exclusive upper date bound.}
       responses:
-        '200': {description: Entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '200': {description: Entries, headers: {X-Next-Cursor: {description: More rows available; send this UUID as after_id., schema: {type: string, format: uuid}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
     post:
       operationId: createTimeEntry
       summary: Record principal time against a node
