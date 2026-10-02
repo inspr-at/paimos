@@ -3,9 +3,11 @@ package attachments
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -194,5 +197,90 @@ func TestAttachmentMutationRechecksLiveAuthority(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAttachmentWriteHoldsAuthorityUntilCommit(t *testing.T) {
+	for _, method := range []string{"POST", "PATCH", "DELETE"} {
+		t.Run(method, func(t *testing.T) {
+			d, p, node := setup(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			mux := http.NewServeMux()
+			New(d.App, Store{FilesDir: t.TempDir(), MaxSize: 1 << 20}).Mount(mux)
+			ct, body := multipartFile(t, "fixture.txt", []byte("synthetic"))
+			uploaded := request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, body)
+			if uploaded.Code != 201 {
+				t.Fatalf("fixture upload: %d", uploaded.Code)
+			}
+			var attachment string
+			if err := d.Admin.QueryRow(ctx, `SELECT id::text FROM attachments WHERE node_id=$1`, node).Scan(&attachment); err != nil {
+				t.Fatal(err)
+			}
+			blocker, err := d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Rollback(context.Background())
+			query, id := `SELECT id FROM attachments WHERE id=$1 FOR UPDATE`, attachment
+			if method == "POST" {
+				query, id = `SELECT id FROM nodes WHERE id=$1 FOR UPDATE`, node
+			}
+			if _, err := blocker.Exec(ctx, query, id); err != nil {
+				t.Fatal(err)
+			}
+			path, contentType := "/api/attachments/"+attachment, "application/json"
+			var input io.Reader
+			if method == "POST" {
+				path = "/api/nodes/" + node + "/attachments"
+				contentType, input = multipartFile(t, "second.txt", []byte("second synthetic"))
+			}
+			if method == "PATCH" {
+				input = strings.NewReader(`{"caption":"allowed"}`)
+			}
+			req := httptest.NewRequest(method, path, input).WithContext(tenant.WithPrincipal(ctx, p))
+			req.Header.Set("Content-Type", contentType)
+			response := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() { defer close(done); mux.ServeHTTP(response, req) }()
+			for {
+				select {
+				case <-done:
+					t.Fatalf("request completed before row barrier: %d", response.Code)
+				default:
+				}
+				var waiting bool
+				if err := d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE NOT granted AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker.Conn().PgConn().PID()).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if waiting {
+					break
+				}
+				runtime.Gosched()
+			}
+			// Resource mutation is paused. Authority changes must remain fenced for
+			// the rest of this transaction, even after the live permission check.
+			probe, err := d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, p.TenantID)
+			_ = probe.Rollback(ctx)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.Code != "55P03" {
+				t.Errorf("attachment write did not fence access changes: %v", err)
+			}
+			if err := blocker.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if want := map[string]int{"POST": 201, "PATCH": 200, "DELETE": 204}[method]; response.Code != want {
+				t.Fatalf("write after release: %d, want %d", response.Code, want)
+			}
+		})
 	}
 }
