@@ -19,7 +19,8 @@ import (
 
 // Module serves /api/models.
 type Module struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	routesTimeout time.Duration
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -34,6 +35,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)
+	mux.HandleFunc("GET /api/models/routes", m.readRoutes)
 	mux.HandleFunc("GET /api/models/resolve", m.resolve)
 }
 

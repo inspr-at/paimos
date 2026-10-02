@@ -6582,6 +6582,18 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /models/routes:
+    get:
+      operationId: readModelRoutes
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; dispatch additionally applies family order, review floors, platform capability, approved accounts and preferences. At most 50 steps, with explicit truncation; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      security: *auth
+      parameters:
+        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+      responses:
+        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
       description: Admin atomically replaces the tenant's role ladders. Temporary unavailable/conserved/budget-limited entries require expiry and reason.
@@ -14069,6 +14081,25 @@ components:
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
         reason: {type: string}
         valid_until: {type: [string, 'null'], format: date-time}
+    ModelRoutesRead:
+      type: object
+      required: [role, steps, setup, truncated, dispatch_family_order, review_floors]
+      properties:
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
+        steps:
+          type: array
+          maxItems: 50
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/ModelRoute'}
+              - type: object
+                required: [profile]
+                properties:
+                  profile: {$ref: '#/components/schemas/ModelProfile'}
+        setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
+        truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
+        dispatch_family_order: {type: array, items: {type: string}, description: Built-in family order used by review dispatch, before further qualification and preferences.}
+        review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
     ModelResolution:
       type: object
       required: [role, ladder, owner_required, source]

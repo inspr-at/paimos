@@ -10,6 +10,21 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Policies
+
+Settings → Policies (`/settings/policies`) reads existing rules without storing
+or changing them. Each tab follows its source permission: review ladders need
+`models.read`; agent key limits read the permission registry with `roles.read`
+and a person session; ownership and advisory rules are visible to signed-in
+people. Links lead only to existing screens the person may open.
+
+`GET /api/models/routes?role=review-gate` reads one of the five model roles,
+ordered by priority and profile id, with at most 50 steps and an explicit
+`truncated` flag. An unseeded registry returns `setup: false` without creating
+profiles or events. The read applies a five-second statement timeout and returns
+503 with `Retry-After` if it expires. CLI priority and qualified review dispatch
+are labelled separately; this display endpoint does not resolve a dispatch.
+
 ## Recurring work
 
 `aeon recur create|list|get|update|pause|resume|run-now|preview` manages
