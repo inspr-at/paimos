@@ -80,6 +80,10 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if _, err := d.Admin.Exec(ctx, `INSERT INTO person_host_labels(tenant_id,person_id,host,label) VALUES($1,$2,'host-fixture','My workstation')`, tid, alias); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO person_pause_settings(tenant_id,person_id,default_level,leaving_scope)
+		VALUES($1,$2,'wrap_up','{"hosts":["PRIVATE_PAUSE_HOST"]}'),($1,$3,'pause','{"hosts":["OTHER_PAUSE_HOST"]}')`, tid, alias, other); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := d.Admin.Exec(ctx, `INSERT INTO aithema_deprovisioned_subjects(tenant_id,issuer,subject)
 		VALUES($1,'dsar-fixture','00000000-0000-0000-0000-000000000123'),($1,'different-issuer','00000000-0000-0000-0000-000000000123')`, tid); err != nil {
 		t.Fatal(err)
@@ -127,13 +131,74 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 			VALUES($1,$2,repeat('e',64),0)`, tid, account); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,doing,doing_at,tool_activity,tool_activity_at)
-			VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker','fixture-ref','fixture-lease','PRIVATE_ACTIVITY_TEXT',now(),'PRIVATE_TOOL_TEXT',now()) RETURNING id::text`, tid, visibleProject, agent, alias).Scan(&session); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,doing,doing_at,tool_activity,tool_activity_at,pause_record,continuation_handover,work_placement,pause_progress)
+			VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker','fixture-ref','fixture-lease','PRIVATE_ACTIVITY_TEXT',now(),'PRIVATE_TOOL_TEXT',now(),'{"note":"PRIVATE_PAUSE_RECORD"}','{"note":"PRIVATE_HANDOVER"}','{"note":"PRIVATE_PLACEMENT"}','{"note":"PRIVATE_PAUSE_PROGRESS"}') RETURNING id::text`, tid, visibleProject, agent, alias).Scan(&session); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO harness_current_activity(tenant_id,session_id,text,source,at)
 			VALUES($1,$2,'PRIVATE_ACTIVITY_HISTORY','agent',now())`, tid, session); err != nil {
 			return err
+		}
+		// Preferences inherit the person's scope even when another person last
+		// edited a row. An unrelated person's scope must stay out of the packet.
+		for _, person := range []string{subject, other} {
+			var scope, kind string
+			if err := tx.QueryRow(ctx, `INSERT INTO model_pref_scopes(tenant_id,level,person_id,updated_by)
+				VALUES($1,'person',$2,$3) RETURNING id::text`, tid, person, other).Scan(&scope); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM work_kinds WHERE tenant_id=$1 AND slug='backend' AND project_id IS NULL`, tid).Scan(&kind); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_rows(tenant_id,scope_id,kind_id,level,updated_by)
+				VALUES($1,$2,$3,'person',$4)`, tid, scope, kind, other); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_cells(tenant_id,scope_id,kind_id,bucket,mode,family,line,effort,harness)
+				VALUES($1,$2,$3,'normal','latest','openai','private-pref-line','high','codex')`, tid, scope, kind); err != nil {
+				return err
+			}
+		}
+		// Use the desk service's fixture capability and neutral tree stubs.
+		// Visible agent questions belong to the subject through the owned session;
+		// hidden questions are included only by the owner's erase review.
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.desk_write','on',true)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema)
+			VALUES($1,'question','Question','QST','question','{"issue_family":false}'),($1,'decision','Decision','DCS','question','{"issue_family":false}')`, tid); err != nil {
+			return err
+		}
+		for _, fixture := range []struct{ project, asker, session, decider string }{{visibleProject, agent, session, alias}, {hiddenProject, alias, "", alias}, {visibleProject, other, "", other}} {
+			var question, answer, asker string
+			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+				SELECT $1,id,aeon_next_node_key($1,'QST'),'Question',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='question' RETURNING id::text`, tid, fixture.project).Scan(&question); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason)
+				VALUES($1,$2,$3,'{"context":"PRIVATE_DESK_INPUT"}','once','agent_suggestion')`, tid, fixture.project, question); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,session_id,comment_node_id,input)
+				VALUES($1,$2,$3,$4,gen_random_uuid(),repeat('g',64),NULLIF($5,'')::uuid,$3,'{"context":"PRIVATE_ASKER_INPUT"}') RETURNING id::text`, tid, fixture.project, question, fixture.asker, fixture.session).Scan(&asker); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+				SELECT $1,id,aeon_next_node_key($1,'DCS'),'Decision',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='decision' RETURNING id::text`, tid, question).Scan(&answer); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,answer,reason,outcome,deliver_after)
+				VALUES($1,$2,$3,$4,2,gen_random_uuid(),repeat('h',64),$5,'PRIVATE_DESK_ANSWER','PRIVATE_DESK_REASON','once',now())`, tid, fixture.project, answer, question, fixture.decider); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO desk_decisions(tenant_id,project_id,question_id,revision,effect_ref)
+				VALUES($1,$2,$3,2,'PRIVATE_DECISION_EFFECT')`, tid, fixture.project, question); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO desk_pending(tenant_id,project_id,question_id,revision,asker_id,kind,deliver_after,effect_ref,error_code)
+				VALUES($1,$2,$3,2,$4,'inbox',now(),'PRIVATE_PENDING_EFFECT','PRIVATE_PENDING_ERROR')`, tid, fixture.project, question, asker); err != nil {
+				return err
+			}
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO aithema_sessions(tenant_id,sid,project_id,plugin_principal,authorization_bytes,worker_generation,auth_epoch,host_mode,currency,evidence,session_cap)
 			VALUES($1,gen_random_uuid(),'fixture','fixture','PRIVATE_AUTH_BYTES',1,1,'review','EUR',false,100) RETURNING sid::text`, tid).Scan(&sid); err != nil {
@@ -198,10 +263,16 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if len(section(report, "aithema_deprovisioned_subjects").Records) != 1 {
 		t.Fatal("OIDC subject/issuer mapping was not exact")
 	}
-	for _, table := range []string{"agent_accounts", "account_person_link_requests", "harness_sessions", "harness_current_activity", "aithema_journal_content_events", "aithema_journal_record_chunks", "aithema_journal_uploads", "aithema_journal_upload_chunks"} {
+	for _, table := range []string{"agent_accounts", "account_person_link_requests", "harness_sessions", "harness_current_activity", "aithema_journal_content_events", "aithema_journal_record_chunks", "aithema_journal_uploads", "aithema_journal_upload_chunks", "person_pause_settings", "model_pref_scopes", "model_pref_rows", "model_pref_cells", "desk_askers", "desk_answers", "desk_decisions", "desk_pending"} {
 		if len(section(report, table).Records) != 1 || section(report, table).Records[0].Match != "subject-reference" {
 			t.Fatalf("new personal domain missing alias/issuer ownership: %s", table)
 		}
+	}
+	if questions := section(report, "desk_questions"); len(questions.Records) != 1 || questions.Records[0].Match != "subject-reference" {
+		t.Fatal("question must inherit its asker/session ownership without a text mention")
+	}
+	if !strings.Contains(string(section(report, "person_pause_settings").Records[0].Data), "wrap_up") {
+		t.Fatal("alias pause preference missing from export")
 	}
 	oidc := section(report, "aithema_deprovisioned_subjects")
 	var locator map[string]string
@@ -216,7 +287,7 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"OTHER_PERSON_PRIVATE", "OTHER_PROFILE_PRIVATE", "FOREIGN_PRIVATE_NAME", foreign, "SECRET_IN_ARBITRARY_JSON", "THIRD_PARTY_MESSAGE_SECRET", "PRIVATE_FREE_TEXT", "PRIVATE_ACTIVITY_TEXT", "PRIVATE_TOOL_TEXT", "PRIVATE_ACTIVITY_HISTORY", "PRIVATE_AUTH_BYTES", "PRIVATE_RECORD_BYTES", "PRIVATE_DOCUMENT_BYTES", "PRIVATE_RECORD_CHUNK_BYTES", "PRIVATE_UPLOAD_CHUNK_BYTES", strings.Repeat("c", 64), strings.Repeat("d", 64), strings.Repeat("e", 64), hiddenNode} {
+	for _, private := range []string{"OTHER_PERSON_PRIVATE", "OTHER_PROFILE_PRIVATE", "FOREIGN_PRIVATE_NAME", foreign, "SECRET_IN_ARBITRARY_JSON", "THIRD_PARTY_MESSAGE_SECRET", "PRIVATE_FREE_TEXT", "PRIVATE_ACTIVITY_TEXT", "PRIVATE_TOOL_TEXT", "PRIVATE_ACTIVITY_HISTORY", "PRIVATE_AUTH_BYTES", "PRIVATE_RECORD_BYTES", "PRIVATE_DOCUMENT_BYTES", "PRIVATE_RECORD_CHUNK_BYTES", "PRIVATE_UPLOAD_CHUNK_BYTES", "PRIVATE_PAUSE_HOST", "OTHER_PAUSE_HOST", "PRIVATE_PAUSE_RECORD", "PRIVATE_HANDOVER", "PRIVATE_PLACEMENT", "PRIVATE_PAUSE_PROGRESS", "private-pref-line", "PRIVATE_DESK_INPUT", "PRIVATE_ASKER_INPUT", "PRIVATE_DESK_ANSWER", "PRIVATE_DESK_REASON", "PRIVATE_DECISION_EFFECT", "PRIVATE_PENDING_EFFECT", "PRIVATE_PENDING_ERROR", strings.Repeat("c", 64), strings.Repeat("d", 64), strings.Repeat("e", 64), strings.Repeat("g", 64), strings.Repeat("h", 64), hiddenNode} {
 		if bytes.Contains(raw, []byte(private)) {
 			t.Fatal("packet disclosed an excluded value")
 		}
@@ -235,6 +306,14 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	if !plan.DryRun || plan.Operation != "erase" || len(section(plan, "nodes").Records) != 2 {
 		t.Fatal("erase plan must include hidden references without deleting")
+	}
+	for _, table := range []string{"desk_questions", "desk_askers", "desk_answers", "desk_decisions", "desk_pending"} {
+		if len(section(plan, table).Records) != 2 {
+			t.Fatalf("erase review omitted hidden desk references: %s", table)
+		}
+	}
+	if section(plan, "desk_answers").Hold != "audit-review" || !contains(strings.Join(section(plan, "person_pause_settings").TouchColumns, " "), "leaving_scope") {
+		t.Fatal("desk immutability or private leaving scope missing from erase review")
 	}
 	if section(plan, "time_periods").Hold != "financial-review" || section(plan, "events").Hold != "audit-review" || !contains(strings.Join(section(plan, "personal_profiles").TouchColumns, " "), "first_name") {
 		t.Fatal("erase columns or hold review missing")
