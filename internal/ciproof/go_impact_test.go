@@ -460,3 +460,35 @@ func TestGoFullComparisonRequiresEveryRowAndReportsOmittedFailures(t *testing.T)
 		t.Fatal("truncated record file accepted")
 	}
 }
+
+func TestGoComparisonRejectsQueueAndScheduledFourShardReports(t *testing.T) {
+	f, p, b, c, _ := impactFixture(t, func(map[string]string) {})
+	for _, event := range []string{"merge_group", "schedule"} {
+		binding := p.Binding
+		binding.Event = event
+		binding.SourceHead = ""
+		binding.PR = 0
+		if event == "merge_group" {
+			binding.GroupID = "queue-fixture"
+			binding.GroupPRs = []int64{1}
+		}
+		plan, err := NewPlan(context.Background(), f.repo, p.Policy, binding, p.EnvironmentDigest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		impact, err := AnalyzeGoImpact(context.Background(), f.repo, plan, b, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := fullGoFixtureRun(plan, impact)
+		run.Layout = 4
+		if _, err := CompareGoImpact(plan, impact, run); err == nil {
+			t.Fatalf("%s accepted main-only layout", event)
+		}
+		run.Layout = 7
+		comparison, err := CompareGoImpact(plan, impact, run)
+		if err != nil || !comparison.Complete {
+			t.Fatalf("full hosted %s rejected: %v", event, err)
+		}
+	}
+}

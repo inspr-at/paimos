@@ -73,8 +73,8 @@ func CompareGoImpact(p Plan, impact GoImpactReport, run GoFullRun) (GoShadowComp
 	if impact.ID != goImpactID(impact) || impact.PlanID != p.ID || impact.Mode != "shadow" || impact.Authority != "diagnostic-only" || run.Schema != "aeon.ci.go-full-run.v1" || run.PlanID != p.ID || run.CandidateCommit != p.Candidate.Commit || run.EnvironmentDigest != p.EnvironmentDigest || run.RunID <= 0 || run.Attempt != 1 || (run.Layout != 7 && run.Layout != 4) {
 		return GoShadowComparison{}, fmt.Errorf("shadow comparison plan/run binding mismatch")
 	}
-	if run.Layout == 4 && p.Binding.Event == "pull_request" {
-		return GoShadowComparison{}, fmt.Errorf("PR full result must use hosted seven-shard layout")
+	if run.Layout == 4 && p.Binding.Event != "push" && p.Binding.Event != "workflow_dispatch" {
+		return GoShadowComparison{}, fmt.Errorf("four-shard results require an eligible main event")
 	}
 	live := map[string]bool{}
 	selected := map[string]bool{}
@@ -186,6 +186,11 @@ func RecordGoImpact(ctx context.Context, r *Repository, file string, p Plan, bas
 		return GoImpactReport{}, nil, err
 	}
 	defer unix.Flock(fd, unix.LOCK_UN)
+	// Check the current size after locking, including any preceding writer.
+	info, err = f.Stat()
+	if err != nil {
+		return GoImpactReport{}, nil, err
+	}
 	if info.Size() > 0 {
 		if _, err := f.Seek(-1, io.SeekEnd); err != nil {
 			return GoImpactReport{}, nil, err
