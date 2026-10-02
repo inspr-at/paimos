@@ -9070,7 +9070,7 @@ components:
         draft_estimate_hours: {type: number, minimum: 0, maximum: 200}
         requested_by_principal_id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
-        launched: {type: boolean, description: Always false in scheduler/preparation responses; these are requests, never launch grants.}
+        launched: {type: boolean, description: "Always false in scheduler/preparation responses; these are requests, never launch grants."}
     AutopilotPreparationResult:
       type: object
       additionalProperties: false

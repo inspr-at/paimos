@@ -192,7 +192,11 @@ func TestSchedulerOverlapPinWindowsAndRevocation(t *testing.T) {
 	manager := f.person(t, f.project, []string{"nodes.read", "autopilot.manage"})
 	f.call(t, manager, "POST", "/api/autopilot-lanes/"+l.ID+"/schedule", actionInput{ExpectedRevision: l.Revision}, 403, nil)
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE permission='run.create' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, f.owner.ID)
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1) AND permission IN ('run.create','*')`, f.owner.ID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,role_id,permission FROM role_bindings CROSS JOIN unnest(ARRAY['nodes.read','autopilot.manage']) permission WHERE principal_id=$1 ON CONFLICT DO NOTHING`, f.owner.ID)
 		return err
 	})
 	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+l.ID+"/schedule", actionInput{ExpectedRevision: l.Revision}, 403, nil)

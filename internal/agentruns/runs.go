@@ -293,7 +293,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if projectID != nil {
 		scope.ProjectID = *projectID
 	}
-	if err = authz.RequireTx(ctx, tx, p, "run.create", scope); err != nil {
+	if err = workorders.RequireMutationTx(r, tx, p, "run.create", scope); err != nil {
 		return nil, err
 	}
 	if owned, err := lanedispatch.OwnedOrder(ctx, tx, o.NodeID); err != nil {
