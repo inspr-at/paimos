@@ -1,15 +1,16 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261001230453.0.0",
+  "version": "261002004358.0.0",
   "release_channel": "stable",
-  "release_sequence": 117,
-  "codename": "Pure Probe",
-  "reserved_at": "2026-10-01T23:04:53Z",
+  "release_sequence": 118,
+  "codename": "Rugged Ratio",
+  "reserved_at": "2026-10-02T00:43:58Z",
   "ticket": "AEON-520",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
-    "261001205522.0.0"
+    "261001205522.0.0",
+    "261001230453.0.0"
   ]
 }
