@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -702,6 +703,37 @@ func TestFix2ReadinessNullChecksPreserveHardStopObservation(t *testing.T) {
 				t.Fatal("ordinary check changed money-stop evidence or spent recovery state")
 			}
 		})
+	}
+}
+
+func TestFix2ReadinessLegacyZeroDeclaredCapStaysBlocking(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-legacy-zero-cap", now)
+	var pi Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"pi-local","harness":"pi","daemon_id":"daemon-pi","label":"Local pi"}`, 201, &pi)
+	ownFixtureAccount(t, f.admin, &pi)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, pi.ID); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0.0
+	probe := probeWrite{DaemonID: "daemon-pi", DaemonGeneration: "g1", Available: true, OpenRouterCredits: &openrouter.Credits{ObservedAt: now.Add(-20 * time.Minute), Limit: &zero}}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	var page struct {
+		Items []AccountReadiness `json:"items"`
+	}
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+	found := false
+	for _, row := range page.Items {
+		if row.AccountID != pi.ID {
+			continue
+		}
+		found = true
+		if row.CanTry || !slices.Contains(row.ReasonCodes, "key_cap_exhausted") || row.MeasuredUsage != nil {
+			t.Fatalf("stale legacy zero cap became missing usage: %+v", row)
+		}
+	}
+	if !found {
+		t.Fatal("legacy Pi account absent from readiness")
 	}
 }
 

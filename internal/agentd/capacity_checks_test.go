@@ -429,7 +429,7 @@ func TestRemoteCapacityCheckContractAndBoundedErrors(t *testing.T) {
 	}
 	var got CapacityCheckReport
 	_ = json.Unmarshal(reports[0]["readiness"], &got)
-	if !reflect.DeepEqual(got, report) || string(reports[0]["daemon_generation"]) != `"generation"` || string(reports[0]["available"]) != "false" || string(reports[0]["failure"]) != `"auth_failed"` {
+	if !reflect.DeepEqual(got, report) || string(reports[0]["daemon_generation"]) != `"generation"` || string(reports[0]["available"]) != "false" || string(reports[0]["failure"]) != `"unavailable"` {
 		t.Fatal("check fencing/cause lost")
 	}
 	mode = "oversize"
