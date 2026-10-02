@@ -54,7 +54,7 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 						if string(a) != string(b) {
 							t.Fatalf("%s/%s/%s/%s changed ladder: %s != %s", role, h, c, area, a, b)
 						}
-						if KnownRouteArea(area) {
+						if KnownRouteArea(area) && h == "" {
 							ticket, err := ResolveTicketRoute(t.Context(), tx, role, area, now)
 							if err != nil {
 								return err

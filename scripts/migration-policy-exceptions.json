@@ -16,7 +16,7 @@
     },
     {
       "file": "1104_work_kinds.sql",
-      "sha256": "dbdd04d67e5958f22f5a9900a2aa8eb1ca8f956ff9b46dad297c0d0cebcf8341",
+      "sha256": "f9832b34fe476af2e6868e77687687900909a373af58fdab6a4fe6b74384a1e9",
       "ticket": "AEON-502",
       "reason": "Additive work-kind tables and tenant seed with an area-schema widening from the six existing strings to their slug-pattern superset. The classifier conservatively flags the tenant-loop DO backfill and CREATE OR REPLACE of the schema helper. Existing values, rows, and binary writes remain valid; Go area gates remain unchanged until 502c. Exact bytes are exposed in this draft PR for coordinator review; migration compatibility is measured in CI before any merge/release."
     }

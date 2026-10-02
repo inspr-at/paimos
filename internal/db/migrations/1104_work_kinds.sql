@@ -52,6 +52,9 @@ BEGIN
   (OLD.slug,OLD.label,OLD.archived_at,OLD.project_id,OLD.system) THEN
   RAISE EXCEPTION 'system kind is immutable' USING ERRCODE='23514';
  END IF;
+ IF NEW.slug IN ('review','security','other') AND (NEW.system IS DISTINCT FROM NEW.slug OR NEW.project_id IS NOT NULL OR NEW.archived_at IS NOT NULL) THEN
+  RAISE EXCEPTION 'system kind cannot be recreated or archived' USING ERRCODE='23514';
+ END IF;
  IF NEW.archived_at IS NULL THEN
   PERFORM pg_advisory_xact_lock(hashtextextended('aeon-work-kind:'||NEW.tenant_id||':'||NEW.slug,0));
   IF EXISTS (SELECT 1 FROM work_kinds k WHERE k.tenant_id=NEW.tenant_id AND k.slug=NEW.slug
@@ -107,7 +110,7 @@ BEGIN
   PERFORM set_config('aeon.tenant_id',t.id::text,true);
   PERFORM aeon_seed_work_kinds(t.id);
   UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{properties}',
-   coalesce(field_schema->'properties','{}'::jsonb)||aeon_ticket_route_properties()),updated_at=now()
+   coalesce(field_schema->'properties','{}'::jsonb)||jsonb_build_object('area',aeon_ticket_route_properties()->'area')),updated_at=now()
    WHERE tenant_id=t.id AND slug IN ('ticket','task');
  END LOOP;
  PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
