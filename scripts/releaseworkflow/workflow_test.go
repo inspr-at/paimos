@@ -2,7 +2,6 @@
 package releaseworkflow
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,26 +209,76 @@ func TestPublishedRuntimeMustMatchSmokedRuntime(t *testing.T) {
 	if !(pushIndex < identityIndex && identityIndex < attestIndex) || identity.If != "" || identity.ContinueOnError {
 		t.Fatal("runtime identity gate can be bypassed")
 	}
-	for _, different := range []bool{false, true} {
-		t.Run(fmt.Sprint(different), func(t *testing.T) {
+	for _, tc := range []struct {
+		name, published string
+		ok              bool
+	}{
+		{"same-export", "smoked", true},
+		{"clock-only", "clock-only", true},
+		{"different-rootfs", "different-rootfs", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			smoked := "sha256:" + strings.Repeat("a", 64)
-			published := smoked
-			if different {
-				published = "sha256:" + strings.Repeat("b", 64)
-			}
-			stub := "#!/bin/bash\nif [[ $1 == pull ]]; then exit 0; fi\nprintf '%s\\n' '" + published + "'\n"
+			// Stub only Docker transport; identity data are the unchanged configs
+			// of real BuildKit exports, including two injected creation clocks.
+			stub := `#!/bin/bash
+if [[ $1 == pull ]]; then exit 0; fi
+if [[ ${@: -1} == "$SMOKED_IMAGE" ]]; then cat "$SMOKED_FIXTURE"; else cat "$PUBLISHED_FIXTURE"; fi
+`
 			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", "-c", identity.Run)
 			cmd.Dir = root(t)
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "SMOKED_IMAGE="+smoked, "DIGEST=sha256:"+strings.Repeat("c", 64))
+			fixtures := filepath.Join(root(t), "scripts/releaseworkflow/testdata/runtime-identity")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "SMOKED_IMAGE="+smoked, "DIGEST=sha256:"+strings.Repeat("c", 64), "SMOKED_FIXTURE="+filepath.Join(fixtures, "smoked.json"), "PUBLISHED_FIXTURE="+filepath.Join(fixtures, tc.published+".json"))
 			output, err := cmd.CombinedOutput()
-			if (err != nil) != different {
+			if (err == nil) != tc.ok {
 				t.Fatalf("identity gate error=%v output=%s", err, output)
 			}
 		})
+	}
+}
+
+// Rehearsal remains read-only and keeps its existing build arguments. The
+// release-only epoch changes export clocks, not Dockerfile/runtime inputs.
+func withoutSourceEpoch(t *testing.T, args string) string {
+	t.Helper()
+	line := "SOURCE_DATE_EPOCH=${{ steps.source-epoch.outputs.epoch }}\n"
+	if strings.Count(args, line) != 1 {
+		t.Fatal("release build must use the single pinned source epoch")
+	}
+	return strings.Replace(args, line, "", 1)
+}
+
+func TestExportsShareSourceEpoch(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	epochIndex, epoch := named(t, j, "Pin both exports to the source epoch")
+	buildIndex, build := named(t, j, "Build cached smoke image")
+	_, push := named(t, j, "Build and push")
+	if epochIndex >= buildIndex || epoch.ID != "source-epoch" || epoch.If != "" || epoch.ContinueOnError || build.With["build-args"] != push.With["build-args"] {
+		t.Fatal("exports do not share an unconditional source epoch")
+	}
+	withoutSourceEpoch(t, build.With["build-args"])
+	for _, value := range []string{"1700000000", "", "bad", "1700000000\n1700000100"} {
+		dir := t.TempDir()
+		stub := "#!/bin/bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(stub), 0700); err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(dir, "output")
+		cmd := exec.Command("bash", "-c", epoch.Run)
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE_EPOCH="+value, "GITHUB_OUTPUT="+output)
+		if err := cmd.Run(); (err == nil) != (value == "1700000000") {
+			t.Fatalf("source epoch %q: %v", value, err)
+		}
+		if value == "1700000000" {
+			body, err := os.ReadFile(output)
+			if err != nil || string(body) != "epoch=1700000000\n" {
+				t.Fatal("source epoch output differs")
+			}
+		}
 	}
 }
 
@@ -267,6 +316,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	}
 	_, productionBuild := named(t, release.Jobs["image-platform"], "Build cached smoke image")
 	_, dryBuild := named(t, dry.Jobs["image-dry-run"], "Build cached smoke image")
+	productionBuild.With["build-args"] = withoutSourceEpoch(t, productionBuild.With["build-args"])
 	if !reflect.DeepEqual(productionBuild.With, dryBuild.With) || productionBuild.Uses != dryBuild.Uses {
 		t.Fatal("dry run must exercise the production smoke build")
 	}

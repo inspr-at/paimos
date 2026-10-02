@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const architectures = ['amd64', 'arm64'];
@@ -19,11 +20,22 @@ export function imageSources(directory) {
   return digests.map(digest => `ghcr.io/inspr-at/aeon@${digest}`);
 }
 
-// An image ID is the SHA256 of its config, which binds runtime settings and
-// the ordered uncompressed rootfs layer digests. Provenance changes the index,
-// not this identity. Require one exact ID from each Docker store lookup.
+// Docker image IDs also hash creation/history timestamps. Compare the ordered
+// uncompressed layers and runtime settings, excluding exporter bookkeeping.
+// Inputs use the OCI config shape, from exports or restricted Docker image
+// projections. No daemon metadata, container environment or image ID is read.
 export function verifyRuntimeIdentity(smoked, published) {
-  if (!digestPattern.test(smoked) || !digestPattern.test(published) || smoked !== published) {
+  const runtime = image => {
+    if (!image || typeof image.architecture !== 'string' || !image.architecture ||
+        typeof image.os !== 'string' || !image.os ||
+        image.rootfs?.type !== 'layers' || !Array.isArray(image.rootfs.diff_ids) ||
+        image.rootfs.diff_ids.length === 0 || image.rootfs.diff_ids.some(layer => !digestPattern.test(layer)) ||
+        !image.config || typeof image.config !== 'object' || Array.isArray(image.config)) {
+      throw new Error('Invalid runtime image inspection');
+    }
+    return { architecture: image.architecture, os: image.os, variant: image.variant ?? '', rootfs: image.rootfs, config: image.config };
+  };
+  if (!isDeepStrictEqual(runtime(smoked), runtime(published))) {
     throw new Error('Published runtime differs from the image that passed smoke');
   }
 }
@@ -59,9 +71,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const [command, path, published] = process.argv.slice(2);
     if (command === 'sources' && path) console.log(imageSources(path).join('\n'));
-    else if (command === 'identity') verifyRuntimeIdentity(path, published);
+    else if (command === 'identity' && path && published) verifyRuntimeIdentity(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(readFileSync(published, 'utf8')));
     else if (command === 'verify' && path) verifyImageIndex(JSON.parse(readFileSync(path, 'utf8')));
-    else throw new Error('Usage: release-image-index.mjs sources <directory> | verify <index.json> | identity <smoked-image-id> <published-image-id>');
+    else throw new Error('Usage: release-image-index.mjs sources <directory> | verify <index.json> | identity <smoked-inspect.json> <published-inspect.json>');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

@@ -259,9 +259,15 @@
       "step": "Require native platform"
     },
     {
+      "counterpart": "TestExportsShareSourceEpoch",
+      "mode": "test",
+      "sha256": "765f083bd777c5d136e36599a10281d28987f0c9933b12ab5d3fb9254f05bafd",
+      "step": "Pin both exports to the source epoch"
+    },
+    {
       "counterpart": "image-dry-run/Build cached smoke image",
       "mode": "step",
-      "sha256": "0fe7948bf008d90249262025082b512df3cc41535d08168278e97c21a752c334",
+      "sha256": "1df59a37c481ab91e3a2036435626fafda029efec862a5b55281778cc5b250cb",
       "step": "Build cached smoke image"
     },
     {
@@ -279,13 +285,13 @@
     {
       "counterpart": "image-dry-run/Export production image with provenance locally",
       "mode": "step",
-      "sha256": "4863a035ebf9ff4b1bb2e76ca0d587068d403624778f11ca2d2e9279839aeedd",
+      "sha256": "cda30a837311406568604a32f574da3988b5eb2d0e530b1dd55a1194bcc97ae2",
       "step": "Build and push"
     },
     {
       "counterpart": "TestPublishedRuntimeMustMatchSmokedRuntime",
       "mode": "test",
-      "sha256": "12dfc2442e72779201759954058312829db388f038d1d29b5c958be9b2f00085",
+      "sha256": "224aa082f579b7186f761b5a97c6e65fcc9b7e5ca0d64dd2e30951682ab33a65",
       "step": "Verify pushed runtime matches smoke"
     },
     {

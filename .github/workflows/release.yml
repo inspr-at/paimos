@@ -242,6 +242,13 @@ jobs:
         run: |
           set -euo pipefail
           case "$ARCH:$(uname -m)" in amd64:x86_64|arm64:aarch64) ;; *) echo 'Native runner architecture mismatch' >&2; exit 1 ;; esac
+      - name: Pin both exports to the source epoch
+        id: source-epoch
+        run: |
+          set -euo pipefail
+          epoch="$(git show -s --format=%ct HEAD)"
+          [[ "$epoch" =~ ^[0-9]+$ ]]
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
       - name: Build cached smoke image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -254,6 +261,7 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            SOURCE_DATE_EPOCH=${{ steps.source-epoch.outputs.epoch }}
 
       # BuildKit's config digest is not a runnable ID in every Docker image
       # store. Resolve the loaded tag through the daemon, then pin that ID.
@@ -291,9 +299,10 @@ jobs:
           cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }},mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            SOURCE_DATE_EPOCH=${{ steps.source-epoch.outputs.epoch }}
 
-      # Docker's image ID hashes the complete config, including rootfs diff_ids.
-      # Compare runtime identity rather than indexes carrying provenance.
+      # Compare ordered rootfs diff IDs and runtime settings. Export timestamps
+      # and provenance are not runtime identity; both builds share one epoch.
       - name: Verify pushed runtime matches smoke
         env:
           SMOKED_IMAGE: ${{ steps.smoke-image.outputs.image }}
@@ -303,8 +312,11 @@ jobs:
           [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
           reference="ghcr.io/inspr-at/aeon@${DIGEST}"
           docker pull "$reference"
-          published="$(docker image inspect --format '{{.Id}}' "$reference")"
-          node scripts/release-image-index.mjs identity "$SMOKED_IMAGE" "$published"
+          directory="$(mktemp -d "$RUNNER_TEMP/runtime-identity.XXXXXX")"
+          format='{"architecture":{{json .Architecture}},"os":{{json .Os}},"variant":{{json .Variant}},"rootfs":{"type":{{json .RootFS.Type}},"diff_ids":{{json .RootFS.Layers}}},"config":{{json .Config}}}'
+          docker image inspect --format "$format" "$SMOKED_IMAGE" > "$directory/smoked.json"
+          docker image inspect --format "$format" "$reference" > "$directory/published.json"
+          node scripts/release-image-index.mjs identity "$directory/smoked.json" "$directory/published.json"
 
       - name: Attest pushed image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
