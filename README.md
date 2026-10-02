@@ -80,6 +80,13 @@ requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires
 `nodes.write`; `queue_each` adds `run.create` and `work_orders.write`.
 
+The recurrence tests cover calendar/DST edges, preview, replica and foreground
+claim barriers, restart recovery, overlap/catch-up, publication deduplication,
+queue/provenance, transaction rollback, tenant/project RLS and permission
+changes during a write. They use an injected database clock and channels rather
+than sleeps. The full Go suite validates the shared authorization, work-order,
+queue, server and OpenAPI integration alongside this package.
+
 DSAR integration note (AEON-490): the inventory is absent from this branch and
 its `origin/main` baseline. Migration 1115 introduces `recurrences` and
 `recurrence_occurrences`, both tenant-scoped with forced RLS and project
