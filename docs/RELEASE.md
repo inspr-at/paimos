@@ -551,7 +551,7 @@ only (AEON-438, 2026-09-30). Successful routed jobs record their actual
 future reuse record must preserve that class. Image provenance, attestations and
 pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
 
-A push of an annotated `v*` tag runs `.github/workflows/release.yml`. Create it with `git tag -a "$tag" -m "Release $tag"`; lightweight tags fail before the image build (AEON-398).
+A push of an annotated `v*` tag runs `.github/workflows/release.yml`. The coordinator creates it with `node scripts/create-release-tag.mjs --write`, which first requires the exact-main-SHA rehearsal receipt; lightweight tags fail before the image build (AEON-398).
 
 The server image pipeline starts independently of the macOS jobs (AEON-407, AEON-504). **Every release requires linux/amd64 and linux/arm64**, built and smoked natively in parallel; either platform failing prevents release-index publication. GitHub's hosted `ubuntu-24.04` runner builds amd64 and `ubuntu-24.04-arm` builds arm64 ([runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)). No QEMU is installed, and each job checks `uname -m` before building.
 
