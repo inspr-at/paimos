@@ -142,6 +142,46 @@ func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
 	}
 }
 
+func TestBPromotionWaitsForStartedWorkAndPreservesFailedClaims(t *testing.T) {
+	base := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-promote-started", base)
+	queued, _ := f.route(t, 200)
+	started, _ := f.route(t, 200)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running',started_at=$2 WHERE id=$1`, started, base)
+		return err
+	})
+	resource := bStop(t, f, base, "unnamed")
+	now := base.Add(time.Hour)
+	bAt(t, &f, now, "g2")
+	path := "/api/agent-accounts/route"
+	body := routeBody(t, queued, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
+	code, response := call(t, f.mod, &f.runner, f.token, "POST", path, body)
+	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: vendor") {
+		t.Fatalf("started work did not fence promotion: %d %s", code, response)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NULL`, resource) != 1 {
+		t.Fatal("blocked claim consumed a permit")
+	}
+	bFinish(t, f, started, now, "completed", 1)
+	// A real manual cap still blocks promotion after started work has left.
+	var cap Window
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(time.Hour), "requests", 1, "unrestricted"), 201, &cap)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance WHERE id=$1`, cap.ID)
+		return err
+	})
+	code, response = call(t, f.mod, &f.runner, f.token, "POST", path, body)
+	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: allowance") {
+		t.Fatalf("manual cap did not fence promotion: %d %s", code, response)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NULL`, resource) != 1 {
+		t.Fatal("failed manual-cap claim consumed a permit")
+	}
+	callStatus(t, f.mod, &f.admin, "", "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+cap.ID, "", 204, nil)
+	mustRoute(t, f.mod, f.runner, f.token, queued, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
+}
+
 func TestBReadinessSharesFactOnlyReserveAdmission(t *testing.T) {
 	loc, err := time.LoadLocation("Europe/Vienna")
 	if err != nil {

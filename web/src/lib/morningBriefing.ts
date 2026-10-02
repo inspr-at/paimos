@@ -93,8 +93,12 @@ export function sumBriefingUsage(dashboards: UsageDashboard[]): BriefingUsage {
   totals.cost_state = !totals.cost_known_rows ? 'unknown' : totals.cost_unknown_rows || totals.unreported_sessions ? 'partial' : totals.provisional_rows ? 'provisional' : 'known'
   totals.tokens_state = dashboards.every(d => d.totals.tokens_state === 'known') ? 'known' : dashboards.every(d => d.totals.tokens_state === 'unknown') ? 'unknown' : 'partial'
   const windows = [...new Map(dashboards.flatMap(d => d.allowance.windows).map(w => [w.window_id, w])).values()]
-  const state = dashboards.some(d => d.allowance.state === 'visible') ? 'visible' : dashboards.some(d => d.allowance.state === 'withheld') ? 'withheld' : 'none'
-  return { totals, allowance: { state, windows }, truncated: dashboards.some(d => d.truncated) }
+  const visible = dashboards.some(d => d.allowance.state === 'visible')
+  const withheld = dashboards.some(d => d.allowance.state === 'withheld')
+  const truncated = dashboards.some(d => d.allowance.truncated)
+  const partial = dashboards.some(d => d.allowance.state === 'partial') || visible && withheld || truncated
+  const state = partial ? 'partial' : visible ? 'visible' : withheld ? 'withheld' : 'none'
+  return { totals, allowance: { state, windows, truncated }, truncated: truncated || dashboards.some(d => d.truncated) }
 }
 export const personJourneyActions = new Set(['continue_intake', 'confirm_brief', 'decide', 'reopen', 'approve_requirements', 'open_first_release', 'start_build', 'mark_candidate', 'approve_candidate', 'approve_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release', 'renew_candidate', 'renew_deploy'])
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }

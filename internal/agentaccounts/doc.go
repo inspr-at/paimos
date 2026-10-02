@@ -209,6 +209,11 @@
 // Unnamed vendor and provider 402 waits grant one durable resource-scoped
 // recovery at expiry or on a current owner check. Failed inference advances
 // 1/2/4/8-hour backoff; only evidenced successful inference clears a 402.
+// An eligible unstarted reservation may acquire that permit during claim;
+// other queued holds stay intact and cannot launch during its recovery wait.
+// Readiness evaluates the same non-mutating admission policy, including fresh
+// fact-only reserves and recovery eligibility, without consuming the permit.
+// Manual allowances cap work but never make unknown vendor usage measured.
 // A restarted heartbeat survives rejection of an obsolete pending check. The
 // 409 response identifies the committed heartbeat; stale facts are discarded,
 // polling stops offering the old check, and old receipts cannot rewind it.

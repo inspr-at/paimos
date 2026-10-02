@@ -39,13 +39,15 @@ type ReadinessInput struct {
 	CheckedAt   *time.Time
 	HardReasons []string
 	Facts       []ReadinessFact
+	// Only a successful non-mutating admission evaluation establishes this.
+	RecoveryEligible bool
 }
 
 var readinessReasonOrder = []string{"owner_required", "approval_required", "paused", "hold", "sign_in", "identity_mismatch", "launcher_unavailable", "offline", "slots_occupied", "models", "vendor_denied", "quota_exhausted", "key_cap_exhausted", "money_exhausted", "manual_limit", "schedule", "reserve"}
 
 func ProjectReadiness(in ReadinessInput) AccountReadiness {
 	out := AccountReadiness{AccountID: in.AccountID, State: "unknown", CanTry: true, ReasonCodes: []string{}, CheckedAt: in.CheckedAt}
-	unknownMeasurement := false
+	unknownMeasurement := in.RecoveryEligible
 	reasons := map[string]bool{}
 	for _, r := range in.HardReasons {
 		reasons[r] = true
@@ -68,7 +70,8 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 		if f.ReadingError == "authentication_failed" {
 			reasons["sign_in"] = true
 		}
-		active := f.StopKind != "none" && f.StopKind != "" && (f.StopKind != "named_reset" || f.ResetsAt == nil || in.Now.Before(*f.ResetsAt))
+		recovery := in.RecoveryEligible && recoverableFact(f)
+		active := !recovery && f.StopKind != "none" && f.StopKind != "" && (f.StopKind != "named_reset" || f.ResetsAt == nil || in.Now.Before(*f.ResetsAt))
 		if active {
 			reason := f.DenialReason
 			if reason == "" {
@@ -100,7 +103,7 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 		}
 		// Hard exhausted values persist past measurement freshness, but their
 		// own named reset is a resource-specific boundary.
-		if f.ResetsAt == nil || in.Now.Before(*f.ResetsAt) {
+		if !recovery && (f.ResetsAt == nil || in.Now.Before(*f.ResetsAt)) {
 			if f.UsedPercent != nil && *f.UsedPercent >= 100 {
 				reasons["quota_exhausted"] = true
 			}
@@ -222,63 +225,31 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 		return AccountReadiness{}, err
 	}
 	in.Facts = facts
-	legacy, err := legacyReadinessFacts(ctx, tx, a, now)
-	if err != nil {
-		return AccountReadiness{}, err
-	}
 	for _, fact := range in.Facts {
 		if fact.ReadingAt != nil && (in.CheckedAt == nil || fact.ReadingAt.After(*in.CheckedAt)) {
 			t := *fact.ReadingAt
 			in.CheckedAt = &t
 		}
 	}
-	s, err := routingSchedule(ctx, tx, a)
+	// Use the exact read-only reserve policy, including fact-only budgets,
+	// learned holds, shared ledgers and current early/automatic recovery intent.
+	// Advice cannot consume a permit or clear its underlying stop.
+	windows, wait, err := admission(ctx, tx, a, a.Windows, now, slots, runRow{Purpose: "managed"}, false)
 	if err != nil {
 		return AccountReadiness{}, err
 	}
-	switch s.ActiveOverride(now) {
-	case "hold":
-		in.HardReasons = append(in.HardReasons, "hold")
-	case "sprint", "away":
-	default:
-		next := s.NextStart(now, s.OffDays == "normal")
-		if next == nil || next.After(now) {
-			in.HardReasons = append(in.HardReasons, "schedule")
-		}
-	}
-	for _, w := range a.Windows {
-		if w.capacityReadAt == nil && !w.pairingVerification && !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
-			if w.Used+w.Reserved >= w.Allowance {
-				in.HardReasons = append(in.HardReasons, "manual_limit")
-			}
-		}
-	}
-	limit, err := accountLimitUse(ctx, tx, a, now)
-	if err != nil {
-		return AccountReadiness{}, err
-	}
-	if limit != nil && limit.Used >= float64(limit.Amount) {
-		in.HardReasons = append(in.HardReasons, "manual_limit")
-	}
-	for _, v := range legacy {
-		if v.ReadingAt != nil && now.Sub(*v.ReadingAt) <= 10*time.Minute && v.ResetsAt != nil && now.Before(*v.ResetsAt) {
-			reading := *v.legacyReading
-			// Preserve the existing measured schedule/reserve path. Unknown
-			// measurements never enter it, so no invented reserve is enforced.
-			plan, _, err := readingPacing(ctx, tx, a.ID, reading, now, s)
-			if err != nil {
-				return AccountReadiness{}, err
-			}
-			if plan.AvailableNowPercent <= 0 && *v.UsedPercent < 100 {
-				reason := "schedule"
-				if _, binds := plan.ReserveBinds(); binds {
-					reason = "reserve"
-				}
-				in.HardReasons = append(in.HardReasons, reason)
-			}
+	in.RecoveryEligible = wait == nil && containsRecovery(windows)
+	if wait != nil {
+		reason := map[string]string{"state": "paused", "capacity": "slots_occupied", "approval": "approval_required", "allowance": "manual_limit", "hold": "hold", "sign_in": "sign_in", "offline": "offline", "schedule": "schedule", "reserve": "reserve"}[wait.Code]
+		if reason != "" {
+			in.HardReasons = append(in.HardReasons, reason)
 		}
 	}
 	out := ProjectReadiness(in)
+	if wait != nil && wait.Until != nil && (out.NextAttemptAt == nil || wait.Until.After(*out.NextAttemptAt)) {
+		t := *wait.Until
+		out.NextAttemptAt = &t
+	}
 	return out, nil
 }
 
@@ -337,6 +308,10 @@ func (m *Module) readinessList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		quotaUsed, err := quotaOccupancy(ctx, tx)
+		if err != nil {
+			return err
+		}
 		now, err := dbNow(ctx, tx)
 		if err != nil {
 			return err
@@ -346,7 +321,7 @@ func (m *Module) readinessList(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			item, err := loadReadiness(ctx, tx, a, now, used[id])
+			item, err := loadReadiness(ctx, tx, a, now, slotCount(a, used, quotaUsed))
 			if err != nil {
 				return err
 			}

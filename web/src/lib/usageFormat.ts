@@ -142,7 +142,7 @@ export interface UsageDashboard {
   trend: UsageTrend[]
   tickets: UsageTicket[]
   tickets_cost_unknown: number
-  allowance: { state: 'visible' | 'withheld' | 'none'; windows: AllowanceWindow[] }
+  allowance: { state: 'visible' | 'partial' | 'withheld' | 'none'; windows: AllowanceWindow[]; truncated?: boolean }
   ratings?: {
     votes: number
     average: string | null

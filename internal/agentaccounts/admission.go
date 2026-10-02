@@ -79,7 +79,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if err != nil || wait != nil {
 		return nil, wait, err
 	}
-	if len(permits) > 0 && slots > 0 {
+	if len(permits) > 0 && slots > 0 && !claiming {
 		return nil, waitFor("capacity"), nil
 	}
 	regular := make([]Window, 0, len(all))
@@ -112,7 +112,8 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			}
 		}
 	}
-	unknownOnly := len(active) == 0
+	// A manual allowance is a person's cap, not a vendor measurement.
+	unknownOnly := !slices.ContainsFunc(active, func(w Window) bool { return w.capacityReadAt != nil })
 	if len(active) == 0 || len(permits) > 0 {
 		w := provisionalWindow(a.ID, now, "blind")
 		w.capacitySource = "estimate"

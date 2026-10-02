@@ -15,6 +15,7 @@ import (
 type recoveryPermit struct {
 	resource, window, wait string
 	check                  *string
+	held                   bool
 }
 
 func recoverableFact(f ReadinessFact) bool {
@@ -169,6 +170,14 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 		return nil, nil, err
 	}
 	permits := []recoveryPermit{}
+	// An unstarted reservation may become the recovery run. Queued siblings
+	// retain their ledgers but cannot claim once this wait has a permit holder.
+	promotable := false
+	if claiming && run.Status == "queued" {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE id::text=$1 AND account_id=$2 AND status='queued' AND started_at IS NULL)`, run.ID, a.ID).Scan(&promotable); err != nil {
+			return nil, nil, err
+		}
+	}
 	var blocked *CapacityWait
 	for _, f := range facts {
 		if f.ReadingError == "identity_mismatch" || f.ReadingError == "authentication_failed" {
@@ -192,7 +201,8 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 			permit := recoveryPermit{resource: f.ResourceID, window: f.WindowKey, wait: *f.WaitID}
 			if f.recoveryRunID != nil {
 				allowed = claiming && *f.recoveryRunID == run.ID
-			} else if !claiming {
+				permit.held = allowed
+			} else if !claiming || promotable {
 				allowed = until != nil && !now.Before(*until)
 				if !allowed && !f.EarlyRecoveryUsed {
 					var check string
@@ -203,8 +213,8 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
  WHERE w.resource_id=$1 AND w.window_key=$2 AND w.wait_id=$3 AND c.early_recovery_requested
  AND c.state IN ('pending','completed') AND c.binding_revision=a.link_revision
  AND c.daemon_generation IS NOT DISTINCT FROM a.last_daemon_generation
- AND c.actor_principal_id=a.owner_person_id AND c.requested_at>$4
- ORDER BY c.requested_at,c.id LIMIT 1`, f.ResourceID, f.WindowKey, *f.WaitID, now.Add(-CheckTTL)).Scan(&check)
+ AND c.actor_principal_id=a.owner_person_id AND c.expires_at>$4
+ ORDER BY c.requested_at,c.id LIMIT 1`, f.ResourceID, f.WindowKey, *f.WaitID, now).Scan(&check)
 					if err != nil && !isNoRows(err) {
 						return nil, nil, err
 					}
@@ -215,7 +225,9 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 			}
 			if allowed && f.recoveryRunID == nil {
 				var busy bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.status IN ('queued','starting','running','waiting') AND ar.id::text<>$3 AND (ar.account_id IN (`+quotaAccounts+`) OR ar.account_id IN (SELECT m.account_id FROM account_readiness_memberships m JOIN agent_accounts a ON a.tenant_id=m.tenant_id AND a.id=m.account_id WHERE m.resource_id=$2 AND m.binding_revision=a.link_revision)))`, a.ID, f.ResourceID, run.ID).Scan(&busy); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs ar WHERE
+ (ar.status IN ('starting','running','waiting') OR ar.status='queued' AND (NOT $4 OR ar.started_at IS NOT NULL))
+ AND ar.id::text<>$3 AND (ar.account_id IN (`+quotaAccounts+`) OR ar.account_id IN (SELECT m.account_id FROM account_readiness_memberships m JOIN agent_accounts a ON a.tenant_id=m.tenant_id AND a.id=m.account_id WHERE m.resource_id=$2 AND m.binding_revision=a.link_revision)))`, a.ID, f.ResourceID, run.ID, promotable).Scan(&busy); err != nil {
 					return nil, nil, err
 				}
 				allowed = !busy
@@ -240,6 +252,9 @@ func consumeRecovery(ctx context.Context, tx pgx.Tx, runID string, permits []rec
 	// Every caller holds the pairing lock before rows. Facts are loaded in
 	// resource/window order, so this batch retains the same global order.
 	for _, p := range permits {
+		if p.held {
+			continue // Replays preserve the original early check and wait identity.
+		}
 		tag, err := tx.Exec(ctx, `UPDATE account_readiness_facts SET recovery_run_id=$4,
  recovery_check_id=$5,early_recovery_used=early_recovery_used OR $5::uuid IS NOT NULL
  WHERE resource_id=$1 AND window_key=$2 AND wait_id=$3 AND recovery_run_id IS NULL`, p.resource, p.window, p.wait, runID, p.check)

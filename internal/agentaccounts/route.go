@@ -287,6 +287,7 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
+	var recovery []recoveryPermit
 	if run.Purpose != "pairing_verification" {
 		used, err := occupancy(ctx, tx)
 		if err != nil {
@@ -296,12 +297,15 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		if err != nil {
 			return err
 		}
-		_, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
+		windows, wait, err := admission(ctx, tx, a, all[accountID], now, max(0, slotCount(a, used, quotaUsed)-1), run, true)
 		if err != nil {
 			return err
 		}
 		if wait != nil {
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
+		}
+		for _, w := range windows {
+			recovery = append(recovery, w.recoveryPermits...)
 		}
 	} else if len(activeWindows(all[accountID], now)) == 0 {
 		return fail(http.StatusConflict, "reserved capacity is not eligible")
@@ -322,7 +326,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if !enabled {
 		return fail(http.StatusConflict, "reserved model profile is not eligible")
 	}
-	return nil
+	// Claim and queued route replay run under the same tenant/pairing fence.
+	// Consume only after every eligibility check; a failure rolls back promotion.
+	return consumeRecovery(ctx, tx, run.ID, recovery)
 }
 
 func validateEstimates(estimates map[string]int64) error {
