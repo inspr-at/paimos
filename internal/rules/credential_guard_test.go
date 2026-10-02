@@ -19,7 +19,6 @@ func TestRulePublicationCredentialFields(t *testing.T) {
 			"note":             func(_ *Set, note *string) { *note = value },
 			"set-en":           func(s *Set, _ *string) { s.TLDR.EN = value },
 			"set-de":           func(s *Set, _ *string) { s.TLDR.DE = value },
-			"identity":         func(s *Set, _ *string) { s.Rules[0].Identity = value },
 			"text":             func(s *Set, _ *string) { s.Rules[0].Text = value },
 			"why":              func(s *Set, _ *string) { s.Rules[0].Why = value },
 			"details":          func(s *Set, _ *string) { s.Rules[0].Details = value },
