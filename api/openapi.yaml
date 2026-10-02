@@ -14,6 +14,8 @@ paths:
       description: >-
         Requires questions.ask and questions.read in an accessible project. Authenticated principal
         is the asker; an optional session must be that principal's active generation in this project.
+        Ask writes revalidate current project permissions and authenticated key activity/scopes
+        inside the final transaction under access/key locks.
         Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
         changed input returns 409. anyway_reason deliberately skips reuse and merging, never permissions.
         Exact ordinary Q&A matches may join an open question or an active Always answer in the same

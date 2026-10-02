@@ -2,15 +2,20 @@
 package questions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -502,5 +507,76 @@ func TestPermissionRevocationWinsBeforeMatching(t *testing.T) {
 	}
 	if w := <-done; w.Code != 404 || f.reuseCount(t, source) != 0 {
 		t.Fatal("stale project access permitted reuse", w.Code)
+	}
+}
+
+type askBarrierModule struct{ handler http.HandlerFunc }
+
+func (m askBarrierModule) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/projects/{projectId}/questions", m.handler)
+}
+
+func TestAuthenticatedKeyChangesBeforeReuse(t *testing.T) {
+	f := newFixture(t)
+	source := f.activeAlways(t, input())
+	for _, c := range []struct {
+		name, change string
+		status       int
+	}{
+		{"revoked", "revoked_at=clock_timestamp()", 401},
+		{"expired", "expires_at=clock_timestamp()-interval '1 second'", 401},
+		{"scope narrowed", "scopes=ARRAY['nodes.read']::text[]", 404},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ready := make(chan tenant.Principal, 1)
+			resume := make(chan struct{})
+			am, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)}, f.d.App)
+			if err != nil {
+				t.Fatal(err)
+			}
+			barrier := askBarrierModule{handler: func(w http.ResponseWriter, r *http.Request) {
+				p, _ := tenant.PrincipalFrom(r.Context())
+				ready <- p
+				<-resume
+				f.m.handleAsk(w, r)
+			}}
+			h := (&httpapi.Server{Pool: f.d.App, Modules: []httpapi.Module{barrier}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}).Handler()
+			key := f.key(t, f.agent.Scopes, false, false)
+			body, _ := json.Marshal(input())
+			r := httptest.NewRequest("POST", "/api/projects/"+f.project+"/questions", bytes.NewReader(body))
+			r.Header.Set("Authorization", "Bearer "+key)
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				done <- w
+			}()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			var p tenant.Principal
+			select {
+			case p = <-ready:
+			case <-ctx.Done():
+				close(resume)
+				t.Fatal("authentication did not reach handler barrier")
+			}
+			if p.AuthKeyID == "" {
+				close(resume)
+				t.Fatal("authenticated key identity was lost")
+			}
+			public, _ := json.Marshal(p)
+			if strings.Contains(string(public), p.AuthKeyID) {
+				close(resume)
+				t.Fatal("internal key identity entered a public projection")
+			}
+			if _, err := f.d.Admin.Exec(t.Context(), "UPDATE agent_keys SET "+c.change+" WHERE tenant_id=$1 AND id=$2", p.TenantID, p.AuthKeyID); err != nil {
+				close(resume)
+				t.Fatal(err)
+			}
+			close(resume)
+			if w := <-done; w.Code != c.status || f.reuseCount(t, source) != 0 {
+				t.Fatal("earlier key authentication authorized reuse after mutation", w.Code)
+			}
+		})
 	}
 }

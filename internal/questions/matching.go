@@ -19,6 +19,30 @@ type questionMatch struct {
 	revision   int64
 }
 
+// Internal agent callers carry their own authority; HTTP key callers also carry
+// the authenticated key row. Re-read its current ceiling under a share lock,
+// serializing revocation/rotation with the membership/count/outbox transaction.
+func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Principal, error) {
+	if p.Kind != tenant.Agent || p.AuthKeyID == "" {
+		return p, nil
+	}
+	var creator *string
+	err := tx.QueryRow(ctx, `SELECT scopes,created_by_principal_id::text FROM agent_keys
+ WHERE tenant_id=$1 AND id=$2 AND principal_id=$3 AND revoked_at IS NULL
+ AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`, p.TenantID, p.AuthKeyID, p.ID).Scan(&p.Scopes, &creator)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, fail(401, "unauthorized", "authenticated key is no longer active")
+	}
+	if err != nil {
+		return p, err
+	}
+	p.KeyCreatorID = ""
+	if creator != nil {
+		p.KeyCreatorID = *creator
+	}
+	return p, nil
+}
+
 // The caller holds tenant -> tree locks and has checked ask/read permissions.
 // Exact fingerprints include ticket scope, context and every option field. An
 // Source-linked and requirement/doctrine inputs have no fingerprint. Anyway

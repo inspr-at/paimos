@@ -119,6 +119,10 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if err := treeLock(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
+		p, err = liveAsker(ctx, tx, p)
+		if err != nil {
+			return err
+		}
 		if err := permit(ctx, tx, p, project, "questions.ask"); err != nil {
 			return err
 		}
