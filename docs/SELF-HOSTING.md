@@ -161,6 +161,9 @@ history, confirmation receipts, and immutable quote profile assets used by
 frozen versions. `paimos files gc --tenant SLUG` is a dry run; `--apply` deletes
 only unreferenced files at least seven days old. Writers and cleanup serialize
 on the same tenant/hash database lock through reference commit or file unlink.
+Multi-file transactions reserve their complete blob set in tenant/hash order
+before publishing files or appending events, including all profiles in a
+showcase apply. The storage guard rejects new out-of-order or post-event locks.
 Upgrade every writer and operator CLI before using cleanup: older binaries do
 not participate in this protocol. Verify reports pre-existing missing or corrupt
 files; cleanup does not repair them.

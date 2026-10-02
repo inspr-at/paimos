@@ -170,26 +170,22 @@ func ApplyProfileBundleRefreshingDrafts(ctx context.Context, pool *pgxpool.Pool,
 	return applyProfileBundle(ctx, pool, tenantID, actorID, filesDir, sourceInstance, bundle, makeDefault, true, apply)
 }
 
-func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, refreshDrafts, apply bool) (profileBundleReport, error) {
-	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance, RefreshDrafts: refreshDrafts}
-	if pool == nil || !uuidRe.MatchString(tenantID) || (actorID != "" && !uuidRe.MatchString(actorID)) || (sourceInstance != "" && !profileSourceInstance.MatchString(sourceInstance)) {
-		return report, errors.New("invalid tenant, actor or source instance")
-	}
-	var in profileWrite
+// prepareProfileBundle validates and addresses every referenced asset without
+// writing files or taking locks. It is also used by composite transactions.
+func prepareProfileBundle(bundle ProfileBundle) (in profileWrite, assets map[string]*bundleAsset, paths []string, err error) {
 	decoder := json.NewDecoder(bytes.NewReader(bundle.Profile))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&in); err != nil {
-		return report, fmt.Errorf("profile.json: %w", err)
+		return in, nil, nil, fmt.Errorf("profile.json: %w", err)
 	}
 	if decoder.Decode(new(any)) != io.EOF || in.ExpectedRevision != 0 {
-		return report, errors.New("profile.json must contain one creation payload without expected_revision")
+		return in, nil, nil, errors.New("profile.json must contain one creation payload without expected_revision")
 	}
 	in.Name = strings.TrimSpace(in.Name)
 	if len(in.Name) < 1 || len(in.Name) > 100 {
-		return report, errors.New("invalid profile name")
+		return in, nil, nil, errors.New("invalid profile name")
 	}
-	report.Name = in.Name
-	assets := map[string]*bundleAsset{}
+	assets = map[string]*bundleAsset{}
 	use := func(ref *string) error {
 		if *ref == "" {
 			return nil
@@ -215,20 +211,64 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 	}
 	for i := range in.Definition.Fonts {
 		if err := use(&in.Definition.Fonts[i].AssetID); err != nil {
-			return report, err
+			return in, nil, nil, err
 		}
 	}
 	for _, ref := range []string{in.Definition.Cover["brand_asset_id"], in.Definition.Footer.AssetID, in.Definition.Footer.DotsAssetID} {
 		if err := use(&ref); err != nil {
-			return report, err
+			return in, nil, nil, err
 		}
 	}
-	paths := make([]string, 0, len(assets))
+	paths = make([]string, 0, len(assets))
 	for p := range assets {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	err := db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
+	return in, assets, paths, nil
+}
+
+// LockProfileBundles reserves every profile's domain and blob locks before a
+// composite apply. Call inside db.InTransaction, before the first profile apply
+// or event append, and pass the same transaction context to subsequent applies.
+func LockProfileBundles(ctx context.Context, pool *pgxpool.Pool, tenantID string, bundles ...ProfileBundle) error {
+	var names, hashes []string
+	for _, bundle := range bundles {
+		in, assets, _, err := prepareProfileBundle(bundle)
+		if err != nil {
+			return err
+		}
+		names = append(names, in.Name)
+		for _, asset := range assets {
+			hashes = append(hashes, asset.hash)
+		}
+	}
+	sort.Strings(names)
+	return db.InTenant(db.AllProjects(ctx, "quote profile bundle locks"), pool, tenantID, func(tx pgx.Tx) error {
+		// Every apply takes the tenant lock before profile and blob locks.
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+			return err
+		}
+		for _, name := range names {
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-profile:"+name); err != nil {
+				return err
+			}
+		}
+		return attachments.LockBlobs(ctx, tx, tenantID, hashes...)
+	})
+}
+
+func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir, sourceInstance string, bundle ProfileBundle, makeDefault, refreshDrafts, apply bool) (profileBundleReport, error) {
+	report := profileBundleReport{Applied: apply, SourceInstance: sourceInstance, RefreshDrafts: refreshDrafts}
+	if pool == nil || !uuidRe.MatchString(tenantID) || (actorID != "" && !uuidRe.MatchString(actorID)) || (sourceInstance != "" && !profileSourceInstance.MatchString(sourceInstance)) {
+		return report, errors.New("invalid tenant, actor or source instance")
+	}
+	in, assets, paths, err := prepareProfileBundle(bundle)
+	if err != nil {
+		return report, err
+	}
+	report.Name = in.Name
+	err = db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.
@@ -266,6 +306,15 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			}
 			if kind == "agent" {
 				actor.Kind = tenant.Agent
+			}
+		}
+		if apply {
+			hashes := make([]string, 0, len(assets))
+			for _, asset := range assets {
+				hashes = append(hashes, asset.hash)
+			}
+			if err := attachments.LockBlobs(ctx, tx, tenantID, hashes...); err != nil {
+				return err
 			}
 		}
 		for _, p := range paths {

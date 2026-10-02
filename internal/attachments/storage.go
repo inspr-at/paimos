@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-
 	"strings"
 	"unicode/utf8"
 
@@ -243,11 +242,20 @@ func Publish(ctx context.Context, tx pgx.Tx, owner Owner, staged ...*Staged) err
 			return errors.New("closed staged upload")
 		}
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].tenant+ordered[i].SHA256 < ordered[j].tenant+ordered[j].SHA256 })
-	for _, s := range ordered {
-		if err := lockBlob(ctx, tx, s.tenant, s.SHA256); err != nil {
+	sort.Slice(ordered, func(i, j int) bool {
+		return strings.ToLower(ordered[i].tenant)+ordered[i].SHA256 < strings.ToLower(ordered[j].tenant)+ordered[j].SHA256
+	})
+	for i := 0; i < len(ordered); {
+		j := i
+		var hashes []string
+		for j < len(ordered) && strings.EqualFold(ordered[i].tenant, ordered[j].tenant) {
+			hashes = append(hashes, ordered[j].SHA256)
+			j++
+		}
+		if err := LockBlobs(ctx, tx, ordered[i].tenant, hashes...); err != nil {
 			return err
 		}
+		i = j
 	}
 	for _, s := range ordered {
 		original, err := s.store.path(s.tenant, s.SHA256, "original")

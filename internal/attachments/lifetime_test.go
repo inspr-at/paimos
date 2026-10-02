@@ -4,6 +4,7 @@ package attachments
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,7 +46,14 @@ func TestInventoryRetainsProfileAssetsAndHistory(t *testing.T) {
 	d, p, node := setup(t)
 	store := Store{FilesDir: t.TempDir()}
 	var imageBlob, fontBlob, svgBlob, historyBlob Prepared
+	var hashes []string
+	for _, body := range [][]byte{fixturePNG(t), []byte("validated font bytes"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), []byte("prior attachment bytes")} {
+		hashes = append(hashes, fmt.Sprintf("%x", sha256.Sum256(body)))
+	}
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := LockBlobs(t.Context(), tx, p.TenantID, hashes...); err != nil {
+			return err
+		}
 		var err error
 		imageBlob, err = store.Put(t.Context(), tx, p.TenantID, OwnerQuoteProfile, bytes.NewReader(fixturePNG(t)))
 		if err != nil {
@@ -357,5 +365,81 @@ func TestGCOnlyCollectsOldOrphansForSelectedTenant(t *testing.T) {
 	verified, err := Verify(t.Context(), d.App, store, other)
 	if err != nil || verified.Checked != 1 || len(verified.Issues) != 0 {
 		t.Fatalf("other tenant verify %+v %v", verified, err)
+	}
+}
+
+// Guard state follows the physical transaction, including released/rolled-back
+// savepoints, and must not leak when a pooled connection starts another one.
+func TestBlobLockOrderGuard(t *testing.T) {
+	d, p, _ := setup(t)
+	ctx := dbtest.Seed(t.Context())
+	low, middle, high := strings.Repeat("1", 64), strings.Repeat("5", 64), strings.Repeat("f", 64)
+	tests := []struct {
+		name string
+		run  func(pgx.Tx) error
+	}{
+		{"descending", func(tx pgx.Tx) error {
+			if err := LockBlobs(ctx, tx, p.TenantID, high); err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, tx, p.TenantID, low); err == nil || !strings.Contains(err.Error(), "out of tenant/hash order") {
+				return fmt.Errorf("descending acquisition accepted: %v", err)
+			}
+			return nil
+		}},
+		{"after_event", func(tx pgx.Tx) error {
+			if err := LockBlobs(ctx, tx, p.TenantID, low); err != nil {
+				return err
+			}
+			if _, err := events.Append(ctx, tx, p, events.Change{Type: "profile.updated", After: map[string]any{}}); err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, tx, p.TenantID, high); err == nil || !strings.Contains(err.Error(), "after event append") {
+				return fmt.Errorf("post-event acquisition accepted: %v", err)
+			}
+			return LockBlobs(ctx, tx, strings.ToUpper(p.TenantID), low)
+		}},
+		{"released_savepoint", func(tx pgx.Tx) error {
+			child, err := tx.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, child, p.TenantID, high, low, high); err != nil {
+				return err
+			}
+			if err := child.Commit(ctx); err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, tx, p.TenantID, high, low); err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, tx, p.TenantID, middle); err == nil {
+				return errors.New("forgot locks after RELEASE SAVEPOINT")
+			}
+			return nil
+		}},
+		{"rolled_back_savepoint", func(tx pgx.Tx) error {
+			child, err := tx.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			if err := LockBlobs(ctx, child, p.TenantID, high); err != nil {
+				return err
+			}
+			if _, err := events.Append(ctx, child, p, events.Change{Type: "profile.updated", After: map[string]any{}}); err != nil {
+				return err
+			}
+			if err := child.Rollback(ctx); err != nil {
+				return err
+			}
+			return LockBlobs(ctx, tx, p.TenantID, low)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := db.InTenant(ctx, d.App, p.TenantID, test.run); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

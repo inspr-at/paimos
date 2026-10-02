@@ -4,6 +4,7 @@ package attachments
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -94,16 +95,72 @@ func referencesTx(ctx context.Context, tx pgx.Tx, tenantID, hash string) (map[st
 // transaction keeps it until its reference commits (or rolls back). The next
 // statement sees commits made while waiting, so READ COMMITTED is required.
 func lockBlob(ctx context.Context, tx pgx.Tx, tenantID, hash string) error {
-	if tx == nil || !validTenant(tenantID) || !validHash(hash) {
+	return LockBlobs(ctx, tx, tenantID, hash)
+}
+
+// LockBlobs reserves the complete set of blobs a transaction will publish,
+// before its first file write or event append. Composite writers must call it
+// once for all their inputs, including inputs in later nested operations.
+// Existing reservations may be reused; new locks must follow tenant/hash order.
+func LockBlobs(ctx context.Context, tx pgx.Tx, tenantID string, hashes ...string) error {
+	if tx == nil || !validTenant(tenantID) {
 		return errors.New("blob lifetime requires a tenant transaction and digest")
 	}
-	var currentTenant, isolation string
-	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id',true),current_setting('transaction_isolation')`).Scan(&currentTenant, &isolation); err != nil {
+	keys := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		if !validHash(hash) {
+			return errors.New("blob lifetime requires a tenant transaction and digest")
+		}
+		keys = append(keys, strings.ToLower(tenantID)+":"+hash)
+	}
+	slices.Sort(keys)
+	keys = slices.Compact(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+	var currentTenant, isolation, reservations string
+	var eventsLocked bool
+	// Transaction-local settings survive RELEASE SAVEPOINT and roll back with
+	// ROLLBACK TO SAVEPOINT, just like the advisory locks. No process-global
+	// transaction cache can safely provide those semantics.
+	// Appending an event writes event_counters (aeon_allocate_event_id), holding
+	// RowExclusiveLock until commit. Inspect the actual lock so direct SQL event
+	// inserts and nested calls are covered too, without instrumenting Append.
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id',true),current_setting('transaction_isolation'),
+	 coalesce(current_setting('aeon.blob_reservations',true),''),
+	 EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='relation'
+	   AND relation='event_counters'::regclass AND mode='RowExclusiveLock' AND granted)`).Scan(&currentTenant, &isolation, &reservations, &eventsLocked); err != nil {
 		return err
 	}
 	if !strings.EqualFold(currentTenant, tenantID) || isolation != "read committed" {
 		return errors.New("blob lifetime requires the same tenant at read committed isolation")
 	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,557))`, strings.ToLower(tenantID)+":"+hash)
+	var held []string
+	if reservations != "" {
+		held = strings.Split(reservations, ",")
+	}
+	var pending []string
+	for _, key := range keys {
+		if slices.Contains(held, key) {
+			continue // Already held: do not acquire another lock after an event.
+		}
+		if eventsLocked {
+			return errors.New("blob lock acquisition after event append")
+		}
+		if len(held) > 0 && key < held[len(held)-1] {
+			return errors.New("blob lock acquisition out of tenant/hash order")
+		}
+		pending = append(pending, key)
+	}
+	for _, key := range pending {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,557))`, key); err != nil {
+			return err
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	held = append(held, pending...)
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.blob_reservations',$1,true)`, strings.Join(held, ","))
 	return err
 }
