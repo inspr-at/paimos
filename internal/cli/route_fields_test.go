@@ -16,7 +16,6 @@ func TestIssueRouteFlags(t *testing.T) {
 	isolate(t)
 	for _, args := range [][]string{
 		{"aeon", "issue", "update", "AEON-1", "--role", "gruntwork"},
-		{"aeon", "issue", "update", "AEON-1", "--area", "mobile"},
 		{"aeon", "issue", "update", "AEON-1", "--complexity", "XL"},
 		{"aeon", "issue", "update", "AEON-1", "--role", ""},
 	} {

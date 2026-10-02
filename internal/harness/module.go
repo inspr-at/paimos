@@ -844,7 +844,11 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
+	placement, err := registrationPlacement(ctx, tx, p, in.TicketNodeID, in.RunID)
+	if err != nil {
+		return nil, err
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,work_placement) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, placement))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
 	}

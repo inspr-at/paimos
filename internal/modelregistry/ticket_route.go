@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -16,14 +17,15 @@ func KnownRouteRole(name string) bool {
 	return ok
 }
 
-// KnownRouteArea reports whether name is a planning area.
-func KnownRouteArea(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "backend", "frontend", "full-stack", "infra", "design", "docs":
-		return true
-	default:
-		return false
+// KnownRouteArea accepts active default and project kinds. The review and
+// catch-all matrix rows are never ticket areas.
+func KnownRouteArea(ctx context.Context, tx pgx.Tx, name, project string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "review" || name == "other" {
+		return false, nil
 	}
+	_, fallback, err := modelprefs.LookupKind(ctx, tx, name, project)
+	return !fallback, err
 }
 
 // TicketRoute is the registry selection for one ticket role and area.
@@ -43,8 +45,12 @@ type TicketRoute struct {
 func ResolveTicketRoute(ctx context.Context, tx pgx.Tx, role, area string, now time.Time) (*TicketRoute, error) {
 	role = strings.TrimSpace(role)
 	area = strings.TrimSpace(area)
-	if !KnownRouteRole(role) || !KnownRouteArea(area) || strings.HasPrefix(role, "review-gate") {
+	if !KnownRouteRole(role) || strings.HasPrefix(role, "review-gate") {
 		return nil, nil
+	}
+	known, err := KnownRouteArea(ctx, tx, area, "")
+	if err != nil || !known {
+		return nil, err
 	}
 	res, err := resolveRole(ctx, tx, resolveQuery{Role: role}, now)
 	if err != nil {

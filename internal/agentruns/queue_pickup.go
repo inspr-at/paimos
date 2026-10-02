@@ -3,12 +3,14 @@ package agentruns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -78,26 +80,40 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 			continue
 		}
+		fields, err := json.Marshal(t.Fields)
+		if err != nil {
+			return nil, err
+		}
+		f := modelprefs.PlacementFields(fields)
+		role := f.RouteRole
+		if role == "" {
+			role = "build"
+		}
+		if readiness(t).SecurityReviewRequired {
+			role = "build-hard"
+		}
+		project := ""
+		if t.ProjectID != nil {
+			project = *t.ProjectID
+		}
+		var starter *string
+		if err := tx.QueryRow(r.Context(), `SELECT prefs_person_id::text FROM agent_runs WHERE id=$1::uuid`, e.Run.ID).Scan(&starter); err != nil {
+			return nil, err
+		}
+		placement, err := modelregistry.PlacementFor(r.Context(), tx, tenant.Principal{}, modelregistry.WorkQuery{
+			Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity, ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter}, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		rawPlacement, err := placement.JSON()
+		if err != nil {
+			return nil, err
+		}
 		if target.Profile == "" {
-			role, _ := t.Fields["route_role"].(string)
-			area, _ := t.Fields["area"].(string)
-			if role == "" {
-				role = "build"
-			}
-			if area == "" {
-				area = "backend"
-			}
-			if readiness(t).SecurityReviewRequired {
-				role = "build-hard"
-			}
-			route, err := modelregistry.ResolveTicketRoute(r.Context(), tx, role, area, time.Now().UTC())
-			if err != nil {
-				return nil, err
-			}
-			if route == nil {
+			if placement.PlannedProfileID == nil {
 				continue
 			}
-			target.Profile = route.Profile.ID
+			target.Profile = *placement.PlannedProfileID
 		}
 		candidates := []queueTarget{}
 		if target.Agent != "" {
@@ -123,7 +139,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 		}
 		for _, candidate := range candidates {
-			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate)
+			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate, rawPlacement)
 			if err != nil {
 				return nil, err
 			}
@@ -135,7 +151,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	return map[string]any{"entry": nil}, nil
 }
-func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget) (bool, error) {
+func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement json.RawMessage) (bool, error) {
 	// Live role check is separate from the daemon's key ceiling, which is
 	// authenticated again by reserve and claim. Never mint a runtime grant.
 	agent := tenant.Principal{TenantID: p.TenantID, ID: target.Agent, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
@@ -164,7 +180,7 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	if err != nil {
 		return false, err
 	}
-	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,requested_model=$4,requested_account_id=$5 WHERE id=$1 AND status='queued'`, v.ID, target.Agent, target.Profile, model, target.Account)
+	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,requested_model=$4,requested_account_id=$5,trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{work_placement}',$6::jsonb) WHERE id=$1 AND status='queued'`, v.ID, target.Agent, target.Profile, model, target.Account, placement)
 	if err != nil {
 		return false, err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -26,6 +27,27 @@ func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorder
 	err := tx.QueryRow(ctx, `SELECT p.model FROM model_profiles p JOIN agent_accounts a ON a.tenant_id=p.tenant_id AND a.harness=p.harness
         WHERE p.id=$1 AND a.id=$2 AND a.registered_by_principal_id=$3 AND p.enabled AND p.family=$4
         AND (a.allowed_model_profile_ids IS NULL OR p.id=ANY(a.allowed_model_profile_ids))`, profileID, accountID, agentID, *o.Review.ReviewerFamily).Scan(&model)
+	if err != nil {
+		return Run{}, err
+	}
+	var placement modelregistry.WorkPlacement
+	if err := json.Unmarshal(trace, &placement.PreferenceTrace); err != nil {
+		return Run{}, err
+	}
+	placement.PlannedProfileID = &profileID
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(trace, &merged); err != nil {
+		return Run{}, err
+	}
+	if merged == nil {
+		merged = map[string]json.RawMessage{}
+	}
+	raw, err := placement.JSON()
+	if err != nil {
+		return Run{}, err
+	}
+	merged["work_placement"] = raw
+	trace, err = json.Marshal(merged)
 	if err != nil {
 		return Run{}, err
 	}

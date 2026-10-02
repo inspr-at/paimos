@@ -6479,7 +6479,7 @@ paths:
     get:
       operationId: getModelPreferences
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -6494,7 +6494,7 @@ paths:
     put:
       operationId: replaceModelPreferenceLevel
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
@@ -6510,7 +6510,7 @@ paths:
     delete:
       operationId: resetModelPreferenceLevel
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
@@ -6526,7 +6526,7 @@ paths:
     put:
       operationId: setModelPreferenceRow
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
@@ -6543,7 +6543,7 @@ paths:
     delete:
       operationId: resetModelPreferenceRow
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
@@ -6759,7 +6759,7 @@ paths:
         - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
-        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: project_id, in: query, description: Optional project for model preference placement and the starter's residency trace., schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
@@ -13563,7 +13563,7 @@ components:
       required: [route, tokens]
       properties:
         route:
-          description: The registry resolution of route_role and area. Null for epics and when unresolved.
+          description: The placement resolution of project, canonical assignee (or viewer), kind of work, complexity and route_role. Null for epics and when unresolved.
           type: [object, 'null']
           required: [label, profile, harness, model, effort, revision]
           properties:
@@ -13578,6 +13578,9 @@ components:
             model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
             effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
             revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
+            set_by: {type: string, enum: [default, person, project], description: Level supplying the model preference.}
+            follows_latest: {type: boolean, description: The effective selector follows a model line.}
+            pinned: {type: boolean, description: The effective selector pins a profile.}
         route_gap:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
@@ -14234,6 +14237,7 @@ components:
               complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
         changes: {type: integer, minimum: 0}
     ModelPreferences:
+      description: The document revision sums the included level revisions; writes compare the target level revision.
       type: object
       required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
       properties:
@@ -14426,7 +14430,7 @@ components:
               required: [ticket_requirement, qualifying_account_ids]
               properties:
                 ticket_requirement: {type: string, enum: [any, eu, local]}
-                qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+                qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
         latest_resolved_to: {type: string, format: uuid}
         fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
         blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
@@ -14461,7 +14465,7 @@ components:
         locked_by: {type: string}
         mode: {type: string, enum: [auto, latest, pinned]}
         prefs_revision: {type: integer, format: int64}
-        qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+        qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
         preferred_candidates: {type: array, items: {type: object, properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
         latest_resolved_to: {type: string, format: uuid}
         fallback: {type: string}
