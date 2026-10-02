@@ -11,8 +11,8 @@
 //	gh api 'repos/gitleaks/gitleaks/contents/config/gitleaks.toml?ref=<tag>' -H 'Accept: application/vnd.github.raw' > gitleaks.toml
 //	gh api 'repos/gitleaks/gitleaks/contents/LICENSE?ref=<tag>' -H 'Accept: application/vnd.github.raw' > LICENSE
 //
-// then set the tag in the go:generate line in ../sensitive.go and run
-// `go generate ./internal/knowledge`. Rules that cannot apply to free text
+// then set the tag in the go:generate line in ../detect.go and run
+// `go generate ./internal/credentialguard`. Rules that cannot apply to free text
 // (path-scoped) or do not compile under Go's RE2 are skipped and listed here,
 // at generation time, never at run time.
 //
@@ -129,7 +129,7 @@ func main() {
 			fmt.Fprintf(&src, "//   - %s\n", s)
 		}
 	}
-	fmt.Fprintf(&src, "\npackage knowledge\n\nconst gitleaksTag = %q\n\nvar gitleaksGlobalAllow = %s\n\nvar gitleaksRules = []leakRuleSpec{\n%s}\n",
+	fmt.Fprintf(&src, "\npackage credentialguard\n\nconst gitleaksTag = %q\n\nvar gitleaksGlobalAllow = %s\n\nvar gitleaksRules = []leakRuleSpec{\n%s}\n",
 		*tag, globalAllow, body.String())
 	formatted, err := format.Source(src.Bytes())
 	if err != nil {
