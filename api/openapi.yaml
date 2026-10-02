@@ -6671,6 +6671,8 @@ paths:
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /agent-accounts:
     get:
       operationId: listAgentAccounts
@@ -14043,6 +14045,15 @@ components:
       additionalProperties: false
       required: [mode]
       description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      oneOf:
+        - properties: {mode: {const: auto}}
+          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: pinned}}
+          required: [profile_id]
+          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: latest}}
+          required: [family, line, effort]
+          not: {required: [profile_id]}
       properties:
         mode: {type: string, enum: [auto, latest, pinned]}
         profile_id: {type: string, format: uuid}
@@ -14258,8 +14269,43 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
-        preference: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
         residency: {type: string, enum: [any, eu, local]}
+    ModelPreferenceDecision:
+      type: object
+      description: Additive resolution evidence returned only when preference placement parameters are supplied.
+      required: [kind, complexity, role, person_id, project_id, cell, residency, fallback, blocked, hard_rules]
+      properties:
+        kind:
+          type: object
+          required: [slug, source]
+          properties: {slug: {type: string}, source: {type: string}}
+        complexity:
+          type: object
+          required: [value, bucket, source]
+          properties: {value: {type: string}, bucket: {type: string, enum: [normal, complex]}, source: {type: string}}
+        role: {type: string}
+        person_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        cell:
+          type: object
+          required: [set_by, selector]
+          properties:
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            selector: {$ref: '#/components/schemas/ModelSelector'}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - type: object
+              required: [ticket_requirement, qualifying_account_ids]
+              properties:
+                ticket_requirement: {type: string, enum: [any, eu, local]}
+                qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
+        blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
+        hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
     ModelPreferenceTrace:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.

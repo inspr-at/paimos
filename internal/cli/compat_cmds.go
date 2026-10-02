@@ -39,14 +39,14 @@ type modelCandidate struct {
 }
 
 type modelResolution struct {
-	Role            string                         `json:"role"`
-	AuthorFamily    string                         `json:"author_family"`
-	Profile         *modelProfile                  `json:"profile"`
-	Ladder          []modelCandidate               `json:"ladder"`
-	CommandTemplate string                         `json:"command_template"`
-	OwnerRequired   bool                           `json:"owner_required"`
-	Source          string                         `json:"source"`
-	Preference      *modelregistry.PreferenceTrace `json:"preference,omitempty"`
+	Role            string                            `json:"role"`
+	AuthorFamily    string                            `json:"author_family"`
+	Profile         *modelProfile                     `json:"profile"`
+	Ladder          []modelCandidate                  `json:"ladder"`
+	CommandTemplate string                            `json:"command_template"`
+	OwnerRequired   bool                              `json:"owner_required"`
+	Source          string                            `json:"source"`
+	Preference      *modelregistry.PreferenceDecision `json:"preference,omitempty"`
 }
 
 func (rt *runtime) resolveModel(role, author, harness string) error {
@@ -150,18 +150,18 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 	}
 	if !rt.jsonOut && result.Preference != nil {
 		trace := result.Preference
-		fmt.Fprintf(rt.stdout, "Why: %s · %s · set by %s · providers %s", trace.Kind, trace.Bucket, trace.SetBy, trace.Residency.Value)
-		if trace.LockedBy != "" {
-			fmt.Fprintf(rt.stdout, " · locked by %s", trace.LockedBy)
+		fmt.Fprintf(rt.stdout, "Why: %s · %s · set by %s · providers %s", trace.Kind.Slug, trace.Complexity.Bucket, trace.Cell.SetBy, trace.Residency.Value)
+		if trace.Cell.LockedBy != "" {
+			fmt.Fprintf(rt.stdout, " · locked by %s", trace.Cell.LockedBy)
 		}
 		if trace.Residency.LoosenedLock {
 			fmt.Fprint(rt.stdout, " · warning: loosens a provider lock")
 		}
-		if trace.Fallback != "" {
-			fmt.Fprintf(rt.stdout, " · fallback: %s", trace.Fallback)
+		if trace.Fallback != nil {
+			fmt.Fprintf(rt.stdout, " · fallback: %s", trace.Fallback.Reason)
 		}
-		if trace.Blocked != "" {
-			fmt.Fprintf(rt.stdout, " · blocked: %s", trace.Blocked)
+		if trace.Blocked != nil {
+			fmt.Fprintf(rt.stdout, " · blocked: %s", trace.Blocked.Reason)
 		}
 		fmt.Fprintln(rt.stdout)
 	}

@@ -19,7 +19,7 @@ func TestModelTicketResolveAndReadOnlyPrefs(t *testing.T) {
 			if r.URL.Query().Get("ticket") != "AEON-123" || r.URL.Query().Has("role") {
 				t.Error("ticket placement not requested", r.URL.String())
 			}
-			_, _ = w.Write([]byte(`{"role":"build","profile":{"id":"profile","slug":"chosen","version":"1","family":"xai","model":"chosen-model","harness":"grok","effort":"xhigh"},"ladder":[],"preference":{"kind":"backend","bucket":"complex","set_by":"person","residency":{"value":"any","set_by":"person","loosened_lock":true}}}`))
+			_, _ = w.Write([]byte(`{"role":"build","profile":{"id":"profile","slug":"chosen","version":"1","family":"xai","model":"chosen-model","harness":"grok","effort":"xhigh"},"ladder":[],"preference":{"kind":{"slug":"backend","source":"ticket"},"complexity":{"bucket":"complex"},"cell":{"set_by":"person"},"residency":{"value":"any","set_by":"person","loosened_lock":true}}}`))
 		case "/api/models":
 			_, _ = w.Write([]byte(`[]`))
 		case "/api/model-preferences":

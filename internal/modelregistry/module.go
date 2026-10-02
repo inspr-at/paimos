@@ -31,18 +31,18 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers model registry routes.
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/model-preferences", m.preferences)
-	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", m.writePreferences)
-	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", m.writePreferences)
-	mux.HandleFunc("PUT /api/model-preferences/levels/{level}/rows/{kindId}", m.writePreferences)
-	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}/rows/{kindId}", m.writePreferences)
-	mux.HandleFunc("GET /api/work-kinds", m.listWorkKinds)
-	mux.HandleFunc("POST /api/work-kinds", m.writeWorkKind)
-	mux.HandleFunc("PATCH /api/work-kinds/{kindId}", m.writeWorkKind)
-	mux.HandleFunc("DELETE /api/work-kinds/{kindId}", m.writeWorkKind)
-	mux.HandleFunc("POST /api/work-kinds/{kindId}/restore", m.writeWorkKind)
-	mux.HandleFunc("POST /api/models/{id}/retire", m.retirement)
-	mux.HandleFunc("DELETE /api/models/{id}/retire", m.retirement)
+	mux.HandleFunc("GET /api/model-preferences", boundedPreferenceHandler(m.preferences))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("GET /api/work-kinds", boundedPreferenceHandler(m.listWorkKinds))
+	mux.HandleFunc("POST /api/work-kinds", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("PATCH /api/work-kinds/{kindId}", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("DELETE /api/work-kinds/{kindId}", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("POST /api/work-kinds/{kindId}/restore", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("POST /api/models/{id}/retire", boundedPreferenceHandler(m.retirement))
+	mux.HandleFunc("DELETE /api/models/{id}/retire", boundedPreferenceHandler(m.retirement))
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)
@@ -141,7 +141,7 @@ func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permissi
 func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 	for _, name := range []string{"ticket", "area", "complexity", "project_id", "person_id"} {
 		if r.URL.Query().Has(name) {
-			m.resolvePreferences(w, r)
+			boundedPreferenceHandler(m.resolvePreferences)(w, r)
 			return
 		}
 	}

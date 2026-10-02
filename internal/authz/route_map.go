@@ -26,10 +26,10 @@ const AuthenticatedRoute = "authenticated"
 var RoutePermissions = map[string]string{
 	"GET /api/model-preferences": "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
-	"PUT /api/model-preferences/levels/{level}":                  "models.read",
-	"DELETE /api/model-preferences/levels/{level}":               "models.read",
-	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read",
-	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read",
+	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
 	"GET /api/work-kinds":                                        "models.read",
 	"POST /api/work-kinds":                                       "model_prefs.manage",
 	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",

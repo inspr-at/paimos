@@ -2,13 +2,74 @@
 package modelregistry
 
 import (
+	"net/http"
+	"strings"
+
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
-	"net/http"
-	"strings"
 )
+
+// PreferenceDecision is the public, grouped explanation for placement-aware
+// resolution. The pre-existing trace remains its own backward-compatible DTO.
+type PreferenceDecision struct {
+	Kind struct {
+		Slug   string `json:"slug"`
+		Source string `json:"source"`
+	} `json:"kind"`
+	Complexity struct {
+		Value  string `json:"value"`
+		Bucket string `json:"bucket"`
+		Source string `json:"source"`
+	} `json:"complexity"`
+	Role      string  `json:"role"`
+	PersonID  *string `json:"person_id"`
+	ProjectID *string `json:"project_id"`
+	Cell      struct {
+		SetBy    string          `json:"set_by"`
+		LockedBy string          `json:"locked_by,omitempty"`
+		Selector modelprefs.Cell `json:"selector"`
+	} `json:"cell"`
+	Residency struct {
+		modelprefs.ResidencyResult
+		TicketRequirement    string   `json:"ticket_requirement"`
+		QualifyingAccountIDs []string `json:"qualifying_account_ids"`
+	} `json:"residency"`
+	LatestResolvedTo string            `json:"latest_resolved_to,omitempty"`
+	Fallback         *PreferenceReason `json:"fallback"`
+	Blocked          *PreferenceReason `json:"blocked"`
+	HardRules        []string          `json:"hard_rules"`
+}
+type PreferenceReason struct {
+	Reason string `json:"reason"`
+}
+
+func decisionTrace(trace PreferenceTrace) PreferenceDecision {
+	var out PreferenceDecision
+	out.Kind.Slug, out.Kind.Source = trace.Kind, trace.KindSource
+	out.Complexity.Value, out.Complexity.Bucket, out.Complexity.Source = trace.Complexity, trace.Bucket, trace.ComplexitySource
+	out.Role, out.PersonID = trace.Role, trace.PersonID
+	if trace.ProjectID != "" {
+		out.ProjectID = &trace.ProjectID
+	}
+	out.Cell.SetBy, out.Cell.LockedBy = trace.SetBy, trace.LockedBy
+	out.Cell.Selector = modelprefs.Cell{Mode: "auto"}
+	if trace.Selector != nil {
+		out.Cell.Selector = *trace.Selector
+	}
+	out.Residency.ResidencyResult, out.Residency.TicketRequirement = trace.Residency, trace.TicketRequirement
+	out.Residency.QualifyingAccountIDs = trace.QualifyingAccountIDs
+	out.LatestResolvedTo = trace.LatestResolvedTo
+	if trace.Fallback != "" {
+		out.Fallback = &PreferenceReason{trace.Fallback}
+	}
+	if trace.Blocked != "" {
+		out.Blocked = &PreferenceReason{trace.Blocked}
+	}
+	out.HardRules = append([]string{}, trace.Hard...)
+	return out
+}
 
 func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
@@ -34,7 +95,7 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	var out struct {
 		WorkResolution
-		Preference PreferenceTrace `json:"preference"`
+		Preference PreferenceDecision `json:"preference"`
 	}
 	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
@@ -112,10 +173,13 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out.Trace.Hard = append(out.Trace.Hard, "residency")
+		if q.Role == "review-gate" || q.Role == "review-gate-security" {
+			out.Trace.Hard = append(out.Trace.Hard, "cross_family", "review_qualification")
+		}
 		out.Trace.Role = out.Role
 		out.Trace.ProjectID = q.ProjectID
 		out.Trace.TicketRequirement = modelprefs.NormalizeResidency(q.TicketResidency)
-		out.Preference = out.Trace
+		out.Preference = decisionTrace(out.Trace)
 		return nil
 	})
 	if err != nil {

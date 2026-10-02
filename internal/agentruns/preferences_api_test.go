@@ -112,6 +112,14 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 	f.call(t, alias, "POST", "/api/work-orders/"+o.NodeID+"/runs", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}, 201, &queued)
 	ids := map[string]string{}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var otherPerson string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other starter') RETURNING id::text`, f.person.TenantID).Scan(&otherPerson); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,status,model_profile_id,prefs_person_id) VALUES($1,$2,$3,'queued',$4,$5) RETURNING id::text`, f.person.TenantID, o.NodeID, f.agent.ID, f.profile, otherPerson).Scan(&otherPerson); err != nil {
+			return err
+		}
+		ids["other"] = otherPerson
 		for _, status := range []string{"starting", "running", "waiting", "completed"} {
 			var id string
 			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,status,model_profile_id,account_id,prefs_person_id,residency) VALUES($1,$2,$3,$4,$5,$6,$7,'eu') RETURNING id::text`, f.person.TenantID, o.NodeID, f.agent.ID, status, f.profile, cloud, f.person.ID).Scan(&id); err != nil {
@@ -146,10 +154,34 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		if stamp != "eu" {
 			t.Fatal("terminal run restamped")
 		}
+		var untouched *string
+		if err := tx.QueryRow(t.Context(), `SELECT residency FROM agent_runs WHERE id=$1`, ids["other"]).Scan(&untouched); err != nil {
+			return err
+		}
+		if untouched != nil {
+			t.Fatal("another starter's run restamped")
+		}
 		return nil
 	})
 	count := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`)
-	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 2, "residency": "any"}, 200, &written)
+	// Simulate a pre-link stale stamp. A local-to-EU loosening must not catch it
+	// up to EU; dispatch still reads the live requirement independently.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET residency=NULL WHERE id=$1`, queued.ID)
+		return err
+	})
+	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 2, "residency": "eu"}, 200, &written)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var stamp *string
+		if err := tx.QueryRow(t.Context(), `SELECT residency FROM agent_runs WHERE id=$1`, queued.ID).Scan(&stamp); err != nil {
+			return err
+		}
+		if stamp != nil {
+			t.Fatal("loosening caught up a stale stamp")
+		}
+		return nil
+	})
+	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 3, "residency": "any"}, 200, &written)
 	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`) != count {
 		t.Fatal("loosening restamped runs")
 	}

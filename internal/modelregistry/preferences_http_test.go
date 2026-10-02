@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +19,6 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
-	"os"
 )
 
 func prefDoc(t *testing.T, p tenant.Principal) preferenceDocument {
@@ -173,6 +173,7 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	agent := addPrincipal(t, admin.TenantID, "agent", "Reader", []string{"admin"})
 	agent.KeyCreatorID = admin.ID
 	agent.Scopes = []string{"models.read", "nodes.read"}
+	dbtest.BindRole(t, testDB, admin.TenantID, agent.ID, "admin")
 	doc := prefDoc(t, admin)
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
 	// Exact existing shape, including part A's additive trace, is the golden.
@@ -212,7 +213,7 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	expectPrefError(t, operator, "GET", "/api/models/resolve?role=build&area=backend&person_id="+admin.ID, "", 403, "person_not_caller")
 	resolved := decode[struct {
 		WorkResolution
-		Preference PreferenceTrace `json:"preference"`
+		Preference PreferenceDecision `json:"preference"`
 	}](t, &operator, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
 	if resolved.Preference.PersonID != nil {
 		t.Fatal("operator got You level")
@@ -232,6 +233,45 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 		t.Fatal("preferences changed legacy response", string(raw))
 	}
 	expectPrefError(t, admin, "GET", "/api/models/resolve?role=review-gate&area=backend", "", 400, "author_family")
+}
+
+func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "prefs-ticket", "person", "Admin", []string{"admin"})
+	other := makePrincipal(t, "prefs-ticket-other", "person", "Other", []string{"admin"})
+	doc := prefDoc(t, admin)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	normal := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-high").ID}
+	complex := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-xhigh").ID}
+	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, normal, complex, false), 200)
+	var project, ticket string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TICKET-P','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TICKET-1','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"TICKET-1", ticket} {
+		result := decode[struct {
+			WorkResolution
+			Preference PreferenceDecision `json:"preference"`
+		}](t, &admin, "GET", "/api/models/resolve?ticket="+key+"&area=other&complexity=S", "", 200)
+		trace := result.Preference
+		if result.Role != "build-hard" || trace.Kind.Slug != "backend" || trace.Complexity.Bucket != "complex" || trace.Complexity.Source != "manual" || trace.Cell.SetBy != "person" || trace.Cell.Selector != complex || trace.PersonID == nil || *trace.PersonID != admin.ID || trace.ProjectID == nil || *trace.ProjectID != project || trace.Residency.TicketRequirement != "eu" || result.Residency != "eu" {
+			t.Fatalf("ticket placement did not win: %+v", result)
+		}
+	}
+	expectPrefError(t, other, "GET", "/api/models/resolve?ticket="+ticket, "", 404, "not found")
+	expectPrefError(t, admin, "GET", "/api/models/resolve?ticket="+ticket+"&project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", 400, "ticket_project_mismatch")
+	review := decode[struct {
+		WorkResolution
+		Preference PreferenceDecision `json:"preference"`
+	}](t, &admin, "GET", "/api/models/resolve?role=review-gate&author_family=openai&ticket="+ticket, "", 200)
+	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "review" || len(review.Preference.HardRules) < 3 {
+		t.Fatal("preference route bypassed the qualified review gate", review)
+	}
 }
 
 type mutationBarrier struct {

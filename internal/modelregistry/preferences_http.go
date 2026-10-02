@@ -58,7 +58,17 @@ func writePreferenceError(w http.ResponseWriter, err error) {
 
 // The same tenant row serializes role changes, links and editor mutations.
 // A no-key-update fence avoids blocking child-table FK share locks.
+func boundedPreferenceHandler(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		handler(w, r.WithContext(ctx))
+	}
+}
 func preferenceFence(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout='5s'`); err != nil {
+		return err
+	}
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
 		return err

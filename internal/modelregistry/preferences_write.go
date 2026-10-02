@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"regexp"
-	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
@@ -275,6 +274,13 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		var priorRequirements map[string]string
+		if kind == nil && (before.Residency != nil || scope.Residency != nil || before.ResidencyLocked != scope.ResidencyLocked) {
+			priorRequirements, err = modelprefs.SnapshotRunRequirements(ctx, tx, scope)
+			if err != nil {
+				return err
+			}
+		}
 		scope, err = modelprefs.SaveScopeOnly(ctx, tx, p, scope)
 		if err != nil {
 			return err
@@ -313,8 +319,8 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 		}
 		// Restamp on a residency change; loosening leaves all stamps untouched.
 		out.RunningOutside = []string{}
-		if kind == nil && (before.Residency != nil || scope.Residency != nil || before.ResidencyLocked != scope.ResidencyLocked) {
-			runs, err := modelprefs.Restamp(ctx, tx, p, scope)
+		if priorRequirements != nil {
+			runs, err := modelprefs.RestampAfter(ctx, tx, p, scope, priorRequirements)
 			if err != nil {
 				return err
 			}
@@ -357,5 +363,5 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
-// A label is trimmed before applying character limits, matching SQL btrim.
-func boundedText(s string, max int) bool { return len([]rune(strings.TrimSpace(s))) <= max }
+// Count characters after the caller's normalization, matching SQL length.
+func boundedText(s string, max int) bool { return len([]rune(s)) <= max }
