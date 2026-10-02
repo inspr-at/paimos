@@ -7,6 +7,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { appJWT } from "./homebrew-tap-pr.mjs";
 import { validCalendarVersion } from "./verify-release.mjs";
+import { assertReleaseAllowed } from "./release-hold.mjs";
 
 export const SOURCE = "inspr-at/paimos";
 export const TARGET = "markus-barta/nixcfg";
@@ -83,6 +84,9 @@ export async function proposePin(env = process.env, options = {}, dependencies =
       !/^sha256:[a-f0-9]{64}$/.test(digest) || !sha(commit) || !env.GH_TOKEN) fail("invalid release invocation");
   if (write && (env.AEON_PIN_BOT_ENABLED !== "true" || options.pinFile)) fail("write mode requires the approved nixcfg review path and live base");
   if (env.INDEX_PUSHED_AT && !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(env.INDEX_PUSHED_AT)) fail("invalid index push observation");
+  if (!env.AEON_RELEASE_HOLD_READ_TOKEN) fail("release hold reader token missing");
+  const hold = () => assertReleaseAllowed((method, path, body) => request(env.AEON_RELEASE_HOLD_READ_TOKEN, method, path, body));
+  await hold();
   const get = async (token, path, expected = 200, method = "GET", body) => {
     const result = await request(token, method, path, body);
     if (result.status !== expected) fail(`GitHub ${method} failed (HTTP ${result.status})`);
@@ -99,6 +103,7 @@ export async function proposePin(env = process.env, options = {}, dependencies =
   const ancestry = await get(env.GH_TOKEN, `${sourcePath}/compare/${commit}...${main.object.sha}`);
   if (!["ahead", "identical"].includes(ancestry.status) || ancestry.base_commit?.sha !== commit || ancestry.merge_base_commit?.sha !== commit) fail("release commit is not on main");
   await verify(env);
+  await hold();
   const evidence = [
     `Verified index: ${IMAGE}@${digest}`,
     `Annotated tag: ${SOURCE}@refs/tags/${tagName}; commit ${commit} is on main.`,
@@ -149,6 +154,7 @@ export async function proposePin(env = process.env, options = {}, dependencies =
     const existing = await request(token, "GET", branchPath);
     let headSHA;
     if (existing.status === 404) {
+      await hold();
       const created = await get(token, `${targetPath}/git/refs`, 201, "POST", { ref: `refs/heads/${branch}`, sha: baseSHA });
       if (created.ref !== `refs/heads/${branch}` || created.object?.sha !== baseSHA) fail("pin branch creation mismatch");
       const updated = await get(token, `${targetPath}/contents/${PIN_PATH}`, 200, "PUT", {
@@ -170,6 +176,7 @@ export async function proposePin(env = process.env, options = {}, dependencies =
         files[0].additions !== 1 || files[0].deletions !== 1 || files[0].changes !== 2 || files[0].sha !== blobSHA(plan.text)) fail("pin branch is not the exact one-line proposal from main");
     const listed = await get(token, `${targetPath}/pulls?head=${encodeURIComponent(`markus-barta:${branch}`)}&state=all&per_page=100`);
     if (!Array.isArray(listed) || listed.length > 1) fail("ambiguous pin pull requests");
+    await hold();
     const pull = listed.length ? listed[0] : await get(token, `${targetPath}/pulls`, 201, "POST", {
       title: `AEON-413: pin Aeon ${version}`, head: branch, base: "main", draft: true, maintainer_can_modify: false,
       body: [...recorded, "", "Proposal only. The coordinator must complete nixcfg checks/review and record a validated database backup before any merge or rollout.",

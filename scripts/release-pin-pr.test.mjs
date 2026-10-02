@@ -18,6 +18,7 @@ const env = () => ({
   VERSION: version, DIGEST: digest, GITHUB_SHA: sourceCommit, GITHUB_REPOSITORY: SOURCE,
   GITHUB_EVENT_NAME: "push", GITHUB_REF: `refs/tags/v${version}`, GH_TOKEN: "fixture-source-auth",
   AEON_PIN_APP_ID: "123", AEON_PIN_APP_KEY: "fixture-key-not-parsed", AEON_PIN_BOT_ENABLED: "true",
+  AEON_RELEASE_HOLD_READ_TOKEN: 'fixture-variable-reader',
 });
 function fixture(overrides = {}) {
   const calls = [];
@@ -44,6 +45,8 @@ function fixture(overrides = {}) {
     request: async (token, method, path, body) => {
       calls.push({ token, method, path, body });
       if (overrides.apiFailure?.(method, path)) return { status: 503, data: {} };
+      if (path === `/repos/${SOURCE}/actions/variables?per_page=30&page=1`) return { status: 200,
+        data: { total_count: overrides.hold ? 1 : 0, variables: overrides.hold ? [{ name: 'RELEASE_HOLD', value: overrides.hold }] : [] } };
       if (path === "/installation/token" && method === "DELETE") return { status: 204, data: null };
       if (path === `/repos/${SOURCE}/git/ref/tags/v${version}`) return { status: 200, data: data.tagRef };
       if (path === `/repos/${SOURCE}/git/tags/${tagSHA}`) return { status: 200, data: data.tag };
@@ -69,6 +72,25 @@ function fixture(overrides = {}) {
   return { calls, data, dependencies };
 }
 const changes = f => f.calls.filter(call => ["POST", "PUT", "PATCH"].includes(call.method) && call.path.startsWith(`/repos/${TARGET}/`) && !call.path.endsWith("/installation"));
+
+test('a live hold stops pin proposals before target authentication or writes', async () => {
+  const f = fixture({ hold: sourceCommit });
+  await assert.rejects(proposePin(env(), { write: true }, f.dependencies), /RELEASE_HOLD/);
+  assert.deepEqual(changes(f), []);
+  assert.equal(f.calls.some(call => call.path === `/repos/${TARGET}/installation`), false);
+});
+test('a hold arriving during verification is re-read before pin writes', async () => {
+  const f = fixture();
+  const request = f.dependencies.request;
+  let reads = 0;
+  f.dependencies.request = async (token, method, path, body) => {
+    if (path.includes('/actions/variables') && ++reads === 2) return { status: 200,
+      data: { total_count: 1, variables: [{ name: 'RELEASE_HOLD', value: sourceCommit }] } };
+    return request(token, method, path, body);
+  };
+  await assert.rejects(proposePin(env(), { write: true }, f.dependencies), /RELEASE_HOLD/);
+  assert.deepEqual(changes(f), []);
+});
 
 test("pin diff changes one line, preserving comments, whitespace, newline and unrelated bytes", () => {
   const result = plan();

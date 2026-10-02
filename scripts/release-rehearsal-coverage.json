@@ -19,6 +19,12 @@
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "f5bf2b2e0e61803dd70ad970503463d7eeb8475f5892117f305325bbda9cc18f",
+      "step": "Require release hold clear"
+    },
+    {
       "counterpart": "TestRehearsalGateBeforeSideEffects",
       "mode": "test",
       "sha256": "8c4f0c8432a530dd9f7f14c531a604ba92160da62c168d0bdb5da3255490c9fe",
@@ -63,6 +69,12 @@
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "f5bf2b2e0e61803dd70ad970503463d7eeb8475f5892117f305325bbda9cc18f",
+      "step": "Require release hold clear"
+    },
+    {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
       "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
@@ -87,6 +99,12 @@
       "step": "Reject an existing GitHub release"
     },
     {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "fc7aca74f3bb1723c92424977cd12f8a1a58c8f5c902dcabe5d9c3e3a8630a4d",
+      "step": "Recheck release hold before publication"
+    },
+    {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
       "sha256": "d4a19ddd98d6c0ecd94e4496c500ec52fdcdbc4fda2d18657c28d747d9c31e45",
@@ -107,10 +125,28 @@
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "f5bf2b2e0e61803dd70ad970503463d7eeb8475f5892117f305325bbda9cc18f",
+      "step": "Require release hold clear"
+    },
+    {
       "counterpart": "TestRehearsalReleaseTagValidation",
       "mode": "test",
       "sha256": "b31f4ff898788b768b5b0e567d03c00cad95c63861ed6ef9102f8458eb4a9023",
       "step": "Validate inspr-calendar-v2 tag"
+    },
+    {
+      "counterpart": "TestHoldStateAndLaneFixtures",
+      "mode": "test",
+      "sha256": "13dad1aac8878a8b3a2893986ecabacc2181f3087a3243e10ae22717690781a7",
+      "step": "Record release CI lane"
+    },
+    {
+      "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "mode": "action",
+      "sha256": "95b43e5f79bec834aad5f7e15076ae809b544a7c3467e3585b4f4d85197ed655",
+      "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     },
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
@@ -143,6 +179,12 @@
       "step": "Reject an existing image tag"
     },
     {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "fc7aca74f3bb1723c92424977cd12f8a1a58c8f5c902dcabe5d9c3e3a8630a4d",
+      "step": "Recheck release hold before publication"
+    },
+    {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
       "sha256": "5f00a1741318395777dacf9d034b68998716990a6f94d2d79e885eb695973a0b",
@@ -169,7 +211,7 @@
     {
       "counterpart": "assets-rehearsal/Pin-bot dry-run with offline source and attestation inputs",
       "mode": "step",
-      "sha256": "a6cd2a387d13eb46d1935abb76be0cd1af86a9dc3594376b15ae4a417fe9b2fc",
+      "sha256": "52f6e2e32508d225ee54a944bb3bab2a6c17e1fcebf746415667a853e670ee33",
       "step": "Propose verified nixcfg deployment pin"
     }
   ],
@@ -185,6 +227,12 @@
       "mode": "action",
       "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "f5bf2b2e0e61803dd70ad970503463d7eeb8475f5892117f305325bbda9cc18f",
+      "step": "Require release hold clear"
     },
     {
       "counterpart": "TestRehearsalReleaseTagValidation",
@@ -275,6 +323,12 @@
       "mode": "step",
       "sha256": "3cf21fda6c4b7c037aa39e03d4a3fb5a8d0d2aea56db6172eaf02229b289a117",
       "step": "Smoke production image"
+    },
+    {
+      "counterpart": "TestReleaseHoldBeforeTagAndRolloutSideEffects",
+      "mode": "test",
+      "sha256": "fc7aca74f3bb1723c92424977cd12f8a1a58c8f5c902dcabe5d9c3e3a8630a4d",
+      "step": "Recheck release hold before publication"
     },
     {
       "counterpart": "image-dry-run/Export production image with provenance locally",

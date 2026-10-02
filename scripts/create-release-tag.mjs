@@ -5,8 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { validCalendarVersion } from './verify-release.mjs';
+import { assertReleaseAllowed, github } from './release-hold.mjs';
 
 export async function createReleaseTag(metadata, { write = false } = {}, dependencies = {}) {
+  const hold = dependencies.hold ?? (() => assertReleaseAllowed(github(process.env.AEON_RELEASE_HOLD_READ_TOKEN)));
   const git = dependencies.git ?? ((args, allowMissing = false) => {
     const result = spawnSync('git', args, { encoding: 'utf8' });
     if (!result.error && result.status === 1 && allowMissing) return '';
@@ -25,11 +27,13 @@ export async function createReleaseTag(metadata, { write = false } = {}, depende
   if (!/^[a-f0-9]{40}$/.test(sha) || git(['branch', '--show-current']) !== 'main') throw new Error('Tag creation requires the exact release commit checked out on main');
   const tag = `v${metadata.version}`;
   if (git(['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`], true)) throw new Error('Existing release tag is immutable');
+  await hold();
   const receipt = await check(sha);
   if (receipt?.sha !== sha) throw new Error('Rehearsal receipt does not bind the checked-out commit');
   // Recheck HEAD after the API lookup. Use the immutable SHA as the tag target.
   if (git(['rev-parse', 'HEAD']) !== sha || git(['branch', '--show-current']) !== 'main') throw new Error('Release checkout changed during the rehearsal check');
   git(['diff', '--quiet', 'HEAD']);
+  await hold();
   if (write === true) git(['tag', '-a', tag, '-m', `Release ${tag}`, sha]);
   return { mode: write === true ? 'created-local-tag' : 'preview', tag, sha, receipt };
 }

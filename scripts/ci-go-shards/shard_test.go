@@ -294,7 +294,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	foundFreshTests := false
 	for _, step := range job.Steps {
 		if step.Name == "Test this shard" {
-			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, `test "$cached" -eq 0`)
+			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && step.Env["AEON_GO_TEST_LANE"] == "${{ needs.ci-lane.outputs.lane }}" && strings.Contains(step.Run, `if [ "$AEON_GO_TEST_LANE" != impacted ]; then test "$cached" -eq 0; fi`)
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
@@ -327,7 +327,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 		t.Fatal("missing explicit rolling Go build cache")
 	}
 	if !foundFreshTests {
-		t.Fatal("all shard layouts and events must execute fresh tests and reject cached success")
+		t.Fatal("main/PR shards must reject cached success; only the bound impacted lane may reuse audited pure tests")
 	}
 }
 

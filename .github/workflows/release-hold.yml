@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Release hold
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Reconcile dropped pending completions and alert/write failures.
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-hold-writer
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.repository == 'inspr-at/paimos' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Never check out the source run, use its artifacts/cache, or run npm.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Reconcile main failures and confirmed recoveries
+        env:
+          # Dedicated repository token: Variables write, Issues write,
+          # Actions read, Contents read. Never GITHUB_TOKEN or a pin token.
+          AEON_RELEASE_HOLD_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_TOKEN }}
+        run: node scripts/release-hold.mjs reconcile --write

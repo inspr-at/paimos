@@ -15,12 +15,14 @@ const digest = `sha256:${'c'.repeat(64)}`;
 const pinFile = join(mkdtempSync(join(tmpdir(), 'aeon-rehearsal-pin-')), 'snapshot.nix');
 writeFileSync(pinFile, `image = "ghcr.io/inspr-at/aeon:260909113550.0.0@sha256:${'d'.repeat(64)}";\n`);
 const inputs = { VERSION: version, DIGEST: digest, GITHUB_SHA: sha, GITHUB_REPOSITORY: SOURCE,
-  GITHUB_EVENT_NAME: 'push', GITHUB_REF: `refs/tags/v${version}`, GH_TOKEN: 'rehearsal-fixture' };
+  GITHUB_EVENT_NAME: 'push', GITHUB_REF: `refs/tags/v${version}`, GH_TOKEN: 'rehearsal-fixture',
+  AEON_RELEASE_HOLD_READ_TOKEN: 'rehearsal-variable-reader' };
 const result = await proposePin(inputs, { pinFile }, {
   verify: () => checkGH(attestationArgs(version, digest, sha)),
   request: async (_token, method, path) => {
     if (method !== 'GET') throw new Error('Rehearsal refuses API mutations');
     const data = {
+      [`/repos/${SOURCE}/actions/variables?per_page=30&page=1`]: { total_count: 0, variables: [] },
       [`/repos/${SOURCE}/git/ref/tags/v${version}`]: { ref: inputs.GITHUB_REF, object: { type: 'tag', sha: tagSHA } },
       [`/repos/${SOURCE}/git/tags/${tagSHA}`]: { sha: tagSHA, tag: `v${version}`, object: { type: 'commit', sha } },
       [`/repos/${SOURCE}/git/ref/heads/main`]: { ref: 'refs/heads/main', object: { type: 'commit', sha } },

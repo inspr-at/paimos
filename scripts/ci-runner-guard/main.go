@@ -24,6 +24,9 @@ const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event.pull_re
 // These exact mappings are the sole authority for workflow concurrency. Jobs
 // never own concurrency, and reusable workflows cannot enter a caller's group.
 var workflowConcurrency = map[string]map[string]any{
+	"release-hold.yml": {
+		"group": "release-hold-writer", "cancel-in-progress": false,
+	},
 	"ci.yml": {
 		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' }}`,
 	},
@@ -146,7 +149,7 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		} else if !reflect.DeepEqual(mapping(concurrency), expected) {
 			reject("must retain the exact reviewed concurrency policy")
 		}
-	} else if name == "ci.yml" {
+	} else if name == "ci.yml" || name == "release-hold.yml" {
 		reject("must retain the exact reviewed concurrency policy")
 	}
 	for id, value := range mapping(workflow["jobs"]) {
@@ -173,6 +176,10 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
 			reject(err.Error())
 		}
+	} else if name == "release-hold.yml" {
+		if err := checkReleaseHoldWorkflow(workflow); err != nil {
+			reject(err.Error())
+		}
 	} else if name == "cross-family-preview.yml" {
 		if err := checkGatePreview(workflow); err != nil {
 			reject(err.Error())
@@ -190,6 +197,47 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		}
 	}
 	return problems
+}
+
+func checkReleaseHoldWorkflow(workflow map[string]any) error {
+	expectedEvents := map[string]any{
+		"workflow_run": map[string]any{"workflows": []any{"CI"}, "types": []any{"completed"}, "branches": []any{"main"}},
+		"schedule":     []any{map[string]any{"cron": "*/5 * * * *"}}, "workflow_dispatch": nil,
+	}
+	if !reflect.DeepEqual(mapping(workflow["on"]), expectedEvents) ||
+		!reflect.DeepEqual(mapping(workflow["permissions"]), map[string]any{"contents": "read"}) || workflow["env"] != nil {
+		return fmt.Errorf("release hold requires trusted completion/repair triggers and read-only workflow permissions")
+	}
+	jobs := mapping(workflow["jobs"])
+	job := mapping(jobs["reconcile"])
+	expectedIf := `github.repository == 'inspr-at/paimos' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))`
+	if len(jobs) != 1 || compact(fmt.Sprint(job["if"])) != compact(expectedIf) || job["runs-on"] != "ubuntu-latest" ||
+		job["timeout-minutes"] != 5 || job["permissions"] != nil || job["environment"] != nil || job["continue-on-error"] != nil || job["env"] != nil {
+		return fmt.Errorf("release hold writer must remain bounded, hosted and main-push-only")
+	}
+	steps, ok := job["steps"].([]any)
+	if !ok || len(steps) != 3 {
+		return fmt.Errorf("release hold may not execute source-run artifacts or extra steps")
+	}
+	checkout, setup, reconcile := mapping(steps[0]), mapping(steps[1]), mapping(steps[2])
+	if checkout["uses"] != "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+		!reflect.DeepEqual(mapping(checkout["with"]), map[string]any{"ref": "${{ github.workflow_sha }}", "persist-credentials": false}) ||
+		setup["uses"] != "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" ||
+		!reflect.DeepEqual(mapping(setup["with"]), map[string]any{"node-version": "24"}) ||
+		reconcile["run"] != "node scripts/release-hold.mjs reconcile --write" ||
+		!reflect.DeepEqual(mapping(reconcile["env"]), map[string]any{"AEON_RELEASE_HOLD_TOKEN": "${{ secrets.AEON_RELEASE_HOLD_TOKEN }}"}) {
+		return fmt.Errorf("release hold must use trusted workflow-revision code and only its dedicated writer token")
+	}
+	for _, step := range steps {
+		s := mapping(step)
+		if s["if"] != nil || s["continue-on-error"] != nil || s["working-directory"] != nil || s["env"] != nil && s["name"] != "Reconcile main failures and confirmed recoveries" {
+			return fmt.Errorf("release hold setup and writes may not be skipped, weakened or given extra credentials")
+		}
+	}
+	return nil
 }
 
 // Full QA is an explicit label opt-in across all changed paths. This exception

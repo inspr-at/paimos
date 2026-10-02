@@ -8,6 +8,7 @@ function fixture(options = {}) {
   const writes = [];
   let heads = 0;
   const dependencies = {
+    hold: async () => ({ hold: '', checked: true }),
     git: args => {
       if (args[0] === 'diff') { if (options.dirty) throw new Error('Dirty checkout'); return ''; }
       if (args[0] === 'tag') { writes.push(args); return ''; }
@@ -40,4 +41,13 @@ for (const [name, options] of [['failed/pending receipt', { failed: true }], ['w
   const { dependencies, writes } = fixture(options);
   await assert.rejects(createReleaseTag({ version }, { write: true }, dependencies));
   assert.deepEqual(writes, []);
+});
+test('a live hold or failed hold read refuses the local tag, including after rehearsal', async () => {
+  for (const failAt of [1, 2]) {
+    const { dependencies, writes } = fixture();
+    let reads = 0;
+    dependencies.hold = async () => { if (++reads === failAt) throw new Error('release hold: refused'); };
+    await assert.rejects(createReleaseTag({ version }, { write: true }, dependencies), /release hold/);
+    assert.equal(reads, failAt); assert.deepEqual(writes, []);
+  }
 });
