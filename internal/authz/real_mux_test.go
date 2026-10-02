@@ -34,6 +34,7 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -82,7 +83,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 	}
 	modules := []httpapi.Module{
 		authModule, &tokens.Module{}, &host.Module{}, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), tenantbrand.New(nil), modelprovider.New(nil, nil), relations.New(nil),
-		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
+		events.New(nil), features.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),
 		imports.New(nil), inbox.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil),

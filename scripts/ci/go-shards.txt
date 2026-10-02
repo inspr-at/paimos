@@ -22,6 +22,7 @@
 1 56791 github.com/inspr-at/paimos/internal/business/hours
 1 6 github.com/inspr-at/paimos/internal/eta
 1 2692 github.com/inspr-at/paimos/internal/fromclassic
+1 0 github.com/inspr-at/paimos/internal/features
 1 1860 github.com/inspr-at/paimos/internal/harness TestCurrentViewHidesSessionsEndedADayAgo
 1 2035 github.com/inspr-at/paimos/internal/harness TestEtaMigrationLockAndValidation
 1 33 github.com/inspr-at/paimos/internal/harness TestInstructionDarwinAliasTargetBoundary

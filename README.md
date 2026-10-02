@@ -33,6 +33,31 @@ pickup atomically, move the ticket to In progress and remove its queue marker.
 Ticket API and CLI JSON include `queued: {position, by, at, …}` while waiting.
 Capacity hours are advice, not a reservation or a hard cap.
 
+## Feature flags
+
+Shipped rollout flags start **OFF**. A person with `settings.manage` can open
+**Settings → Workspace → Feature flags** and choose On, Off or Inherit for the
+workspace or one project. A project override wins over the workspace override;
+without either, the feature stays off. Resetting an override retains its revision.
+The first flag, `workspace-summary`, shows project and work counts in Workspace
+settings. Enable or disable it on the same page without rebuilding, restarting
+or deploying. Other open pages re-evaluate on focus and navigation.
+
+`GET /api/features?project_id=<uuid>` reads committed flags for the caller's
+tenant and visible project; omit the query for the workspace baseline. It
+requires `nodes.read`. Admin reads use `GET /api/settings/features`; writes use
+`PUT /api/settings/features/{key}` with `enabled` (true, false or null) and
+`expected_revision` from the read (zero for a new scope). Optional `project_id`
+selects the override scope. Changed writes atomically append `feature.updated`
+events with actor and before/after state; identical writes are idempotent and
+stale writes return 409. Agent keys cannot change rollout choices.
+
+Web code uses the typed `canFeature(key, projectId?)` helper in
+`web/src/lib/features.ts` alongside its existing `can(permission, projectId?)`
+check. Pending, failed, unknown and revoked answers are off. Server code uses
+`features.Service.Enabled`, which reads the database each time and returns
+false on error. **Flags never grant permissions or bypass approval gates.**
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open
