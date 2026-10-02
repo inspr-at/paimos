@@ -309,7 +309,7 @@ func TestRemainingGrantReplayAndSettlement(t *testing.T) {
 	})
 }
 func TestRefusalConditions(t *testing.T) {
-	for _, mode := range []string{"unknown_billing", "api_billing", "quota_reserve", "unknown_quota", "target_unset", "revoked", "paused", "revision", "window_end", "capability"} {
+	for _, mode := range []string{"unknown_billing", "api_billing", "quota_reserve", "unknown_quota", "target_unset", "revoked", "paused", "revision", "window_end", "next_window", "deleted_ticket", "moved_order", "capability"} {
 		t.Run(mode, func(t *testing.T) {
 			f := setup(t)
 			in := f.request(t, 60000)
@@ -336,6 +336,12 @@ func TestRefusalConditions(t *testing.T) {
 					q = `UPDATE autopilot_lanes SET paused=true`
 				case "revision":
 					q = `UPDATE autopilot_lanes SET revision=2`
+				case "deleted_ticket":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, in.TicketID)
+					return err
+				case "moved_order":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=NULL WHERE id=(SELECT work_order_id FROM agent_runs WHERE id=$1)`, in.RunID)
+					return err
 				}
 				if q != "" {
 					_, err := tx.Exec(t.Context(), q)
@@ -357,12 +363,18 @@ func TestRefusalConditions(t *testing.T) {
 				if mode == "window_end" {
 					now = now.Add(time.Hour)
 				}
+				if mode == "next_window" {
+					now = now.Add(24 * time.Hour)
+				}
 				_, err = f.claim(t.Context(), in, now)
 			}
 			if err == nil {
 				t.Fatal("unsafe admission succeeded")
 			}
 			expected := map[string]string{"unknown_billing": "known subscription", "api_billing": "known subscription", "quota_reserve": "retain quota reserve", "unknown_quota": "measured quota", "target_unset": "slots unavailable", "paused": "paused", "revision": "revision changed", "window_end": "window closed", "capability": "lane-capable"}
+			expected["next_window"] = "earlier window"
+			expected["deleted_ticket"] = "scope changed"
+			expected["moved_order"] = "scope changed"
 			if mode == "revoked" {
 				if !errors.Is(err, authz.ErrForbidden) {
 					t.Fatalf("wrong revocation refusal: %v", err)

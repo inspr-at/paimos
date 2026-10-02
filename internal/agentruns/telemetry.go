@@ -71,6 +71,9 @@ func terminal(s string) bool {
 	return false
 }
 func (t Telemetry) validate() error {
+	if t.LaneSettlement != nil && t.LaneSettlement.ExitConfirmed && (t.Status == "ownership_lost" || t.ErrorCode == "ownership_lost" || t.ErrorCode == "child_stop_failed") {
+		return workorders.Fail(400, "unknown process exit cannot settle a lane grant")
+	}
 	if t.LaneSettlement != nil && (t.Kind != "finished" || t.LaneSettlement.ElapsedMS < 0) {
 		return workorders.Fail(400, "lane settlement requires finished telemetry and nonnegative elapsed time")
 	}

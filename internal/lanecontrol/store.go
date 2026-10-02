@@ -26,9 +26,14 @@ func currentLane(ctx context.Context, tx pgx.Tx, tenantID, id string, revision i
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT l.node_id::text,l.project_id::text,l.owner_principal_id::text,l.revision,l.enabled,l.paused,l.policy
  FROM autopilot_lanes l JOIN nodes n ON n.tenant_id=l.tenant_id AND n.id=l.node_id
+ JOIN nodes project ON project.tenant_id=l.tenant_id AND project.id=l.project_id
  JOIN principals p ON p.tenant_id=l.tenant_id AND p.id=l.owner_principal_id
- WHERE l.tenant_id=$1 AND l.node_id=$2 AND n.deleted_at IS NULL AND p.kind='person' AND p.status='active'
+ WHERE l.tenant_id=$1 AND l.node_id=$2 AND n.project_id=l.project_id
+ AND n.deleted_at IS NULL AND project.deleted_at IS NULL AND p.kind='person' AND p.status='active'
  FOR NO KEY UPDATE OF l`, tenantID, id).Scan(&l.id, &l.project, &l.owner, &l.revision, &enabled, &paused, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return l, workorders.Fail(409, "lane, project or owner unavailable")
+	}
 	if err != nil {
 		return l, err
 	}

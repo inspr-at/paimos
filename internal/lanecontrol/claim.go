@@ -45,9 +45,10 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, capabili
 		return nil, workorders.Fail(409, "lane run is not awaiting claim")
 	}
 	var laneID, project, owner string
+	var periodStart time.Time
 	var revision, remaining, attempt int64
 	var closed bool
-	err = tx.QueryRow(ctx, `SELECT lane_id::text,project_id::text,owner_principal_id::text,lane_revision,maximum_ms-settled_ms,attempt_ms,closed FROM lane_budget_envelopes WHERE id=$1 FOR NO KEY UPDATE`, *eid).Scan(&laneID, &project, &owner, &revision, &remaining, &attempt, &closed)
+	err = tx.QueryRow(ctx, `SELECT lane_id::text,project_id::text,owner_principal_id::text,lane_revision,maximum_ms-settled_ms,attempt_ms,closed,period_start FROM lane_budget_envelopes WHERE id=$1 FOR NO KEY UPDATE`, *eid).Scan(&laneID, &project, &owner, &revision, &remaining, &attempt, &closed, &periodStart)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +61,21 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, capabili
 	}
 	if l.owner != owner || l.project != project {
 		return nil, workorders.Fail(409, "lane ownership changed")
+	}
+	if !l.start.Equal(periodStart) {
+		return nil, workorders.Fail(409, "lane envelope belongs to an earlier window")
+	}
+	var bound bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r
+ JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ JOIN nodes t ON t.tenant_id=n.tenant_id AND t.id=n.parent_id
+ JOIN lane_budget_envelopes e ON e.tenant_id=r.tenant_id AND e.id=r.lane_envelope_id
+ WHERE r.id=$1 AND t.id=e.ticket_node_id AND n.project_id=e.project_id AND t.project_id=e.project_id
+ AND n.deleted_at IS NULL AND t.deleted_at IS NULL)`, runID).Scan(&bound); err != nil {
+		return nil, err
+	}
+	if !bound {
+		return nil, workorders.Fail(409, "lane ticket or work-order scope changed")
 	}
 	if err = agentaccounts.ValidateLaneCapacity(ctx, tx, runID, *accountID, now); err != nil {
 		return nil, err
