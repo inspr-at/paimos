@@ -56,9 +56,6 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 	// tenant and owner predicates; return no project/session identities.
 	ctx := db.AllProjects(r.Context(), "agents plan: authorized person's running count only")
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(ctx, tx, p, agentplan.ReadScope, authz.Scope{}); err != nil {
-			return err
-		}
 		var canonicalOwner string
 		err := tx.QueryRow(ctx, `SELECT canonical.id::text FROM principals person
 			JOIN principals canonical ON canonical.tenant_id=person.tenant_id AND canonical.id=coalesce(person.linked_to,person.id)
@@ -68,6 +65,9 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 			return authz.ErrForbidden
 		}
 		if err != nil {
+			return err
+		}
+		if err := authz.RequireTx(ctx, tx, p, agentplan.ReadScope, authz.Scope{}); err != nil {
 			return err
 		}
 		var raw []byte

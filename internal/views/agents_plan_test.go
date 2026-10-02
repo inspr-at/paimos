@@ -34,6 +34,12 @@ func TestAgentsPlanPrivateOwnershipValidationAndCounts(t *testing.T) {
 		return p
 	}
 	alice := person(tid, "person", "Alice")
+	var planRole string
+	must(d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'plan_only','Own plan only') RETURNING id::text`, tid).Scan(&planRole))
+	_, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, tid, planRole, agentplan.ReadScope)
+	must(err)
+	_, err = d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, alice.ID, planRole)
+	must(err)
 	bob := person(tid, "person", "Bob")
 	carol := person(foreign, "person", "Carol")
 	agent := person(tid, "agent", "Alice's enforcer")
@@ -46,19 +52,23 @@ func TestAgentsPlanPrivateOwnershipValidationAndCounts(t *testing.T) {
 	addSession := func(p tenant.Principal, owner *string, project, harness, phase, activity string, archived bool) string {
 		t.Helper()
 		var id string
-		must(d.Admin.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,activity,stopped_at,archived_at)
+		must(d.Admin.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,activity,stopped_at)
 			VALUES($1,$2,$3,$4,$5,'test','unmanaged','worker',uuid_send(gen_random_uuid()),uuid_send(gen_random_uuid()),$6,$7,
-			CASE WHEN $6='stopped' THEN now() END,CASE WHEN $8 THEN now() END) RETURNING id::text`, p.TenantID, project, p.ID, owner, harness, phase, activity, archived).Scan(&id))
+			CASE WHEN $6='stopped' THEN now() END) RETURNING id::text`, p.TenantID, project, p.ID, owner, harness, phase, activity).Scan(&id))
+		if archived {
+			_, err := d.Admin.Exec(ctx, `UPDATE harness_sessions SET archived_at=now(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=uuid_send(gen_random_uuid()),recovery_actor_id=$2,recovery_reason='Test recovery' WHERE id=$1`, id, *owner)
+			must(err)
+		}
 		return id
 	}
-	// A read-only person cannot see project sessions normally, but the private
+	// A person with only plan permission cannot see project sessions, but the private
 	// aggregate must still count their sessions across every project.
 	addSession(agent, &alice.ID, project, "codex", "starting", "unknown", false)
 	addSession(agent, &alice.ID, project, "codex", "working", "idle", false)
 	addSession(agent, &alice.ID, project, "cursor", "yielded", "throttled", false)
 	addSession(agent, &alice.ID, project, "claude", "stopping", "busy", false)
 	addSession(agent, &alice.ID, project, "codex", "stopped", "idle", false)
-	addSession(agent, &alice.ID, project, "codex", "working", "busy", true)
+	addSession(agent, &alice.ID, project, "codex", "stopped", "busy", true)
 	addSession(agent, &bob.ID, project, "grok", "working", "busy", false)
 	addSession(foreignAgent, &carol.ID, foreignProject, "pi", "working", "busy", false)
 	// Ownerless legacy sessions count once even with several keys from one
@@ -148,7 +158,7 @@ func TestAgentsPlanPrivateOwnershipValidationAndCounts(t *testing.T) {
 		t.Fatal("anonymous plan read")
 	}
 	// Stored corruption never creates an accidental default start allowance.
-	_, err := d.Admin.Exec(ctx, `UPDATE user_preferences SET value='{"total":99}'::jsonb WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, alice.ID)
+	_, err = d.Admin.Exec(ctx, `UPDATE user_preferences SET value='{"total":99}'::jsonb WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, alice.ID)
 	must(err)
 	if w := request(agent, "GET", "/api/agents/plan", ""); w.Code != 500 {
 		t.Fatal("invalid stored plan did not fail closed")

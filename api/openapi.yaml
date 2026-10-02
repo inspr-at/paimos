@@ -4635,7 +4635,7 @@ paths:
         For agents.working, validate AgentsPlan or the legacy cap/view/area/model
         shape (cap 1–12, optional). Preserve the legacy shape for existing UI
         clients; its reservations do not become limits. Plan reads for enforcers
-        use GET /agents/plan. Agents cannot write preferences.
+        use GET /agents/plan. Agents cannot write this plan.
       requestBody:
         required: true
         content:

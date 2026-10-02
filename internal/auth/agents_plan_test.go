@@ -19,7 +19,7 @@ func TestAgentsPlanRouteScopeIsReadOnly(t *testing.T) {
 		t.Fatal("plan read has no explicit scope")
 	}
 	for _, route := range []struct{ method, path string }{
-		{"PUT", "/api/agents/plan"}, {"POST", "/api/agents/plan"}, {"GET", "/api/agents/plan/another-person"}, {"PUT", "/api/preferences/agents.working"},
+		{"PUT", "/api/agents/plan"}, {"POST", "/api/agents/plan"}, {"GET", "/api/agents/plan/another-person"},
 	} {
 		if scope, ok := coreAgentScope(httptest.NewRequest(route.method, route.path, nil)); ok && scope != "" {
 			t.Fatalf("plan exposed %s %s", route.method, route.path)
@@ -31,6 +31,7 @@ func TestAgentsPlanRealKeyScopeCreatorAndLiveGrants(t *testing.T) {
 	m, owner := keyFixture(t)
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "plan-enforcer", "scopes": []string{agentplan.ReadScope}}))
 	unscoped := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "plain-worker", "scopes": []string{"harness.read"}}))
+	writer := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "plan-with-preferences", "scopes": []string{agentplan.ReadScope, "views.write"}}))
 	mux := http.NewServeMux()
 	views.New(m.pool).Mount(mux)
 	secured := m.Middleware(mux)
@@ -51,6 +52,12 @@ func TestAgentsPlanRealKeyScopeCreatorAndLiveGrants(t *testing.T) {
 	}
 	read(key, 200)
 	read(unscoped, 403)
+	for _, key := range []agentKeyCreatedJSON{key, writer} {
+		status, _, _ := do(t, &http.Client{}, "PUT", app.URL+"/api/preferences/agents.working", `{"value":{"total":0}}`, http.Header{"Authorization": {"Bearer " + key.Token}})
+		if status != 403 {
+			t.Fatalf("agent plan write status=%d", status)
+		}
+	}
 	ctx := dbtest.Seed(t.Context())
 	mutate := func(sql string, args ...any) {
 		t.Helper()
@@ -69,6 +76,11 @@ func TestAgentsPlanRealKeyScopeCreatorAndLiveGrants(t *testing.T) {
 	mutate(`UPDATE agent_keys SET created_by_principal_id=NULL WHERE id=$1`, key.ID)
 	read(key, 403)
 	mutate(`UPDATE agent_keys SET created_by_principal_id=$2 WHERE id=$1`, key.ID, owner.ID)
+	// Respect the schema's last-owner guard while exercising deactivation.
+	mutate(`INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Backup owner')`, owner.TenantID)
+	mutate(`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		SELECT p.tenant_id,p.id,r.id,'workspace' FROM principals p JOIN roles r ON r.tenant_id=p.tenant_id AND r.key='owner'
+		WHERE p.tenant_id=$1 AND p.name='Backup owner'`, owner.TenantID)
 	mutate(`UPDATE principals SET status='deactivated' WHERE id=$1`, owner.ID)
 	read(key, 403)
 	mutate(`UPDATE principals SET status='active' WHERE id=$1`, owner.ID)
