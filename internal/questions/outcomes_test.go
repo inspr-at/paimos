@@ -444,6 +444,17 @@ func TestDoctrinePendingPublishedAndCorrectedEffects(t *testing.T) {
 	if f.count(t, `SELECT count(*) FROM doctrine_proposals WHERE id=$1 AND data->>'state'='promoted' AND data->>'promoted_commit'='2222222222222222222222222222222222222222'`, published) != 1 {
 		t.Fatal("landed doctrine evidence changed")
 	}
+	// P4's manual correction boundary persists through Once and later Doctrine
+	// revisions; the desk cannot create competing drafts for the reviewed rule.
+	q = f.outcome(t, q, "doctrine", "- 🟡 Keep commits small and explicitly reviewed.")
+	f.advance(10 * time.Second)
+	f.dispatch(t)
+	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "delivered" || e.EffectData.DoctrineID != "" || len(e.EffectData.ReviewRequired) != 1 || e.EffectData.ReviewRequired[0].Ref != published {
+		t.Fatalf("later Doctrine revision lost manual review boundary: %+v", e)
+	}
+	if f.count(t, `SELECT count(*) FROM doctrine_proposals`) != 2 {
+		t.Fatal("later Doctrine revision created a competing draft")
+	}
 }
 
 func TestDoctrineChangedBaseDuringGraceIsVisibleAndSafe(t *testing.T) {

@@ -485,7 +485,7 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if _, err = tx.Exec(ctx, `UPDATE desk_pending SET state='replaced' WHERE tenant_id=$1 AND question_id=$2 AND state IN ('pending','failed')`, p.TenantID, id); err != nil {
 			return err
 		}
-		retired, err := retireDecisions(ctx, tx, p, id, answerID)
+		retired, err := retireDecisions(ctx, tx, p, project, id, answerID)
 		if err != nil {
 			return err
 		}
@@ -526,7 +526,7 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 
 // Reuse is withdrawn in the decision transaction, independently of the next
 // effect. Only the desk-owned active Knowledge record for this question changes.
-func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, question, answer string) ([]events.Change, error) {
+func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, question, answer string) ([]events.Change, error) {
 	var id string
 	var before, after json.RawMessage
 	err := tx.QueryRow(ctx, `SELECT n.id::text,to_jsonb(n) FROM nodes n JOIN desk_decisions d ON d.tenant_id=n.tenant_id AND d.question_id=$2::uuid AND d.effect_ref=n.id::text
@@ -535,6 +535,12 @@ func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, questio
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: project}); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return nil, fail(403, "knowledge_access_lost", "Withdrawing the active Decision requires knowledge.write permission.")
+		}
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE nodes SET state='cancelled',fields=jsonb_set(jsonb_set(fields,'{metadata,decision_state}','"superseded"'),'{metadata,superseded_by}',to_jsonb($3::text)),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2`, p.TenantID, id, answer); err != nil {

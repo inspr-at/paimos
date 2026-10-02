@@ -2372,19 +2372,25 @@ an immutable Decided record. Always publishes a protected Knowledge entry of typ
 `decision`, using the existing knowledge list/filter/resolve/graph surfaces and
 CLI taxonomy. A correction immediately withdraws and archives the earlier Always
 answer, independently of grace or failure of its replacement; lineage remains.
+Withdrawing an active Decision requires `knowledge.write` on its project,
+including when correcting to Once.
 Requirement appends one criterion with its exact answer marker, preserves the
 other ticket fields, and compares the captured ticket revision before writing.
 Concurrent edits leave a visible `ticket_revision_conflict`; decide again after
 reviewing the ticket. Requirement is unavailable for list or structured criteria.
 Corrections replace only the exact tracked criterion; edited or removed criteria
 remain untouched and appear in `effect_data.review_required` on the new effect.
+Missing, moved or otherwise non-editable prior tickets also require review;
+their criteria stay untouched while the rest of the correction applies.
 Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
 tldr_de?}` on the question or person decision. It creates only a pending AEON-444
 inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
 remain authoritative. Dismissed and expired drafts are already retired. Published
 or person-edited proposals remain untouched and appear in `review_required`; the
 rest of the answer can apply, and the existing Doctrine path governs any manual
-correction. A Doctrine correction requiring that review creates no new draft.
+correction. This review provenance carries across later answers; a Doctrine
+correction requiring that review creates no new draft until a person handles
+the correction through the existing Doctrine path.
 CLI status reads the current proposal lifecycle, including dismissal and promotion.
 No rule is described as changed merely by proposing.
 Status exposes `outcomes` with availability and a why for disabled stamps, plus
@@ -2392,7 +2398,9 @@ per-revision `effect_data` and safe failure explanations. Availability reads loa
 permissions once and report a cheap Doctrine `mapping_present` hint; exact mapping
 and quotation checks run when deciding and applying. Expensive inbox preparation
 runs before the tenant mutation fence, then rechecks authority and cache versions
-inside the write. Transient failures retry with current permissions. Permanent
+inside the write. Transient failures retry with current permissions, including
+`stale_source` preparation races and an expired `public_main_unavailable` cache.
+Permanent
 conflicts expose `retryable: false` and require a reviewed new decision; failed
 outcome writes never appear applied. Encoded Doctrine inputs exceeding the
 4096-byte persistence bound return 422 and are stored only for Doctrine.

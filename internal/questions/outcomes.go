@@ -172,15 +172,32 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 	}
 	changes := []events.Change{}
 	data := EffectData{Supersedes: previousID, ReviewRequired: previous.ReviewRequired}
-	if previous.TicketID != "" || a.Outcome == "requirement" {
+	previousCriterion := previous
+	if previousCriterion.TicketID != "" {
+		editable := check("nodes.write", d.project)
+		if editable {
+			if err := checkNode(ctx, tx, tid, d.project, previousCriterion.TicketID, true); err != nil {
+				var ae *apiError
+				if !errors.As(err, &ae) || ae.status != 404 {
+					return err
+				}
+				editable = false
+			}
+		}
+		if !editable {
+			data.requireReview(EffectReview{Kind: "criterion", Ref: previousCriterion.TicketID, Why: "The earlier ticket is missing or no longer editable; its tracked criterion was preserved for person review."})
+			previousCriterion.TicketID, previousCriterion.Criterion = "", ""
+		}
+	}
+	if previousCriterion.TicketID != "" || a.Outcome == "requirement" {
 		if err := permit(ctx, tx, p, d.project, "nodes.write"); err != nil {
 			return fail(403, "ticket_access_lost", "Updating the criterion requires ticket write permission.")
 		}
-		ticket := previous.TicketID
+		ticket := previousCriterion.TicketID
 		if a.Outcome == "requirement" {
 			ticket = in.TicketID
 		}
-		if previous.TicketID != "" && previous.TicketID != ticket {
+		if previousCriterion.TicketID != "" && previousCriterion.TicketID != ticket {
 			return fail(409, "ticket_changed", "The linked criterion belongs to another ticket; review the correction.")
 		}
 		if err := checkNode(ctx, tx, tid, d.project, ticket, true); err != nil {
@@ -204,11 +221,11 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 			return fail(422, "criteria_too_large", "The ticket's criteria exceed the bounded append limit.")
 		}
 		changed := false
-		if previous.Criterion != "" {
-			if !textCriteria || strings.Count(criteria, previous.Criterion) != 1 {
+		if previousCriterion.Criterion != "" {
+			if !textCriteria || strings.Count(criteria, previousCriterion.Criterion) != 1 {
 				data.requireReview(EffectReview{Kind: "criterion", Ref: ticket, Why: "The earlier tracked criterion was edited or removed; it was preserved for person review."})
 			} else {
-				criteria = strings.Replace(criteria, previous.Criterion, "", 1)
+				criteria = strings.Replace(criteria, previousCriterion.Criterion, "", 1)
 				changed = true
 			}
 		}

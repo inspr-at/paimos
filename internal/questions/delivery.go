@@ -223,10 +223,13 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 		}
 		retryableEffect := true
 		var retryAt any = now.Add(30 * time.Second)
-		if d.kind == "outcome" && ae != nil && (ae.status == 400 || ae.status == 409 || ae.status == 422) {
+		transientDoctrine := code == "stale_source" || code == "public_main_unavailable"
+		if d.kind == "outcome" && ae != nil && !transientDoctrine && (ae.status == 400 || ae.status == 409 || ae.status == 422) {
 			retryableEffect = false
 			retryAt = nil
 			message += " Review this failure and decide again; automatic retries have stopped."
+		} else if d.kind == "outcome" && transientDoctrine {
+			message += " This temporary doctrine failure will be retried automatically."
 		}
 		_, err = tx.Exec(ctx, `UPDATE desk_pending SET state='failed',error_code=$3,retry_at=$4,error_message=$5,effect_data=jsonb_set(effect_data,'{retryable}',to_jsonb($6::boolean)) WHERE tenant_id=$1 AND id=$2`, tid, id, code, retryAt, message, retryableEffect)
 		return err
