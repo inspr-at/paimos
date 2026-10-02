@@ -2,6 +2,7 @@
 package agentruns_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
@@ -49,6 +50,41 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
  FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id WHERE r.id=$3`, f.agent.TenantID, resource, run.ID)
 				return err
 			})
+			if age == "expired" {
+				// Expiry may defer to current admission only for the run's own
+				// provisional grant, and Hold must still prevent promotion.
+				f.tx(t, f.agent, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET capacity_refresh_run=$2 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, sibling.ID)
+					return err
+				})
+				f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
+				f.tx(t, f.agent, func(tx pgx.Tx) error {
+					if _, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET capacity_refresh_run=$1 WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE account_capacity_schedules SET schedule=jsonb_set(schedule,'{override}','"hold"') WHERE account_id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID)
+					return err
+				})
+				body, err := json.Marshal(claimBody(ids))
+				if err != nil {
+					t.Fatal(err)
+				}
+				response := f.request(f.agent, "POST", "/api/runs/"+run.ID+"/claim", string(body), f.token)
+				var failure struct{ Error string }
+				if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
+					t.Fatal(err)
+				}
+				if response.Code != 409 || failure.Error != "reserved capacity is not eligible" {
+					t.Fatalf("expired provisional grant bypassed Hold or failed before current admission: %d %s", response.Code, response.Body.String())
+				}
+				if f.count(t, f.person, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NOT NULL`, resource) != 0 {
+					t.Fatal("failed claim consumed the recovery permit")
+				}
+				f.tx(t, f.agent, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE account_capacity_schedules SET schedule=jsonb_set(schedule,'{override}','"sprint"') WHERE account_id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run.ID)
+					return err
+				})
+			}
 			var claimed agentruns.Run
 			f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, &claimed)
 			if claimed.Status != "starting" || f.count(t, f.person, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id=$2`, resource, run.ID) != 1 {
