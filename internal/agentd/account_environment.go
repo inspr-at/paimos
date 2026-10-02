@@ -36,6 +36,8 @@ func (s *Supervisor) AccountEnvironment(accountID, daemonID, harness string) (Ac
 			homes, variable = adapter.Homes, "CURSOR_CONFIG_DIR"
 		case *GrokAdapter:
 			homes, variable = adapter.Homes, "GROK_HOME"
+		case *ACPAdapter:
+			homes, variable = adapter.Homes, "HOME"
 		default:
 			return AccountEnvironment{}, errors.New("account environment unavailable")
 		}

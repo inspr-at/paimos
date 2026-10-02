@@ -22,6 +22,8 @@ func mapDB(err error) *httpError {
 		return nil
 	}
 	switch pgErr.Code {
+	case "40P01":
+		return conflictCoded("concurrent node update; retry request", "retryable_conflict")
 	case "23505":
 		switch {
 		case strings.Contains(pgErr.ConstraintName, "slug"):

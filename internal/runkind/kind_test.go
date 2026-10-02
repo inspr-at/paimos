@@ -9,6 +9,7 @@ import (
 func TestExecutionLabels(t *testing.T) {
 	for _, tc := range []struct{ harness, generator, command, errorFlag string }{
 		{"codex", "", "", ""}, {"claude", "", "", ""}, {"pi", "", "", ""}, {"cursor", "", "", ""}, {"grok", "", "", ""},
+		{"gemini", "", "", ""}, {"opencode", "", "", ""},
 		{"media", "higgsfield/kling3_0", "", ""}, {"terminal", "", "npm run build", ""},
 		{"higgsfield", "", "", "--harness"}, {"tool", "", "", "--harness"},
 		{"media", "", "", "--generator"}, {"media", "veo\n3", "", "--generator"},

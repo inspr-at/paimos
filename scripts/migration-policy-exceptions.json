@@ -15,6 +15,12 @@
       "reason": "Expand-only family widening: replace the existing harness check with its strict superset (media and terminal). No existing value, row, column, or route is removed; nullable execution labels preserve previous-binary writes. The classifier conservatively flags DROP CONSTRAINT. This exact-byte exception is exposed in the draft PR for coordinator review, with previous-binary migration compatibility exercised in CI."
     },
     {
+      "file": "1088_more_harnesses.sql",
+      "sha256": "933ef28a5dd85d16e2ad1e61b1fdd09a80bfd797ea79b6a7f91c82221942e4eb",
+      "ticket": "AEON-452",
+      "reason": "Only definition-selected drops of historical enum CHECKs need this one-file exception. Superset replacements are ADD CONSTRAINT CHECK NOT VALID followed by VALIDATE CONSTRAINT, both allowlisted. Every historical harness/family/adapter value, pi unknown-family policy and the review null-pairing predicate remain intact. No rows, columns, RLS policies or other constraints are removed. This exact-byte draft CI exception still requires coordinator acceptance before merge/release and previous-binary compatibility measurement; it grants no release authority."
+    },
+    {
       "file": "1104_work_kinds.sql",
       "sha256": "f9832b34fe476af2e6868e77687687900909a373af58fdab6a4fe6b74384a1e9",
       "ticket": "AEON-502",

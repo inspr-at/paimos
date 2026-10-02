@@ -70,6 +70,13 @@ func checkSourceIdentity(fields map[string]json.RawMessage, opt Options) error {
 		groups = append(groups, params)
 	}
 	kind, _ := parseString(fields["type"])
+	if opt.Source == "opencode" && kind == "step_finish" {
+		part, err := objectField(fields, "part")
+		if err != nil {
+			return err
+		}
+		groups = append(groups, part)
+	}
 	if kind == "session_meta" {
 		payload, err := objectField(fields, "payload")
 		if err != nil {
@@ -98,7 +105,7 @@ func checkSourceIdentity(fields map[string]json.RawMessage, opt Options) error {
 		}
 	}
 	for _, g := range groups {
-		for _, k := range []string{"session_id", "sessionId", "thread_id", "threadId"} {
+		for _, k := range []string{"session_id", "sessionId", "sessionID", "thread_id", "threadId"} {
 			if raw, ok := g[k]; ok {
 				id, err := parseString(raw)
 				if err != nil || id != opt.SourceSessionID {

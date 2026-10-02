@@ -33,3 +33,12 @@ func TestHarnessEffortFence(t *testing.T) {
 		t.Fatal("harness enum fence")
 	}
 }
+
+func TestAdditionalHarnessEffortFence(t *testing.T) {
+	if !ValidModel("gemini", "gemini-2.5-pro", "16384") || ValidModel("gemini", "gemini-2.5-pro", "high") || ValidModel("gemini", "gemini-2.5-pro", "0") {
+		t.Fatal("Gemini explicit budget fence")
+	}
+	if !ValidModel("opencode", "ollama/qwen3-coder", "default") || ValidModel("opencode", "model-only", "default") || ValidModel("opencode", "provider/model", "bad\nvariant") {
+		t.Fatal("OpenCode variant fence")
+	}
+}

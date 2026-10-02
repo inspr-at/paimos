@@ -21,6 +21,9 @@ import (
 )
 
 type Run struct {
+	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
+	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
+	QueueRoutedAt             *time.Time                  `json:"queue_routed_at,omitempty"`
 	ReadOnlyReview            bool                        `json:"read_only_review,omitempty"`
 	VerificationError         string                      `json:"verification_error,omitempty"`
 	VerificationReason        string                      `json:"verification_reason,omitempty"`
@@ -90,6 +93,7 @@ func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionR
 	return &module{pool: pool, usage: usage, reviews: reviews}
 }
 func (m *module) Mount(mux *http.ServeMux) {
+	m.mountQueue(mux)
 	for _, route := range []struct {
 		pattern, scope string
 		agent          bool
@@ -109,6 +113,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 			if err := agentpairing.Lock(r.Context(), tx); err != nil {
 				return nil, err
 			}
+			if route.pattern == "POST /api/runs/{runId}/claim" {
+				if err := queueLock(r.Context(), tx); err != nil {
+					return nil, err
+				}
+			}
 			v, err := route.fn(r, tx, p)
 			var pe *agentpairing.Error
 			if errors.As(err, &pe) {
@@ -123,11 +132,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
@@ -180,7 +189,9 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 		return nil, workorders.Fail(403, "run belongs to another agent")
 	}
 	if v.Status == "queued" && v.Purpose == "managed" {
-		v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+		if v.QueueNodeID == nil || v.QueueTargetAgentID != nil || v.QueueRoutedAt != nil {
+			v.Wait, err = agentaccounts.WaitForRun(r.Context(), tx, v.ID)
+		}
 	} else if v.Status == "failed" {
 		v.Wait, err = vendorWait(r.Context(), tx, v)
 	}
@@ -210,7 +221,12 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
    OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND (w.kind<>'review' OR $4::bool) AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
-	 ORDER BY created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
+	 AND (queue_node_id IS NULL OR ((queue_target_agent_id IS NOT NULL OR queue_routed_at IS NOT NULL)
+	 AND EXISTS(SELECT 1 FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id AND ticket.deleted_at IS NULL AND ticket.state='open')))
+	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,
+	 CASE WHEN queue_target_agent_id IS NOT NULL THEN queue_at END DESC,queue_rank NULLS LAST,
+	 (SELECT CASE ticket.fields->>'priority' WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id),
+	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -382,6 +398,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
+	if err = queueClaimable(ctx, tx, v); err != nil {
+		return nil, err
+	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
 		return nil, workorders.Fail(409, "review-capable daemon policy required")
 	}
@@ -492,6 +511,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	v, err = scan(tx.QueryRow(ctx, `UPDATE agent_runs SET status='starting',daemon_id=$2,daemon_generation=$3,started_at=clock_timestamp() WHERE id=$1 RETURNING `+columns, v.ID, in.Daemon, in.Generation))
 	if err != nil {
 		return nil, err
+	}
+	if v.QueueNodeID != nil {
+		if err := queuePickup(ctx, tx, p, *v.QueueNodeID, v.ID); err != nil {
+			return nil, err
+		}
 	}
 	if o.Status == "ready" {
 		if _, err = tx.Exec(ctx, `UPDATE work_orders SET status='running',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1`, o.NodeID); err != nil {

@@ -64,7 +64,7 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return out, err
 	}
-	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3}
+	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
 	if out.Role == "review-gate" {
 		sort.SliceStable(steps, func(i, j int) bool {
 			a, b := steps[i].Profile, steps[j].Profile
