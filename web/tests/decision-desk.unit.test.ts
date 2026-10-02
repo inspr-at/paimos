@@ -6,6 +6,36 @@ import { commitDesk, emptySources, loadDesk, questionItem, approvalItem, actionI
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
   input: { request_id: 'request', question: 'Which index?', options: [{ id: 'a', title: 'Partial', description: 'Smaller', answer: 'Use the partial index.' }], meanwhile: 'parked' }, askers: [], pending: [], created_at: '', updated_at: '' })
 afterEach(() => vi.unstubAllGlobals())
+it('reads newest answered pages with bounded cursors while Open keeps its offset', async () => {
+  const history = Array.from({ length: 205 }, (_, i) => ({ ...question(), id: `history-${205-i}`, state: 'answered' as const }))
+  const reads: URL[] = []
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://test.invalid'); reads.push(url)
+    if (url.pathname === '/api/decision-desk') {
+      if (url.searchParams.get('state') === 'open') return Response.json({ items: [question()], has_more: false })
+      expect(url.searchParams.get('order')).toBe('desc')
+      expect(url.searchParams.has('offset')).toBe(false)
+      const cursor = url.searchParams.get('cursor'), start = cursor === 'page/two' ? 100 : cursor === 'page/three' ? 200 : 0
+      return Response.json({ items: history.slice(start, start + 100), has_more: start < 200, ...(start < 200 ? { next_cursor: start === 0 ? 'page/two' : 'page/three' } : {}) })
+    }
+    return Response.json(url.pathname === '/api/approvals' ? [] : { items: [] })
+  }))
+  const result = await loadDesk({ open: 1, answered: 3 })
+  expect(result.items.filter(item => item.decided).map(item => item.id)).toEqual(history.map(question => `q:${question.id}`))
+  expect(result.sources.questions.size).toBe(206)
+  expect(result.hasMore).toEqual({ open: false, answered: false })
+  expect(reads.filter(url => url.searchParams.get('state') === 'answered')).toHaveLength(3)
+  expect(reads.find(url => url.searchParams.get('state') === 'open')!.searchParams.get('offset')).toBe('0')
+})
+it('fails answered reads honestly when a required continuation cursor is missing', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://test.invalid')
+    if (url.pathname === '/api/decision-desk') return Response.json({ items: [], has_more: url.searchParams.get('state') === 'answered' })
+    return Response.json(url.pathname === '/api/approvals' ? [] : { items: [] })
+  }))
+  const result = await loadDesk({ open: 1, answered: 2 })
+  expect(result.warnings).toContain('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+})
 it('freezes round IDs while arrivals and decided/skipped counts remain distinct', () => {
   const one = questionItem(question(), 'Aeon'), two = { ...one, id: 'q:two' }, three = { ...one, id: 'q:new' }
   const round = newRound([one, two])

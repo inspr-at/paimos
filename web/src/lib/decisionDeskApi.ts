@@ -27,7 +27,7 @@ export interface Question {
   answer?: QuestionAnswer; created_at: string; updated_at: string
   pending: { id: string; revision: number; kind: 'inbox' | 'comment' | 'outcome'; state: 'pending' | 'delivered' | 'failed' | 'replaced'; deliver_after: string; receipt_state?: 'queued' | 'handed_off' | 'failed'; error_code?: string }[]
 }
-export interface QuestionPage { items: Question[]; has_more: boolean }
+export interface QuestionPage { items: Question[]; has_more: boolean; next_cursor?: string }
 export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
   const response = await api(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {
@@ -38,16 +38,22 @@ export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
 }
 export type QuestionState = 'open' | 'answered'
 export const MAX_QUESTION_PAGES = 10
-export const readQuestions = (offset = 0, state: QuestionState = 'open') => deskRequest<QuestionPage>(`/decision-desk?state=${state}&limit=100&offset=${offset}`)
+export const readQuestions = (offset = 0, state: QuestionState = 'open', cursor?: string) => deskRequest<QuestionPage>(state === 'answered'
+  ? `/decision-desk?state=answered&order=desc&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+  : `/decision-desk?state=open&limit=100&offset=${offset}`)
 async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPage> {
-  const items: Question[] = []
-  let has_more = false
+  const items = new Map<string, Question>()
+  let has_more = false, cursor: string | undefined
   for (let page = 0; page < Math.min(MAX_QUESTION_PAGES, Math.max(1, pages)); page++) {
-    const result = await readQuestions(page * 100, state)
-    items.push(...result.items); has_more = result.has_more
+    const result = await readQuestions(page * 100, state, cursor)
+    result.items.forEach(question => items.set(question.id, question)); has_more = result.has_more
     if (!has_more) break
+    if (state === 'answered') {
+      if (!result.next_cursor || result.next_cursor.length > 512 || result.next_cursor === cursor) throw new Error('The answered page cursor is unavailable. Refresh before loading more.')
+      cursor = result.next_cursor
+    }
   }
-  return { items, has_more }
+  return { items: [...items.values()], has_more }
 }
 export function deliveryTime(value?: string): string {
   const timestamp = value ? Date.parse(value) : NaN

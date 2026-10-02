@@ -211,6 +211,52 @@ test('open questions remain visible behind 100 older answered questions', async 
   await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible()
   expect(world.reads.some(path => path.includes('state=open'))).toBe(true)
 })
+for (const width of [1440, 390]) test(`newest answered questions and fresh corrections survive refresh ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 })
+  const world = await mockDecisionDesk(page, { long: true })
+  const history = Array.from({ length: 105 }, (_, at) => {
+    const question = sampleQuestion(`history-${String(at).padStart(3, '0')}`, { question: `Historical answer ${at}` })
+    const created_at = new Date(Date.UTC(2026, 0, 1, 0, at)).toISOString()
+    return { ...question, revision: 2, state: 'answered' as const, answer: { id: `answer-history-${at}`, revision: 2, answer: 'Old answer', option_id: 'partial', outcome: 'once' as const, decided_by: 'person', created_at, deliver_after: created_at } }
+  })
+  world.questions.unshift(...history)
+  await openFirst(page)
+  await expectStableControls({ controls: {
+    actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
+    stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'), frame: page.getByTestId('desk-frame'),
+  }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+    { name: 'record the old question as a new decision', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+    { name: 'return to the fresh answer', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('1 of') } },
+    { name: 'refresh the fresh answer among more than 100 decisions', run: async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+      await expect(page.getByTestId('desk-status')).not.toContainText('source could not be confirmed')
+      await expect(page.getByTestId('desk-decide')).toBeEnabled()
+    } },
+    { name: 'choose a correction', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
+    { name: 'record the correction without moving controls', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+  ] })
+  expect(world.calls.map(call => call.body.expected_revision)).toEqual([1, 2])
+  expect(world.calls[1]!.body.option_id).toBe('full')
+  await page.getByTestId('desk-close').click()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await page.getByRole('button', { name: /^Decided/ }).click()
+  const rows = page.locator('.desk-list .desk-row')
+  await expect(rows).toHaveCount(100)
+  await expect(rows.first()).toHaveAttribute('data-testid', 'desk-row-q:question-1')
+  await expect(rows.first()).toContainText('Use a full index.')
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'desk-row-q:history-104')
+  await expect(page.getByTestId('desk-row-q:history-000')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Load 100 more' }).click()
+  await expect(rows).toHaveCount(106)
+  await expect(rows.last()).toHaveAttribute('data-testid', 'desk-row-q:history-000')
+  expect(world.reads.some(path => path.includes('state=answered&order=desc') && path.includes('&cursor='))).toBe(true)
+  await page.reload()
+  await page.getByRole('button', { name: /^Decided/ }).click()
+  await expect(rows.first()).toHaveAttribute('data-testid', 'desk-row-q:question-1')
+  await rows.first().click(); await page.getByTestId('choice-0').click()
+  await expect(page.getByTestId('desk-decide')).toBeEnabled()
+})
 test('loaded open and answered pages survive focus refresh with their memo still actionable', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.push(...Array.from({ length: 100 }, (_, at) => sampleQuestion(`open-${at}`)))

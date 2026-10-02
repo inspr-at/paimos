@@ -35,14 +35,17 @@ paths:
         '413': {description: Body exceeds 64 KiB}
     get:
       operationId: listQuestions
-      description: Questions in this project with current questions.read permission. Stable oldest-first order; agents see only questions they asked and only their own membership.
+      description: Questions in this project with current questions.read permission. Defaults to stable oldest-first creation order. For state=answered, order=desc uses newest current answer first (answer created_at, then question ID), with bounded keyset pagination via next_cursor. Agents see only questions they asked and only their own membership.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.}
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /questions/{questionId}:
     parameters:
@@ -93,13 +96,16 @@ paths:
     get:
       operationId: listDecisionDeskQuestions
       security: [{session: []}, {agentKey: []}]
-      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Later packages add other item types and held-work ordering.
+      description: P1 question-only projection, filtered by questions.read per project and asker for agents. No counts or content from inaccessible projects. Defaults to oldest-first creation order; state=answered with order=desc lists newest current answers first (answer created_at, then question ID) using bounded keyset pagination via next_cursor. Later packages add other item types and held-work ordering.
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.}
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /queue:
     get:
@@ -8847,7 +8853,8 @@ components:
       type: object
       required: [items, has_more]
       properties:
-        items: {type: array, items: {$ref: '#/components/schemas/Question'}}
+        next_cursor: {type: string, maxLength: 512, description: Present only when order=desc has another page. Continue with the same scope and filters; concurrent new decisions appear after refreshing from the first page.}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
         has_more: {type: boolean}
     StatusAutopilotRule:
       type: object
