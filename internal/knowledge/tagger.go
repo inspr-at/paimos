@@ -171,9 +171,6 @@ func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (in
 	var run tagRun
 	err := db.InTenant(db.AllProjects(ctx, "method learning tagger"), pool, tenantID, func(tx pgx.Tx) error {
 		run = tagRun{}
-		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true)`); err != nil {
-			return err
-		}
 		// Match delete/updateNode and queue writers: pairing, then tree, then
 		// rows. Node UPDATE triggers also take this tree lock; taking a node
 		// row first can deadlock with the status autopilot's startup pass.
@@ -181,6 +178,11 @@ func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (in
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+			return err
+		}
+		// Coordination locks wait like other node writers. Cap only the later
+		// row-lock waits, so a long autopilot batch cannot end this daily pass.
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true)`); err != nil {
 			return err
 		}
 		var tickets, comments, verdicts tagCursor

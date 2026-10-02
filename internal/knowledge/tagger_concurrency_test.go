@@ -144,6 +144,88 @@ func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 	}
 }
 
+func TestTaggerWaitsForLongTreeLock(t *testing.T) {
+	f := setup(t)
+	ticket := addNode(t, f, "WAIT-534", "ticket", "Long startup batch", &f.project)
+	closeAged(t, f, ticket, "done", "1 hour")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	// Stand in for an autopilot batch holding the same tenant tree lock.
+	holder, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, f.a.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := tagTenant(ctx, f.db.App, f.a.TenantID)
+		done <- result{n, err}
+	}()
+	// Observe the actual lock wait before starting the six-second hold. Time
+	// spent starting the goroutine must not shorten the regression's wait.
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		var waiting bool
+		err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(
+		 SELECT 1 FROM pg_locks w JOIN pg_locks h USING(locktype,database,classid,objid,objsubid)
+		 WHERE h.pid=$1 AND h.granted AND NOT w.granted AND h.locktype='advisory')`, holder.Conn().PgConn().PID()).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case r := <-done:
+			t.Fatalf("tagger ended before waiting for tree lock: %+v", r)
+		case <-ctx.Done():
+			t.Fatal("tagger did not wait for tree lock")
+		case <-poll.C:
+		}
+	}
+	hold := time.NewTimer(6 * time.Second)
+	defer hold.Stop()
+	select {
+	case r := <-done:
+		t.Fatalf("tagger ended while tree lock was held: %+v", r)
+	case <-ctx.Done():
+		t.Fatal("tree lock hold exceeded test deadline")
+	case <-hold.C:
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.err != nil || r.n != 1 {
+			t.Fatalf("tagger nominated %d after long tree wait: %v", r.n, r.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("tagger did not finish after tree lock release")
+	}
+	if !nodeTagged(t, f, ticket) {
+		t.Fatal("long tree wait lost the tag")
+	}
+	if _, _, ok := nominationOfKey(t, f, nodeLearningID(ticket)); !ok {
+		t.Fatal("long tree wait lost the nomination")
+	}
+	var updates, cursors int
+	err = f.db.Admin.QueryRow(ctx, `SELECT
+	 (SELECT count(*) FROM events WHERE tenant_id=$1 AND node_id=$2 AND metadata->>'job'='learning-tagger'),
+	 (SELECT count(*) FROM method_learning_tag_cursor WHERE tenant_id=$1)`, f.a.TenantID, ticket).Scan(&updates, &cursors)
+	if err != nil || updates != 1 || cursors != 1 {
+		t.Fatalf("events=%d cursors=%d after long tree wait: %v", updates, cursors, err)
+	}
+}
+
 func TestTaggerRetriesRolledBackTenantPass(t *testing.T) {
 	for _, failThrough := range []int{1, 3} {
 		t.Run(fmt.Sprintf("fail_%d_attempts", failThrough), func(t *testing.T) {
