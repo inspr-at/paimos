@@ -223,5 +223,9 @@ including healthy readings, separately from notification receipts in 1136.
 The reservation is recorded on AEON-613; the coordinator must mirror it to the
 shared ledger under the same ownership boundary. Existing receipts remain
 unchanged, and current availability resumes with the next fresh measurement.
+The first fenced write seeds its watermark from retained receipt reading and
+recovery times. A historical recovery with no retained healthy percentage stays
+unknown; it never synthesizes a quota figure. A newer measured observation
+replaces it, while delayed readings remain blocked across reset transitions.
 Classify this table as personal quota telemetry, located by
 `(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
