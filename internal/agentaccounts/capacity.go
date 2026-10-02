@@ -316,8 +316,9 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	// One deadline covers reading the body and the work. The body is read
 	// before a slot is taken, so a slow or unfinished upload never holds one.
-	deadline := time.Now().Add(g.timeout)
-	raw, err := readBodyBy(w, r, deadline)
+	ctx, cancel := g.withTimeout(r.Context(), g.timeout)
+	defer cancel()
+	raw, err := readBodyBy(ctx, w, r)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -354,8 +355,6 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 	if draft.Override != "away" {
 		draft.Override, draft.OverrideUntil = "", nil
 	}
-	ctx, cancel := context.WithDeadline(r.Context(), deadline)
-	defer cancel()
 	var out []accountCapacity
 	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if draft.Override == "away" {

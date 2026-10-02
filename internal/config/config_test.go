@@ -43,6 +43,7 @@ func TestDoctrineBinaryAllowlist(t *testing.T) {
 }
 
 func TestFromEnvDefaults(t *testing.T) {
+	t.Setenv("AEON_STATUS_AUTOPILOT", "")
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
 	t.Setenv("AEON_ADDR", "")
@@ -60,6 +61,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.Addr != ":8080" || cfg.Env != "dev" {
 		t.Fatalf("addr/env = %s %s", cfg.Addr, cfg.Env)
 	}
+	if cfg.StatusAutopilot != "on" {
+		t.Fatal("status autopilot must default on")
+	}
 	if len(cfg.AithemaOperatorLocalServices) != 0 {
 		t.Fatal("operator-local service exceptions must default off")
 	}
@@ -68,6 +72,27 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" || cfg.PublicURL != "" || cfg.WebDir != "" {
 		t.Fatalf("unexpected cfg %+v", cfg)
+	}
+}
+
+func TestStatusAutopilotServerMode(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
+	for _, mode := range []string{"off", "suggest", "on"} {
+		t.Setenv("AEON_STATUS_AUTOPILOT", mode)
+		cfg, err := FromEnv()
+		if err != nil || cfg.StatusAutopilot != mode {
+			t.Fatalf("mode %s: %v", mode, err)
+		}
+	}
+	for _, mode := range []string{"false", "apply", "ON", "unknown"} {
+		t.Setenv("AEON_STATUS_AUTOPILOT", mode)
+		if _, err := FromEnv(); err == nil {
+			t.Fatal("invalid server mode started")
+		}
 	}
 }
 

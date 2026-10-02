@@ -8,7 +8,7 @@ Releases up to `260929113854.0.0` (release 10, sequence 105) were reserved under
 
 The version pill uses the shared INSPR renderer: six segments (`YY·MM·DD hh:mm`, seconds on hover, focus or tap), never the `v` or `.0.0`. Copying always yields the exact canonical version, `.0.0` included. The label table (`schemes.json`) names the schemes INSPR-CalVer3, INSPR-CalVer2 and INSPR-CalVer1.
 
-The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. Create an annotated tag with a message: `git tag -a "$tag" -m "Release $tag"`. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
+The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. The coordinator creates it with `node scripts/create-release-tag.mjs --write` after the rehearsal and release approval below; the helper writes an annotated tag with a `Release <tag>` message. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
 
 Development builds leave the linker version at `dev`. A release build sets:
 
@@ -19,6 +19,69 @@ Development builds leave the linker version at `dev`. A release build sets:
 with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`Dockerfile` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` is the build used by `.github/workflows/release.yml`.
 
 ## Workflow
+
+### Mandatory pre-tag rehearsal (AEON-531)
+
+Every release PR must pass **`release-rehearsal`** in
+`release-image-check.yml`. The coordinator treats it as a release-readiness
+requirement; this change does not alter repository rulesets. PR runs exercise
+the proposed code, but cannot authorize a tag. After merge, the workflow runs
+on the release commit on `main`; if the automatic path-filtered run did not
+start, dispatch it on `main` while that exact commit is the branch head.
+Do not tag until the main run completes successfully:
+
+```sh
+gh workflow run release-image-check.yml --ref main
+# After the run completes, from the exact main commit intended for release:
+node scripts/create-release-tag.mjs
+# After the coordinator's release approval, explicitly create the local tag:
+node scripts/create-release-tag.mjs --write
+# Push the annotated tag only through the coordinator's existing release procedure.
+```
+
+The check reads the exact workflow identity, paginated runs, every job and step,
+and the unexpired receipt artifact for that SHA and run attempt. PR/fork/other
+branch runs, a different commit, a newer failed or pending attempt, a skipped
+platform or missing receipt all leave the gate closed. The tag workflow checks
+the same receipt before either native signing work or image publication can
+start. A merge/squash commit needs its own main rehearsal; an earlier PR receipt
+never carries over. Receipts expire after 14 days; rerun on the same main commit
+if needed. No tag, release, image or historic version is rewritten.
+The tag helper requires a clean tracked checkout on `main`, validates the version,
+presentation and frozen notes, rejects existing tags and rechecks the checkout
+after the receipt lookup. Its default is a preview; explicit `--write` creates
+only an annotated local tag at the checked immutable SHA, without pushing.
+
+The rehearsal validates `version.json`, the complete pinned presentation bundle
+and the release's own frozen notes; builds and smokes both native Linux images
+from the production Docker context and read-only caches; exports BuildKit
+provenance locally; builds both native Darwin agents with LocalAuthentication;
+executes the exact production asset assembly and verifies all eight checksums.
+It runs the production pin-bot in dry-run mode with fixture source/tag/attestation
+observations and a local pin snapshot. The index and draft shell bodies are read
+directly from `release.yml`: strict offline adapters exercise the index contract,
+and the installed `gh` parses the actual attestation and nine-asset draft argv
+against a closed loopback proxy, with an empty config and synthetic credential.
+This catches incompatible flags and missing assets without calling the forge or
+registry. Tap fixtures run without a live App. The receipt records the commit,
+version metadata, release-workflow digest and disabled operations.
+
+Rehearsal never signs, notarizes, pushes an image/cache, writes an attestation,
+creates a tag/release/pin/tap PR, publishes or deploys. Its native checks verify
+the unsigned daemon's embedded version and unsigned-image refusal. Real Apple
+credentials/notarization, live registry provenance, paired Keychain ACL and
+Touch ID qualification remain the existing post-tag gates; fixture success is
+not evidence for those controls.
+
+`scripts/release-rehearsal-coverage.json` binds every production release step to
+its rehearsal action, executable counterpart, regression fixture or explicitly
+disabled privileged operation. The workflow tests reject new jobs, new steps,
+changed step bodies/flags and missing counterparts. When a release step changes,
+implement its counterpart first, then review the updated fingerprint and run the
+negative drift fixtures. Do not regenerate fingerprints as a substitute for a
+counterpart. `docker-web-check.yml` separately builds the real Dockerfile `web`
+stage on PR changes to `web/**`, `internal/**/*.json` and its build inputs, so
+shared JSON imports are checked inside the production context before release.
 
 ### Cross-family verdict and merge queue (AEON-411)
 
@@ -488,7 +551,7 @@ only (AEON-438, 2026-09-30). Successful routed jobs record their actual
 future reuse record must preserve that class. Image provenance, attestations and
 pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
 
-A push of an annotated `v*` tag runs `.github/workflows/release.yml`. Create it with `git tag -a "$tag" -m "Release $tag"`; lightweight tags fail before the image build (AEON-398).
+A push of an annotated `v*` tag runs `.github/workflows/release.yml`. The coordinator creates it with `node scripts/create-release-tag.mjs --write`, which first requires the exact-main-SHA rehearsal receipt; lightweight tags fail before the image build (AEON-398).
 
 The server image pipeline starts independently of the macOS jobs (AEON-407, AEON-504). **Every release requires linux/amd64 and linux/arm64**, built and smoked natively in parallel; either platform failing prevents release-index publication. GitHub's hosted `ubuntu-24.04` runner builds amd64 and `ubuntu-24.04-arm` builds arm64 ([runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)). No QEMU is installed, and each job checks `uname -m` before building.
 
@@ -604,7 +667,7 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Image dry runs and timing evidence
 
-`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Run it on the work branch without creating a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
 
 Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 

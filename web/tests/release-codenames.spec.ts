@@ -199,7 +199,7 @@ test('phones show the name without horizontal scroll', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
-test('the footer shows both codename and Pretty version; hover reveals seconds', async ({ page }) => {
+test('the footer shows both codename and Pretty version; hover shows seconds in a card', async ({ page }) => {
   await mockWork(page, fixtures())
   const history = presentedHistory()
   await mockReleases(page, history, { codename: CODENAMES[5] })
@@ -211,7 +211,8 @@ test('the footer shows both codename and Pretty version; hover reveals seconds',
   const version = pill.locator('.calendar-version')
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await pill.hover()
-  await expect(version).toHaveAttribute('data-version-view', 'revealed')
+  await expect(page.locator('.release-hover-card .calendar-version')).toHaveAttribute('data-version-view', 'revealed')
+  await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await expect(pill.locator('.footer-codename')).toBeVisible()
   await page.mouse.move(5, 5)
   await expect(version).toHaveAttribute('data-version-view', 'pretty')

@@ -269,6 +269,11 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1074_model_display_effort.sql" {
+		if err := backfillModelProfileDisplay(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1076_ticket_human_check.sql" {
 		if err := backfillHumanCheckSchemas(ctx, tx); err != nil {
 			return fmt.Errorf("backfill %s: %w", name, err)
@@ -427,6 +432,37 @@ func backfillWorkMetadata(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_session_model_profiles()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Metadata lives beside immutable profiles. Backfill every tenant in the same
+// transaction as expansion and migration recording, with FORCE RLS intact.
+func backfillModelProfileDisplay(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(ctx, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_model_profile_display()`); err != nil {
 			return err
 		}
 	}

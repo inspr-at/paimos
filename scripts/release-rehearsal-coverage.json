@@ -1,0 +1,322 @@
+{
+  "agentd-darwin": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "3ef4af68ef144f12dd555f182fb78c286413a5c20503a3491c8a1a7ea3554af7",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "mode": "action",
+      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestRehearsalGateBeforeSideEffects",
+      "mode": "test",
+      "sha256": "8c4f0c8432a530dd9f7f14c531a604ba92160da62c168d0bdb5da3255490c9fe",
+      "step": "Require exact-SHA release rehearsal"
+    },
+    {
+      "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
+      "mode": "step",
+      "sha256": "e4228f5fed4a2391d05bf550c22ddbddde8dcac46b9066c1a51fb96a9c695332",
+      "step": "Build darwin paimos-agentd with LocalAuthentication"
+    },
+    {
+      "counterpart": "Apple credentials and notarization stay in the tag-only signing environment; native unsigned build and signing-shell syntax run in rehearsal.",
+      "mode": "disabled",
+      "sha256": "ffeb3de273e79426b33268e00432a160f159358a6ed7f168b0ec6bb8161b3576",
+      "step": "Sign and notarize paimos-agentd"
+    },
+    {
+      "counterpart": "No signing keychain or private key exists in rehearsal; TestReleaseSignsDarwinAgentdBeforeChecksums checks the production cleanup contract.",
+      "mode": "disabled",
+      "sha256": "97396a939b8ce25116234c1bcb36f1c8ab5757fe65efc3cc88557bf2e5f18989",
+      "step": "Remove signing keychain and temp files"
+    },
+    {
+      "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "mode": "action",
+      "sha256": "2cd9a03d5936656e31ec2449705786a1355a9b927e37b71d863d9e5164ca2b1f",
+      "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  ],
+  "assets": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "69983d424f70d56e16aca2c5bc441464578ac832b548ce342069dd3e5a1ca9e1",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "mode": "action",
+      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+    },
+    {
+      "counterpart": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+      "mode": "action",
+      "sha256": "bbafc41fb0115c9136d565595c7773919afd1a63bb2e892ae549f462f02072fb",
+      "step": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    },
+    {
+      "counterpart": "assets-rehearsal/Exact production assets assembly",
+      "mode": "step",
+      "sha256": "3f23684a69da046128765efa604f225488fd248a14e7a909d6f59abe50627066",
+      "step": "Build linux paimos-agentd and aeon-cli"
+    },
+    {
+      "counterpart": "TestImmutabilityGuardsFailClosed",
+      "mode": "test",
+      "sha256": "2ee606b9f9013db7ce7fea7d936e6d75de0cbf22ae1e73766f5978f2e0642ce1",
+      "step": "Reject an existing GitHub release"
+    },
+    {
+      "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
+      "mode": "step",
+      "sha256": "d4a19ddd98d6c0ecd94e4496c500ec52fdcdbc4fda2d18657c28d747d9c31e45",
+      "step": "Create draft GitHub release with signed assets"
+    }
+  ],
+  "image": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "69983d424f70d56e16aca2c5bc441464578ac832b548ce342069dd3e5a1ca9e1",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestRehearsalReleaseTagValidation",
+      "mode": "test",
+      "sha256": "b31f4ff898788b768b5b0e567d03c00cad95c63861ed6ef9102f8458eb4a9023",
+      "step": "Validate inspr-calendar-v2 tag"
+    },
+    {
+      "counterpart": "TestCurrentWithdrawalLedgerBeforeImagePublication",
+      "mode": "test",
+      "sha256": "dfef68c7d1e52761498673d9ed53694d48fa4947a25ac3dbcb79c97a7399304a",
+      "step": "Enforce current release withdrawal ledger"
+    },
+    {
+      "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      "mode": "action",
+      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
+      "mode": "disabled",
+      "sha256": "db7508a740529d4a33ae55668d7e410ff7d029275e2758f190553298b14ceb56",
+      "step": "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
+    },
+    {
+      "counterpart": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+      "mode": "action",
+      "sha256": "b156d10b0844481720af5a09cacc3f4eb984989e236593c606df4e6649db3578",
+      "step": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    },
+    {
+      "counterpart": "TestImmutabilityGuardsFailClosed",
+      "mode": "test",
+      "sha256": "7813b8abf2abe6bf363caab7841d72894142a98e929d693566743d2af8c9da0b",
+      "step": "Reject an existing GitHub release"
+    },
+    {
+      "counterpart": "TestImmutabilityGuardsFailClosed",
+      "mode": "test",
+      "sha256": "4a347f0c1510514e647cb1fd2452fceddd57b91dd988b187ba679cccc7750c3f",
+      "step": "Reject an existing image tag"
+    },
+    {
+      "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
+      "mode": "step",
+      "sha256": "5f00a1741318395777dacf9d034b68998716990a6f94d2d79e885eb695973a0b",
+      "step": "Publish multi-arch index"
+    },
+    {
+      "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",
+      "mode": "disabled",
+      "sha256": "e636724e626643c5fb3c2962f2afb9242874ee62ba8f36841308f8cd7a9e3540",
+      "step": "Attest pushed image"
+    },
+    {
+      "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
+      "mode": "step",
+      "sha256": "564610ea150063443f15d0d3e70f58638198cd7aa7d841fce7340840f95f0bd3",
+      "step": "Verify pushed image attestation"
+    },
+    {
+      "counterpart": "TestPinProposalFollowsVerificationWithoutWaitingForAssets",
+      "mode": "test",
+      "sha256": "0853eb42c3a4849c3934203ccd8dbfe14976141ec7d0eca191844d86eb348020",
+      "step": "Record pushed digest"
+    },
+    {
+      "counterpart": "assets-rehearsal/Pin-bot dry-run with offline source and attestation inputs",
+      "mode": "step",
+      "sha256": "a6cd2a387d13eb46d1935abb76be0cd1af86a9dc3594376b15ae4a417fe9b2fc",
+      "step": "Propose verified nixcfg deployment pin"
+    }
+  ],
+  "image-platform": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "ef6a8540ae1c0d19cf31cbd6b1e298260e37b342230b56247fbb7e0e1a1ceec3",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestRehearsalReleaseTagValidation",
+      "mode": "test",
+      "sha256": "b31f4ff898788b768b5b0e567d03c00cad95c63861ed6ef9102f8458eb4a9023",
+      "step": "Validate inspr-calendar-v2 tag"
+    },
+    {
+      "counterpart": "TestAnnotatedTagGuardFailsClosed",
+      "mode": "test",
+      "sha256": "3318e782e0fe83a9149a2701d4a07422ce94d02d37cdc6130285a5112c157be1",
+      "step": "Require an annotated release tag"
+    },
+    {
+      "counterpart": "TestRehearsalGateBeforeSideEffects",
+      "mode": "test",
+      "sha256": "8c4f0c8432a530dd9f7f14c531a604ba92160da62c168d0bdb5da3255490c9fe",
+      "step": "Require exact-SHA release rehearsal"
+    },
+    {
+      "counterpart": "image-dry-run/Validate version and presentation bundle",
+      "mode": "step",
+      "sha256": "e08cb7d242e48b6e1433b432d6fc85e3d3b6d6cf8f4b93f3b876902377f0c84a",
+      "step": "Release checks"
+    },
+    {
+      "counterpart": "TestCurrentWithdrawalLedgerBeforeImagePublication",
+      "mode": "test",
+      "sha256": "dfef68c7d1e52761498673d9ed53694d48fa4947a25ac3dbcb79c97a7399304a",
+      "step": "Enforce current release withdrawal ledger"
+    },
+    {
+      "counterpart": "TestTagMatchesVersionFailsClosed",
+      "mode": "test",
+      "sha256": "9a0f1cd759d93f0f61487ebfd4660d3c346bb8f7370a3504917492bdd6983d78",
+      "step": "Tag matches version.json"
+    },
+    {
+      "counterpart": "TestImmutabilityGuardsFailClosed",
+      "mode": "test",
+      "sha256": "7813b8abf2abe6bf363caab7841d72894142a98e929d693566743d2af8c9da0b",
+      "step": "Reject an existing GitHub release"
+    },
+    {
+      "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "mode": "action",
+      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+    },
+    {
+      "counterpart": "image-dry-run/Release history fixture",
+      "mode": "step",
+      "sha256": "75c43f99ed77eb48ea35cbdf2bae16182a4695aa7c4917eeb9bf7abda7673aa1",
+      "step": "Release history"
+    },
+    {
+      "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      "mode": "action",
+      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
+      "mode": "disabled",
+      "sha256": "db7508a740529d4a33ae55668d7e410ff7d029275e2758f190553298b14ceb56",
+      "step": "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
+    },
+    {
+      "counterpart": "TestImmutabilityGuardsFailClosed",
+      "mode": "test",
+      "sha256": "4a347f0c1510514e647cb1fd2452fceddd57b91dd988b187ba679cccc7750c3f",
+      "step": "Reject an existing image tag"
+    },
+    {
+      "counterpart": "image-dry-run/Require native platform",
+      "mode": "step",
+      "sha256": "a05091bb2f4940b1af0af9fab542ac710c420478deb185a7d01b07e40b5f75e9",
+      "step": "Require native platform"
+    },
+    {
+      "counterpart": "image-dry-run/Build cached smoke image",
+      "mode": "step",
+      "sha256": "0fe7948bf008d90249262025082b512df3cc41535d08168278e97c21a752c334",
+      "step": "Build cached smoke image"
+    },
+    {
+      "counterpart": "image-dry-run/Resolve loaded smoke image",
+      "mode": "step",
+      "sha256": "4d2780456b8ee9f14de88dc2d1b127d009c7c1b23b621dcdce602abe541de27a",
+      "step": "Resolve loaded smoke image"
+    },
+    {
+      "counterpart": "image-dry-run/Smoke production image",
+      "mode": "step",
+      "sha256": "3cf21fda6c4b7c037aa39e03d4a3fb5a8d0d2aea56db6172eaf02229b289a117",
+      "step": "Smoke production image"
+    },
+    {
+      "counterpart": "image-dry-run/Export production image with provenance locally",
+      "mode": "step",
+      "sha256": "4863a035ebf9ff4b1bb2e76ca0d587068d403624778f11ca2d2e9279839aeedd",
+      "step": "Build and push"
+    },
+    {
+      "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",
+      "mode": "disabled",
+      "sha256": "e636724e626643c5fb3c2962f2afb9242874ee62ba8f36841308f8cd7a9e3540",
+      "step": "Attest pushed image"
+    },
+    {
+      "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
+      "mode": "step",
+      "sha256": "564610ea150063443f15d0d3e70f58638198cd7aa7d841fce7340840f95f0bd3",
+      "step": "Verify pushed image attestation"
+    },
+    {
+      "counterpart": "TestRehearsalPlatformDigestHandoff",
+      "mode": "test",
+      "sha256": "93a3f35d369cd08c47d2bcbf494ba894584a66c0d7836121f6d518648d989776",
+      "step": "Record platform digest"
+    },
+    {
+      "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "mode": "action",
+      "sha256": "1d99810496c7e3ff30e1389315ce822b68825c632ed91374bb4b084de513f15a",
+      "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  ]
+}

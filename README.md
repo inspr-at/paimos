@@ -81,6 +81,37 @@ makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
 
+## Morning briefing
+
+People can open **Morning briefing** on Projects or `/briefing`. The daily
+in-app reminder uses a chosen time in the device's local timezone (08:00 by
+default). It reads existing completion and release outcomes, delivered-state
+and recorded ticket merge evidence, Status autopilot deliveries and skipped
+human checks, failed reviews/CI, current approvals, held human
+requests and available journey decisions. Each fact links to its item and source.
+The suggested next step is one of those person actions or recorded findings.
+
+The first visit covers 24 hours; later visits start at that person's saved
+briefing visit. The database statement start establishes the window alongside the first
+event page; only complete successful log reads advance the saved server cutoff.
+Denied logs, failed logs and log pagination limits retain the earlier cutoff.
+Pending approvals, held requests, journey actions and usage are separate current
+snapshots: their page limits or failures do not freeze completed log windows.
+Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
+there is no new activity tracking or generated narrative.
+
+Usage requires `harness.read`. Its API list value is approximate, includes
+lifetime usage of sessions **started** in the window, and is not interval spend
+or an invoice. Recorded ticket totals reuse the planning columns' measured and
+estimated figures and Paid semantics; account budget windows describe current
+reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+`harness.read`, using the workspace dashboard only for a workspace grant; source
+links appear only after successful reads. Merge facts use changes to a ticket’s
+recorded `fields.merge_commit`, available under project visibility; PR URLs alone
+do not count as merges. The visit-bounded autopilot log must also load completely
+before the cutoff advances. Journey next actions use one batch snapshot query.
+This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
+
 ## Link a vendor account to yourself
 
 On a paired computer, select your enrolled login with `paimos use` as usual.
@@ -134,6 +165,60 @@ authentication, executor admission, reusable credit, signatures or check
 publication exists in A; current workflows and runner routing are unchanged.
 Future authority/executor and selection packages must establish those boundaries
 before any omission. Run the foundation tests with `go test ./internal/ciproof`.
+
+AEON-417 C adds `scripts/ci-go-impact`, a **shadow-only** Go selection and
+full-result comparison tool. The complete foundation/authority plan remains
+unchanged: every action is `run`, every required check and job remains present,
+and timing/static run fresh. `ci-go-impact shadow --mirror <absolute-bare-mirror>
+--git <absolute-reviewed-git> --plan <full-plan.json> --analysis-context
+<installed-context.json> --base-metadata <base-go-list.json> --candidate-metadata
+<candidate-go-list.json> --record <private-shadow.jsonl>` records a separate
+selection hint. This command consumes bounded artifacts and immutable Git blobs;
+it never launches candidate code or `go list` on the controller host. Missing,
+invalid, incomplete or unsupported metadata produces a full selection. Without
+metadata, omit the three analysis options to record that fallback explicitly.
+
+The metadata recipe is `/opt/aeon/bin/go list -mod=readonly -deps -test
+-json=<required-fields> ./...` in B's disposable offline Linux/amd64 guest. The
+installed recipe fixes the complete required field list and excludes large
+unused transitive-dependency lists to fit the artifact bound. Collect base and
+candidate separately under the same pinned image/environment. The context has `goos`,
+`goarch`, `tags` (empty), `toolchain_digest`, `dependency_digest` and
+`environment_digest`. The decoder covers production/test/external-test imports,
+test variants, ignored source files and production/test embeds; immutable source
+imports independently widen the graph so a supplied artifact cannot remove
+edges. Unsupported targets/tags, cgo/assembly, workspaces/replacements, missing
+objects, malformed metadata and graph limits fall back to full work. A sealed B
+metadata observation has a separate validation API; raw CLI artifacts remain
+diagnostic. The reviewed analysis image and actual hosted boot proof still need
+coordinator provisioning before any trusted collection claim.
+
+The union of both graphs retains removed imports, files and packages. Changes to
+testdata, embedded files and declared runtime fixtures select owners and reverse
+dependants. Shared CI/harness/module/migration/OpenAPI/web-embed/version inputs
+and unmapped paths select the full inventory. The compiled
+`internal/ciproof/go-impact-policy.json` initially audits only `runkind`,
+`scopecode` and `ticketbenefits`, with byte pins and explicit runtime inputs.
+Changed or unknown runtime closures remain selected with whole-tree input
+fingerprints; candidate policy edits force full selection. Every selected package
+retains **all** ordinary shard rows
+in both recorded layouts. A scheduling hint never permits omission without a
+verified passing baseline receipt: `required_fresh_packages` always includes the
+complete live package inventory while optimization is disabled.
+
+Add `--results <full-run.json>` to compare the hint with actual full-run terminal
+results. The diagnostic input schema `aeon.ci.go-full-run.v1` binds `plan_id`,
+`candidate_commit`, `environment_digest`, `run_id`, `attempt` (1) and `layout`
+(7 for PRs; 4 is allowed for full main runs). Its `results` array has
+`obligation_id`, `package`, and `result` (`success`, `failure`, `skipped` or
+`cancelled`) for every live row of that layout, including all split-package rows.
+New packages without rows use their `go-package/<import-path>` obligation.
+Missing/skipped/cancelled rows make the comparison incomplete and leave
+`omitted_failure_count` null; a complete comparison must have zero omitted
+failures. The CLI records the comparison before exiting nonzero for incomplete
+coverage or omitted failures. These unsigned diagnostic records do not mint
+receipts, baseline credit, certificates or success checks. No workflow, required
+check, runner route, queue reuse, timing reuse or UI selection changes in C.
 
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
@@ -408,6 +493,24 @@ checks that have no stored completion. Check and Undo in the ticket use the exis
 preconditions. Part B's automation skips pending checks when moving tickets to
 Delivered or Accepted.
 
+Status autopilot starts new workspaces with automatic rules enabled. Workspaces
+present when migration 1108 runs enter Suggest mode for 24 hours, including
+release publication hooks. Settings → Workspace → Status autopilot → Changes
+lists proposed status moves and attention flags with Apply / Dismiss. Proposals
+leave tickets untouched; Apply checks the current ticket and rule, and Dismiss
+prevents that status episode from returning. An owner can explicitly select
+**Enable automatic changes** to end the upgrade review period early; ordinary
+settings saves and project On do not end it. The worker rescans when the review
+period expires or an owner confirms, including within the same UTC day.
+
+Operators can set `AEON_STATUS_AUTOPILOT=off|suggest|on` (default `on`) before
+starting the server. `off` pauses all unattended status rules, including release
+hooks and attention flags; `suggest` keeps proposals waiting for review without
+an expiry. These server modes cap every workspace and project setting. Explicit
+Apply is available in Suggest mode and forbidden in Off. Invalid values refuse
+startup. An explicitly authorized daemon work claim still starts its ticket;
+it does not become an unattended status proposal.
+
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
@@ -597,7 +700,142 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.1`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.4`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+
+Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
+and an optional `--note` to pause one or all sessions. Omitted levels use the
+person's workspace default, initially Pause; read or change it with
+`aeon harness pause-default [--level pause_quickly]`. Pause quickly interrupts
+where the harness advertises support, commits WIP as it is and requests a short
+handover within three minutes. Pause chooses the next safe point within ten
+minutes. Wrap up finishes only when the estimate is below ten minutes and fits
+the deadline; otherwise it hands over. The API exposes `supported_pause_levels`
+and `pause_can_interrupt`; workers without a cooperative inbox support only
+Stop now. Pause all skips those workers unless Stop now is selected.
+
+`aeon harness leaving-at --at 2026-10-02T17:00:00+02:00 [--note "Continue tomorrow"]`
+sets one durable deadline for all of your running work in authorized projects.
+Fresh finish estimates select Wrap up first, including near the deadline when
+finishing fits with one minute to spare. Otherwise Pause starts at T minus ten
+minutes; fresh handover and command timing choose Pause quickly when a full
+handover cannot fit. Without that timing, escalation starts at T minus two
+minutes. A current uninterruptible command keeps cooperative Pause, without an
+interrupt signal. Stop now is requested at each level’s deadline. Pause and
+Wrap up end at the earlier of the leave time and ten minutes after their actual
+start; Pause quickly has a three-minute cap, with a two-minute escalation lead.
+Workers without an inbox keep working until T. `aeon harness leaving-at` reads the deadline and
+per-agent plans; `--off` withdraws pending requests and leaves paused handovers
+resumable. A claimed stop cannot be recalled and is reported as in flight.
+Setting the same deadline and selection again is idempotent; changing either
+replaces pending plans. A deadline covers at most 200 owned running sessions
+atomically, and rejects a larger selection before changing any plans.
+
+Workers can include optional `step`, `next_point`, `next_point_in_min`,
+`finish_in_min`, `finish_outcome`, `interrupt`, `command` and `command_left_min`
+in a heartbeat. These form the optional `pause_progress` response snapshot,
+with a database-clock `reported_at`; the current operation's `command` does not
+change a terminal session's registered command label. Sending any planning
+field replaces the snapshot (omitted fields are unknown, null clears); omitting
+all of them preserves its original timestamp. Minutes count down from that
+instant and expire after two ETA intervals. Once a planning snapshot exists,
+an absent or stale finish prediction never falls back to an older ready ETA.
+Legacy reporters without a snapshot retain their fresh ready-ETA behavior.
+Text is limited to public labels without credentials, paths or command arguments.
+
+The leaving API also accepts `{hosts: "all" | [host identities], agents: [session
+UUIDs]}` alongside `deadline_at`. `agents`, when provided, selects the exact
+owned running generations independently of `hosts`; ended and unauthorized
+sessions are ignored. Omitted `agents` selects running work on the named hosts,
+or all owned work when `hosts` is omitted. An empty agent array selects no work.
+GET returns the effective selection and the stored host scope. Host scope is
+persisted for the approved wind-down UI and later launcher admission integration;
+this backend does not yet enforce refusal of new starts on those hosts.
+
+Stop now uses the existing control queue. Agentd executes it only for its exact
+live generation and owned process identity, with the existing monotonic signal
+fence. A database-clock wake hint schedules the next heartbeat at each transition.
+`harness run` advertises `owned_stop_v1` and may stop only the child it launched; a PID-only
+`run-heartbeat` observer receives no signal authority. Requests, scheduling,
+escalation, cancellation, defaults and confirmed outcomes are audited. A stop
+request is not a process exit receipt: offline or older launchers can leave an
+unconfirmed request, which remains visible in the deadline report. The server
+never claims such a process has stopped. Existing part-A records without a
+level retain their original cancel-on-expiry behavior. The response contract
+adds optional fields at `harness-session/2.4`; request headers stay unchanged.
+
+Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
+in contract 2.2. `pause.state` distinguishes requested, planned, paused,
+resume_requested, resumed and cancelled; the established phase values remain
+unchanged. `state=paused` selects resumable closed generations, including those
+older than 24 hours in `view=current`; existing stopped filters remain compatible.
+
+```sh
+aeon harness pause --project AEON --session SESSION_UUID --reason "Reboot"
+aeon harness pause --all --except KEEP_RUNNING_SESSION_UUID
+aeon harness resume --project AEON --all
+```
+
+A person needs `harness.control` and owns the registration (project owners/admins
+may control other registrations). An agent coordinator uses `--project`,
+`--coordinator-session` and its `--worker-lease-file` to control direct children.
+Global `--all` spans the person's visible authorized projects; `--project` narrows
+it. Batches return up to 200 items and `more`; repeat while `more` is true.
+Requests and the default ten-minute handover deadline persist in Postgres.
+The pause control uses the existing `stop` kind with `request_payload.pause=true`; managed
+yield holds it aside so it cannot accidentally trigger an immediate signal.
+Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
+an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.
+Agentd forwards a heartbeat pause through its existing generation-fenced inbox
+when the adapter supports input, with the ordinary durable input receipt.
+Managed sessions must advertise `inbox`; otherwise an individual pause returns
+409 without creating a request. Project and person-wide pause-all leave these
+sessions running, continue pausing capable sessions, and report the skipped
+session's `id`, `project_id`, optional `display_label` and reason
+`inbox_delivery_unavailable` in `skipped`. Reports are capped at 200 per call;
+`skipped_more` indicates omitted reports. Skips do not consume the 200-pause
+limit or set `more`, so repeating a batch can reach later capable sessions.
+Cursor and Grok daemon runs currently lack that input path. Unmanaged CLI
+heartbeat sessions advertise cooperative pause only with `--print-controls`;
+one-shot `harness run` jobs advertise Stop now only.
+
+An overdue requested or planned pause becomes `cancelled` on the database clock.
+Heartbeat, session/control reads and the periodic sweep complete its cooperative
+control with reason `pause_deadline_expired`. Level-aware requests also queue
+Stop now; historical requests without a level retain cancel-only expiry. Before
+the deadline, a
+`heartbeat_lost` close preserves the pending or claimed pause control so the
+same worker can heartbeat, plan and stop with its handover after revival.
+An unarchived paused or resume-requested generation continues to occupy its
+ticket, suppressing the status autopilot's stale-progress rule until it is
+resumed or archived.
+
+The worker must plan a safe stopping point, finish or roll back the current
+step, commit WIP on its own branch, then submit a handover and exit cleanly:
+
+```sh
+aeon harness pause-plan --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --control-id CONTROL_UUID --handover-point "After the current commit"
+aeon harness mark-stopped --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --reason paused --handover-file HANDOVER_JSON_PATH
+```
+
+The handover JSON contains `state`, a nonempty `next_steps` array,
+`open_questions` (an empty array is valid), and `worktree_state` (`committed`,
+`clean` or `rolled_back`). `committed` requires `commit_sha`. Session storage,
+the bound-ticket comment, control completion and stopped generation are one
+transaction; a retry cannot duplicate the handover. Notes are public project
+content: never include credentials or private registration proofs.
+
+`resume` persists a launch recipe and full continuation brief. For one session,
+`--registration-file` may supply a fresh private reference and lease and create
+the successor atomically; ordinary `harness register --succeeds SESSION_UUID`
+and `run-heartbeat --succeeds` also consume that recipe. The successor keeps
+the principal, harness/model, generator/command labels, branch/worktree and
+ticket, and receives the full handover in `continuation.brief` rather than truncating it to the short
+metadata label. Old run and process ownership are never reused. Resume paused
+coordinators before their paused children; the new coordinator adopts those
+children for continuation. Generation registration does not itself launch a
+vendor executable. Agentd automatic launch after login and a hard-stop deadline executor
+are separate runtime integration: any hard stop must use the existing exact
+owned-process controls, and these HTTP endpoints never signal a process.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -1786,7 +2024,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.1`, declared by the response-only
+The reporter contract is `harness-session/2.4`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -1816,3 +2054,76 @@ This is the canonical inventory of server egress; there is no global switch that
 Separate processes have their own explicit destinations: `aeon-agentd` contacts its paired instance and selected model providers; user-run checksum installers and Homebrew fetch release/package assets; build/release/history tooling contacts the forge, registries and configured historical import sources. Those are not server startup workers. Classic migration readers remain historical CLI-only paths; they do not run in the server and Classic Paimos stays retired.
 
 `TestServeShutdownAndBootstrap` observes and denies outbound HTTP/DNS while exercising startup and running handlers. On Linux amd64/arm64, `TestDefaultServerHasNoOutboundNetwork` additionally runs the full server against a fixture database through a Unix socket with a process-wide seccomp filter: any Internet socket attempt traps, including DNS and custom transports. Connect/DNS negative controls must trap before the test accepts the server run. The test exercises startup and two seconds of running workers/requests; it does not claim to simulate every optional integration or arbitrary elapsed time.
+
+AEON-417 B adds an external **shadow authority** in `scripts/ci-authority` and a
+disposable Linux guest init in `scripts/ci-executor`. Install reviewed binaries
+outside all candidate workspaces; do not run this controller from a PR checkout.
+The authority authenticates the original webhook body with HMAC-SHA256, reads
+the numeric repository identity and current main/PR/queue state from GitHub,
+and reconstructs the complete plan from its dedicated bare mirror. PR plans
+bind the source head and the API-resolved merge commit separately. Queue plans
+enumerate every constituent through Git parents and recheck the active queue
+ref. Checks are revalidated after reconciliation. Its output includes each
+existing required context, every extra inventory context, and `ci/trusted`, all
+with **pending** status. There is no check writer or activation flag.
+
+`ci-authority shadow --config /absolute/controller/config.json --event
+pull_request --delivery <delivery-id> --signature <X-Hub-Signature-256> --webhook
+/absolute/controller/event.json --generation <positive-generation>` reads only
+Git objects and GitHub API state. Configuration has schema
+`aeon.ci.authority-config.v1`, `mirror`, a `git` object with absolute `path` and
+raw SHA-256 `digest`, and `authority`
+containing `repository_id`, `repository`, the reviewed `policy` pin,
+`environment_digest`, and `verifier_app_id` (zero until provisioned). Supply
+`AEON_CI_WEBHOOK_SECRET` and a read-only `AEON_CI_READ_TOKEN` to the controller
+process through approved credential storage; neither is forwarded to execution
+or output. The installed authority requires a separate Linux host and verifies
+root ownership, non-writable parents and Git bytes before opening its mirror.
+Mirror refresh is a separate trusted ingress responsibility. The
+current replay/generation guard lasts for one controller process; production
+needs durable serialized ingress before any authority activation.
+
+`observe` additionally needs a `profile`, `admission_public_key`, signed
+`--admission`, `--obligation`, `--run-id`, and `--job-id`. The profile fixes each
+obligation's absolute `/opt/aeon/` command, stage, reporter and expected manifest,
+plus raw SHA-256 pins for QEMU, firmware, kernel, initrd and a read-only ext4 root
+image. It also binds harness/toolchain/environment digests, security epoch,
+separate QEMU UID/GID, CPU/memory limits and timeout. The supervisor deep-copies
+these settings and requires `infrastructure: hosted-disposable`; the provider
+must independently attest that placement. This backend supports Linux/amd64
+only and never routes candidates to the trusted main pool or production hosts.
+Each metadata/build/test stage boots a new Linux/KVM VM with
+read-only framed task/source disks, no network, no host mount and no monitor or
+control socket. The root guest init uses a read-only, `nosuid` executor image and
+an unprivileged candidate process in private tmpfs storage with a fixed offline
+environment. Source export reads every verified Git blob directly, ignores
+candidate export attributes, and refuses symlinks/submodules and unsafe paths.
+Only bounded content-addressed opaque artifacts can cross the result interface.
+Candidate stdout is never interpreted as a host receipt or GitHub check.
+
+Admission is independently Ed25519-signed over the plan, exact candidate commit,
+complete tree-manifest digest, policy, executor, approved harness, environment,
+epoch, review target/record and a maximum 24-hour validity window. This admits
+the complete executable closure, including package initializers, JS helpers,
+dependency/config and lifecycle code. It cannot establish honest assertions in
+unreviewed code. Supervisor observations have an in-process private seal;
+serializing one loses that provenance. Trusted ingress can revoke an admission;
+expiry and revocation are rechecked after execution and during reconciliation.
+Durable signatures/revocation, source
+run/job verification, full receipts and reuse remain E's responsibility. Partial
+reruns are refused. The browser/application VM connection and approved browser
+reporter remain D/H work and currently fail closed.
+
+This is an unactivated implementation: independently reviewed VM images,
+Linux/KVM hosted provisioning and a real boot/tamper probe remain required.
+The tests cover protocol, admission and supervisor ownership, including attack
+classes from all five AEON-421 reviews; they do not certify a live VM boundary.
+App provisioning, expected-App per-context ruleset probes, durable ingress and
+review revocation are later coordinator/OPS steps. No workflow, runner route,
+required check, version or execution selection changes here. Keep full existing
+CI and both optimization switches off until those prerequisites are proven.
+Build the guest init with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`; the approved
+kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
+rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
+tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
+this worker, and missing images, recipes or admission refuse execution.
