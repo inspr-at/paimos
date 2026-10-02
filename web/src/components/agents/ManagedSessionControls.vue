@@ -207,29 +207,34 @@ async function sendRequest() {
           <button type="button" class="icon-btn flat" aria-label="Close" @click="closeSheet"><AppIcon name="close" :size="15" /></button>
         </header>
         <div class="sheet-body">
-          <form v-if="confirmStop" class="sheet-form" @submit.prevent="submit('stop')">
+          <form v-if="confirmStop" :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit('stop')">
             <p class="sheet-lead">End this session?</p>
-            <div class="sheet-actions"><button type="submit" class="btn" :disabled="!!unavailable || waiting">Confirm stop</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
-          <form v-else-if="editing" class="sheet-form" @submit.prevent="submit(editing)">
+          <form v-else-if="editing" :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit(editing)">
             <input v-if="editing === 'rename'" :id="`${uid}-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" :aria-label="settingNames[editing]" />
             <select v-else :id="`${uid}-setting`" v-model="settingValue" :aria-label="settingNames[editing]" :disabled="waiting || loadingSettings || !settingChoices.length">
               <option value="" disabled>Choose {{ settingNames[editing].toLowerCase() }}</option>
               <option v-for="value in settingChoices" :key="value" :value="value">{{ value }}</option>
             </select>
             <p v-if="editing !== 'rename' && !loadingSettings && !settingChoices.length" class="hint">No compatible choices in this account’s catalog.</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!validValue || waiting || loadingSettings || !!unavailable">Save {{ settingNames[editing].toLowerCase() }}</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
-          <form v-else class="sheet-form" @submit.prevent="submit('steer')">
+          <form v-else :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit('steer')">
             <label :for="`${uid}-steer`">What should change?</label>
             <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />
             <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
           <p v-if="sheetOpen && feedback" class="feedback" role="status">{{ feedback }}</p>
           <p v-if="sheetOpen && error" class="hint" role="alert">{{ error }}</p>
-          <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
         </div>
+        <footer class="pinned-actions">
+          <div class="sheet-recovery-slot">
+            <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
+          </div>
+          <div class="sheet-actions">
+            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !confirmStop && !canSteer)">{{ confirmStop ? 'Confirm stop' : editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button>
+            <button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button>
+          </div>
+        </footer>
       </div>
     </dialog>
   </section>
@@ -267,12 +272,12 @@ summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}
 .sheet-head .icon-btn{width:44px;height:44px}
-.sheet-body{position:relative;flex:1;min-height:0;overflow:hidden;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet-body{position:relative;flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
 .sheet-lead{margin:0;font-size:14px}
 .sheet-actions{display:flex;gap:8px}
-.sheet-form{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
-.sheet-form > .sheet-actions{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));left:16px;right:16px}
-.sheet-form{padding-bottom:60px}
+.sheet-form{flex:none;min-height:0;display:flex;flex-direction:column}
+.sheet-recovery-slot{height:44px;overflow:auto}
+.pinned-actions{display:flex;flex-direction:column;gap:8px;flex:none;padding:12px 16px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
 .sheet-actions .btn{flex:1;min-height:44px}
 @media(max-width:720px){
   .managed-controls{gap:8px;padding-top:8px}

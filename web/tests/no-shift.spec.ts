@@ -142,7 +142,26 @@ for (const width of [1440, 1024, 390]) {
   })
 }
 
-test('stability guard allows nested scrolling but detects movement, resizing and overflow', async ({ page }) => {
+test('phone steer feedback and retry never move the pinned action bar', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const data = await setup(page)
+  Object.assign(data.sessions[0]!, { advertised_capabilities: ['status', 'steer', 'stop', 'managed_control_v1'], process_ownership: { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: new Date().toISOString() }, process_observed_at: new Date().toISOString() })
+  await page.route('**/api/projects/*/harness-sessions/*/managed-controls', route => route.abort('failed'))
+  await page.goto(`/agents/${session(1)}`)
+  await page.getByRole('region', { name: 'Session controls' }).getByRole('button', { name: 'Steer', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Steer', exact: true })
+  const send = sheet.getByRole('button', { name: 'Send steer' })
+  await expectStableControls({
+    controls: { sheet, send, cancel: sheet.getByRole('button', { name: 'Cancel' }), footer: sheet.locator('.pinned-actions'), draft: sheet.getByLabel('What should change?') },
+    scrollAreas: { body: sheet.locator('.sheet-body') },
+    interactions: [
+      { name: 'long draft', run: () => sheet.getByLabel('What should change?').fill('Keep the footer still. '.repeat(200)) },
+      { name: 'lost response and retry controls', run: async () => { await send.click(); await expect(sheet.getByRole('alert')).toBeVisible(); await expect(sheet.getByRole('button', { name: 'Retry same request' })).toBeVisible() } },
+    ],
+  })
+})
+
+test('stability guard allows scrolling but detects movement, resizing and overflow', async ({ page }) => {
   await page.setContent('<div id="scroll" style="height:120px;width:200px;overflow:auto"><div style="height:600px"><button id="control" style="margin-top:60px">Choose</button></div></div>')
   const controls = { choose: page.locator('#control') }, scrollAreas = { body: page.locator('#scroll') }
   await expectStableControls({ controls, scrollAreas, interactions: [{ name: 'scroll', run: () => page.locator('#scroll').evaluate(el => { el.scrollTop = 30 }) }] })
