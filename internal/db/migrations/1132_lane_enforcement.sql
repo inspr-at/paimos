@@ -70,9 +70,11 @@ END $$;
 -- This narrow aggregate sees tenant-wide slots, including other projects, but
 -- exposes no identifiers or content. Function-local GUC is restored on return.
 CREATE FUNCTION aeon_lane_working_slots(owner_id uuid, exclude_run uuid)
-RETURNS TABLE(area text,harness text) LANGUAGE sql
-SET aeon.visible_projects='*' AS $$
- WITH occupied AS (
+RETURNS TABLE(area text,harness text) LANGUAGE plpgsql AS $$
+DECLARE prior text := current_setting('aeon.visible_projects',true);
+BEGIN
+ PERFORM set_config('aeon.visible_projects','*',true);
+ RETURN QUERY WITH occupied AS (
   SELECT r.id,coalesce(ticket.fields->>'area','') AS area,coalesce(m.harness,'') AS harness
   FROM agent_runs r JOIN work_orders w ON w.tenant_id=r.tenant_id AND w.node_id=r.work_order_id
   JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
@@ -95,8 +97,12 @@ SET aeon.visible_projects='*' AS $$
    -- A managed process is counted by its run/grant, even during a stale session
    -- heartbeat. A confirmed finished process waiting for a person takes no slot.
    AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.id=s.run_id)
- ) SELECT area,harness FROM occupied UNION ALL SELECT area,harness FROM sessions LIMIT 13
-$$;
+ ) SELECT o.area,o.harness FROM occupied o UNION ALL SELECT s.area,s.harness FROM sessions s LIMIT 13;
+ PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
+EXCEPTION WHEN OTHERS THEN
+ PERFORM set_config('aeon.visible_projects',coalesce(prior,''),true);
+ RAISE;
+END $$;
 
 CREATE FUNCTION aeon_lane_run_binding_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

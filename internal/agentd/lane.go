@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/lanecontrol"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 )
 
 // LaneRepository is a local, operator-approved mapping. Neither a ticket nor
@@ -92,8 +92,8 @@ func (s *Supervisor) laneWorkspace(ctx context.Context, run Run, adapter Adapter
 
 // grantDeadline starts from the monotonic instant BEFORE the claim request.
 // Network latency, setup, replay and wall-clock corrections cannot add time.
-func grantDeadline(g *lanecontrol.Grant, run Run, daemon, generation, workspace string, sent time.Time) (time.Time, error) {
-	if g == nil || g.EnvelopeID != run.LaneEnvelopeID || g.RunID != run.ID || g.ProjectID != run.LaneProjectID || g.WorkspaceID != workspace || g.DaemonID != daemon || g.Generation != generation || g.RemainingMS <= g.StopAllowanceMS || g.RemainingMS > 36_000_000_000 || g.StopAllowanceMS != lanecontrol.StopAllowanceMS || g.ExpiresAt.IsZero() {
+func grantDeadline(g *laneprotocol.Grant, run Run, daemon, generation, workspace string, sent time.Time) (time.Time, error) {
+	if g == nil || g.EnvelopeID != run.LaneEnvelopeID || g.RunID != run.ID || g.ProjectID != run.LaneProjectID || g.WorkspaceID != workspace || g.DaemonID != daemon || g.Generation != generation || g.RemainingMS <= g.StopAllowanceMS || g.RemainingMS > 36_000_000_000 || g.StopAllowanceMS != laneprotocol.StopAllowanceMS || g.ExpiresAt.IsZero() {
 		return time.Time{}, errors.New("invalid claim-bound lane grant")
 	}
 	return sent.Add(time.Duration(g.RemainingMS-g.StopAllowanceMS) * time.Millisecond), nil

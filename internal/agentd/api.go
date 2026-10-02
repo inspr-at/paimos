@@ -20,7 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
-	"github.com/inspr-at/paimos/internal/lanecontrol"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -382,7 +382,7 @@ func (r *Remote) ClaimLane(ctx context.Context, runID, daemonID, generation stri
 	var run Run
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
-		"lane_capability": lanecontrol.Capability, "lane_workspace_id": workspaceID,
+		"lane_capability": laneprotocol.Capability, "lane_workspace_id": workspaceID,
 	}, &run, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return run, err
 }

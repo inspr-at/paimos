@@ -5,7 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
-	"github.com/inspr-at/paimos/internal/lanecontrol"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 )
 
 const (
@@ -66,7 +66,7 @@ func (s *Supervisor) finishUnlaunched(ctx context.Context, entry *owned) error {
 	entry.mu.Unlock()
 	t := Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"}
 	if entry.record.LaneEnvelopeID != "" {
-		t.LaneSettlement = &lanecontrol.Settlement{ExitConfirmed: true}
+		t.LaneSettlement = &laneprotocol.Settlement{ExitConfirmed: true}
 	}
 	return s.update(ctx, entry, t)
 }

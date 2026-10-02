@@ -9,31 +9,20 @@ package lanecontrol
 import (
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"math"
 	"strconv"
 	"time"
 	_ "time/tzdata"
 )
 
-const Capability = "lane-execution-v1"
-const StopAllowanceMS int64 = 2000
+const Capability = laneprotocol.Capability
+const StopAllowanceMS = laneprotocol.StopAllowanceMS
 const maxBudgetMS int64 = 36_000_000_000
 
-type Grant struct {
-	EnvelopeID      string    `json:"envelope_id"`
-	RunID           string    `json:"run_id"`
-	ProjectID       string    `json:"project_id"`
-	WorkspaceID     string    `json:"workspace_id"`
-	DaemonID        string    `json:"daemon_id"`
-	Generation      string    `json:"daemon_generation"`
-	RemainingMS     int64     `json:"remaining_ms"`
-	StopAllowanceMS int64     `json:"stop_allowance_ms"`
-	ExpiresAt       time.Time `json:"expires_at"`
-}
-type Settlement struct {
-	ElapsedMS     int64 `json:"elapsed_ms"`
-	ExitConfirmed bool  `json:"exit_confirmed"`
-}
+type Grant = laneprotocol.Grant
+type Settlement = laneprotocol.Settlement
+
 type window struct {
 	Timezone string `json:"timezone"`
 	Days     []int  `json:"days"`

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/lanecontrol"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 )
 
 const laneProject = "00000000-0000-4000-8000-000000000001"
@@ -20,7 +20,7 @@ const laneRunB = "00000000-0000-4000-8000-000000000004"
 
 type laneTestAPI struct {
 	*fakeAPI
-	grant *lanecontrol.Grant
+	grant *laneprotocol.Grant
 }
 
 func (a *laneTestAPI) ClaimLane(_ context.Context, id, daemon, generation string, _ []string, workspace string) (Run, error) {
@@ -29,7 +29,7 @@ func (a *laneTestAPI) ClaimLane(_ context.Context, id, daemon, generation string
 	a.claims++
 	run := a.run
 	run.Status = "starting"
-	run.LaneGrant = &lanecontrol.Grant{EnvelopeID: laneEnvelope, RunID: id, ProjectID: laneProject, WorkspaceID: workspace, DaemonID: daemon, Generation: generation, RemainingMS: 60000, StopAllowanceMS: 2000, ExpiresAt: time.Now().Add(time.Minute)}
+	run.LaneGrant = &laneprotocol.Grant{EnvelopeID: laneEnvelope, RunID: id, ProjectID: laneProject, WorkspaceID: workspace, DaemonID: daemon, Generation: generation, RemainingMS: 60000, StopAllowanceMS: 2000, ExpiresAt: time.Now().Add(time.Minute)}
 	if a.grant != nil {
 		run.LaneGrant = a.grant
 	}
@@ -161,7 +161,7 @@ func TestLaneUnsupportedAdapterRefusesBeforeRouting(t *testing.T) {
 func TestLaneDeadlineUsesRequestClockAndRemainingGrant(t *testing.T) {
 	run := Run{ID: laneRunA, LaneEnvelopeID: laneEnvelope, LaneProjectID: laneProject}
 	sent := time.Now()
-	g := &lanecontrol.Grant{EnvelopeID: laneEnvelope, RunID: laneRunA, ProjectID: laneProject, WorkspaceID: laneRunA, DaemonID: "d", Generation: "g", RemainingMS: 12000, StopAllowanceMS: 2000, ExpiresAt: time.Now().Add(24 * time.Hour)}
+	g := &laneprotocol.Grant{EnvelopeID: laneEnvelope, RunID: laneRunA, ProjectID: laneProject, WorkspaceID: laneRunA, DaemonID: "d", Generation: "g", RemainingMS: 12000, StopAllowanceMS: 2000, ExpiresAt: time.Now().Add(24 * time.Hour)}
 	deadline, err := grantDeadline(g, run, "d", "g", laneRunA, sent)
 	if err != nil || !deadline.Equal(sent.Add(10*time.Second)) {
 		t.Fatalf("deadline %v %v", deadline, err)

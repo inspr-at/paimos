@@ -23,7 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/lanecontrol"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -1459,10 +1459,10 @@ func (s *Supervisor) monitor(entry *owned) {
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
 	automaticReview := entry.record.AutomaticReview
 	workspace := entry.record.Workspace
-	var laneSettlement *lanecontrol.Settlement
+	var laneSettlement *laneprotocol.Settlement
 	if entry.record.LaneEnvelopeID != "" && !entry.processStarted.IsZero() {
 		elapsed := processExitedAt.Sub(entry.processStarted)
-		laneSettlement = &lanecontrol.Settlement{ElapsedMS: int64((elapsed + time.Millisecond - 1) / time.Millisecond), ExitConfirmed: entry.record.ExitObserved}
+		laneSettlement = &laneprotocol.Settlement{ElapsedMS: int64((elapsed + time.Millisecond - 1) / time.Millisecond), ExitConfirmed: entry.record.ExitObserved}
 	}
 	entry.mu.Unlock()
 	s.flushCapacity(ctx, entry)
