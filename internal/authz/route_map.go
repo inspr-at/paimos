@@ -38,6 +38,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/questions/{questionId}/status":       "questions.read",
 	"POST /api/questions/{questionId}/decision":    "questions.decide",
 	"GET /api/decision-desk":                       "questions.read",
+	"GET /api/decision-desk/projection":            "profile.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",

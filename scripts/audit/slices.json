@@ -149,6 +149,7 @@
         "internal/intake/**",
         "internal/requirements/**",
         "internal/questions/**",
+        "internal/decisiondesk/**",
         "internal/outcomes/**",
         "internal/relations/**",
         "internal/projectgroups/**",

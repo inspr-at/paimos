@@ -232,6 +232,30 @@ paths:
       responses:
         '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /decision-desk/projection:
+    get:
+      operationId: decisionDeskProjection
+      security: [{session: []}]
+      description: >-
+        Person-only canonical open desk pointers and exact counts, reauthorized per source and project.
+        Held approvals sort by expiry, then other held items by creation time, then other items by creation time;
+        stable source ID breaks ties. Merged askers count once and a question replaces its linked held request.
+        Answered questions (including grace/corrections), decided/expired approvals and resolved requests are excluded.
+        A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
+        Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
+        Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
+        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
+        The existing question-only decision-desk endpoint remains available.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200': {description: Canonically ordered visible sources, content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskProjection'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/Error'}
   /queue:
     get:
       operationId: listWorkQueue
@@ -6536,7 +6560,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6546,6 +6570,7 @@ paths:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
@@ -8987,6 +9012,35 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Question'}}
         has_more: {type: boolean}
+    DecisionDeskItem:
+      type: object
+      required: [id, kind, revision, title, created_at, held, href, source]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [question, approval, action_request, doctrine]}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        title: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        held: {type: boolean}
+        href: {type: string, description: App review link to the exact source}
+        source: {type: string, description: Authorized app route or API link to the exact source}
+    DecisionDeskProjection:
+      type: object
+      required: [items, counts, has_more, as_of]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskItem'}}
+        counts:
+          type: object
+          required: [open, held, chores]
+          properties:
+            open: {type: integer, minimum: 0}
+            held: {type: integer, minimum: 0}
+            chores: {type: integer, minimum: 0}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+        as_of: {type: string, format: date-time}
     RecurrenceTrigger:
       type: object
       additionalProperties: false

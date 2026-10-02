@@ -45,6 +45,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -378,6 +379,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
 			questions.New(pool),
+			decisiondesk.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
 			pairingMod,

@@ -26,10 +26,10 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean } = {}) {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}, setupPrelude = '') {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
-  const can = (permission: string, project?: string) => permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed')
+  const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
   const dashboard = usageDashboard('reported')
   dashboard.totals.cost_state = 'known'
@@ -42,9 +42,9 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
     }
     if (path.startsWith('/approvals')) {
       if (options.pendingFailure) throw new APIError(500, 'failed')
-      return options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ ...pending, id: `approval-${i}` })) : []
+      return options.fullQueue || options.noDecide ? Array.from({ length: options.fullQueue ? 200 : 1 }, (_, i) => ({ ...pending, id: `approval-${i}` })) : []
     }
-    if (path.includes('/messages')) return { items: options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, is_action_request: true, human_resolution_outcome: null, body: 'A check' })) : [] }
+    if (path.includes('/messages')) return { items: options.humanRequest && path.includes('/allowed/') ? [{ id: 'held', is_action_request: true, human_resolution_outcome: null, body: 'Check the merge result' }] : options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, is_action_request: true, human_resolution_outcome: null, body: 'A check' })) : [] }
     if (path.includes('/journey')) {
       const next_action = { key: options.action ?? 'wait_for_build', label: options.action ?? 'Wait', available: true }
       return path.startsWith('/journey/next-actions') ? { items: projects.map(p => ({ project_node_id: p.id, next_action })) } : { next_action }
@@ -80,11 +80,17 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
         ] : [], truncated: false } }
       },
     },
+    '../lib/decisionDesk': { readDeskProjection: async () => {
+      paths.push('/decision-desk/projection?limit=100')
+      if (options.pendingFailure) throw new APIError(500, 'failed')
+      const items = options.noDecide ? [{ id: 'cannot-decide', kind: 'approval', title: 'Change tickets', held: true, href: '/agents?needs=a:cannot-decide', source: '/agents?needs=a:cannot-decide' }] : options.fullQueue ? [{ id: 'question', kind: 'question', title: 'Ordinary question', held: false, href: '/agents?needs=q:question', source: '/api/questions/question' }] : []
+      return { items, counts: { open: options.fullQueue ? 401 : 0, held: 0, chores: 0 }, truncated: !!options.fullQueue }
+    } },
     '../components/AppIcon.vue': { __esModule: true, default: { render: () => Vue.h('svg', { 'aria-hidden': 'true' }) } },
     '../components/work/PlanningCell.vue': { __esModule: true, default: { render: () => Vue.h('span') } },
   }
   const source = readFileSync(new URL('../src/views/MorningBriefingView.vue', import.meta.url), 'utf8')
-  const { descriptor } = parse(source)
+  const { descriptor } = parse(source.replace('<script setup lang="ts">', `<script setup lang="ts">\n${setupPrelude}`))
   const { content } = compileScript(descriptor, { id: 'briefing-test', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: Vue.Component } = {}
@@ -157,4 +163,35 @@ it('renders measured in visible cost text for screen readers', async () => {
 
 it('keeps a pending-only detail failure separate from completed logs', async () => {
   expect((await mount({ fullQueue: true, detailsFailure: true })).saves).toHaveLength(1)
+})
+
+it('keeps unsupported questions out of the briefing until the desk cutover', async () => {
+  const { root, paths } = await mount({ fullQueue: true })
+  expect(textOf(root)).toContain('Needs you now')
+  expect(textOf(root)).toContain('Change tickets')
+  expect(textOf(root)).toContain('Review me')
+  expect(textOf(root)).not.toContain('Ordinary question')
+  expect(paths.some(path => path.startsWith('/decision-desk/projection'))).toBe(false)
+  expect(flatten(root).some(el => el.tag === 'a' && String(el.props.href).includes('/api/questions/'))).toBe(false)
+})
+it('never recommends a readable approval the person cannot decide', async () => {
+  const { root } = await mount({ noDecide: true })
+  expect(textOf(root)).not.toContain('Review me')
+  expect(textOf(root)).not.toContain('Change tickets')
+  expect(flatten(root).some(el => el.props['aria-label'] === 'Recommended next step')).toBe(false)
+})
+it('preserves held request body, project label and an app Source link', async () => {
+  const { root } = await mount({ humanRequest: true })
+  expect(textOf(root)).toContain('Human check · allowed')
+  expect(textOf(root)).toContain('Check the merge result')
+  const sources = flatten(root).filter(el => el.tag === 'a' && textOf(el) === 'Source')
+  expect(sources.length).toBeGreaterThan(0)
+  expect(sources.every(el => String(el.props.href).startsWith('/agents?needs='))).toBe(true)
+})
+
+// Positive control: the no-projection assertion must observe the export a view
+// would actually call, rather than passing because its mock uses another name.
+it('records calls to the real desk reader export in the briefing harness', async () => {
+  const { paths } = await mount({}, "import { readDeskProjection } from '../lib/decisionDesk'\nvoid readDeskProjection(100)\n")
+  expect(paths.filter(path => path.startsWith('/decision-desk/projection'))).toEqual(['/decision-desk/projection?limit=100'])
 })

@@ -747,6 +747,56 @@ func TestPairingClaimDisconnectRaceAndVerificationExpiry(t *testing.T) {
 	}
 }
 
+// Disconnect releases queued reservations but retains launched-work accounting.
+// Both committed outcomes must report enrollment revocation on the next claim,
+// rather than let released holds hide the cleanup instruction behind a 409.
+func TestPairingRevokedClaimReportsEnrollmentBeforeReservations(t *testing.T) {
+	for _, claimedFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("claimed_first_%v", claimedFirst), func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			f.probe(v, e, key, 200)
+			ids := f.reserve(v, e, key, 200)
+			if claimedFirst {
+				f.claim(v, e, key, ids, 200)
+			}
+			f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/enrollments/"+e.AccountID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+			wantStatus, wantReservation, wantHeld := "cancelled", "released", int64(0)
+			if claimedFirst {
+				wantStatus, wantReservation, wantHeld = "starting", "active", 1
+			}
+			checkAccounting := func() {
+				t.Helper()
+				var status, reservation, enrollment string
+				var held int64
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,res.state,e.state,w.reserved
+ FROM agent_runs r JOIN agent_pairing_enrollments e ON e.verification_run_id=r.id
+ JOIN account_reservations res ON res.run_id=r.id
+ JOIN account_allowance_windows w ON w.id=res.window_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &reservation, &enrollment, &held); err != nil {
+					t.Fatal(err)
+				}
+				if status != wantStatus || reservation != wantReservation || enrollment != "revoked" || held != wantHeld {
+					t.Fatalf("disconnect accounting: run=%s reservation=%s enrollment=%s held=%d", status, reservation, enrollment, held)
+				}
+			}
+			checkAccounting()
+			w := f.call("POST", "/api/runs/"+*e.VerificationRunID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": ids}, false, key, 410)
+			var failure struct {
+				Error string `json:"error"`
+			}
+			decodeResult(t, w, &failure)
+			if failure.Error != "enrollment_revoked" {
+				t.Fatalf("claim lost enrollment cleanup reason: %s", failure.Error)
+			}
+			checkAccounting()
+		})
+	}
+}
+
 func TestPairingZeroUsageCannotRefillOrSubstituteAccount(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")
