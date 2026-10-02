@@ -2,6 +2,7 @@
 package releasehistory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -530,6 +531,44 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 		}
 		return bundle
 	}
+	rejectFailedImport := func(dir string, args ...string) {
+		t.Helper()
+		versionPath := filepath.Join(dir, "version.json")
+		original, err := os.ReadFile(versionPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundlePath := filepath.Join(dir, ProductNotesPath)
+		frozen, err := os.ReadFile(bundlePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []string{StateReserved, StateWithdrawn} {
+			var policy map[string]any
+			if err := json.Unmarshal(original, &policy); err != nil {
+				t.Fatal(err)
+			}
+			if state == StateWithdrawn {
+				policy["withdrawn_releases"] = []Withdrawal{{Version: notesVersion, Digest: "sha256:" + strings.Repeat("a", 64), Ticket: "AEON-530", Reason: "failed publication"}}
+			} else {
+				policy["unpublished_reservations"] = []string{notesVersion}
+			}
+			raw, _ := json.Marshal(policy)
+			if err := os.WriteFile(versionPath, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := run(dir, args...); err == nil || !strings.Contains(string(out), "failed coordinate") {
+				t.Fatalf("%s capture accepted: %v %s", state, err, out)
+			}
+			got, err := os.ReadFile(bundlePath)
+			if err != nil || !bytes.Equal(got, frozen) {
+				t.Fatal("rejected import changed existing captures", err)
+			}
+		}
+		if err := os.WriteFile(versionPath, original, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := repo(t)
 	s := noteFixture()
 	s.Frozen = true
@@ -563,6 +602,7 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 	if snapped.Releases[notesVersion].Items[0].Group != GroupFixes || snapped.Releases[plain.Version].Items[0].Key != "AEON-9" || snapped.Releases[plain.Version].Items[0].Group != "" {
 		t.Fatalf("snapshots %+v", snapped.Releases)
 	}
+	rejectFailedImport(dir, "-snapshots", snapDir, "-tenant", s.TenantID, "-project", s.ProjectID)
 
 	dir = repo(t)
 	s = noteFixture()
@@ -621,4 +661,5 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 	if len(exported.Releases[notesVersion].Items) != 1 || exported.Releases[notesVersion].Items[0].Group != GroupFixes || exported.Releases[notesVersion].Items[0].PillEN != "Clear release notes" {
 		t.Fatalf("history bundle %+v", exported.Releases[notesVersion])
 	}
+	rejectFailedImport(dir, "-history", historyPath, "-tenant", s.TenantID, "-project", s.ProjectID)
 }

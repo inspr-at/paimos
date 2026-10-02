@@ -76,6 +76,12 @@ func runWithArgs(args []string) error {
 	if history.Product != bundle.Product {
 		return fmt.Errorf("this exporter is only for PAIMOS AEON")
 	}
+	failedVersions := map[string]bool{}
+	for _, rel := range history.Releases {
+		if rel.State != releasehistory.StatePublished {
+			failedVersions[rel.Version] = true
+		}
+	}
 	// Tagged snapshots already have an immutable version binding. Import their
 	// public fields only; historical tags and the raw files remain untouched.
 	if err := bundle.AddHistory(history); err != nil {
@@ -135,11 +141,19 @@ func runWithArgs(args []string) error {
 		if err := releasehistory.HistoryBindingError(exported.TenantID, exported.ProjectID, *tenant, *project); err != nil {
 			return err
 		}
+		for _, rel := range exported.Releases {
+			if rel.State == releasehistory.StatePublished && failedVersions[rel.Version] {
+				return fmt.Errorf("history export cannot publish failed coordinate %s", rel.Version)
+			}
+		}
 		if err := bundle.AddHistory(exported.History); err != nil {
 			return err
 		}
 	}
 	add := func(path, version string, reserve bool) error {
+		if failedVersions[version] {
+			return fmt.Errorf("cannot capture failed coordinate %s", version)
+		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err

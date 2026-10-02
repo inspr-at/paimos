@@ -50,7 +50,7 @@ func TestProductNotesFallbackIsTenantScopedAndFrozen(t *testing.T) {
 	})
 	history := releasehistory.History{Product: "PAIMOS AEON", Repository: "inspr-at/aeon", Releases: []releasehistory.Release{}}
 	for _, v := range []string{version, emptyVersion} {
-		history.Releases = append(history.Releases, releasehistory.Release{Version: v, Notes: &releasehistory.Notes{Source: releasehistory.ProductNotesSource, Items: []releasehistory.NoteItem{}, PublicItems: []releasehistory.TicketNote{{Key: "AEON-7", Group: releasehistory.GroupFeatures, PillEN: "Portable release notes", BenefitEN: "Public product benefit."}}}})
+		history.Releases = append(history.Releases, releasehistory.Release{Version: v, State: releasehistory.StatePublished, Notes: &releasehistory.Notes{Source: releasehistory.ProductNotesSource, Items: []releasehistory.NoteItem{}, PublicItems: []releasehistory.TicketNote{{Key: "AEON-7", Group: releasehistory.GroupFeatures, PillEN: "Portable release notes", BenefitEN: "Public product benefit."}}}})
 	}
 	mod := releasehistory.NewWith(history, version).WithBackfills(f.db.App, "AEON")
 	mod.UseTickets(func(context.Context, string, []string) (map[string]releasehistory.TicketMeta, error) {
