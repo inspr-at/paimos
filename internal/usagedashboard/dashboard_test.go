@@ -634,3 +634,25 @@ func TestFix2AllowanceOwnerSharingBoundary(t *testing.T) {
 	})
 	check(w.admin, false)
 }
+
+func TestAllowanceTruncationAndPartialPrivacyAreExplicit(t *testing.T) {
+	w := newWorld(t)
+	account, _ := w.allowanceWindow(t, "bounded", "Visible", 10, 0, 0)
+	private, _ := w.allowanceWindow(t, "private", "Private", 917, 0, 0)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=false WHERE id=$1`, private)
+		return err
+	})
+	code, page, body := w.get(t, w.admin, "/api/usage/dashboard")
+	if code != 200 || page.Allowance.State != "partial" || len(page.Allowance.Windows) != 1 || page.Allowance.Truncated || strings.Contains(body, `"allowance":917`) {
+		t.Fatalf("partial privacy: %d %s", code, body)
+	}
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,burst_ratio) SELECT $1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',10,'unrestricted',0 FROM generate_series(1,1025)`, w.home.TenantID, account)
+		return err
+	})
+	code, page, body = w.get(t, w.home, "/api/usage/dashboard")
+	if code != 200 || !page.Allowance.Truncated || page.Allowance.State != "partial" || len(page.Allowance.Windows) != 1024 {
+		t.Fatalf("bounded allowance: status=%d state=%s truncated=%v count=%d body=%s", code, page.Allowance.State, page.Allowance.Truncated, len(page.Allowance.Windows), body)
+	}
+}

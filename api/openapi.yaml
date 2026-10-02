@@ -14126,7 +14126,7 @@ components:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}
         priority: {type: integer, minimum: 1}
         profile_id: {type: string, format: uuid}
-        state: {type: string, enum: [available, conserved, budget_limited]}
+        state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
         reason: {type: string}
         valid_until: {type: [string, 'null'], format: date-time}
     ModelResolution:

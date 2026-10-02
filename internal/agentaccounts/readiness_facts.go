@@ -111,7 +111,7 @@ func (v ReadinessFactWrite) validate(now time.Time) error {
 
 // ReadinessResources is bounded and includes only the current binding.
 func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessResource, error) {
-	rows, err := tx.Query(ctx, `SELECT r.id::text,r.kind,m.binding_revision FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 ORDER BY r.id LIMIT 17`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.kind,m.binding_revision FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (r.identity_kind<>'person_confirmed' OR r.identity_key=encode(sha256(convert_to('quota:'||$3||':'||$4,'UTF8')),'hex')) ORDER BY r.id LIMIT 17`, a.ID, a.LinkRevision, a.Harness, a.QuotaPoolFingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessR
 }
 
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id JOIN agent_accounts member ON member.tenant_id=m.tenant_id AND member.id=m.account_id JOIN account_readiness_resources resource ON resource.tenant_id=m.tenant_id AND resource.id=m.resource_id WHERE m.account_id IN (`+quotaAccounts+`) AND m.binding_revision=member.link_revision AND (resource.identity_kind<>'person_confirmed' OR resource.identity_key=encode(sha256(convert_to('quota:'||member.harness||':'||COALESCE(member.quota_pool_fingerprint,''),'UTF8')),'hex')) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +158,12 @@ func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 // only be cleared by package B's evidenced successful recovery inference. An
 // ordinary check, null-cap response or unrelated bucket cannot clear it.
 func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFactWrite, now time.Time) error {
+	if v.StopKind == "money_402" && a.Harness == "pi" && a.Provider == "openrouter" {
+		if err := tx.QueryRow(ctx, `SELECT r.id::text FROM account_readiness_resources r JOIN account_readiness_memberships m ON m.tenant_id=r.tenant_id AND m.resource_id=r.id WHERE m.account_id=$1 AND m.binding_revision=$2 AND r.kind='shared_balance' AND r.identity_kind='unresolved' ORDER BY r.id LIMIT 1`, a.ID, a.LinkRevision).Scan(&v.ResourceID); err != nil {
+			return err
+		}
+	}
+
 	if v.StopKind == "" {
 		v.StopKind = "none"
 	}

@@ -379,7 +379,7 @@ func workDays(s capacity.Schedule) int {
 	return n
 }
 
-func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
+func TestCapacityEnforcesSchedulesSnapshotsAndResourceStops(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "enforced-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
@@ -450,27 +450,35 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	route(409)
 	short.ReadAt = now.Add(200 * time.Millisecond)
 	report(short)
-	run = route(200)
-	release(run) // Missing weekly bucket no longer constrains this source.
+	route(409) // A missing weekly bucket cannot erase its full reading.
 	if n := scalar(t, admin, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_retired`, a.ID); n != 1 {
 		t.Fatal("missing bucket not retired", n)
 	}
-	// Out-of-order history cannot resurrect a missing bucket.
+	// Out-of-order history cannot clear the still-full bucket.
 	weekly.ReadAt = now.Add(150 * time.Millisecond)
+	report(weekly)
+	route(409)
+	weekly.ReadAt = now.Add(250 * time.Millisecond)
+	weekly.UsedPercent = 10
 	report(weekly)
 	run = route(200)
 	release(run)
 	// Retire the short window and introduce an older observation from a different source.
-	// Its first refresh job is bounded to one reservation even with 3 parallel slots.
+	// Stale room creates no quota fence; only the actual three slots bind.
 	stale := short
 	stale.Source = "agentd"
 	stale.ReadAt = now.Add(-20 * time.Minute)
 	stale.Bucket = "refresh"
 	report(stale)
 	run = route(200)
+	other := route(200)
+	third := route(200)
 	route(409)
 	release(run)
-	route(409)
+	release(other)
+	release(third)
+	run = route(200)
+	release(run)
 	stale.ReadAt = now.Add(300 * time.Millisecond)
 	report(stale)
 	run = route(200)
@@ -563,7 +571,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("America/New_York", "")
 }
 
-func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
+func TestExpiredCapacityHasNoStartFence(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "expired-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -593,7 +601,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	}
 	second := insertRun(t, person, runner, profile)
 	body := encoded(t, map[string]any{"run_id": second, "daemon_id": "daemon-a", "account_ids": []string{a.ID}, "estimated_units": map[string]int64{"requests": 1}})
-	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 409, nil)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 200, nil)
 	reading.ReadAt = now
 	reading.ResetsAt = now.Add(time.Hour)
 	reading.UsedPercent = 1

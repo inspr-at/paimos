@@ -4,7 +4,8 @@ package agentaccounts
 import (
 	"context"
 	"fmt"
-	"sync"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func bResource(t *testing.T, f limitFixture) string {
@@ -69,8 +71,7 @@ func TestBUnknownUsageEveryHarnessHasOnlyRealSlots(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = tx.Exec(t.Context(), `UPDATE model_profiles SET harness=$2 WHERE id=$1`, f.profile, harness)
-				return err
+				return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$3,'openai','test','high','strong') RETURNING id::text`, f.admin.TenantID, "b-"+harness, harness).Scan(&f.profile)
 			})
 			// Test fixtures changing harness must seed the new canonical local kind.
 			f.account.Harness = harness
@@ -122,7 +123,7 @@ func TestBDurableRecoveryBackoffAndInferenceEvidence(t *testing.T) {
 			bAt(t, &f, now.Add(8*time.Hour), "g8")
 			run, _ := f.route(t, 200)
 			bFinish(t, f, run, now.Add(8*time.Hour), "completed", 7)
-			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND stop_kind='none' AND wait_id IS NULL AND next_attempt_at IS NULL AND backoff_step=0`, resource) != 1 {
+			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND stop_kind='none' AND wait_id IS NULL AND next_attempt_at IS NULL AND backoff_step=0`, resource) != 1 {
 				t.Fatal("evidenced inference did not reset the stop/backoff")
 			}
 			f.route(t, 200)
@@ -140,29 +141,40 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 		t.Fatal("owner check did not capture its wait")
 	}
 	runs := []string{insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile)}
-	// Both callers are ready before either transaction enters admission.
-	start, ready := make(chan struct{}), make(chan struct{}, 2)
+	// Pause the first transaction after it owns the tenant fence. The second
+	// must already be inside its transaction attempting that same fence before
+	// the first can continue; channels prove overlap without elapsed time.
+	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
+	config := appPool.Config()
+	config.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	racing := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
-	var wg sync.WaitGroup
-	for _, run := range runs {
-		wg.Add(1)
-		go func(run string) {
-			defer wg.Done()
-			ready <- struct{}{}
-			<-start
-			code, _ := call(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
-			statuses <- code
-		}(run)
-	}
-	<-ready
-	<-ready
-	close(start)
-	wg.Wait()
-	close(statuses)
+	go func() {
+		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[0], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		statuses <- code
+	}()
+	bBarrier(t, tracer.held)
+	go func() {
+		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[1], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		statuses <- code
+	}()
+	bBarrier(t, tracer.competing)
+	close(tracer.release)
 	counts := map[int]int{}
-	for code := range statuses {
-		counts[code]++
+	for i := 0; i < 2; i++ {
+		select {
+		case code := <-statuses:
+			counts[code]++
+		case <-time.After(20 * time.Second):
+			t.Fatal("recovery transactions hung")
+		}
 	}
+	close(statuses)
 	if counts[200] != 1 || counts[409] != 1 {
 		t.Fatalf("recovery race statuses: %v", counts)
 	}
@@ -172,7 +184,7 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 	bAt(t, &f, now.Add(time.Hour), "g2")
 	f.route(t, 409)
 	var held string
-	if err := adminPool.QueryRow(t.Context(), `SELECT recovery_run_id::text FROM account_readiness_facts WHERE resource_id=$1`, resource).Scan(&held); err != nil {
+	if err := adminPool.QueryRow(t.Context(), `SELECT recovery_run_id::text FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor'`, resource).Scan(&held); err != nil {
 		t.Fatal(err)
 	}
 	bFinish(t, f, held, now.Add(time.Hour), "completed", 2)
@@ -190,5 +202,77 @@ func TestBHardStopsAndStaleRoomRemainResourceSpecific(t *testing.T) {
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
 	f.route(t, 409)
 	f.report(t, 10, now, reset)
+	f.route(t, 200)
+}
+
+// bRaceTracer establishes a competing transaction at the real serialization
+// fence. The timeout is only a hang guard; no correctness claim uses duration.
+type bRaceTracer struct {
+	count                    atomic.Int32
+	held, competing, release chan struct{}
+}
+type bRaceKey struct{}
+
+func (b *bRaceTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(data.SQL, "SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE") {
+		n := b.count.Add(1)
+		if n == 2 {
+			<-b.held
+			close(b.competing)
+		}
+		return context.WithValue(ctx, bRaceKey{}, n)
+	}
+	return ctx
+}
+func (b *bRaceTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if n, ok := ctx.Value(bRaceKey{}).(int32); ok && n == 1 && data.Err == nil {
+		close(b.held)
+		<-b.release
+	}
+}
+func bBarrier(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(20 * time.Second):
+		t.Fatal("transaction barrier hung")
+	}
+}
+
+func TestBUnstartedRecoveryRestoresEarlyIntent(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-cancel", now)
+	resource := bStop(t, f, now, "unnamed")
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("early", 0), 202, nil)
+	run, _ := f.route(t, 200)
+	seed(t, f.admin, func(tx pgx.Tx) error { return Release(t.Context(), tx, f.runner, run, "", "") })
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND recovery_run_id IS NULL AND NOT early_recovery_used AND backoff_step=0 AND next_attempt_at=$2`, resource, now.Add(time.Hour)) != 1 {
+		t.Fatal("cancel advanced backoff or spent early intent")
+	}
+	f.route(t, 200)
+	f.route(t, 409)
+}
+
+func TestBStaleKeyCapPersistsAcrossNullChecks(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-cap", now)
+	resource := bResource(t, f)
+	zero, room := 0.0, 10.0
+	report := func(at time.Time, window string, left *float64) {
+		t.Helper()
+		bAt(t, &f, at, "g1")
+		fact := ReadinessFactWrite{ResourceID: resource, WindowKey: window, Source: "provider", ObservedAt: at, CreditState: "unknown", Remaining: left}
+		if left != nil {
+			fact.ReadingAt = &at
+		}
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}}), 200, nil)
+	}
+	report(now, "key_cap", &zero)
+	bAt(t, &f, now.Add(time.Hour), "g2")
+	f.route(t, 409)
+	report(now.Add(2*time.Hour), "key_cap", nil)
+	report(now.Add(2*time.Hour+time.Minute), "other", &room)
+	f.route(t, 409)
+	report(now.Add(2*time.Hour+2*time.Minute), "key_cap", &room)
 	f.route(t, 200)
 }

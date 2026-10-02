@@ -217,33 +217,20 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	if !models {
 		in.HardReasons = append(in.HardReasons, "models")
 	}
-	facts, err := loadReadinessFacts(ctx, tx, a, now)
+	facts, err := admissionFacts(ctx, tx, a, now)
 	if err != nil {
 		return AccountReadiness{}, err
 	}
+	in.Facts = facts
 	legacy, err := legacyReadinessFacts(ctx, tx, a, now)
 	if err != nil {
 		return AccountReadiness{}, err
 	}
-	in.Facts = append(facts, legacy...)
 	for _, fact := range in.Facts {
 		if fact.ReadingAt != nil && (in.CheckedAt == nil || fact.ReadingAt.After(*in.CheckedAt)) {
 			t := *fact.ReadingAt
 			in.CheckedAt = &t
 		}
-	}
-	if c := a.OpenRouterCredits; c != nil {
-		resource, err := localReadinessResource(ctx, tx, a)
-		if err != nil {
-			return AccountReadiness{}, err
-		}
-		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.Remaining, StopKind: "none"}}
-		if c.Remaining != nil && *c.Remaining == 0 {
-			f.CreditState = "exhausted"
-			f.StopKind = "unnamed"
-			f.DenialReason = "key_cap_exhausted"
-		}
-		in.Facts = append(in.Facts, f)
 	}
 	s, err := routingSchedule(ctx, tx, a)
 	if err != nil {
@@ -273,14 +260,6 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	if limit != nil && limit.Used >= float64(limit.Amount) {
 		in.HardReasons = append(in.HardReasons, "manual_limit")
 	}
-	// Reset-only run telemetry is a hard fact even without a usage reading.
-	var reset *time.Time
-	if err := tx.QueryRow(ctx, `SELECT max(t.limit_resets_at) FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit' AND t.limit_resets_at>$2`, a.ID, now).Scan(&reset); err != nil {
-		return AccountReadiness{}, err
-	}
-	if reset != nil {
-		in.HardReasons = append(in.HardReasons, "vendor_denied")
-	}
 	for _, v := range legacy {
 		if v.ReadingAt != nil && now.Sub(*v.ReadingAt) <= 10*time.Minute && v.ResetsAt != nil && now.Before(*v.ResetsAt) {
 			reading := *v.legacyReading
@@ -300,9 +279,6 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 		}
 	}
 	out := ProjectReadiness(in)
-	if reset != nil && (out.NextAttemptAt == nil || reset.After(*out.NextAttemptAt)) {
-		out.NextAttemptAt = reset
-	}
 	return out, nil
 }
 

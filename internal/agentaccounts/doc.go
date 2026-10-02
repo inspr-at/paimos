@@ -52,23 +52,17 @@
 // tenant-isolated and idempotent; optional run IDs must use that account.
 // Derived percent windows have allowance 100 and conservatively round used
 // percent upward for the integer reservation ledger. Fresh means <=10 minutes;
-// aging <=window/6, stale beyond, expired at reset. Aging/stale readings allow
-// one estimated 1% refresh job per observation, with no other live run. If all
-// windows reset, a provisional five-minute 1% grant permits that same single
-// refresh; expiry/release never renews it without a new measured observation. Vendor denials wait until the latest unexpired deadline across all denying buckets and unnamed stops (one hour each). Only after every wait expires may one recovery run per latest denial epoch and daemon generation read again; an expired named reset never masks a later unnamed stop. A fresh allowing reading, or a later run that finishes without vendor_limit, clears that denial on its own epoch. A later unnamed stop is a separate denial and keeps its own hour, including after a daemon restart. A recovery that clears the denial without a new reading leaves one more provisional reading run, and the capacity card stays unread until that run. A spent blind recovery grant waits for the next allowed run, or for the schedule when that is what blocks.
+// aging <=window/6, stale beyond, expired at reset. Stale room is unknown:
+// estimates and unknown windows never impose a start count or serial budget.
+// Every named denial retains its own deadline, independently of other buckets.
+// Unnamed stops use durable resource-scoped recovery waits across restarts.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
 // AEON-353 permits saving this approval after the person approves pairing,
 // before helper redemption; dispatch still requires redemption and a fresh probe.
-// Without prior readings Codex/Claude get one provisional first-reading run per
-// daemon generation. No parallel second run starts before a real reading. Blind
-// Grok/Cursor/Pi use blindDayPolicy: one at a time, three daily attempts during
-// the owner's work bands; nights/off days retain the normal parallel cap, and
-// runs that start outside those bands do not count toward the three. A
-// vendor_limit signal waits one hour, then one recovery run may try again.
-// That hour is a retry limit, not a guessed vendor window. Run now does not
-// skip the stop or the three-attempt cap. Night pacing stays off for blind
-// harnesses that have no reading.
+// Unknown usage follows the actual parallel cap and the person's schedule,
+// including permitted nights and off days. Run now skips schedule pacing,
+// while vendor waits, Hold and manual limits remain authoritative.
 // Catalog and queued runs expose structured advisory waits; reservation and
 // claim recheck admission under the account lock. A person's per-run "now"
 // override skips schedule pacing, never holds, truth or ownership fences.
@@ -193,7 +187,7 @@
 // require the owner's sharing setting. HTTP account responses and event/SSE
 // replay apply current server-side redaction. Required old shapes remain valid
 // (empty windows/history, null timestamps); projections mark details_redacted.
-// This package supplies no daemon launch, admission permits, or UI. Existing
+// This package supplies no daemon executable or UI. Existing
 // ledgers remain unchanged; rollback disables new callers and retains history.
 //
 // Pending captures expire after five minutes from their original requested_at;

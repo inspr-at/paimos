@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -27,23 +28,41 @@ func recoveryBackoff(step int) time.Duration { return time.Hour << min(max(step,
 
 // Current legacy telemetry is projected even before its first fenced write.
 // Its canonical row prevents a cleared run stop from being imported again.
-func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account) (*ReadinessFact, error) {
+func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (*ReadinessFact, error) {
 	var at time.Time
 	var reset *time.Time
+	var runID, kind string
 	err := tx.QueryRow(ctx, `SELECT t.at,COALESCE(t.limit_resets_at,
  (SELECT max(r.resets_at) FROM account_capacity_readings r WHERE r.account_id IN (`+quotaAccounts+`)
   AND r.run_id=t.run_id AND r.source<>'estimate' AND (r.ordinary_usage_allowed=false OR r.used_percent>=100)
-  AND (t.limit_window='' OR r.window_kind=t.limit_window) AND r.resets_at>t.at))
+  AND (t.limit_window='' OR r.window_kind=t.limit_window) AND r.resets_at>t.at)),t.run_id::text,t.limit_window
  FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
  WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit'
- ORDER BY t.at DESC,t.run_id,t.sequence DESC LIMIT 1`, a.ID).Scan(&at, &reset)
+ ORDER BY t.at DESC,t.run_id,t.sequence DESC LIMIT 1`, a.ID).Scan(&at, &reset, &runID, &kind)
 	if isNoRows(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	resource, err := localReadinessResource(ctx, tx, a)
+	if reset != nil {
+		// Named telemetry follows only the denying bucket attached to that run.
+		// A newer weekly or unrelated bucket cannot clear a five-hour stop.
+		var cleared bool
+		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings original
+ JOIN LATERAL (SELECT r.* FROM account_capacity_readings r
+ WHERE r.account_id IN (`+quotaAccounts+`) AND r.window_kind=original.window_kind
+ AND r.bucket=original.bucket AND r.window_minutes=original.window_minutes
+ AND r.source<>'estimate' ORDER BY r.read_at DESC,r.id DESC LIMIT 1) latest ON true
+ WHERE original.run_id=$2 AND original.source<>'estimate'
+ AND (original.ordinary_usage_allowed=false OR original.used_percent>=100)
+ AND ($3='' OR original.window_kind=$3) AND latest.read_at>original.read_at
+ AND (latest.resets_at<=$4 OR latest.used_percent<100 AND latest.ordinary_usage_allowed IS DISTINCT FROM false))`, a.ID, runID, kind, now).Scan(&cleared)
+		if err != nil || cleared {
+			return nil, err
+		}
+	}
+	resource, err := vendorReadinessResource(ctx, tx, a)
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +81,13 @@ func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account) (*ReadinessFact
 }
 
 func reconcileVendorStop(ctx context.Context, tx pgx.Tx, a Account, now time.Time) error {
-	f, err := legacyVendorFact(ctx, tx, a)
+	f, err := legacyVendorFact(ctx, tx, a, now)
 	if err != nil || f == nil {
 		return err
 	}
+	if f.StopKind == "named_reset" {
+		return nil
+	} // Telemetry itself retains its named deadline.
 	// Import the original stop deadline, never restart the wait at daemon boot.
 	return storeReadinessFact(ctx, tx, a, f.ReadinessFactWrite, f.ObservedAt)
 }
@@ -80,7 +102,20 @@ func admissionFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([
 		return nil, err
 	}
 	facts = append(facts, legacy...)
-	vendor, err := legacyVendorFact(ctx, tx, a)
+	// Older reset-only stops also retain their own deadlines when a later
+	// unnamed stop arrives. They have no attached bucket to supply a reading.
+	var namedReset *time.Time
+	if err := tx.QueryRow(ctx, `SELECT max(t.limit_resets_at) FROM run_telemetry t
+ JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
+ WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit' AND t.limit_resets_at>$2
+ AND NOT EXISTS(SELECT 1 FROM account_capacity_readings r WHERE r.run_id=t.run_id AND r.source<>'estimate'
+ AND (r.ordinary_usage_allowed=false OR r.used_percent>=100) AND (t.limit_window='' OR r.window_kind=t.limit_window))`, a.ID, now).Scan(&namedReset); err != nil {
+		return nil, err
+	}
+	if namedReset != nil {
+		facts = append(facts, ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "vendor_named", StopKind: "named_reset", ResetsAt: namedReset, DenialReason: "vendor_denied", CreditState: "unknown"}})
+	}
+	vendor, err := legacyVendorFact(ctx, tx, a, now)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +126,37 @@ func admissionFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([
 		facts = append(facts, ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "key_cap", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}})
 	}
 	return facts, nil
+}
+
+// New fact-only daemon reports participate in the existing measured ledger.
+// The budget and all holds belong to the resource/window, across its members.
+func factWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]Window, error) {
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
+	if err != nil {
+		return nil, err
+	}
+	out := []Window{}
+	for _, f := range facts {
+		if f.UsedPercent == nil || f.ReadingAt == nil || f.ResetsAt == nil ||
+			now.Before(*f.ReadingAt) || now.Sub(*f.ReadingAt) > 10*time.Minute || !now.Before(*f.ResetsAt) {
+			continue
+		}
+		bucket := f.ResourceID + ":" + f.WindowKey
+		w := Window{AccountID: a.ID, StartsAt: *f.ReadingAt, EndsAt: *f.ResetsAt, Unit: "percent", Allowance: 100,
+			Used: int64(math.Ceil(*f.UsedPercent)), PaceModel: "unrestricted", capacityReadAt: f.ReadingAt,
+			capacityAllowed: true, capacityKind: "fact", capacityBucket: bucket, capacitySource: f.Source}
+		// One existing ledger is reused; overlapping old holds remain bounds even
+		// when a new observation changes the reset or reporting account.
+		err := tx.QueryRow(ctx, `SELECT id::text,account_id::text FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND ends_at=$2 ORDER BY id LIMIT 1`, bucket, w.EndsAt).Scan(&w.ID, &w.AccountID)
+		if err != nil && !isNoRows(err) {
+			return nil, err
+		}
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(reserved),0)::bigint FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND starts_at<$2 AND ends_at>$3`, bucket, w.EndsAt, w.StartsAt).Scan(&w.Reserved); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, nil
 }
 
 func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time, run runRow, claiming bool) ([]recoveryPermit, *CapacityWait, error) {
@@ -153,6 +219,9 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 			if allowed {
 				permits = append(permits, permit)
 			}
+		}
+		if allowed && recoverableFact(f) && f.WaitID == nil {
+			permits = append(permits, recoveryPermit{resource: f.ResourceID, window: f.WindowKey})
 		}
 		if !allowed {
 			if blocked == nil || until != nil && (blocked.Until == nil || until.After(*blocked.Until)) {

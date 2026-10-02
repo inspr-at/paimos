@@ -438,24 +438,14 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		if err != nil {
 			return nil, err
 		}
-		if _, cleared, err := recoveryClearedAt(ctx, tx, a.ID); err != nil {
-			return nil, err
-		} else if cleared {
-			open := false
-			for _, v := range readings {
-				if v.Source != "estimate" && now.Before(v.ResetsAt) && (v.OrdinaryUsageAllowed == nil || *v.OrdinaryUsageAllowed) {
-					open = true
-					break
-				}
-			}
-			if !open {
-				item.AwaitingReading = true
-				item.LimitingReset = nil
-				out = append(out, item)
+		item.AwaitingReading = true
+		for _, v := range readings {
+			if !now.Before(v.ResetsAt) {
 				continue
 			}
-		}
-		for _, v := range readings {
+			if v.Source != "estimate" && v.Freshness(now) == "fresh" {
+				item.AwaitingReading = false
+			}
 			if budget > 0 {
 				if steps += previewSteps(v.StartsAt(), v.ResetsAt); steps > budget {
 					return nil, fail(http.StatusRequestEntityTooLarge, "too many long capacity windows to preview at once")
@@ -467,6 +457,9 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 				return nil, err
 			}
 			item.Windows = append(item.Windows, capacityWindow{v, v.StartsAt(), 100, left, v.Freshness(now), pace, known})
+		}
+		if len(item.Windows) == 0 {
+			item.LimitingReset = nil
 		}
 		if item.Limit, err = accountLimitUse(ctx, tx, a, now); err != nil {
 			return nil, err

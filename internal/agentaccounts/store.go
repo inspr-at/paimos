@@ -351,6 +351,9 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
 	}
+	if err := reconcileReadinessResources(ctx, tx, before); err != nil {
+		return Account{}, err
+	}
 	if c := before.OpenRouterCredits; c != nil && c.Remaining != nil {
 		resource, err := localReadinessResource(ctx, tx, before)
 		if err != nil {

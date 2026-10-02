@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
+func TestUnknownUsageHonorsSlotsAcrossGenerations(t *testing.T) {
 	for _, harness := range []string{"codex", "claude"} {
 		t.Run(harness, func(t *testing.T) {
 			reset(t)
@@ -50,24 +50,25 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 				t.Fatal(route)
 			}
 			second := insertRun(t, person, runner, profile)
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			// Repeated polling replays the same reservation, never another grant.
 			again := mustRoute(t, mod, runner, token, first, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 			if again.Reservations[0].ReservationID != route.Reservations[0].ReservationID {
 				t.Fatal("grant replay changed")
 			}
-			// A new probe generation does not create a second concurrent run.
+			// A new daemon generation cannot exceed the real two-slot cap.
+			blocked := insertRun(t, person, runner, profile)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
 			probe("g2")
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			probe("g1")
 			seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, first, "", "") })
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			probe("g1")
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			probe("g2")
 			mustRoute(t, mod, runner, token, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
-			// A real harness reading replaces bootstrap admission. It is stored as
-			// harness evidence and enables the normal second parallel slot.
+			// Fresh harness evidence is stored without changing the slot cap.
 			now := time.Now().UTC().Add(-time.Second)
 			reading := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 10, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness", RunID: second, Phase: "start"}
 			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{reading}}), 204, nil)
@@ -80,7 +81,7 @@ func TestFirstReadingGrantIsSingleUsePerGeneration(t *testing.T) {
 	}
 }
 
-func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
+func TestUnknownUsageHasNoDailyLimit(t *testing.T) {
 	for _, harness := range []string{"grok", "cursor", "pi"} {
 		t.Run(harness, func(t *testing.T) {
 			reset(t)
@@ -106,17 +107,22 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 				s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
 			}
 			callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", a.ID, &s, false, ""}), 204, nil)
-			for i := 0; i < 3; i++ {
+			for i := 0; i < 6; i++ {
 				run := insertRun(t, person, runner, profile)
 				mustRoute(t, mod, runner, token, run, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 				concurrent := insertRun(t, person, runner, profile)
-				callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, concurrent, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+				callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, concurrent, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
+				blocked := insertRun(t, person, runner, profile)
+				callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+				seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, concurrent, "", "") })
 				seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, run, "", "") })
 			}
 			run := insertRun(t, person, runner, profile)
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
-			// Outside the person's hours Q3 removes the daily cap, including off days.
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
+			seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, run, "", "") })
+			// Explicit permitted nights also have no start-count cap.
 			s.Week = capacity.Preset(5)
+			s.Nights = true
 			s.Timezone = "UTC"
 			seed(func(tx pgx.Tx) error {
 				now := time.Date(2026, 9, 29, 23, 10, 0, 0, time.UTC)
@@ -168,8 +174,8 @@ func TestBlindDayPolicyAndDurableDailyLimit(t *testing.T) {
 					if source == "estimate" && (w == nil || w.Code != "vendor" || w.RunNowAllowed) {
 						t.Fatalf("estimate erased stop: %+v", w)
 					}
-					if source == "harness" && w != nil {
-						t.Fatalf("explicit recovery did not clear stop: %+v", w)
+					if source == "harness" && (w == nil || w.Code != "vendor") {
+						t.Fatalf("unrelated reading cleared unnamed stop: %+v", w)
 					}
 				}
 				return nil
@@ -261,7 +267,7 @@ func TestAdmissionScheduleClockAndRunNowFences(t *testing.T) {
 	}
 }
 
-func TestVendorDenialRecoversOnceAfterReset(t *testing.T) {
+func TestNamedDenialResetRestoresRealSlots(t *testing.T) {
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			reset(t)
@@ -334,12 +340,12 @@ func TestVendorDenialRecoversOnceAfterReset(t *testing.T) {
 			first := insertRun(t, person, runner, profile)
 			mustRoute(t, mod, runner, token, first, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 			second := insertRun(t, person, runner, profile)
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			probe("g2")
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, first, "", "") })
 			probe("g1")
-			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 200, nil)
 			probe("g2")
 			mustRoute(t, mod, runner, token, second, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 			seed(func(tx pgx.Tx) error { return Release(t.Context(), tx, runner, second, "", "") })
@@ -390,7 +396,7 @@ func TestVendorDenialRecoversOnceAfterReset(t *testing.T) {
 	}
 }
 
-func TestBlindNightRunsDoNotCountTowardDailyLimit(t *testing.T) {
+func TestUnknownUsageHistoryNeverCountsAsDailyBudget(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "blind-night", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -431,8 +437,11 @@ func TestBlindNightRunsDoNotCountTowardDailyLimit(t *testing.T) {
 		insertBlindAttempt(t, person, a.ID, insertRun(t, person, runner, profile), time.Date(2026, 9, 29, hour, 0, 0, 0, time.UTC))
 	}
 	afternoon := time.Date(2026, 9, 29, 13, 0, 0, 0, time.UTC)
-	if w := admit(afternoon, 0); w == nil || w.Code != "allowance" || w.RunNowAllowed {
-		t.Fatalf("three daytime runs: %+v", w)
+	if w := admit(afternoon, 0); w != nil {
+		t.Fatalf("history imposed a daily budget: %+v", w)
+	}
+	if w := admit(afternoon, 2); w == nil || w.Code != "capacity" {
+		t.Fatalf("real cap lost: %+v", w)
 	}
 }
 
@@ -489,7 +498,7 @@ func TestBlindVendorBackoffAdmitsOneRecovery(t *testing.T) {
 	if w := admit(due, 0); w != nil {
 		t.Fatalf("recovery after backoff: %+v", w)
 	}
-	if w := admit(due, 1); w == nil || w.Code != "reading" {
+	if w := admit(due, 1); w == nil || w.Code != "capacity" {
 		t.Fatalf("second recovery slot: %+v", w)
 	}
 }
@@ -532,7 +541,10 @@ func TestBlindCompletionClearsVendorStop(t *testing.T) {
 	recovered := insertRun(t, person, runner, profile)
 	mustRoute(t, mod, runner, token, recovered, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 	seed(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, recovered, stop.Add(time.Minute)); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, recovered, time.Now().UTC()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,output_tokens_delta) VALUES($1,$2,1,'usage',3)`, person.TenantID, recovered); err != nil {
 			return err
 		}
 		return Release(t.Context(), tx, runner, recovered, "", "")
@@ -689,7 +701,7 @@ func TestNamedClaudeDenialDoesNotWaitForTheOtherWindow(t *testing.T) {
 	}
 }
 
-func TestRecoveryWithoutReadingResumesFirstRun(t *testing.T) {
+func TestExpiredReadingRestoresUnknownSlots(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "reread", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -759,39 +771,23 @@ func TestRecoveryWithoutReadingResumesFirstRun(t *testing.T) {
 		}
 		return windows, wait
 	}
-	if _, w := admit(1); w == nil || w.Code != "reading" || w.ReadAt != nil {
-		t.Fatalf("second slot before the reread grant: %+v", w)
-	}
-	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:%'`, a.ID); n != 0 {
-		t.Fatal("slot wait persisted a reread", n)
+	if _, w := admit(1); w != nil {
+		t.Fatalf("unknown usage imposed a second-slot fence: %+v", w)
 	}
 	windows, w := admit(0)
-	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "reread:g1:") {
-		t.Fatalf("reread grant: %+v windows=%+v", w, windows)
+	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "unknown:") {
+		t.Fatalf("unknown allowance: %+v %+v", w, windows)
 	}
 	next := insertRun(t, person, runner, profile)
-	mustRoute(t, mod, runner, token, next, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
-	if _, w := admit(0); w == nil || w.Code != "reading" || w.ReadAt != nil {
-		t.Fatalf("spent reread: %+v", w)
-	}
 	again := insertRun(t, person, runner, profile)
-	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
-	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:%'`, a.ID); n != 1 {
-		t.Fatal("reread duplicated", n)
-	}
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		return Release(t.Context(), tx, runner, next, "", "")
-	}); err != nil {
-		t.Fatal(err)
-	}
-	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
-	probe("g2")
+	mustRoute(t, mod, runner, token, next, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
 	mustRoute(t, mod, runner, token, again, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
-	if n := scalar(t, person, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_bucket LIKE 'reread:g2:%'`, a.ID); n != 1 {
-		t.Fatal("new generation did not reread", n)
-	}
+	blocked := insertRun(t, person, runner, profile)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
+	probe("g2")
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-a", []Account{a}, map[string]int64{"requests": 1}), 409, nil)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='completed', started_at=$2 WHERE id=$1`, again, time.Now().UTC().Add(-time.Minute)); err != nil {
+		if err := Release(t.Context(), tx, runner, next, "", ""); err != nil {
 			return err
 		}
 		return Release(t.Context(), tx, runner, again, "", "")
@@ -883,8 +879,8 @@ func TestClaudeUnnamedStopUsesVendorBackoff(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if w := admit(); w != nil && w.Code == "vendor" {
-		t.Fatalf("completion left the unnamed stop: %+v", w)
+	if w := admit(); w == nil || w.Code != "vendor" || w.Until == nil || !w.Until.Equal(stop.Add(time.Hour)) {
+		t.Fatalf("unevidenced completion cleared stop: %+v", w)
 	}
 }
 
@@ -946,7 +942,7 @@ func TestUnnamedStopAfterClearedNamedDenialKeepsBackoff(t *testing.T) {
 		return windows, wait
 	}
 	windows, w := admit(now)
-	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "reread:g1:") {
+	if w != nil || len(windows) != 1 || !strings.HasPrefix(windows[0].capacityBucket, "unknown:") {
 		t.Fatalf("cleared named denial should reread: %+v windows=%+v", w, windows)
 	}
 	stop := now.Add(-30 * time.Minute)
@@ -982,12 +978,12 @@ func TestUnnamedStopAfterClearedNamedDenialKeepsBackoff(t *testing.T) {
 	if w != nil && w.Code == "vendor" {
 		t.Fatalf("backoff lasted past an hour: %+v", w)
 	}
-	if w != nil || len(opened) != 1 || !strings.HasPrefix(opened[0].capacityBucket, "recover:g2:") {
+	if w != nil || len(opened) != 1 || !strings.HasPrefix(opened[0].capacityBucket, "recover:") {
 		t.Fatalf("hour ended on the unnamed stop: %+v windows=%+v", w, opened)
 	}
 }
 
-func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
+func TestUnstartedRecoveryReleasesPermit(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "blind-spent", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -1043,19 +1039,19 @@ func TestBlindSpentRecoveryDoesNotSayReading(t *testing.T) {
 		}
 		return wait
 	}
-	if w := admit(day); w == nil || w.Code != "reading" || w.ReadAt != nil || w.Timezone != "UTC" || w.RunNowAllowed {
-		t.Fatalf("daytime spent grant: %+v", w)
+	if w := admit(day); w != nil {
+		t.Fatalf("cancelled unstarted recovery kept permit: %+v", w)
 	}
 	night := time.Date(2026, 9, 2, 23, 0, 0, 0, time.UTC)
-	next := s.NextStart(night.Add(time.Second), false)
-	if w := admit(night); w == nil || w.Code != "schedule" || w.RunNowAllowed || w.Until == nil || next == nil || !w.Until.Equal(*next) {
-		t.Fatalf("night spent grant: %+v next=%v", w, next)
+	if w := admit(night); w != nil {
+		t.Fatalf("Run now could not recover at night: %+v", w)
 	}
 	held := s
 	held.Override = "hold"
 	until := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	held.OverrideUntil = &until
-	if w := blindAfterRecovery(held, day); w == nil || w.Code != "hold" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(until) {
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &held}), 204, nil)
+	if w := admit(day); w == nil || w.Code != "hold" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(until) {
 		t.Fatalf("hold after spent grant: %+v", w)
 	}
 }
