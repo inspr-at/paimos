@@ -142,7 +142,7 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		if old.Kind == "tier" && s.Activity != "idle" {
 			continue
 		}
-		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, old.ID))
+		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,clock_timestamp()+interval '45 seconds') ELSE expires_at END WHERE id=$1 RETURNING `+controlColumns, old.ID))
 		if e != nil {
 			return nil, e
 		}

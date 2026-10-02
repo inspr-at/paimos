@@ -538,8 +538,7 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
 }
 
-// Register the tier routes separately to keep this additive change from
-// reformatting the shared route table.
+// Tier reads, worker reports and person decisions use the existing session permissions.
 func init() {
 	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"

@@ -5119,6 +5119,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
+      security: *auth
       operationId: getSessionServiceTier
       description: Read active/reported tier, pending change, adapter provenance and agent requests. Unmanaged and ended sessions are read-only.
       responses:
@@ -5126,6 +5127,7 @@ paths:
         '403': {description: Project harness.read required}
         '404': {description: Session not visible in this tenant/project}
     post:
+      security: *auth
       operationId: setSessionServiceTier
       description: Person-only project harness.control; live exact process ownership and tier revision required. Returns a pending control; the daemon confirms at the next safe point. Undo is another change. A request for the active tier cancels an unclaimed pending change; a claimed change must finish before undo.
       requestBody:
@@ -5140,7 +5142,9 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Exact generation worker proof}
     post:
+      security: *auth
       operationId: reportSessionServiceTiers
       description: Session-bound agent worker lease reports vendor capability facts per exact model. Only unmanaged sessions may report their active tier here; managed tier changes require a person control and daemon completion. No secrets or vendor credentials.
       requestBody:
@@ -5164,6 +5168,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
+      security: *auth
       operationId: askSessionServiceTier
       description: The session's own agent asks for a tier; its daemon lease is not required. No switch is performed. Requests are exposed on the tier read for the Decision Desk.
       requestBody:
@@ -5188,6 +5193,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
+      security: *auth
       operationId: decideSessionServiceTier
       description: Person with project harness.control approves or declines an agent request. Approval creates a fenced pending tier control atomically; a direct set to the requested tier also approves it.
       requestBody:

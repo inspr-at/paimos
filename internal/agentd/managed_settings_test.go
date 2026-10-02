@@ -195,7 +195,7 @@ func TestClaudeTierConfirmsFreshVendorState(t *testing.T) {
  return {close,streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),
  applyFlagSettings:async settings=>{mode=settings.fastMode?'on':'off';count++},
  reinitialize:async()=>({fast_mode_state:count===3?'cooldown':mode}),
- async *[Symbol.asyncIterator](){yield {type:'system',subtype:'init',session_id:'fixture',model:'claude-opus-5-5',capabilities:['interrupt_receipt_v1']};await closed;}}
+ async *[Symbol.asyncIterator](){yield {type:'system',subtype:'init',session_id:'fixture',model:'claude-opus-5-5',capabilities:['interrupt_receipt_v1']};yield {type:'result',subtype:'success',is_error:false};await closed;}}
  }`
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
@@ -213,13 +213,13 @@ func TestClaudeTierConfirmsFreshVendorState(t *testing.T) {
 	_ = enc.Encode(map[string]any{"op": "start", "prompt": "fixture", "model": "claude-opus-5-5", "effort": "high"})
 	started := false
 	for scan.Scan() {
-		if strings.Contains(scan.Text(), `"kind":"session_started"`) {
+		if strings.Contains(scan.Text(), `"kind":"turn_completed"`) {
 			started = true
 			break
 		}
 	}
 	if !started {
-		t.Fatal("bridge did not initialize")
+		t.Fatal("bridge did not reach an idle turn boundary")
 	}
 	for i, tc := range []struct{ tier, outcome string }{{"fast", "control_applied"}, {"default", "control_applied"}, {"fast", "control_failed"}} {
 		id := string(rune('a' + i))

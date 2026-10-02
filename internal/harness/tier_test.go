@@ -64,6 +64,14 @@ func TestTierChangeConfirmUndoAndSafePoint(t *testing.T) {
 	if len(decode(t, w)["controls"].([]any)) != 1 {
 		t.Fatal(w.Body.String())
 	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var bounded bool
+		err := tx.QueryRow(t.Context(), `SELECT expires_at-claimed_at<=interval '45 seconds' FROM harness_controls WHERE id=$1`, control).Scan(&bounded)
+		if err == nil && !bounded {
+			t.Fatal("claimed tier authorization retained the pending wait window")
+		}
+		return err
+	})
 	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "applied", "reason": "tier_applied_safe_point"}, lease), 200)
 	w = f.call(f.person, "GET", path+"/tier", nil, "")
 	expect(t, w, 200)
