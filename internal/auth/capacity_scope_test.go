@@ -24,3 +24,18 @@ func TestCapacityReadingUsesProbeScope(t *testing.T) {
 		t.Fatal("agent statusline opt-in")
 	}
 }
+
+func TestAccountLinkScopeAllowsOnlyPairedDeviceOperation(t *testing.T) {
+	path := "/api/agent-pairing/account-link"
+	if scope, ok := coreAgentScope(httptest.NewRequest("POST", path, nil)); !ok || scope != "account.probe" {
+		t.Fatal("paired device operation has no probe scope")
+	}
+	for _, route := range []struct{ method, path string }{
+		{"GET", path}, {"POST", path + "/lookup"}, {"POST", path + "/11111111-1111-4111-8111-111111111111/approve"},
+		{"GET", "/api/agent-pairing/account-links"}, {"POST", "/api/agent-pairing/account-links/11111111-1111-4111-8111-111111111111/unlink"},
+	} {
+		if scope, ok := coreAgentScope(httptest.NewRequest(route.method, route.path, nil)); ok || scope != "" {
+			t.Fatal("person ownership action exposed to an agent key")
+		}
+	}
+}

@@ -2061,6 +2061,98 @@ paths:
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission denied","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Source unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+  /agent-pairing/account-link:
+    post:
+      operationId: accountLinkDevice
+      summary: Offer or poll one account ownership code on its paired computer
+      description: Requires the paired runtime bearer with account.probe and its installation lifecycle proof. Only its connected enrollment is accepted. A first offer returns one six-digit code valid for ten minutes; only its hash is persisted and subsequent offers never repeat the code or prompt. An explicit renew replaces an expired offer. Polls name the original request. Due pending requests become expired with one account.link_expired event in the same transaction. Computer or enrollment disconnect cancels pending requests with account.link_cancelled. No ownership, ongoing-use approval, capacity, grants or pairing changes occur here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account_id, device_proof, operation]
+              properties:
+                account_id: {type: string, format: uuid}
+                device_proof: {type: string, pattern: '^[a-f0-9]{64}$', writeOnly: true}
+                operation: {type: string, enum: [offer, poll, renew]}
+                request_id: {type: string, format: uuid, description: Required for poll}
+      responses:
+        '200': {description: Terminal prompt or its result; no-store, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkDeviceView'}}}}
+        '403': {description: Paired runtime and installation proof required}
+        '404': {description: Connected enrollment or request not found}
+        '409': {description: Offer still pending or pairing not redeemed}
+        '429': {description: Persistent tenant attempt limit reached}
+  /agent-pairing/account-link/lookup:
+    post:
+      operationId: lookupAccountLink
+      summary: Review an account code as the current person
+      description: Same-origin signed-in person with profile.write. The code hash is looked up only in that person's tenant and verified with a constant-time comparison. A consumed or expired code cannot be looked up. Observing expiry persists the expired state and account.link_expired event before returning 410. No account ownership is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [user_code], properties: {user_code: {type: string, maxLength: 16}}}
+      responses:
+        '200': {description: 'Account, computer and current person to confirm', content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
+        '403': {description: Same-origin signed-in person required}
+        '404': {description: Code not found in current tenant}
+        '410': {description: Code expired or consumed}
+        '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
+  /agent-pairing/account-link/{requestId}/approve:
+    post:
+      operationId: approveAccountLink
+      summary: Link the reviewed account to the current person in one confirmation
+      description: Same-origin signed-in person with profile.write; agent keys are rejected. Body binds the reviewed tenant, person and account revision, preventing stale reviews or changed sessions. Requires the entered user_code and verifies its server-peppered HMAC in constant time inside the transaction before atomically consuming the request and appending account.linked. Observing expiry persists the expired state and account.link_expired event before returning 410. Never transfers an owned account. Does not authorize agent spending or alter machine pairing.
+      parameters: [{name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tenant_id, person_id, expected_revision, request_digest, user_code]
+              properties:
+                tenant_id: {type: string, format: uuid}
+                person_id: {type: string, format: uuid}
+                expected_revision: {type: integer, minimum: 0}
+                request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                user_code: {type: string, maxLength: 16, writeOnly: true, description: Six-digit code entered by the person; spaces and hyphens are ignored}
+      responses:
+        '200': {description: Linked account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLinkReview'}}}}
+        '403': {description: Same-origin signed-in person required}
+        '404': {description: Request or code not found in current tenant}
+        '409': {description: Account or session changed}
+        '410': {description: Code expired or consumed}
+        '429': {description: Persistent tenant attempt limit reached}
+        '503': {description: Account linking signing key unavailable}
+  /agent-pairing/account-links:
+    get:
+      operationId: listMyAccountLinks
+      summary: Current person's linked accounts
+      responses:
+        '200': {description: Own links only, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountLinkReview'}}}}}
+        '403': {description: Signed-in person with profile.write required}
+  /agent-pairing/account-links/{accountId}/unlink:
+    post:
+      operationId: unlinkMyAccount
+      summary: Unlink one of the current person's accounts
+      description: Same-origin person with profile.write. Only its owner can unlink. Invalidates outstanding codes and increments the ownership revision; emits account.unlinked. Runs, pairing, capacity and history stay.
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
+      responses:
+        '204': {description: Unlinked}
+        '403': {description: Same-origin signed-in owner required}
+        '404': {description: Own linked account not found}
+        '409': {description: Ownership changed; refresh first}
   /agent-pairing/guide:
     get:
       operationId: pairingGuide
@@ -9592,6 +9684,38 @@ components:
               artifact_url: {type: string, format: uri}
               checksums_url: {type: string, format: uri}
               command: {type: string}
+    AccountLinkDeviceView:
+      type: object
+      additionalProperties: false
+      required: [account_id, state, show_prompt, show_result]
+      properties:
+        account_id: {type: string, format: uuid}
+        request_id: {type: string, format: uuid}
+        state: {type: string, enum: [pending, linked, expired, revoked]}
+        show_prompt: {type: boolean}
+        show_result: {type: boolean, description: True only for the first linked poll across all watching windows}
+        user_code: {type: string, pattern: '^[0-9]{3} [0-9]{3}$', description: Only on the first offer}
+        verification_uri: {type: string, format: uri}
+        expires_at: {type: string, format: date-time}
+        person_name: {type: string}
+    AccountLinkReview:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, tenant_name, account_id, harness, account_label, computer_name, person_id, person_name, revision, state, expires_at, request_digest]
+      properties:
+        request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        request_id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        tenant_name: {type: string}
+        account_id: {type: string, format: uuid}
+        harness: {type: string}
+        account_label: {type: string}
+        computer_name: {type: string}
+        person_id: {type: string, format: uuid}
+        person_name: {type: string}
+        revision: {type: integer, minimum: 0}
+        state: {type: string, enum: [pending, linked]}
+        expires_at: {type: string, format: date-time}
     PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
     PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
@@ -13424,6 +13548,10 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
+            owner_person_name: {type: string}
+            linked_at: {type: string, format: date-time}
+            link_revision: {type: integer, minimum: 0}
             ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
             reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
             quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}

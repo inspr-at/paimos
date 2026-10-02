@@ -32,6 +32,7 @@ type Remote struct {
 	Client               *client.Client
 	mu                   sync.RWMutex
 	daemonID, generation string
+	accountLinkProof     string
 }
 
 func NewRemote(baseURL, token string) *Remote {
