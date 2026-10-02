@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Resolve the same live role routes as the cells, including account health.
+// Resolve the same placements as the cells, including account health.
 func prepareModelNameSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 	rows, err := filteredPlanPlacements(ctx, tx, *q)
 	if err != nil {

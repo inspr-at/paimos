@@ -2,16 +2,24 @@
 package nodes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -31,6 +39,146 @@ func placementNode(t *testing.T, w planningWorld, key string, fields map[string]
 		t.Fatal(err)
 	}
 	return n
+}
+
+type placementEUEvidence struct{ expires time.Time }
+
+func (f placementEUEvidence) ResidencyClass(_ context.Context, _ pgx.Tx, a agentaccounts.Account, _ string) (string, string, *time.Time, error) {
+	class := "any"
+	if a.Harness == "grok" {
+		class = "eu"
+	}
+	return class, "fixture-proof", &f.expires, nil
+}
+
+func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
+	w := planningSetup(t)
+	placementCalibration(t, w)
+	alias := insertPerson(t, w.admin.TenantID, "Linked viewer")
+	d := insertPerson(t, w.admin.TenantID, "Other assignee")
+	operator := tenant.Principal{ID: w.agent, TenantID: w.admin.TenantID, Kind: tenant.Agent}
+	var grok string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE principals SET linked_to=$2 WHERE id=$1`, alias.ID, w.admin.ID); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyRoles(t.Context(), tx, operator.TenantID, operator.ID, []string{"admin"}); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'grok-pref-high','1','grok','xai','grok-4.7','high','strong') RETURNING id::text`, w.admin.TenantID).Scan(&grok); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_prices(tenant_id,model,version,input_usd_per_million,output_usd_per_million,cached_input_usd_per_million) VALUES($1,'grok-4.7',100,1,1,1)`, w.admin.TenantID); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		for _, h := range []string{"grok", "claude", "codex"} {
+			var account string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'placement-runner',$3,$2,now(),true,'fixture',$4) RETURNING id::text`, w.admin.TenantID, h, w.agent, w.admin.ID).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, w.admin.TenantID, account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, w.admin.TenantID, w.admin.ID, account, raw); err != nil {
+				return err
+			}
+		}
+		eu := "eu"
+		scope, err := modelprefs.SaveScope(t.Context(), tx, w.admin, modelprefs.Scope{Level: "person", PersonID: &w.admin.ID, Residency: &eu})
+		if err != nil {
+			return err
+		}
+		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", "")
+		if err != nil {
+			return err
+		}
+		return modelprefs.PutRow(t.Context(), tx, w.admin, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: grok}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var tickets []nodeJSON
+	for i, assignee := range []string{"", w.agent, alias.ID, d.ID, w.admin.ID} {
+		fields := map[string]any{"area": "backend", "complexity": "M", "route_role": "build", "estimate_hours": 2}
+		if assignee != "" {
+			fields["assignee"] = assignee
+		}
+		tickets = append(tickets, placementNode(t, w, fmt.Sprintf("LINK-%d", i+1), fields))
+	}
+	for i := range 5 {
+		n := w.node(t, fmt.Sprintf("GROK-HISTORY-%d", i+1), "ticket", w.root.ID, "done", nil)
+		w.session(t, n.ID, "grok", "grok-4.7", "high", "grok-4.7", 60, 1_000_000, 0, 0, "api", "")
+	}
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-30T12:00:00Z',stopped_at='2026-09-30T13:00:00Z' WHERE tenant_id=$1`, w.admin.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	evidence := placementEUEvidence{expires: time.Now().Add(time.Hour)}
+	page := func(p tenant.Principal, order string) nodePage {
+		t.Helper()
+		mux := http.NewServeMux()
+		New(appPool, nil).Mount(mux)
+		r := httptest.NewRequest("GET", "/api/nodes?within="+w.root.ID+"&kind=ticket&state=open&limit=100&sort="+order, nil)
+		r = r.WithContext(agentaccounts.WithResidencyClassifier(tenant.WithPrincipal(r.Context(), p), evidence))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, r)
+		return decode[nodePage](t, rec.Code, rec.Body.Bytes(), 200)
+	}
+	for _, order := range []string{"tokens", "-tokens", "list_cost", "-list_cost", "paid", "-paid", "model", "-model"} {
+		a, c := page(alias, order), page(w.admin, order)
+		if !reflect.DeepEqual(a.Items, c.Items) {
+			t.Fatalf("linked viewer differs from canonical viewer on %s", order)
+		}
+		byID := map[string]*planningView{}
+		for _, row := range a.Items {
+			byID[row.ID] = row.Planning
+		}
+		for _, i := range []int{0, 1, 2, 4} {
+			v := byID[tickets[i].ID]
+			if v == nil || v.Route == nil || v.Route.Profile != "grok-pref-high" || v.Route.SetBy != "person" || !v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
+				t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
+			}
+			if !reflect.DeepEqual(v, byID[tickets[4].ID]) {
+				t.Fatalf("assignee fallback differs from canonical assignment %d", i)
+			}
+		}
+		if v := byID[tickets[3].ID]; v.Route == nil || v.Route.Profile != "claude-opus-high" || v.Route.SetBy != "" || v.Tokens.Calibration.TokensPerHour != 8_000_000 {
+			t.Fatalf("D gained the viewer's You preference: %+v", v)
+		}
+	}
+	for _, row := range page(operator, "tokens").Items {
+		if row.ID == tickets[0].ID || row.ID == tickets[1].ID || row.ID == tickets[3].ID {
+			if row.Planning.Route == nil || row.Planning.Route.Profile != "claude-opus-high" || row.Planning.Route.SetBy != "" {
+				t.Fatal("operator preview gained You scope", row.Planning)
+			}
+		}
+	}
+	ctx := agentaccounts.WithResidencyClassifier(t.Context(), evidence)
+	if err := db.InTenant(dbtest.Seed(ctx), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		for _, n := range tickets {
+			if err := CapturePlanningStart(ctx, tx, n.ID, "session"); err != nil {
+				return err
+			}
+		}
+		var same bool
+		if err := tx.QueryRow(ctx, `SELECT (SELECT snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$1)=(SELECT snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$2)`, tickets[2].ID, tickets[4].ID).Scan(&same); err != nil {
+			return err
+		}
+		if !same {
+			t.Fatal("linked and canonical assignee snapshots differ")
+		}
+		var profile string
+		if err := tx.QueryRow(ctx, `SELECT snapshot->'route'->>'profile' FROM ticket_estimate_snapshots WHERE ticket_node_id=$1`, tickets[0].ID).Scan(&profile); err != nil {
+			return err
+		}
+		if profile != "claude-opus-high" {
+			t.Fatal("unassigned snapshot borrowed viewer preference", profile)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // These recorded rates differ by role and from any-route. Fixed timestamps

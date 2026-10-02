@@ -15764,7 +15764,7 @@ components:
         route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
         route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
         route_role_confirmed: {type: boolean, readOnly: true}
-        area: {type: [string, 'null'], enum: [backend, frontend, full-stack, infra, design, docs, null]}
+        area: {type: [string, 'null'], maxLength: 48, description: Active default or project work-kind slug, excluding review and other. security is valid.}
         area_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
         area_by: {type: [string, 'null'], format: uuid, readOnly: true}
         area_at: {type: [string, 'null'], format: date-time, readOnly: true}

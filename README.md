@@ -108,6 +108,13 @@ Provider locks permit lower choices and flag a loosening in the view and trace.
 Tightening stamps active runs without stopping turns; `running_outside` identifies
 starting/running turns outside the new setting. Stamps never loosen. EU/local
 routes require valid account evidence; without it, work waits with `residency`.
+
+Ticket properties choose Kind of work from the active default and project work
+kinds, including Security, and confirm suggested complexity. Planning resolves
+each ticket's placement with its canonical person assignee, falling back to the
+viewer's canonical You setting for unassigned or agent-assigned tickets. Work-start
+estimate snapshots use only the assignee; registered sessions and dispatched runs
+save their starter's work placement separately from the model that actually runs.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
 

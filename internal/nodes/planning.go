@@ -717,6 +717,8 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 	} else {
 		if self.role != "" {
 			switch route := pl.routes[self.placementKey()]; {
+			case route == nil && self.area == "":
+				view.RouteGap = "area"
 			case route != nil && route.gap != "":
 				view.RouteGap = route.gap
 			case route == nil || route.view == nil:
@@ -992,16 +994,24 @@ func (l *usageLine) hideCost() {
 	l.rateIn, l.rateOut, l.rateCached = nil, nil, nil
 }
 
-// resolvePlanRoutes resolves each role once through the model registry.
+type planRouteCacheKey struct{}
+
+// Resolve once per placement within the list's read transaction. Sort, totals,
+// and page display share the same decision and price row.
 func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[string]*planRoute, error) {
 	out := map[string]*planRoute{}
+	cache, _ := ctx.Value(planRouteCacheKey{}).(map[string]*planRoute)
 	revision := ""
 	now := time.Now()
 	for _, r := range rows {
 		if r.role == "" || out[r.placementKey()] != nil || !modelregistry.KnownRouteRole(r.role) {
 			continue
 		}
-		if len(out) == 0 {
+		if cached := cache[r.placementKey()]; cached != nil {
+			out[r.placementKey()] = cached
+			continue
+		}
+		if revision == "" {
 			var err error
 			if revision, err = modelregistry.Revision(ctx, tx); err != nil {
 				return nil, err
@@ -1009,6 +1019,9 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		}
 		route := &planRoute{}
 		out[r.placementKey()] = route
+		if cache != nil {
+			cache[r.placementKey()] = route
+		}
 		if strings.HasPrefix(r.role, "review-gate") {
 			if r.area == "" {
 				route.gap = "area"

@@ -18,7 +18,7 @@ export function shownModelName(model: ModelDisplay & { label: string; harness: s
   return [fallback, model.display_name && prefs.modelVersion === 'show' ? model.model_version : ''].filter(Boolean).join(' ')
 }
 
-export interface PlanningRoute extends ModelDisplay { effort_level?: number | null; label: string; profile: string; harness: string; model: string; effort: string; revision: string }
+export interface PlanningRoute extends ModelDisplay { effort_level?: number | null; label: string; profile: string; harness: string; model: string; effort: string; revision: string; set_by?: string; follows_latest?: boolean; pinned?: boolean }
 export interface PlanningCalibration { basis: 'median' | 'default'; tickets: number; tokens_per_hour: number; any_route?: boolean }
 export interface PlanningTokens {
   spent: number | null; input: number; output: number; cached: number
@@ -126,6 +126,11 @@ function planLine(row: PlanningRow, models: PlanningModel[] = []): string {
   else if (used && used.sessions.every(session => session.effort === route.effort)) suffix = ', as used'
   return `Planned: ${fullModelName(route)}${route.effort ? ` · ${route.effort}` : ''}${suffix}`
 }
+function preferenceLine(route: PlanningRoute): string {
+  if (!route.set_by) return ''
+  const scope = ({ person: 'You', project: 'Project', default: 'Default' } as Record<string, string>)[route.set_by] ?? route.set_by
+  return `${scope} preference${route.pinned ? ' · pinned version' : route.follows_latest ? ' · follows latest' : ' · Automatic'}`
+}
 function usedLines(models: PlanningModel[]): string[] {
   return models.map(model => {
     const efforts = [...new Set(model.sessions.map(session => session.effort).filter(Boolean))]
@@ -149,7 +154,7 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
   if (row.kind_slug !== 'epic' && route) {
     return { text: shownModelName(route, prefs), effort: effortLevel(route.effort_level), fullName: fullModelName(route), provider: route.provider ?? '', harness: route.harness, state: 'planned', more: 0,
       label: `${fullModelName(route)}, estimated (planned)${effortTip(route.effort_level) ? `, ${effortTip(route.effort_level)}` : ''}`,
-      tip: [planLine(row), effortTip(route.effort_level), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].filter(Boolean).join('\n') }
+      tip: [planLine(row), effortTip(route.effort_level), preferenceLine(route), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].filter(Boolean).join('\n') }
   }
   let reason = 'No model planned: set a role and area'
   if (row.kind_slug === 'epic') reason = 'Epics take no model; their tickets do'

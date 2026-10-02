@@ -32,7 +32,9 @@ func TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	expectPrefError(t, viewer, "GET", "/api/models/resolve?ticket="+ticket+"&project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", 403, "permission")
+	// RLS hides the ticket before its project can be compared. Neither its
+	// existence nor a project mismatch may escape through this endpoint.
+	expectPrefError(t, viewer, "GET", "/api/models/resolve?ticket="+ticket+"&project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", 404, "not found")
 	expectPrefError(t, admin, "GET", "/api/models/resolve?role=build&person_id=bad", "", 400, "invalid_placement")
 	denied := addPrincipal(t, admin.TenantID, "person", "Denied", nil)
 	expectPrefError(t, denied, "GET", "/api/models/resolve?role=build&person_id=bad", "", 403, "permission")

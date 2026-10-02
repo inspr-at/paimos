@@ -1136,13 +1136,25 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	before := s
+	var placement json.RawMessage
+	if !same(s.TicketNodeID, in.TicketNodeID) {
+		starter := tenant.Principal{}
+		if s.ownerID != nil {
+			starter = tenant.Principal{ID: *s.ownerID, TenantID: p.TenantID, Kind: tenant.Person}
+		}
+		placement, err = registrationPlacement(ctx, tx, starter, in.TicketNodeID, s.RunID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,
+		work_placement=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN $5::jsonb ELSE work_placement END,
 		eta_ready_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_ready_at END,
 		eta_live_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_live_at END,
 		progress_pct=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE progress_pct END,
 		missing_progress_beats=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN 0 ELSE missing_progress_beats END,
 		eta_reported_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_reported_at END,
-		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape))
+		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape, placement))
 	if err != nil {
 		return nil, err
 	}
