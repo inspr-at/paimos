@@ -453,7 +453,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 			capture.Result = "protocol"
 		}
 	}
-	if report.Result == "unsupported" && identityFailure {
+	if report.Result != "success" && report.Result != "authentication_failed" && identityFailure {
 		report.Result = identityResult
 	}
 	saved.LastResult = report.Result

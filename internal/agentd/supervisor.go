@@ -592,6 +592,12 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.probeFailureReasons = map[string]string{}
 		}
 		delete(s.probeFailureReasons, account.ID)
+		if captureFailure == "identity_mismatch" {
+			s.probeFailureReasons[account.ID] = ProbeIdentityMismatch
+		}
+		if captureFailure == "authentication_failed" {
+			s.loginRequired[account.ID] = true
+		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			switch status.Failure {
 			case ProbeIdentityMismatch, ProbeTimeout, ProbeProtocol, ProbeLaunchFailed:
