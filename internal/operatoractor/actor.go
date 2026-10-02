@@ -20,11 +20,11 @@ func Ensure(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
 // EnsureWithProduction marks the principal creation event when a confirmed
 // production host command creates the operator for the first time.
 func EnsureWithProduction(ctx context.Context, tx pgx.Tx, tenantID string, production bool) (string, error) {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+	var lockedID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedID); err != nil {
 		return "", err
 	}
-	var lockedID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&lockedID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
 		return "", err
 	}
 	var id string

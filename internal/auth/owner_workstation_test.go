@@ -537,3 +537,39 @@ func TestWorkstationSignatureAndActionEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkstationProofCannotOutlivePinnedSigner(t *testing.T) {
+	f := newWorkstationFixture(t)
+	f.enable(t)
+	body := `{"name":"Synthetic role","permissions":["nodes.read"]}`
+	challenge := f.challenge(t, "POST", "/api/roles", body)
+	handler := f.m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate a pin replacement after proof consumption, before the final write.
+		replacement := workstationSigner(2)
+		public := base64.StdEncoding.EncodeToString(elliptic.Marshal(replacement.Curve, replacement.X, replacement.Y))
+		err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET local_auth_public_key=$2 WHERE id=$1`, f.computer, public)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, _ := tenant.PrincipalFrom(r.Context())
+		wrote := false
+		err = db.InTenant(r.Context(), f.m.pool, p.TenantID, func(tx pgx.Tx) error { wrote = true; return nil })
+		if !errors.Is(err, authz.ErrForbidden) || wrote {
+			t.Fatal("proof survived a changed pinned signer")
+		}
+		w.WriteHeader(403)
+	}))
+	r := httptest.NewRequest("POST", "/api/roles", strings.NewReader(body))
+	r.Pattern = "POST /api/roles"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer "+f.key.Token)
+	r.Header.Set("Aeon-Step-Up", workstationProof(t, f.signer, challenge))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatalf("pin replacement status: %d", w.Code)
+	}
+}

@@ -44,7 +44,7 @@ func TestOwnerWorkstationKeyCommands(t *testing.T) {
 		{"keys", "owner-workstation", id, "--computer", computer},
 		{"keys", "owner-workstation", id, "--clear"},
 	} {
-		args = append(args, "--session-file", "-", "--url", srv.URL)
+		args = append(append([]string{"aeon"}, args...), "--session-file", "-", "--url", srv.URL)
 		code, out, stderr := runCLI(args, "synthetic-cookie\n")
 		if code != 0 {
 			t.Fatalf("command status %d", code)
@@ -52,7 +52,7 @@ func TestOwnerWorkstationKeyCommands(t *testing.T) {
 		if strings.Contains(out+stderr, "MUST-NOT-PRINT") || strings.Contains(out+stderr, "synthetic-cookie") {
 			t.Fatal("metadata command leaked a credential field")
 		}
-		if args[1] == "show" && !strings.Contains(out, "owner workstation: "+computer) {
+		if args[2] == "show" && !strings.Contains(out, "owner workstation: "+computer) {
 			t.Fatal("show missing workstation")
 		}
 	}
@@ -73,7 +73,7 @@ func TestMeReportsOwnerWorkstation(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
-	code, out, _ := runCLI([]string{"me"}, "")
+	code, out, _ := runCLI([]string{"aeon", "me"}, "")
 	if code != 0 || !strings.Contains(out, "owner workstation: computer") {
 		t.Fatal("me omitted owner workstation")
 	}

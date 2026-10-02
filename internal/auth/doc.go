@@ -3,7 +3,7 @@
 // Package auth authenticates people and agent keys. The middleware applies an
 // outer, deny-by-default key-scope ceiling before any module handler runs.
 // Module handlers still check principal kind, resource ownership and live grants.
-// GET /api/me emits Aeon-Contract: me/1.0 without changing the strict JSON
+// GET /api/me emits Aeon-Contract: me/1.3 without changing the strict JSON
 // body. Additive optional response fields require a minor bump; breaking
 // changes require a major bump. internal/reportercontract pins its schema.
 // Scope management rechecks keys.manage under the tenant/key lock. A confirmed

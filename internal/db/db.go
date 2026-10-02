@@ -76,6 +76,11 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 		if err := guard(ctx, tx, tenantID); err != nil {
 			return err
 		}
+		// The guard may have waited behind an access change. Recompute project
+		// visibility under its fence rather than retaining the pre-lock snapshot.
+		if err := enterTenant(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("refresh guarded tenant: %w", err)
+		}
 	}
 	if err := fn(tx); err != nil {
 		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {

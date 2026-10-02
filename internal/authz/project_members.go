@@ -169,11 +169,11 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 // lockProjectMutation serializes project bindings with other membership
 // changes in the tenant. The advisory lock also covers operator CLI calls.
 func lockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id); err != nil {
 		return err
 	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
 		return err
 	}
 	return nil

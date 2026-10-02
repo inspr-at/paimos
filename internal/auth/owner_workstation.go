@@ -27,6 +27,9 @@ import (
 
 const workstationBodyLimit = 2 << 20
 
+type workstationDigestKey struct{}
+type workstationSignerKey struct{}
+
 type workstationChallenge struct {
 	Code    string    `json:"code"`
 	ID      string    `json:"challenge_id"`
@@ -82,6 +85,7 @@ func verifyWorkstationSignature(public, nonce, digest, signature string) bool {
 // This fence runs at every handler transaction, including the final write after
 // external I/O. It takes the tenant first and rechecks live roles/scopes/marking;
 // no transaction trusts the earlier middleware authorization snapshot.
+// Pairing precedes the tree (as in run dispatch); both precede record locks.
 func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) db.TenantGuard {
 	return func(ctx context.Context, tx pgx.Tx, tid string) error {
 		if tid != p.TenantID {
@@ -93,6 +97,12 @@ func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) 
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tid); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, tid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, tid); err != nil {
+			return err
+		}
 		// Pairing disconnect fences on the computer before revoking its keys.
 		if _, err := tx.Exec(ctx, `SELECT id FROM agent_pairing_computers WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE`, tid, p.WorkstationComputerID); err != nil {
 			return err
@@ -100,8 +110,12 @@ func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) 
 		if _, err := tx.Exec(ctx, `SELECT id FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE`, tid, p.KeyID); err != nil {
 			return err
 		}
-		if _, _, err := authz.WorkstationKeyTx(ctx, tx, p); err != nil {
+		public, _, err := authz.WorkstationKeyTx(ctx, tx, p)
+		if err != nil {
 			return err
+		}
+		if approved, ok := ctx.Value(workstationSignerKey{}).(string); ok && public != approved {
+			return authz.ErrForbidden
 		}
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.owner_workstation_key',$1,true)`, p.KeyID); err != nil {
 			return err
@@ -114,13 +128,17 @@ func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) 
 }
 
 func (m *Module) auditWorkstation(r *http.Request, p tenant.Principal, step bool, outcome string) error {
-	return m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	digest, _ := ctx.Value(workstationDigestKey{}).(string)
+	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 			return err
 		}
-		_, err := events.Append(r.Context(), tx, p, events.Change{Type: "agent_key.governance_used", After: map[string]any{
+		_, err := events.Append(ctx, tx, p, events.Change{Type: "agent_key.governance_used", After: map[string]any{
 			"key_id": p.KeyID, "principal_id": p.ID, "computer_id": p.WorkstationComputerID,
 			"action": r.Pattern, "step_up": step, "outcome": outcome,
+			"route": r.URL.EscapedPath(), "action_digest": digest,
 		}})
 		return err
 	})
@@ -140,7 +158,10 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			writeBadRequest(w, "action URI too long")
 			return
 		}
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, workstationBodyLimit))
+		_ = controller.SetReadDeadline(time.Time{})
 		if err != nil {
 			if err := m.auditWorkstation(r, p, false, "invalid_body"); err != nil {
 				writeInternal(w)
@@ -151,7 +172,9 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		digest, summary := workstationAction(p, r, body)
+		r = r.WithContext(context.WithValue(r.Context(), workstationDigestKey{}, digest))
 		var challenge workstationChallenge
+		var approvedSigner string
 		proof := r.Header.Get("Aeon-Step-Up")
 		err = m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 			if err := workstationGuard(p, permission, authz.RouteScope(r.Context()))(r.Context(), tx, p.TenantID); err != nil {
@@ -190,6 +213,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 				return authz.ErrForbidden
 			}
 			_, err = tx.Exec(r.Context(), `DELETE FROM owner_workstation_challenges WHERE tenant_id=$1 AND id=$2`, p.TenantID, id)
+			approvedSigner = public
 			return err
 		})
 		outcome := "admitted"
@@ -199,6 +223,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			outcome = "step_up_required"
 		} else {
 			step = true
+			r = r.WithContext(context.WithValue(r.Context(), workstationSignerKey{}, approvedSigner))
 		}
 		if auditErr := m.auditWorkstation(r, p, step, outcome); auditErr != nil {
 			writeInternal(w)
@@ -227,6 +252,9 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 }
 
 func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || p.Kind != tenant.Person || r.Header.Get("Authorization") != "" {
 		writeForbidden(w)
@@ -253,6 +281,9 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
+	defer controller.SetReadDeadline(time.Time{})
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF {
