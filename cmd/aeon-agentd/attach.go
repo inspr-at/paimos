@@ -181,7 +181,7 @@ func attachCommand(args []string, out io.Writer) error {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(out, "Detached. Nothing is shared.")
+			fmt.Fprintln(out, attachCancelledLine(previous))
 			return nil
 		case <-ticker.C:
 			next, err := client.Attach(ctx, agentd.AttachLocalRequest{Operation: "poll", ID: view.ID, Digest: view.Digest})
@@ -219,17 +219,21 @@ func attachApprovalNotice(origin, code string, expires *time.Time, now time.Time
 	var b strings.Builder
 	b.WriteString("Waiting for your approval in Aeon")
 	if left := attachTimeLeft(expires, now); left != "" {
-		fmt.Fprintf(&b, " (expires in %s)", left)
+		fmt.Fprintf(&b, " · expires in %s", left)
 	}
-	b.WriteString(".\n")
+	b.WriteString("\n")
 	link := attachApprovalURL(origin, code)
 	if link == "" {
-		b.WriteString("  Open Aeon → Attach session and enter the attach code.\n")
+		b.WriteString("  Where  Open Aeon → Attach session and enter the attach code.\n")
 	} else {
-		fmt.Fprintf(&b, "  Open %s \u2192 Attach session and enter code %s-%s-%s\n", strings.Split(link, "#")[0], code[:3], code[3:6], code[6:])
-		fmt.Fprintf(&b, "  or open this link, which fills the code in (you still approve):\n  %s\n", link)
+		fmt.Fprintf(&b, "  Where  %s → Decision Desk\n", strings.TrimPrefix(strings.Split(link, "#")[0], "https://"))
+		b.WriteString("         or Attach session on any device, with the code\n")
+		fmt.Fprintf(&b, "  Code   %s %s %s\n", code[:3], code[3:6], code[6:])
+		// Only the validated, origin-pinned URL is allowed inside OSC 8.
+		fmt.Fprintf(&b, "  Link   \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", link, link)
+		b.WriteString("         fills the code in; you still review and allow\n")
 	}
-	b.WriteString("Keep this terminal open; Ctrl-C detaches.\n")
+	b.WriteString("Keep this terminal open. Ctrl-C cancels the request.\n")
 	return b.String()
 }
 
@@ -254,9 +258,9 @@ func attachTimeLeft(expires *time.Time, now time.Time) string {
 func attachStateLine(state, consentMode string, statusOnly bool) string {
 	switch {
 	case state == "approved" && consentMode == attachwatch.ConsentLocalAuth:
-		return "Approved in Aeon. Waiting for local confirmation on the paired Mac; nothing is shared yet."
+		return "Allowed in Aeon. Confirm with Touch ID on this Mac; nothing is shared yet."
 	case state == "approved":
-		return "Approved in Aeon. Connecting\u2026"
+		return "Allowed in Aeon. Connecting\u2026"
 	case state == "active" && statusOnly:
 		return "Attached. Session status is reported until you detach (Ctrl-C) or revoke it in Aeon."
 	case state == "active":
@@ -272,9 +276,9 @@ func attachEndedLine(state, previous string) string {
 	case state == "confirmed_exited":
 		return "Attach: the session exited."
 	case state == "unreachable" && previous != "active":
-		return "The attach request expired before it was approved. Run attach again."
+		return "The attach request expired before it was allowed. Run aeon-agentd attach again."
 	case state == "detached" && previous == "pending":
-		return "The attach request was declined or cancelled in Aeon. Run attach again."
+		return "The attach request was declined in Aeon or cancelled. Nothing was shared. Run aeon-agentd attach again."
 	case state == "detached" && previous == "approved":
 		return "The approval was withdrawn before the attach started. Run attach again."
 	default:
@@ -288,7 +292,7 @@ func attachPollFailure(previous string, expires *time.Time, now time.Time) error
 	switch previous {
 	case "pending":
 		if expires != nil && !now.Before(expires.Add(-5*time.Second)) {
-			return errors.New("the attach request expired before it was approved; run attach again")
+			return errors.New("the attach request expired before it was allowed; run aeon-agentd attach again")
 		}
 		return errors.New("the attach request was declined, cancelled or expired in Aeon; run attach again")
 	case "approved":
@@ -337,4 +341,13 @@ func readAttachAnswer(ctx context.Context, reader *bufio.Reader) (string, error)
 	case answer := <-answers:
 		return answer.line, answer.err
 	}
+}
+
+// Ctrl-C is locally known; the server's detached state combines remote declines
+// and cancellations, so it must not claim to distinguish them.
+func attachCancelledLine(previous string) string {
+	if previous == "active" {
+		return "Detached. Nothing more is shared."
+	}
+	return "Cancelled. Nothing was shared; Aeon shows the request as cancelled."
 }

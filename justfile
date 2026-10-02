@@ -22,7 +22,12 @@ web-check:
 
 # Playwright smoke against a running server (BASE_URL defaults to http://127.0.0.1:8080)
 e2e:
-    cd web && npx playwright install chromium && npm run e2e
+    cd web && npm run e2e
+
+# Full browser suites: committed HEAD on the approved remote lane; no local fallback.
+# Set AEON_REMOTE_CONTROL_DIR to the coordinator's remote-test.sh directory.
+ui-remote *args:
+    cd web && npm run test:remote -- {{args}}
 
 # Build the web app and the binary
 build: web-check

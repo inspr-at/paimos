@@ -126,7 +126,7 @@ describe('online with readings', () => {
 
 describe('waits from the server routing', () => {
   // AEON-499 review: a capacity or reading wait (rank 0, no slot, run_now_allowed false) showed "Ready".
-  const waiting = (code: 'capacity' | 'reading') => {
+  const waiting = (code: 'capacity' | 'reading' | 'residency') => {
     const cap = capacity([weekly(40)])
     cap[0].routing = { rank: 0, available_slots: 0, wait: { code, run_now_allowed: false } }
     return buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
@@ -140,6 +140,12 @@ describe('waits from the server routing', () => {
     const cards = waiting('reading')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'waiting', text: 'Waiting for a reading', tone: 'mute' })
     expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
+  })
+  it('a residency wait explains allowed providers and keeps the account out of the ready count', () => {
+    const cards = waiting('residency')
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Outside allowed providers', tone: 'warn', tip: 'Waiting for an account within the allowed providers' })
+    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'warn' })
+    expect(cards[0].accounts[0].capacity).toMatchObject({ kind: 'bar', dim: true })
   })
   it('the only account busy is "0 of 1 ready", and a warning elsewhere still warns', () => {
     const cap = capacity([weekly(40)]).slice(0, 1)
