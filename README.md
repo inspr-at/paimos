@@ -53,6 +53,8 @@ settings. Enable or disable it on the same page without rebuilding, restarting
 or deploying. Selecting a project in Feature flags shows its work summary only
 when that project's effective flag is on, including an explicit project On
 while the workspace is Off. Other open pages re-evaluate on focus and navigation.
+Summaries render below the flag controls. Scope reloads keep the rows in place
+and disable them until the selected scope's settings arrive.
 
 `GET /api/features?project_id=<uuid>` reads committed flags for the caller's
 tenant and visible project; omit the query for the workspace baseline. It
@@ -65,7 +67,9 @@ stale writes return 409. Agent keys cannot change rollout choices.
 
 Web code uses the typed `canFeature(key, projectId?)` helper in
 `web/src/lib/features.ts` alongside its existing `can(permission, projectId?)`
-check. Pending, failed, unknown and revoked answers are off. Server code uses
+check. Unread scopes, failed, unshipped and revoked answers are off. Rechecks
+retain the last valid answer until its replacement arrives; failures and
+session resets discard it. Server code uses
 `features.Service.Enabled`, which reads the database each time and returns
 false on error. **Flags never grant permissions or bypass approval gates.**
 

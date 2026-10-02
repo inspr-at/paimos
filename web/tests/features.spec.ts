@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -57,6 +57,103 @@ test('a shipped dark feature turns on and off without navigation or deployment',
   await expect(counts).toHaveCount(0)
   expect(world.writes[1]).toEqual({ enabled: false, expected_revision: 1, project: '' })
   await expect(page).toHaveURL(/\/settings\/workspace$/)
+})
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`flag controls stay put through toggles, refresh and scope reload at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await setup(page)
+    await page.goto('/settings/workspace')
+    const card = page.getByRole('region', { name: 'Feature flags', exact: true })
+    const control = card.getByLabel('Workspace summary', { exact: true })
+    const scope = card.getByLabel('Apply to')
+    const counts = page.locator('dl[aria-label="Workspace summary"]')
+    await expect(control).toBeEnabled()
+    await control.scrollIntoViewIfNeeded()
+    const original = await control.boundingBox()
+    const originalScope = await scope.boundingBox()
+    expect(original).not.toBeNull()
+    expect(originalScope).not.toBeNull()
+    const staysPut = async (locator: Locator, box: NonNullable<typeof original>) => {
+      const current = await locator.boundingBox()
+      expect(current).not.toBeNull()
+      for (const axis of ['x', 'y', 'width', 'height'] as const) expect(current![axis]).toBeCloseTo(box[axis], 1)
+    }
+    const checkControls = async () => {
+      await staysPut(control, original!)
+      await staysPut(scope, originalScope!)
+    }
+
+    await control.selectOption('on')
+    await expect(counts).toBeVisible()
+    await expect(control).toBeEnabled()
+    await checkControls()
+
+    let releaseEvaluation!: () => void
+    const evaluationHeld = new Promise<void>(resolve => { releaseEvaluation = resolve })
+    await page.route('**/api/features', async route => { await evaluationHeld; await route.fallback() })
+    const recheck = page.waitForRequest(request => new URL(request.url()).pathname === '/api/features')
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await recheck
+    await expect(counts).toBeVisible()
+    await checkControls()
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/features')
+    releaseEvaluation()
+    await refreshed
+    await expect(counts).toBeVisible()
+    await checkControls()
+
+    await control.selectOption('off')
+    await expect(counts).toHaveCount(0)
+    await expect(control).toBeEnabled()
+    await checkControls()
+
+    let releaseSettings!: () => void
+    const settingsHeld = new Promise<void>(resolve => { releaseSettings = resolve })
+    await page.route('**/api/settings/features?project_id=p-pharos', async route => { await settingsHeld; await route.fallback() })
+    await scope.selectOption('p-pharos')
+    await expect(control).toBeVisible()
+    await expect(control).toBeDisabled()
+    await checkControls()
+    releaseSettings()
+    await expect(control).toBeEnabled()
+    await expect(control).toHaveValue('inherit')
+    await checkControls()
+    await control.selectOption('on')
+    await expect(card.locator('dl[aria-label="Project summary"]')).toBeVisible()
+    await expect(control).toBeEnabled()
+    await checkControls()
+    await control.selectOption('off')
+    await expect(card.locator('dl[aria-label="Project summary"]')).toHaveCount(0)
+    await expect(control).toBeEnabled()
+    await checkControls()
+    await scope.selectOption('')
+    await expect(control).toBeEnabled()
+    await expect(control).toHaveValue('off')
+    await checkControls()
+  })
+}
+
+test('a failed scope reload retains disabled rows until retry succeeds', async ({ page }) => {
+  const world = await setup(page)
+  await page.goto('/settings/workspace')
+  const card = page.getByRole('region', { name: 'Feature flags', exact: true })
+  const control = card.getByLabel('Workspace summary', { exact: true })
+  await expect(control).toBeEnabled()
+  let fail = true
+  await page.route('**/api/settings/features?project_id=p-pharos', route => fail
+    ? route.fulfill({ status: 503, json: { error: 'unavailable' } }) : route.fallback())
+  await card.getByLabel('Apply to').selectOption('p-pharos')
+  await expect(card.getByRole('alert')).toContainText('could not be loaded')
+  await expect(control).toBeVisible()
+  await expect(control).toBeDisabled()
+  expect(world.writes).toHaveLength(0)
+  fail = false
+  await card.getByRole('button', { name: 'Reload' }).click()
+  await expect(control).toBeEnabled()
+  await control.selectOption('on')
+  await expect(card.getByRole('status')).toContainText('Saved.')
+  expect(world.writes).toEqual([{ enabled: true, expected_revision: 0, project: 'p-pharos' }])
 })
 
 test('project OFF overrides workspace ON and inherit restores it', async ({ page }) => {

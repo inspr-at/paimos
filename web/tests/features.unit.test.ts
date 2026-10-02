@@ -23,6 +23,32 @@ it('starts dark, keeps project scopes separate and never enables unknown keys', 
   expect(canFeature('unshipped' as FeatureKey, 'one')).toBe(false)
 })
 
+it('keeps a well-formed unshipped feature off even when the server reports it on', async () => {
+  vi.mocked(api).mockResolvedValueOnce(new Response(JSON.stringify({ project_id: null, items: [
+    { key: 'unshipped', label: 'Unshipped', description: '', enabled: true, source: 'tenant' },
+    { key: 'workspace-summary', label: 'Workspace summary', description: '', enabled: true, source: 'tenant' },
+  ] })))
+  await refreshFeatures()
+  expect(canFeature('unshipped' as FeatureKey)).toBe(false)
+  expect(canFeature('workspace-summary')).toBe(true)
+})
+
+it('keeps the last good evaluation during refresh, then replaces it or fails closed', async () => {
+  vi.mocked(api).mockResolvedValueOnce(response(true))
+  await refreshFeatures()
+  for (const answer of [response(false), new Response(null, { status: 503 })]) {
+    vi.mocked(api).mockResolvedValueOnce(response(true))
+    await refreshFeatures(undefined, true)
+    let finish!: (answer: Response) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = refreshFeatures(undefined, true)
+    expect(canFeature('workspace-summary')).toBe(true)
+    expect(canFeature('workspace-summary', 'unread')).toBe(false)
+    finish(answer); await pending
+    expect(canFeature('workspace-summary')).toBe(false)
+  }
+})
+
 it('releases and disables on the same page after a revisioned write', async () => {
   let enabled = false
   vi.mocked(api).mockImplementation(async (path, init) => {

@@ -68,9 +68,11 @@ async function saveInterval() {
         <div><dt>Name</dt><dd>{{ session.identity?.tenant.name }}</dd></div>
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
-      <WorkspaceSummary v-if="can('nodes.read') && canFeature('workspace-summary')" />
     </SettingsCard>
     <FeatureFlagsCard v-if="can('settings.manage')" />
+    <SettingsCard v-if="can('nodes.read') && canFeature('workspace-summary')" title="Workspace summary" icon="folder" anchor="workspace-summary">
+      <WorkspaceSummary />
+    </SettingsCard>
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="intervalReady" title="Estimates" icon="clock" anchor="estimates">

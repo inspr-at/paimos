@@ -45,11 +45,12 @@ export function clearFeatures(): void {
 }
 
 // Same shape as can(), but explicitly separate from permissions. A feature
-// check never authorizes an operation. Unknown, pending, failed and revoked
+// check never authorizes an operation. Unknown, unread, failed and revoked
 // answers are OFF; scope changes cannot reuse a tenant's/project's answer.
+// Rechecks retain the last good answer until its replacement arrives.
 export function canFeature(key: FeatureKey, projectId?: string): boolean {
   revision.value
-  if (permissionsRevoked()) return false
+  if (key !== 'workspace-summary' || permissionsRevoked()) return false
   const scope = projectId || ''
   if (!cache.has(scope)) { void refreshFeatures(projectId); return false }
   return cache.get(scope)?.find(feature => feature.key === key)?.enabled === true
@@ -62,7 +63,7 @@ export function refreshFeatures(projectId?: string, force = false): Promise<void
   const started = epoch
   const turn = (turns.get(scope) ?? 0) + 1
   turns.set(scope, turn)
-  cache.set(scope, null); revision.value++
+  if (!cache.has(scope)) { cache.set(scope, null); revision.value++ }
   const current = () => epoch === started && turns.get(scope) === turn && !permissionsRevoked()
   const pending = (async () => {
     try {
