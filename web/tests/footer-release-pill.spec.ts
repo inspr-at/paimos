@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-515: the release stays at the right, beside the opt-in project flow.
+// AEON-542: approved A Line, beside the opt-in project flow (AEON-515).
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
@@ -60,22 +60,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
       mkdirSync(screenshots, { recursive: true })
       await page.screenshot({ path: join(screenshots, `${width < 600 ? 'phone' : 'desktop'}-${colorScheme}.png`) })
       await pill(page).hover()
-      await expect(version(page)).toHaveAttribute('data-version-view', 'revealed')
-      await expect(version(page).locator('.ss')).toHaveCSS('transition', 'none')
+      await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
+      await expect(page.locator('.release-hover-card .calendar-version')).toHaveAttribute('data-version-view', 'revealed')
       await expect(pill(page).locator('.footer-codename')).toBeVisible()
       expect(await codename.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
       await insideFooter(page)
       await page.mouse.move(1, 1)
       await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
       await pill(page).focus()
-      await expect(version(page)).toHaveAttribute('data-version-view', 'revealed')
+      await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
       await page.keyboard.press('Enter')
       await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
     })
   }
 }
 
-test('opt-in flow avoids the release pill, including during the version reveal', async ({ page }) => {
+test('opt-in flow avoids the release pill, including while the hover card is open', async ({ page }) => {
   await setup(page, { flow: true, fresh: true })
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 })
@@ -84,7 +84,7 @@ test('opt-in flow avoids the release pill, including during the version reveal',
     await expect(chip).toBeVisible()
     for (const reveal of [false, true]) {
       if (reveal) await pill(page).hover()
-      await expect(version(page)).toHaveAttribute('data-version-view', reveal ? 'revealed' : 'pretty')
+      await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
       await expect.poll(async () => {
         const flow = await bounds(chip)
         expect(flow.width).toBeGreaterThan(0)
@@ -109,15 +109,15 @@ test('flow is absent by default and a long codename cannot push the version off 
   await expect(pill(page).locator('.new-badge')).toHaveCount(0)
   await insideFooter(page)
   await pill(page).hover()
-  await expect(version(page)).toHaveAttribute('data-version-view', 'revealed')
+  await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
   await insideFooter(page)
 })
 
-test('unknown count says New; failed versions still open history', async ({ page }) => {
+test('unknown count reserves no badge; failed versions still open history', async ({ page }) => {
   await setup(page, { fresh: true })
   await page.route('**/api/releases**', route => route.fulfill({ status: 503, json: { error: 'Unavailable' } }))
   await page.goto('/')
-  await expect(pill(page).locator('.new-badge')).toHaveText('New')
+  await expect(pill(page).locator('.new-badge')).toHaveCount(0)
   await expect(pill(page)).toHaveAccessibleName(/new releases since your last visit$/)
   await page.route('**/api/version', route => route.fulfill({ status: 503 }))
   await page.reload()
@@ -127,21 +127,22 @@ test('unknown count says New; failed versions still open history', async ({ page
   await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
 })
 
-test('motion uses the shared reveal duration', async ({ page }) => {
+test('the footer stays at rest even when motion is enabled', async ({ page }) => {
   await setup(page)
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/')
   await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
   await pill(page).hover()
-  await expect(version(page)).toHaveAttribute('data-version-view', 'revealed')
-  await expect(version(page).locator('.ss')).toHaveCSS('transition-duration', '1s, 1s')
+  await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
+  await expect(version(page).locator('.ss')).toHaveCSS('max-width', '0px')
+  await expect(page.locator('.release-hover-card .calendar-version .ss')).toHaveCSS('max-width', 'none')
 })
 
 // Hold /version until both footer sides and the project flow have settled.
-// This catches a missing name slot as well as an incorrectly sized digit skeleton.
+// Loading remains usable without reserving the eventual name or badge width.
 for (const width of [1440, 390, 320]) {
   for (const failed of [false, true]) {
-    test(`signed-in loading keeps the release and flow widths at ${width}, ${failed ? 'failure' : 'success'}`, async ({ page }) => {
+    test(`signed-in loading keeps the release usable and the flow clear at ${width}, ${failed ? 'failure' : 'success'}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       const history = await setup(page, { flow: true, fresh: true })
       let release!: () => void
@@ -158,8 +159,6 @@ for (const width of [1440, 390, 320]) {
       await expect(version(page)).toHaveAttribute('aria-hidden', 'true')
       await expect(version(page)).toBeHidden()
       await page.evaluate(() => document.fonts.ready)
-      const before = await bounds(pill(page))
-      const flowBefore = await bounds(chip)
       release()
       if (failed) {
         await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
@@ -169,11 +168,10 @@ for (const width of [1440, 390, 320]) {
         await expect(pill(page).locator('.footer-codename')).toHaveText('An exceptionally long release codename')
         await expect(version(page)).not.toHaveAttribute('aria-hidden')
       }
-      const after = await bounds(pill(page))
-      expect(Math.abs(after.width - before.width)).toBeLessThan(1)
-      expect(Math.abs(after.x - before.x)).toBeLessThan(1)
-      await expect.poll(async () => Math.abs((await bounds(chip)).x - flowBefore.x)).toBeLessThan(1)
-      expect(Math.abs((await bounds(chip)).width - flowBefore.width)).toBeLessThan(1)
+      await expect.poll(async () => {
+        const flow = await bounds(chip)
+        return flow.x + flow.width - (await bounds(pill(page))).x
+      }).toBeLessThanOrEqual(0)
       await insideFooter(page)
       await pill(page).click()
       await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
@@ -210,67 +208,32 @@ for (const width of [1440, 390, 320]) {
   }
 }
 
-// Neither response has arrived at the first measurement. The stored last visit
-// only becomes countable after /version, then history resolves "New" to "3 new".
+// Natural widths follow actual data; empty/unknown counts reserve no room.
 for (const width of [1440, 390, 320]) {
-  test(`badge loading and marking seen keep the release and flow fixed at ${width}`, async ({ page }) => {
+  test(`new count takes room only while present at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const history = await setup(page, { flow: true, fresh: true })
-    let releaseVersion!: () => void
     let releaseHistory!: () => void
-    const versionHeld = new Promise<void>(resolve => { releaseVersion = resolve })
     const historyHeld = new Promise<void>(resolve => { releaseHistory = resolve })
-    await page.route('**/api/version', async route => {
-      await versionHeld
-      await route.fulfill({ json: { version: history.current, scheme: 'inspr-calendar-v2', codename: 'Lucky Lune' } })
-    })
-    await page.route('**/api/releases**', async route => {
-      await historyHeld
-      await route.fulfill({ json: history })
-    })
+    await page.route('**/api/releases**', async route => { await historyHeld; await route.fulfill({ json: history }) })
     await page.goto('/p/PHAROS')
-    const chip = page.locator('footer.app-footer .journey-chip')
+    await expect(pill(page).locator('.footer-codename')).toHaveText('Lucky Lune')
     const badge = pill(page).locator('.new-badge')
-    await expect(chip).toBeVisible()
-    await expect(pill(page).locator('.name-skeleton')).toBeVisible()
     await expect(badge).toHaveCount(0)
-    await page.evaluate(async () => {
-      await document.fonts.ready
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    })
-    const before = await bounds(pill(page))
-    const flowBefore = await bounds(chip)
-    async function staysPut() {
-      const after = await bounds(pill(page))
-      expect(Math.abs(after.width - before.width)).toBeLessThan(1)
-      expect(Math.abs(after.x - before.x)).toBeLessThan(1)
-      await expect.poll(async () => Math.abs((await bounds(chip)).x - flowBefore.x)).toBeLessThan(1)
-      expect(Math.abs((await bounds(chip)).width - flowBefore.width)).toBeLessThan(1)
-      await insideFooter(page)
-    }
-    releaseVersion()
-    await expect(badge).toHaveText('New')
-    await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}, new releases since your last visit`)
-    if (width === 390) {
-      expect(await pill(page).locator('.footer-codename').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
-    }
-    await staysPut()
+    const empty = await bounds(pill(page))
     releaseHistory()
     await expect(badge).toHaveText('3 new')
-    await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}, 3 new since your last visit`)
-    await staysPut()
+    expect((await bounds(pill(page))).width).toBeGreaterThan(empty.width)
+    await insideFooter(page)
     await pill(page).click()
     const dialog = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
     await expect(dialog).toBeVisible()
     await expect(badge).toHaveCount(0)
     await dialog.getByRole('button', { name: 'Close release history', exact: true }).click()
     await expect(dialog).toBeHidden()
-    await pill(page).evaluate(el => el.blur())
-    await page.mouse.move(1, 1)
-    await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
-    await expect(chip).toBeVisible()
     await expect(pill(page)).toHaveAccessibleName(`Release history, Lucky Lune, version ${history.current}`)
-    await staysPut()
+    await insideFooter(page)
+    await expect(page.locator('footer.app-footer .journey-chip')).toBeVisible()
   })
 }
 
@@ -286,3 +249,124 @@ for (const named of [false, true]) {
     await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
   })
 }
+
+// Range rectangles include font descenders, unlike element boxes. Ellipsis
+// intentionally clips horizontally; collapsed renderer segments paint no ink.
+async function textFits(page: Page) {
+  const result = await pill(page).evaluate(control => {
+    const errors: string[] = []
+    const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT)
+    let measured = 0, text: Node | null
+    while ((text = walker.nextNode())) {
+      if (!text.textContent?.trim()) continue
+      let clip = text.parentElement
+      while (clip && clip !== control && !/(hidden|clip|auto|scroll)/.test(`${getComputedStyle(clip).overflowX} ${getComputedStyle(clip).overflowY}`)) clip = clip.parentElement
+      if (!clip) continue
+      const box = clip.getBoundingClientRect()
+      if (box.width < 1 || getComputedStyle(clip).visibility === 'hidden') continue
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      const rect = range.getBoundingClientRect()
+      measured++
+      const ellipsis = getComputedStyle(clip).textOverflow === 'ellipsis'
+      if (rect.top < box.top - .5 || rect.bottom > box.bottom + .5 || (!ellipsis && (rect.left < box.left - .5 || rect.right > box.right + .5))) errors.push(`${text.textContent}: ${JSON.stringify({ rect: rect.toJSON(), clip: box.toJSON() })}`)
+    }
+    return { errors, measured }
+  })
+  expect(result.measured).toBeGreaterThan(5)
+  expect(result.errors).toEqual([])
+}
+
+async function controlBoxes(page: Page) {
+  return pill(page).evaluate(control => [control, ...control.querySelectorAll('.pill-face, .pill-face > *, .calendar-version')].map(el => {
+    const r = el.getBoundingClientRect()
+    return { x: r.x, y: r.y, width: r.width, height: r.height }
+  }))
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  for (const width of [1440, 390]) {
+    for (const zoom of [1, 1.25, 1.5]) {
+      test(`release text fits and controls never move: ${width}px, ${zoom * 100}%, ${colorScheme}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme })
+        await setup(page, { name: 'Rugged Ratio', fresh: true })
+        await page.goto('/')
+        await expect(pill(page).locator('.new-badge')).toHaveText('3 new')
+        await page.evaluate(async zoom => {
+          document.documentElement.style.zoom = String(zoom)
+          // CSS zoom does not resize viewport units like actual browser zoom.
+          // Keep the shell within the viewport so the real pointer reaches it.
+          ;(document.querySelector('#app') as HTMLElement).style.height = `${innerHeight / zoom}px`
+          await document.fonts.ready
+        }, zoom)
+        await page.mouse.move(1, 1)
+        await textFits(page)
+        const before = await controlBoxes(page)
+        expect((await bounds(pill(page))).height).toBeCloseTo((await bounds(page.locator('footer.app-footer'))).height, 1)
+        await pill(page).hover()
+        const card = page.locator('.release-hover-card')
+        await expect(card).toBeVisible()
+        await expect(card.locator('.eyebrow')).toHaveText('Running release')
+        await expect(card.locator('.card-name')).toHaveText('Rugged Ratio')
+        await expect(card.locator('.card-meta')).toHaveText(/^Released .+ UTC · .+/)
+        await expect(card.locator('.card-new')).toHaveText('3 new')
+        expect((await bounds(card)).y + (await bounds(card)).height).toBeLessThan((await bounds(pill(page))).y)
+        await expect(card.locator('.calendar-version .ss')).toHaveCSS('max-width', 'none')
+        await expect(version(page)).toHaveAttribute('data-version-view', 'pretty')
+        await textFits(page)
+        expect(await controlBoxes(page)).toEqual(before)
+        await page.mouse.move(1, 1)
+        await expect(card).toHaveCount(0)
+        await page.keyboard.press('Tab')
+        await pill(page).focus()
+        await expect(card).toBeVisible()
+        await textFits(page)
+        expect(await controlBoxes(page)).toEqual(before)
+        await page.keyboard.press('Escape')
+        await expect(card).toHaveCount(0)
+        await page.keyboard.press('Enter')
+        await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+      })
+    }
+  }
+}
+
+for (const width of [1440, 390]) {
+  test(`long names ellipsize at their cap with uncut descenders at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const name = 'Quietly Quarrelsome Quokka with gypqj descenders'
+    await setup(page, { name })
+    await page.goto('/')
+    const label = pill(page).locator('.footer-codename')
+    await expect(label).toHaveText(name)
+    await expect(label).toHaveCSS('max-width', width === 390 ? '104px' : '168px')
+    expect(await label.evaluate(el => el.scrollWidth)).toBeGreaterThan(await label.evaluate(el => el.clientWidth))
+    await textFits(page)
+    await pill(page).hover()
+    await expect(page.locator('.release-hover-card .card-name')).toHaveText(name)
+  })
+}
+
+test('short pointer visits and touch do not open the hover card; keyboard focus is immediate', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  await expect(version(page)).toBeVisible()
+  const card = page.locator('.release-hover-card')
+  await pill(page).dispatchEvent('pointerenter', { pointerType: 'mouse' })
+  await page.waitForTimeout(200)
+  await expect(card).toHaveCount(0)
+  await pill(page).dispatchEvent('pointerleave', { pointerType: 'mouse' })
+  await page.waitForTimeout(220)
+  await expect(card).toHaveCount(0)
+  await pill(page).dispatchEvent('pointerenter', { pointerType: 'touch' })
+  await page.waitForTimeout(420)
+  await expect(card).toHaveCount(0)
+  await page.keyboard.press('Tab')
+  await pill(page).focus()
+  await expect(card).toBeVisible({ timeout: 250 })
+  await pill(page).dispatchEvent('pointerleave', { pointerType: 'mouse' })
+  await expect(card).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(card).toHaveCount(0)
+})

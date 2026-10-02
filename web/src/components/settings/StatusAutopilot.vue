@@ -2,7 +2,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getProjects } from '../../lib/api'
-import { getAutomaticChanges, getAutopilotSuggestions, getProjectAutopilot, getStatusAutopilot, saveProjectAutopilot, saveStatusAutopilot, type AutopilotSettings, type AutomaticChange, type ProjectOverride, type RuleKey } from '../../lib/statusAutopilot'
+import { can } from '../../lib/authz'
+import { getAutomaticChanges, getAutopilotProposals, getAutopilotSuggestions, getProjectAutopilot, getStatusAutopilot, resolveAutopilotProposal, saveProjectAutopilot, saveStatusAutopilot, automaticTarget, type AutopilotSettings, type AutopilotProposal, type AutomaticChange, type ProjectOverride, type RuleKey } from '../../lib/statusAutopilot'
+import { statusMeta } from '../../lib/work'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 import AutomaticChangeRow from '../work/AutomaticChangeRow.vue'
@@ -12,6 +14,7 @@ const settings = ref<AutopilotSettings | null>(null)
 const projects = ref<{ id: string; key: string; title: string; override: ProjectOverride }[]>([])
 const changes = ref<AutomaticChange[]>([])
 const suggestions = ref<AutomaticChange[]>([])
+const proposals = ref<AutopilotProposal[]>([])
 const lists = [{ flag: 'triage_list', label: 'Triage list' }, { flag: 'cancel_suggested', label: 'Cancel suggested' }, { flag: 'blocked_reminder', label: 'Blocked reminders' }, { flag: 'missed_release', label: 'Missed releases' }]
 const error = ref('')
 const pending = ref(false)
@@ -42,12 +45,19 @@ async function load() {
 async function recent() {
   changes.value = (await getAutomaticChanges()).items
   suggestions.value = (await getAutopilotSuggestions()).items
+  proposals.value = (await getAutopilotProposals()).items
 }
 onMounted(load)
-async function save(next: AutopilotSettings) {
+async function save(next: AutopilotSettings, confirmUpgrade = false) {
   pending.value = true; error.value = ''
-  try { settings.value = await saveStatusAutopilot(next) }
+  try { settings.value = await saveStatusAutopilot(next, confirmUpgrade) }
   catch (e) { error.value = e instanceof Error ? e.message : 'Changes could not be saved.' }
+  finally { pending.value = false }
+}
+async function resolve(proposal: AutopilotProposal, action: 'apply' | 'dismiss') {
+  pending.value = true; error.value = ''
+  try { await resolveAutopilotProposal(proposal.event_id, action); await recent() }
+  catch (e) { error.value = e instanceof Error ? e.message : 'Proposal could not be resolved.' }
   finally { pending.value = false }
 }
 function toggleMaster(event: Event) { if (settings.value) void save({ ...settings.value, enabled: (event.target as HTMLInputElement).checked }) }
@@ -86,7 +96,9 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
     <template v-if="settings">
       <SettingsCard title="Status autopilot" icon="sparkle" anchor="status-autopilot">
         <template #lead>Moves tickets on their own: Delivered when a release ships, Accepted {{ settings.rules.accept.days }} days later, back to Open when work stalls. Every change is logged with its reason and can be undone.</template>
-        <template #aside><label class="switch"><input type="checkbox" role="switch" aria-label="Status autopilot" :checked="settings.enabled" :disabled="pending" @change="toggleMaster" /><span>{{ settings.enabled ? 'On' : 'Off' }}</span></label></template>
+        <template #aside><label class="switch"><input type="checkbox" role="switch" aria-label="Status autopilot" :checked="settings.enabled" :disabled="pending" @change="toggleMaster" /><span>{{ settings.effective_mode === 'suggest' ? 'Suggest' : settings.effective_mode === 'off' ? 'Off' : settings.enabled ? 'On' : 'Off' }}</span></label></template>
+        <p v-if="settings.suggest_until && settings.effective_mode === 'suggest'" class="set-note"><AppIcon name="info" :size="14" /><span>After this upgrade, proposed changes wait for review until {{ new Date(settings.suggest_until).toLocaleString() }}. Review them under Changes, or enable automatic changes now.<button v-if="can('ownership.transfer')" type="button" class="btn sm" :disabled="pending || settings.server_mode !== 'on'" @click="save(settings, true)">Enable automatic changes</button></span></p>
+        <p v-if="settings.server_mode && settings.server_mode !== 'on'" class="set-note"><AppIcon name="info" :size="14" /><span>{{ settings.server_mode === 'off' ? 'The server operator has paused status autopilot. Workspace and project settings cannot enable it.' : 'The server operator requires Suggest mode. Proposed changes wait for Apply or Dismiss.' }}</span></p>
         <div class="rules" :class="{ paused: !settings.enabled }">
           <div v-for="rule in rules" :key="rule.key" class="rule" :class="{ off: !settings.rules[rule.key].enabled }">
             <div class="rule-move"><StatusIcon :state="rule.from" />{{ rule.fromLabel }}<AppIcon name="arrow" :size="12" class="arrow" /><span class="to"><AppIcon v-if="rule.glyph" :name="rule.glyph" :size="14" class="glyph" /><StatusIcon v-else :state="rule.to" />{{ rule.toLabel }}</span></div>
@@ -97,8 +109,13 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
         </div>
         <p class="set-note"><svg v-if="settings.enabled" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></svg><AppIcon v-else name="info" :size="14" /><span>{{ settings.enabled ? 'Tickets with a human check are skipped by the moves to Delivered and Accepted, with a comment, until someone marks them checked.' : 'Off: nothing moves on its own. Suggestions are still listed.' }}</span></p>
       </SettingsCard>
+      <SettingsCard title="Changes" icon="list" anchor="autopilot-changes">
+        <template #lead>Proposed changes leave tickets untouched until applied. Dismiss keeps the same proposal from returning.</template>
+        <ul class="auto-changes"><li v-for="proposal in proposals" :key="proposal.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="proposal.key" /><span class="change-title">{{ proposal.title }}</span></p><p class="proposal-move">{{ statusMeta(proposal.from).label }} <AppIcon name="arrow" :size="12" /> {{ automaticTarget(proposal.to) || statusMeta(proposal.to).label }}</p><p class="proposal-reason">{{ proposal.reason }}</p><p v-if="proposal.changed_since" class="proposal-reason">Ticket changed since this proposal. Dismiss it and review the current ticket.</p><div class="proposal-actions"><button type="button" class="btn sm" :disabled="pending || !proposal.applicable" :aria-label="`Apply proposal for ${proposal.key}`" @click="resolve(proposal, 'apply')">Apply</button><button type="button" class="btn sm" :disabled="pending" :aria-label="`Dismiss proposal for ${proposal.key}`" @click="resolve(proposal, 'dismiss')">Dismiss</button></div></div></li></ul>
+        <p v-if="!proposals.length" class="empty">No proposed changes.</p>
+      </SettingsCard>
       <SettingsCard title="Autopilot per project" icon="folders" anchor="autopilot-projects">
-        <template #lead>A project follows the workspace unless it sets its own. Its own setting wins for its tickets.</template>
+        <template #lead>A project follows the workspace unless it sets its own. The upgrade review period and server mode apply to every project.</template>
         <div class="projects"><div class="proj head" aria-hidden="true"><span>Project</span><span>Status autopilot</span></div>
           <div v-for="project in projects" :key="project.id" class="proj"><span class="proj-name"><span class="key-badge">{{ project.key }}</span><span>{{ project.title }}</span></span><div class="proj-ctl"><span class="ctl-cap">Status autopilot</span><div class="seg" role="radiogroup" :aria-label="`Status autopilot in ${project.title}`" @keydown="modeKey($event, project)"><button v-for="value in modes" :key="value" type="button" role="radio" :aria-checked="project.override.mode === value" :tabindex="project.override.mode === value ? 0 : -1" :disabled="pending" @click="mode(project, value)">{{ value === 'inherit' ? 'Inherit' : value === 'on' ? 'On' : 'Off' }}</button></div><span v-if="project.override.mode === 'inherit'" class="eff">Workspace: {{ settings.enabled ? 'On' : 'Off' }}</span></div></div>
         </div>
@@ -157,6 +174,9 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
 .change { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .change:first-child { border-top: 0; padding-top: 0; }
 .change-main { display: grid; gap: 2px; min-width: 0; }
+.proposal-move, .proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proposal-move, .proposal-reason { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.proposal-actions { margin-top: 6px; }
 .change-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .change-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--ink); }
 .auto { display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 7px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); }

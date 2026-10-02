@@ -57,6 +57,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers the journey routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/journey/next-actions", m.handleNextActions)
 	mux.HandleFunc("GET /api/projects/{projectId}/journey", reportercontract.WithHeader(reportercontract.Journey, m.handleGet))
 	mux.HandleFunc("PUT /api/projects/{projectId}/journey/profile", m.handleProfile)
 	mux.HandleFunc("POST /api/projects/{projectId}/journey/actions", m.handleAction)

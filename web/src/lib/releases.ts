@@ -519,10 +519,14 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
 }
 
 // ---------- New since the last visit ----------
-// Releases newer than the one the person last saw; nothing on a first visit.
-export function newSince(releases: Release[], lastSeen: string | null) {
+// Visibility never changes the source history used by statistics or deep links.
+export function visibleReleases(releases: Release[], showReservedVersions = false): Release[] {
+  return releases.filter(r => showReservedVersions || r.state !== 'reserved')
+}
+// Visible releases newer than the one the person last saw; nothing on a first visit.
+export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {
   if (!lastSeen) return new Set<string>()
-  return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
+  return new Set(visibleReleases(releases, showReservedVersions).filter(r => r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
 

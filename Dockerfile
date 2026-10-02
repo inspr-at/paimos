@@ -15,6 +15,7 @@ COPY version.json /src/version.json
 # Shared data imported by web/src must keep its repository-relative paths.
 COPY internal/authz/permission_labels.json /src/internal/authz/permission_labels.json
 COPY internal/nodes/status_definitions.json /src/internal/nodes/status_definitions.json
+COPY internal/agentactivity/privacy.json /src/internal/agentactivity/privacy.json
 RUN node --test /src/scripts/docker-web-inputs.test.mjs && npm run build
 
 FROM golang:1.26 AS build

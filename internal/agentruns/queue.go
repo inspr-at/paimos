@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -301,6 +303,24 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	person := modelprefs.PrefsPerson(ctx, tx, p)
+	requirement, trace, err := modelprefs.OrderRequirementTrace(ctx, tx, o.NodeID, person)
+	if err != nil {
+		return nil, err
+	}
+	if in.Account != nil {
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return nil, err
+		}
+		qualifies, err := agentaccounts.AccountMeetsResidency(ctx, tx, *in.Account, in.Profile, requirement, now)
+		if err != nil {
+			return nil, err
+		}
+		if !qualifies {
+			return nil, &modelprefs.ResidencyUnmet{}
+		}
+	}
 	var model *string
 	if in.Profile != "" {
 		if err = tx.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model); err != nil {
@@ -313,8 +333,8 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, err
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,queue_node_id,queue_by_principal_id,queue_at,queue_target_agent_id,queue_rank,queue_security_review_required)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, agent, optional(in.Profile), model, in.Account, t.ID, p.ID, optional(in.Agent), rank, ready.SecurityReviewRequired))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,queue_node_id,queue_by_principal_id,queue_at,queue_target_agent_id,queue_rank,queue_security_review_required,residency,prefs_person_id,trace)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11,$12,$13,$14) RETURNING `+columns, p.TenantID, o.NodeID, agent, optional(in.Profile), model, in.Account, t.ID, p.ID, optional(in.Agent), rank, ready.SecurityReviewRequired, modelprefs.Stamp(requirement), person, trace))
 	if err != nil {
 		return nil, err
 	}

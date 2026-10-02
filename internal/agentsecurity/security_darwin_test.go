@@ -4,6 +4,7 @@
 package agentsecurity
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -28,6 +29,20 @@ func TestUnsignedDaemonCannotAccessKeychainOrEnclave(t *testing.T) {
 	}
 	if _, err := DefaultSigner().Sign(t.Context(), "unsigned-fixture", make([]byte, 32), ""); !errors.Is(err, ErrDenied) {
 		t.Fatal("empty Touch ID reason reached Keychain")
+	}
+}
+
+func TestCancelledEnclaveOperationStopsBeforeNativeAccess(t *testing.T) {
+	// A pre-cancelled caller must never reach Security.framework or a Touch ID
+	// prompt. The unsigned fixture would otherwise return ErrDenied.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	signer := DefaultSigner()
+	if public, err := signer.Create(ctx, "cancelled-fixture"); public != "" || !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled creation reached native access")
+	}
+	if proof, err := signer.Sign(ctx, "cancelled-fixture", make([]byte, 32), "Allow watching the conversation codex session PID 40 on Fixture Mac"); proof != "" || !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled signing reached native access")
 	}
 }
 

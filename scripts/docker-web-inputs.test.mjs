@@ -77,6 +77,16 @@ test('every web/src import outside web/ is explicitly copied into the Dockerfile
   assertInputsCopied(externalImports(), readFileSync(join(root, 'Dockerfile'), 'utf8'));
 });
 
+test('rejects the real Dockerfile when the activity privacy JSON copy is missing', () => {
+  const input = 'internal/agentactivity/privacy.json';
+  const targets = externalImports();
+  assert.ok(targets.has(input), 'the activity privacy import must be discovered');
+  const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
+  const missingCopy = dockerfile.replace(/^COPY internal\/agentactivity\/privacy\.json .*\r?\n/m, '');
+  assert.notEqual(missingCopy, dockerfile, 'the fixture must remove the privacy JSON copy');
+  assert.throws(() => assertInputsCopied(targets, missingCopy), /internal\/agentactivity\/privacy\.json/);
+});
+
 test('recognizes multiline, side-effect, re-export and dynamic relative imports without comments', () => {
   assert.deepEqual(importSpecifiers(`
     // import ignored from '../../../ignored.json'
