@@ -3137,7 +3137,7 @@ paths:
                 crop: {$ref: '#/components/schemas/AvatarCrop'}
       responses:
         '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
-        '400': {description: Invalid crop or image}
+        '400': {description: 'Invalid crop or image; at most 4,194,304 pixels, 4096 pixels per side and a square crop up to 2048 pixels per side'}
         '413': {description: Upload too large}
     delete:
       operationId: deleteMyAvatar

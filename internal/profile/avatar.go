@@ -72,7 +72,7 @@ func processAvatar(ctx context.Context, data []byte, crop Crop, consume func(ima
 		return badInput("image must be PNG, JPEG or WebP")
 	}
 	if imagework.Avatar.Check(cfg.Width, cfg.Height) != nil {
-		return badInput("image dimensions exceed limit")
+		return badInput("image dimensions exceed limit: use at most 4,194,304 pixels, 4096 pixels per side, and a square crop at most 2048 pixels per side")
 	}
 	orientation := 1
 	w, h := cfg.Width, cfg.Height
@@ -83,7 +83,7 @@ func processAvatar(ctx context.Context, data []byte, crop Crop, consume func(ima
 		}
 	}
 	if crop.X < 0 || crop.Y < 0 || crop.Size < 1 || crop.Size > 2048 || crop.X > w-crop.Size || crop.Y > h-crop.Size {
-		return badInput("crop outside oriented image")
+		return badInput("crop outside oriented image: choose a square inside the photo, at most 2048 pixels per side")
 	}
 	release, err := imagework.Avatar.Acquire(ctx, cfg.Width, cfg.Height)
 	if err != nil {

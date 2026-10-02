@@ -276,6 +276,11 @@ func TestAvatarOversizedUploadHTTP(t *testing.T) {
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "image dimensions exceed limit") {
 		t.Fatalf("oversized avatar HTTP %d: %s", w.Code, w.Body.String())
 	}
+	for _, limit := range []string{"4,194,304 pixels", "4096 pixels per side", "crop at most 2048 pixels per side"} {
+		if !strings.Contains(w.Body.String(), limit) {
+			t.Errorf("avatar rejection missing %q: %s", limit, w.Body.String())
+		}
+	}
 }
 
 func TestAvatarOrientationViews(t *testing.T) {
@@ -389,6 +394,9 @@ func TestAvatarCropBeforeDecode(t *testing.T) {
 		_, _, err := ProcessAvatar(pngHeader(2048, 2048), crop)
 		if err == nil || !strings.Contains(err.Error(), "crop outside oriented image") {
 			t.Fatalf("%+v: want crop rejection before decode, got %v", crop, err)
+		}
+		if !strings.Contains(err.Error(), "at most 2048 pixels per side") {
+			t.Fatalf("crop rejection must explain the limit: %v", err)
 		}
 	}
 }
