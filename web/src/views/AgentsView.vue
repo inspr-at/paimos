@@ -361,7 +361,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
-    <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.session.id" />
+    <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
     <TierToast />
     <StartAgentDialog ref="startDialog" />
     <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>

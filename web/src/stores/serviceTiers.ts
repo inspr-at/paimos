@@ -15,7 +15,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   const busy = ref<Record<string, boolean>>({})
   const errors = ref<Record<string, string>>({})
   const uncertain = ref<Record<string, boolean>>({})
-  const dialog = shallowRef<{ session: HarnessSession; name: string; anchor: HTMLElement; ask: boolean } | null>(null)
+  const dialog = shallowRef<{ instance: string; session: HarnessSession; name: string; anchor: HTMLElement; ask: boolean } | null>(null)
   const undo = shallowRef<{ session: string; project: string; name: string; from: ServiceTier; to: ServiceTier; revision: number; control: string; price: string; ownership: ProcessOwnership; actor: string } | null>(null)
   const viewer = computed(() => auth.identity ? `${auth.identity.tenant.id}.${auth.identity.principal.id}` : '')
   const grant = computed(() => ({ person: auth.identity?.principal.kind === 'person', can }))
@@ -69,7 +69,7 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   function open(s: HarnessSession, name: string, anchor: HTMLElement) {
     if (dialog.value?.anchor === anchor) { close(true); return }
     if (busy.value[s.id] || state(s).pending || (unavailable(s) && !canAsk(s))) return
-    dialog.value = { session: s, name, anchor, ask: canAsk(s) }
+    dialog.value = { instance: crypto.randomUUID(), session: s, name, anchor, ask: canAsk(s) }
   }
   function close(restore = false) { const anchor = dialog.value?.anchor; dialog.value = null; if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true }) }
   function changeBody(s: HarnessSession, tier: ServiceTier, snapshot: TierState): TierChange {
