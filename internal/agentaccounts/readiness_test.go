@@ -735,6 +735,35 @@ func TestFix2ReadinessLegacyZeroDeclaredCapStaysBlocking(t *testing.T) {
 	if !found {
 		t.Fatal("legacy Pi account absent from readiness")
 	}
+	// A legacy null-cap refresh and then a failed measurement must leave the
+	// same stop in place; only newer room evidence for this key can clear it.
+	later := fixedClockModule{Module: New(appPool), at: now.Add(time.Minute)}
+	probe.OpenRouterCredits = &openrouter.Credits{ObservedAt: later.at}
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	probe.Readiness = &ReadinessReport{BindingRevision: ptrRevision(0), Result: "protocol"}
+	probe.OpenRouterCredits = nil
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	callStatus(t, later, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+	found = false
+	for _, row := range page.Items {
+		if row.AccountID == pi.ID {
+			found = true
+			if row.CanTry || !slices.Contains(row.ReasonCodes, "key_cap_exhausted") {
+				t.Fatalf("legacy null/failed check erased zero cap: %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("legacy Pi account disappeared after refresh")
+	}
+	limit, remaining := 10.0, 5.0
+	later = fixedClockModule{Module: New(appPool), at: now.Add(2 * time.Minute)}
+	probe.Readiness = nil
+	probe.OpenRouterCredits = &openrouter.Credits{ObservedAt: later.at, Limit: &limit, Remaining: &remaining}
+	callStatus(t, later, &f.runner, f.token, "POST", "/api/agent-accounts/"+pi.ID+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE reported_by_account_id=$1 AND window_key='key_cap' AND stop_kind='none' AND remaining=5 AND wait_id IS NULL`, pi.ID) != 1 {
+		t.Fatal("newer same-key room could not clear legacy zero cap")
+	}
 }
 
 func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {

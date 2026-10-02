@@ -857,6 +857,21 @@ Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
 remaining credit unknown, and an unavailable measurement does not invalidate a
 locally configured key. No /credits request or management key is introduced;
 null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
+An explicit zero key cap stays exhausted even when `/key` omits remaining.
+Readings with room expire after ten minutes; quota at 100%, zero key caps and
+vendor stops keep blocking until their own reset or newer same-window room
+evidence. Null checks retain the stop's original observation time and cannot
+reset its recovery wait or backoff. Provider-confirmed 402 stops require
+successful recovery inference, which package B owns. Check now has a persisted
+60-second gap and audits each new request; retries reuse the same check and
+decision 2B's one early recovery intent per wait.
+
+Wrong-account `identity_mismatch` and confirmed `authentication_failed` are
+distinct repairs and both block work. Only confirmed sign-out uses the legacy
+probe category `auth_failed`; a mismatched identity uses `unavailable` alongside
+the explicit readiness cause. Measurement `timeout`, `protocol` and
+`launch_failed` remain separate from sign-out. An older identity cause survives
+measurement errors, while a newer confirmed identity failure replaces it.
 
 | Harness | Private home binding | Idle fallback |
 | --- | --- | --- |

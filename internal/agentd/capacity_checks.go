@@ -100,7 +100,7 @@ func (r *Remote) ReportCapacityCheck(ctx context.Context, account, daemon, gener
 	body := map[string]any{"daemon_id": daemon, "daemon_generation": generation, "available": status.OK, "readiness": report}
 	if !status.OK {
 		body["failure"] = ProbeUnavailable
-		if status.Failure == ProbeAuthFailed || status.Failure == ProbeIdentityMismatch {
+		if status.Failure == ProbeAuthFailed {
 			body["failure"] = ProbeAuthFailed
 		}
 	}
@@ -458,7 +458,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 			capture.Result = "protocol"
 		}
 	}
-	if report.Result != "success" && report.Result != "authentication_failed" && identityFailure {
+	if report.Result != "success" && report.Result != "identity_mismatch" && report.Result != "authentication_failed" && identityFailure {
 		report.Result = identityResult
 	}
 	saved.LastResult = report.Result
@@ -478,14 +478,19 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 	s.mu.Lock()
 	s.capacityChecks[local.ID] = saved
 	err = s.saveCapacityChecksLocked()
-	if capture.Result == "identity_mismatch" || capture.Result == "authentication_failed" {
+	if report.Result == "identity_mismatch" || report.Result == "authentication_failed" {
 		s.blockedAccounts[local.ID] = true
 		if s.probeFailureReasons == nil {
 			s.probeFailureReasons = map[string]string{}
 		}
 		s.probeFailureReasons[local.ID] = ProbeIdentityMismatch
+		s.loginRequired[local.ID] = report.Result == "authentication_failed"
+		if s.loginRequired[local.ID] {
+			s.probeFailureReasons[local.ID] = ProbeAuthFailed
+		}
 	} else if report.Result == "success" && identityFailure {
 		s.blockedAccounts[local.ID] = false
+		s.loginRequired[local.ID] = false
 		delete(s.probeFailureReasons, local.ID)
 	}
 	s.mu.Unlock()
@@ -554,9 +559,7 @@ func capacityCheckFacts(a CapacityCheckAccount, c CapacityCapture, now time.Time
 			credit := c.Credits
 			fact := CapacityCheckFact{ResourceID: resource.ID, WindowKey: "key_cap", Source: "provider", ObservedAt: now, ReadingAt: &credit.ObservedAt, CreditState: "unknown", StopKind: "none"}
 			// A null cap makes no statement about total credit or replenishment.
-			if credit.Limit != nil {
-				fact.Remaining = credit.Remaining
-			}
+			fact.Remaining = credit.KeyRemaining()
 			if fact.Remaining != nil && *fact.Remaining == 0 {
 				fact.CreditState = "exhausted"
 				fact.StopKind = "unnamed"
@@ -589,7 +592,10 @@ func (s *Supervisor) finishCapacityCheck(ctx context.Context, local EnrolledAcco
 		return
 	}
 	status := ProbeStatus{OK: true}
-	if completion.Report.Result == "identity_mismatch" || completion.Report.Result == "authentication_failed" {
+	if completion.Report.Result == "identity_mismatch" {
+		status = ProbeStatus{Failure: ProbeIdentityMismatch}
+	}
+	if completion.Report.Result == "authentication_failed" {
 		status = ProbeStatus{Failure: ProbeAuthFailed}
 	}
 	if err := api.ReportCapacityCheck(ctx, local.ID, s.daemonID, s.generation, status, completion.Report); err != nil {

@@ -14547,6 +14547,7 @@ components:
         retry_at: {type: string, format: date-time}
     ReadinessCheckResult:
       type: string
+      description: Identity mismatch blocks work and is distinct from confirmed sign-out (authentication_failed). Timeout, protocol and launch_failed are measurement failures; they do not establish sign-out or clear an earlier identity failure.
       enum: [success, unsupported, timeout, protocol, launch_failed, identity_mismatch, authentication_failed]
     ReadinessReport:
       type: object
@@ -14574,12 +14575,12 @@ components:
         resource_id: {type: string, format: uuid, description: Must already be a current resource membership; daemon reports cannot invent shared identities.}
         window_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
         source: {type: string, enum: [agentd, harness, provider]}
-        observed_at: {type: string, format: date-time}
+        observed_at: {type: string, format: date-time, description: Observation of this fact. A null check cannot move the retained hard stop's evidence time or postpone acceptance of a newer same-window room reading.}
         resets_at: {type: [string, 'null'], format: date-time}
         reading_at: {type: [string, 'null'], format: date-time}
         used_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
         credit_state: {type: string, enum: [unknown, available, exhausted], default: unknown}
-        remaining: {type: [number, 'null'], minimum: 0}
+        remaining: {type: [number, 'null'], minimum: 0, description: Measured remaining amount for this resource. A declared zero key cap is exhausted even if the provider omits remaining; a null key cap does not describe total balance.}
         stop_kind: {type: string, enum: [none, named_reset, unnamed, money_402], default: none}
         denial_reason: {type: string, enum: ['', vendor_denied, quota_exhausted, key_cap_exhausted, money_exhausted]}
     ReadinessFact:

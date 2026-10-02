@@ -89,6 +89,19 @@ type Credits struct {
 	Remaining  *float64  `json:"remaining"`
 }
 
+// KeyRemaining describes only the key cap. A declared zero cap cannot allow
+// work even when limit_remaining was omitted; a null cap leaves balance unknown.
+func (c Credits) KeyRemaining() *float64 {
+	if c.Limit == nil {
+		return nil
+	}
+	if *c.Limit == 0 {
+		zero := 0.0
+		return &zero
+	}
+	return c.Remaining
+}
+
 func (c Credits) Valid() bool {
 	if c.ObservedAt.IsZero() {
 		return false
@@ -120,9 +133,7 @@ func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
 	out := &Credits{ObservedAt: time.Now().UTC(), Usage: body.Data.Usage, Limit: body.Data.Limit, Remaining: body.Data.Remaining}
 	// /key describes a key cap, never the account's total balance. A null cap
 	// has no measurable remaining credit, even if a stray field was returned.
-	if out.Limit == nil {
-		out.Remaining = nil
-	}
+	out.Remaining = out.KeyRemaining()
 	if !out.Valid() {
 		return nil, ErrUnavailable
 	}

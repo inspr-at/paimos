@@ -237,8 +237,8 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 		if err != nil {
 			return AccountReadiness{}, err
 		}
-		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.Remaining, StopKind: "none"}}
-		if c.Remaining != nil && *c.Remaining == 0 {
+		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.KeyRemaining(), StopKind: "none"}}
+		if f.Remaining != nil && *f.Remaining == 0 {
 			f.CreditState = "exhausted"
 			f.StopKind = "unnamed"
 			f.DenialReason = "key_cap_exhausted"

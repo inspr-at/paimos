@@ -180,12 +180,14 @@ func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFa
 	}
 	// Only a newer, measured, same-window room observation can clear a quota
 	// stop, and the named reset must refer to that resource's window. Absent
-	// measurements never create replenishment evidence.
+	// measurements never create replenishment evidence or move the retained
+	// stop's observation time past a subsequently delivered room reading.
 	room := v.ReadingAt != nil && v.CreditState != "exhausted" && (v.UsedPercent != nil && *v.UsedPercent < 100 || v.Remaining != nil && *v.Remaining > 0)
 	_, err := tx.Exec(ctx, `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,reported_by_account_id,binding_revision,source,observed_at,resets_at,reading_at,used_percent,credit_state,remaining,stop_kind,denial_reason,wait_id,next_attempt_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         ON CONFLICT(tenant_id,resource_id,window_key) DO UPDATE SET
-        reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,source=EXCLUDED.source,observed_at=EXCLUDED.observed_at,
+        reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,source=EXCLUDED.source,
+        observed_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind<>'none' AND EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)) THEN account_readiness_facts.observed_at ELSE EXCLUDED.observed_at END,
         reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.used_percent ELSE EXCLUDED.used_percent END,
         remaining=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.remaining ELSE EXCLUDED.remaining END,credit_state=CASE WHEN EXCLUDED.reading_at IS NULL AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
         resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
@@ -206,6 +208,25 @@ func aTenant(ctx context.Context) string {
 	// No resource identifier is permitted to supply a tenant.
 	p, _ := tenant.PrincipalFrom(ctx)
 	return p.TenantID
+}
+
+// Legacy Pi probes also contribute durable key facts. Otherwise a later null
+// cap replaces the account's credit snapshot and silently erases known stops.
+func storeLegacyKeyFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) error {
+	resource, err := localReadinessResource(ctx, tx, a)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM account_readiness_resources WHERE id=$1 FOR NO KEY UPDATE`, resource); err != nil {
+		return err
+	}
+	c := a.OpenRouterCredits
+	fact := ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.KeyRemaining(), CreditState: "unknown", StopKind: "none"}
+	if fact.Remaining != nil && *fact.Remaining == 0 {
+		fact.CreditState = "exhausted"
+		fact.DenialReason = "key_cap_exhausted"
+	}
+	return storeReadinessFact(ctx, tx, a, fact, now)
 }
 
 func completeReadinessReport(ctx context.Context, tx pgx.Tx, a Account, generation string, in ReadinessReport, now time.Time) error {

@@ -358,6 +358,12 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
 			return Account{}, err
 		}
+	} else if in.Available && before.Harness == "pi" && in.OpenRouterCredits != nil {
+		legacy := before
+		legacy.OpenRouterCredits = in.OpenRouterCredits
+		if err := storeLegacyKeyFact(tenant.WithPrincipal(ctx, p), tx, legacy, now); err != nil {
+			return Account{}, err
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
