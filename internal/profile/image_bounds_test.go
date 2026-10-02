@@ -373,7 +373,7 @@ func TestAvatarCropPixelsAndStoredPNGs(t *testing.T) {
 	if _, err := store.Open(tenant, hash, "original"); !os.IsNotExist(err) {
 		t.Fatalf("avatar became visible before publication: %v", err)
 	}
-	err = db.InTenant(t.Context(), d.App, tenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tenant, func(tx pgx.Tx) error {
 		before, existed, err := read(t.Context(), tx, tenant, p.ID, true)
 		if err != nil {
 			return err

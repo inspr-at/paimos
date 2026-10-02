@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -125,7 +126,7 @@ func TestHTMLStorageAndInertThumbnail(t *testing.T) {
 	if !isHTML(a.ContentType) || a.Image {
 		t.Fatalf("HTML storage failed: %+v", a.Prepared)
 	}
-	err = db.InTenant(t.Context(), d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
 		if err := Publish(t.Context(), tx, OwnerAttachment, a); err != nil {
 			return err
 		}
@@ -381,7 +382,7 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 	}
 	s := Store{FilesDir: t.TempDir()}
 	var id string
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		blob, err := s.Put(t.Context(), tx, p.TenantID, OwnerAttachment, strings.NewReader("<html>Bound content</html>"))
 		if err != nil {
 			return err
