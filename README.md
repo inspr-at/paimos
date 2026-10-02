@@ -1973,6 +1973,9 @@ frozen multiplier. This is an estimate, never vendor billed cost. The tier API's
 bounded `history` records requests, approvals, declines, confirmations and both
 forms of Undo with the person's identity and agent attribution. Cancelling an
 approval preserves its history even when the request becomes pending again.
+Reads show the latest 50 tier decisions and explicitly report truncation;
+older decisions remain stored. Unconfirmed daemon outcomes remain unconfirmed
+in the history instead of asserting that a switch was applied or reversed.
 Tier decisions and daemon claim/completion batches write history before taking
 the tenant event counter. Audit failure rolls the entire decision back.
 
