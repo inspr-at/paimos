@@ -18,7 +18,7 @@
 //   - nuget-config-password: scoped to file paths
 //   - pkcs12-file: scoped to file paths
 
-package knowledge
+package credentialguard
 
 const gitleaksTag = "v8.30.1"
 

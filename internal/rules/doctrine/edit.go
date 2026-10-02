@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/inspr-at/paimos/internal/credentialguard"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"gopkg.in/yaml.v3"
 )
@@ -93,11 +94,38 @@ func writableSource(s Source) bool {
 	return s.Repository == publicRepository && s.Visibility == "public" || s.Repository == privateRepository && s.Visibility == "private"
 }
 
-func guardPublic(repository string, texts ...string) error {
+// Preserve case and token bytes through compatibility normalization: the
+// quotation skeleton folds case and even changes ASCII (1 -> l, m -> rn),
+// which can erase provider prefixes, entropy and Basic authorization values.
+func hasCredentials(text string) bool {
+	if credentialguard.Contains(text) {
+		return true
+	}
+	compatible := norm.NFKC.String(strings.Map(func(r rune) rune {
+		if isIgnoredFormat(r) {
+			return -1
+		}
+		return r
+	}, text))
+	if compatible != text && credentialguard.Contains(compatible) {
+		return true
+	}
+	normalized := normalizeProposalText(text)
+	return credentialLeaks.MatchString(normalized) || credentialguard.Contains(normalized)
+}
+
+func guardCredentials(texts ...string) error {
 	for _, text := range texts {
-		if credentialLeaks.MatchString(normalizeProposalText(text)) {
+		if hasCredentials(text) {
 			return fail(422, "credential_text", "This proposal contains credential-shaped text. Remove credentials before publishing to either repository.")
 		}
+	}
+	return nil
+}
+
+func guardPublic(repository string, texts ...string) error {
+	if err := guardCredentials(texts...); err != nil {
+		return err
 	}
 	if repository != publicRepository {
 		return nil
@@ -243,6 +271,12 @@ func editRuleViews(s Source, files []File, in ProposalInput) (map[string]string,
 		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
 	}
 	if err := guardPublic(s.Repository, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+		return nil, RuleView{}, RuleView{}, err
+	}
+	// GitHub receives entire replacement blobs, including untouched rules and
+	// sidecar entries. Identity checks remain limited to the edited text, but
+	// credentials must never be copied into a new git object or tree path.
+	if err := guardCredentials(content, string(encoded), in.Path); err != nil {
 		return nil, RuleView{}, RuleView{}, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, old, next, nil
