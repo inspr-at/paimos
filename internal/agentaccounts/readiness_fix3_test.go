@@ -56,3 +56,25 @@ func TestFix3CapacityReplayPreservesConcurrentHealthFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestFix3MeasurementHeartbeatAndGenerationFence(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix3-generation", now)
+	path := "/api/agent-accounts/" + f.account.ID + "/probe"
+	var health Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path, encodedSimple(probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Failure: "auth_failed"}), 200, &health)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path, encodedSimple(probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, MeasurementOnly: true}), 200, nil)
+	if health.LastProbeAt == nil || scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_probe_ok=false AND last_probe_failure='auth_failed' AND last_probe_at=$2 AND last_daemon_generation='g2'`, f.account.ID, health.LastProbeAt) != 1 {
+		t.Fatal("generation heartbeat changed health")
+	}
+	for _, generation := range []string{"g1", "g2"} {
+		want := 409
+		if generation == "g2" {
+			want = 200
+		}
+		callStatus(t, f.mod, &f.runner, f.token, "POST", path, encodedSimple(probeWrite{DaemonID: "daemon-a", DaemonGeneration: generation, Available: true, MeasurementOnly: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success"}}), want, nil)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND last_probe_ok=false AND last_probe_failure='auth_failed' AND last_daemon_generation='g2'`, f.account.ID) != 1 {
+		t.Fatal("measurement report erased health or rebound an old generation")
+	}
+}

@@ -59,6 +59,31 @@ func TestFix3AutomaticHardStopSurvivesFailedDeliveryAndRestart(t *testing.T) {
 	}
 }
 
+func TestFix3IdentityRecoveryDoesNotClearConcurrentLocalHealthFailure(t *testing.T) {
+	s, _, a, clock := checkFixture(t)
+	s.capacityChecks["account"] = capacityCheckState{Revision: 0, LastResult: "identity_mismatch", Failures: 1}
+	s.blockedAccounts["account"] = true
+	a.entered, a.release = make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() { defer close(done); tickChecks(t, s, clock) }()
+	select {
+	case <-a.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("identity recovery did not reach capture barrier")
+	}
+	s.mu.Lock()
+	s.probedAccounts["account"] = false
+	s.blockedAccounts["account"] = true
+	s.loginRequired["account"] = true
+	s.probeFailureReasons = map[string]string{"account": ProbeAuthFailed}
+	s.mu.Unlock()
+	close(a.release)
+	<-done
+	if !s.blockedAccounts["account"] || !s.loginRequired["account"] || s.probeFailureReasons["account"] != ProbeAuthFailed {
+		t.Fatal("capture recovery cleared a newer local sign-out")
+	}
+}
+
 func fix3Pi(t *testing.T, api *checkFixtureAPI, clock *checkClock, handler http.Handler) (*Supervisor, *PiAdapter) {
 	t.Helper()
 	home := privateCapacityHome(t)
