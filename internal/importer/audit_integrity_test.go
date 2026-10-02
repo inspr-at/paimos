@@ -117,8 +117,8 @@ func TestAEON587RelationBackfillKeepsSourceNamespaces(t *testing.T) {
 	}
 	writer := PostgresWriter{Pool: d.App}
 	for index, source := range []string{"source-a", "source-b"} {
-		project := int64(index + 1)
-		prefix := strings.ToUpper(source)
+		project := index + 1
+		prefix := []string{"SA", "SB"}[index]
 		snapshot := relationSnapshot(source, project, []Record{issue(11, project, "ticket", prefix+"-11", "First"), issue(12, project, "ticket", prefix+"-12", "Second")}, []Record{{"source_id": 11, "target_id": 12, "type": "blocks"}})
 		if _, err := writer.Write(ctx, snapshot, "source-isolation"); err != nil {
 			t.Fatal(err)
