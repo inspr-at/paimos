@@ -8,7 +8,7 @@ import { prefsDocument, prefsFixture, PREF_MODELS, prefScope, customKind } from 
 import type { ModelPreferences, PrefLevel, PrefRow } from '../src/lib/modelPrefs'
 import { expectStableControls } from './helpers/stable'
 
-async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void> } = {}) {
+async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void>; truncated?: boolean } = {}) {
   const data = fixtures()
   data.preferences['list:p-pharos'] = { visible: ['status', 'model'] }
   const ticket = data.nodes.find(n => n.key === 'PHAROS-11')!
@@ -31,7 +31,7 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
   })
   await page.route('**/api/model-preferences**', async route => {
     const url = new URL(route.request().url()), method = route.request().method(), path = url.pathname, project = url.searchParams.has('project_id')
-    if (method === 'GET') return route.fulfill({ json: prefsDocument(state, project) })
+    if (method === 'GET') { const doc = prefsDocument(state, project); for (const view of Object.values(doc.views)) if (view) view.choices_truncated = options.truncated ?? false; return route.fulfill({ json: doc }) }
     const body = method === 'PUT' ? route.request().postDataJSON() : undefined
     calls.push({ method, path, body })
     await options.beforeWrite?.()
@@ -249,7 +249,7 @@ test('saving retains keyboard focus and guards controls while the write is held'
   await open(page)
   const modal = dialog(page), radio = modal.getByRole('radio', { name: /EU-hosted only/ })
   await radio.focus(); await radio.press('Space')
-  await expect(radio).toHaveAttribute('aria-disabled', 'true'); await expect(radio).toBeFocused()
+  await expect(radio).toBeFocused(); await expect(radio).toHaveAttribute('aria-disabled', 'true')
   const tab = modal.getByRole('tab', { name: 'You', exact: true })
   await tab.focus(); await tab.press('Enter'); await expect(tab).toBeFocused()
   await expect(tab).toHaveAttribute('aria-selected', 'true')
@@ -280,11 +280,11 @@ test('ticket explanation uses the resolved complex column rather than the viewer
   await setup(page); await page.goto('/p/PHAROS')
   await page.getByRole('button', { name: /Why this model\?/ }).first().click()
   const why = dialog(page).locator('.why')
-  await expect(why).toBeInViewport()
   await expect(why).toContainText('If it’s complex (L), set by an agent')
   await expect(why).toContainText('This project selects a pinned model')
   await expect(why).toContainText('Automatic fallback: preferred profile unavailable')
   await expect(why).toContainText('Runs Claude Fable 5.1 · xhigh today via claude')
+  await expect(why).toBeInViewport()
 })
 
 test('review picker works from server evidence when auxiliary catalogs are unavailable', async ({ page }) => {
@@ -312,4 +312,49 @@ test('picker marks the selected pinned version', async ({ page }) => {
   await open(page); await row(page, 'backend').locator('.model-chip').first().click()
   const picker = page.getByRole('dialog', { name: 'Backend · Normally', exact: true })
   await expect(picker.getByRole('button', { name: '5.1', exact: true })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('Done and its Escape keycap fit in the footer', async ({ page }) => {
+  await setup(page); await open(page)
+  const done = dialog(page).getByRole('button', { name: 'Done Esc' })
+  expect(await done.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  const button = await done.boundingBox(), keycap = await done.locator('kbd').boundingBox()
+  expect(button!.width).toBeGreaterThan(0); expect(keycap!.width).toBeGreaterThan(0)
+  expect(keycap!.x + keycap!.width).toBeLessThanOrEqual(button!.x + button!.width - 5)
+})
+
+test('running-run links retain the document and use distinct run labels', async ({ page }) => {
+  const id = 'ab000000-0000-4000-8000-000000000001'
+  await setup(page, { runningOutside: [id] }); await open(page)
+  await dialog(page).getByRole('radio', { name: /EU-hosted only/ }).click()
+  const link = dialog(page).locator('.outside a').first()
+  await page.evaluate(() => { (window as typeof window & { prefsNavigation: string }).prefsNavigation = 'same document' })
+  await link.click(); await expect(page).toHaveURL(new RegExp(`run=${id}`))
+  expect(await page.evaluate(() => (window as typeof window & { prefsNavigation: string }).prefsNavigation)).toBe('same document')
+})
+
+test('truncated picker evidence is explicit and does not claim that work waits', async ({ page }) => {
+  await setup(page, { truncated: true }); await open(page)
+  await dialog(page).getByRole('radio', { name: /EU-hosted only/ }).click()
+  await expect(dialog(page).locator('.route-count')).toContainText('among the first 256 profiles; more choices exist')
+  await expect(dialog(page).locator('.route-count')).not.toContainText('Work waits')
+  await row(page, 'backend').locator('.model-chip').first().click()
+  await expect(page.getByRole('dialog', { name: 'Backend · Normally', exact: true })).toContainText('Automatic still uses the full registry')
+})
+
+test('picker restores keyboard focus to the model cell during and after its save', async ({ page }) => {
+  let release!: () => void
+  const held = new Promise<void>(done => { release = done })
+  const { calls } = await setup(page, { beforeWrite: () => held })
+  try {
+    await open(page)
+    const chip = row(page, 'backend').locator('.model-chip').first()
+    await chip.focus(); await chip.press('Enter')
+    const picker = page.getByRole('dialog', { name: 'Backend · Normally', exact: true })
+    await picker.getByRole('button', { name: '5.1', exact: true }).press('Enter')
+    await expect.poll(() => calls.length).toBe(1)
+    await expect(chip).toBeFocused()
+    release(); await expect(dialog(page).locator('.save-status')).toHaveText('')
+    await expect(chip).toBeFocused()
+  } finally { release() }
 })

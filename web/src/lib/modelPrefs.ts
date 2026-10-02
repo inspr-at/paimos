@@ -80,6 +80,6 @@ export function pickerReason(choice: PrefChoice | undefined, review: boolean, re
 export interface ModelPreferenceTrace {
   kind: string; kind_source: string; complexity: string; complexity_source: string; bucket: 'normal' | 'complex';
   set_by: PrefLevel; locked_by?: PrefLevel; mode: 'auto' | 'latest' | 'pinned'; role?: string;
-  residency: ResidencyView; ticket_requirement?: Residency; fallback?: string; blocked?: string; prefs?: string; hard?: string[]
+  residency: Omit<ResidencyView, 'qualifying_routes'>; ticket_requirement?: Residency; fallback?: string; blocked?: string; prefs?: string; hard?: string[]
 }
 export interface TicketModelResolution { profile: PrefProfile | null; trace: ModelPreferenceTrace; owner_required: boolean; role: string; residency: Residency }

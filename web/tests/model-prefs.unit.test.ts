@@ -52,6 +52,11 @@ describe('model preferences presentation', () => {
     expect(pickerReason({ ...choice, profile: { ...choice.profile, harness: 'gemini' } }, true, residency)).toBe('')
     expect(pickerReason({ ...choice, review_reason: 'No isolated review adapter' }, true, residency)).toBe('No isolated review adapter')
     expect(pickerReason({ ...choice, residency_routes: 0 }, false, { ...residency, value: 'eu' })).toContain('No EU-hosted route')
+    const codex = prefsDocument(prefsFixture()).views.person!.choices![1]!
+    expect(pickerReason(codex, true, residency)).toBe('Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
+    expect(pickerReason({ ...choice, review_reason: 'Reviews require strong or frontier models at extra high effort' }, true, residency)).toContain('strong or frontier')
+    expect(pickerReason({ ...choice, review_ladder: false, review_reason: 'Outside the review ladder' }, true, residency)).toBe('Outside the review ladder')
+    expect(pickerReason({ ...choice, residency_routes: 0 }, false, { ...residency, value: 'local' })).toContain('No local route')
     expect(pickerReason(undefined, true, residency)).toContain('unavailable')
   })
 })
