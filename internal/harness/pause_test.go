@@ -15,7 +15,7 @@ import (
 )
 
 func pauseRegistration(f *harnessFixture) map[string]any {
-	return map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "pause-ref-" + uid(), "worker_lease": "pause-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship", "worktree": "/owned/worktree", "branch": "work/owned", "model": "fixture-model", "reasoning_effort": "high"}
+	return map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "advertised_capabilities": []string{"pause"}, "management_mode": "unmanaged", "role": "worker", "harness_session_ref": "pause-ref-" + uid(), "worker_lease": "pause-lease-" + uid(), "ticket_node_id": f.ticket, "work_shape": "ship", "worktree": "/owned/worktree", "branch": "work/owned", "model": "fixture-model", "reasoning_effort": "high"}
 }
 
 func pauseHandover() map[string]any {
@@ -89,7 +89,7 @@ func TestPauseControlSurvivesLostContactAndRevive(t *testing.T) {
 	}
 }
 
-func TestPauseDeadlineCancelsWithoutStoppingAndAllowsNewControl(t *testing.T) {
+func TestLegacyPauseDeadlineCancelsWithoutStoppingAndAllowsNewControl(t *testing.T) {
 	for _, tc := range []struct {
 		trigger          string
 		planned, managed bool
@@ -106,6 +106,10 @@ func TestPauseDeadlineCancelsWithoutStoppingAndAllowsNewControl(t *testing.T) {
 				body["management_mode"], body["advertised_capabilities"] = "managed", []string{"stop", "inbox"}
 			}
 			path, lease, control := pauseSession(t, f, body)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET pause_record=pause_record-'level' WHERE id=$1`, path[strings.LastIndex(path, "/")+1:])
+				return err
+			})
 			id := strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")
 			plan := map[string]any{"control_id": control, "handover_point": "After the current step"}
 			if tc.planned {

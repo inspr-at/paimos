@@ -101,6 +101,10 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	ExpectedGeneration string `json:"expected_generation"`
+	RequestPayload     *struct {
+		StopNow bool `json:"stop_now"`
+	} `json:"request_payload,omitempty"`
 	// deadline is local, monotonic, and never serialized or persisted.
 	deadline          time.Time
 	ExpiresInMS       int64                  `json:"expires_in_ms"`

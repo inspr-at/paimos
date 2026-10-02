@@ -4884,6 +4884,49 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /me/agent-pause-settings:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's default pause level in this workspace
+      responses:
+        '200': {description: Personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Set this person's default pause level in this workspace
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+      responses:
+        '200': {description: Saved personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+  /me/leaving-at:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's durable leaving deadline and per-agent plans
+      responses:
+        '200': {description: Deadline and current plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Schedule all my running work to stop by a deadline
+      description: 'People with harness.control only. Selects owned sessions in authorized projects. Uses fresh finish estimates for Wrap up, begins Pause at T minus 10 minutes, escalates to Pause quickly at T minus 2 minutes, and requests Stop now at T through the existing generation-fenced stop channel. Agents without inbox support keep running until T. Repeating the same deadline is idempotent. More than 200 eligible sessions returns 409 without partial scheduling. A changed deadline replaces pending plans; already paused sessions stay paused. No server-side process signal or closure is inferred from a stop request.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deadline_at]
+              properties:
+                deadline_at: {type: string, format: date-time, description: Future UTC deadline within 24 hours, evaluated using the database clock.}
+                reason: {type: string, maxLength: 240}
+                note: {type: string, maxLength: 2000}
+      responses:
+        '200': {description: Durable deadline and plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+        '409': {description: Too many sessions or a stop already in flight}
+    delete:
+      tags: [Harness sessions]
+      summary: Turn off leaving mode and withdraw pending requests
+      description: Cancels only requests belonging to this person's current leaving deadline. Already paused sessions stay paused. A stop already claimed by its executor cannot be recalled and is reported in the result.
+      responses:
+        '200': {description: Cancelled deadline and preserved handovers, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
   /harness-sessions/pause:
     post:
       operationId: pauseAllHarnessSessions
@@ -8350,7 +8393,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.1']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.2']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12268,6 +12311,13 @@ components:
       description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
       required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
       properties:
+        expected_generation: {type: string, format: uuid}
+        request_payload:
+          type: object
+          properties:
+            stop_now: {type: boolean}
+            level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+            note: {type: string, maxLength: 2000}
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
         kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
@@ -12468,10 +12518,29 @@ components:
         agent_principal_id: {type: string, format: uuid}
         stopped_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}
+    HarnessPauseLevel:
+      type: string
+      enum: [stop_now, pause_quickly, pause, wrap_up]
+    HarnessPauseSettings:
+      type: object
+      additionalProperties: false
+      required: [default_level]
+      properties:
+        default_level: {$ref: '#/components/schemas/HarnessPauseLevel', default: pause}
+    HarnessLeavingReport:
+      type: object
+      required: [deadline_at, request_id, items, stop_in_flight]
+      properties:
+        deadline_at: {type: [string, 'null'], format: date-time}
+        request_id: {type: [string, 'null'], format: uuid}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
+        stop_in_flight: {type: boolean}
     HarnessPauseRequest:
       type: object
       additionalProperties: false
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
         coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using X-Aeon-Worker-Lease.}
@@ -12479,6 +12548,8 @@ components:
       type: object
       additionalProperties: false
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
         coordinator_session_id: {type: string, format: uuid}
@@ -12523,12 +12594,21 @@ components:
       type: object
       required: [control_id, state, requested_by_principal_id, requested_at, reason, deadline_at]
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+        note: {type: string, maxLength: 2000}
+        starts_at: {type: string, format: date-time, description: Do not deliver or plan before this database-clock time.}
+        leaving_request_id: {type: string, format: uuid}
+        stop_control_id: {type: string, format: uuid}
+        interrupt_control_id: {type: string, format: uuid}
+        stop_expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: "Heartbeat-only authorization lifetime for an owned unmanaged launcher. Anchor to monotonic request start, deduct round trip, and fail closed if absent or zero."}
+        stop_requested: {type: boolean, description: An immediate stop was queued; this does not confirm process exit.}
+        deliver: {type: boolean, description: Database-clock delivery eligibility. Old records without starts_at remain deliverable.}
         control_id: {type: string, format: uuid}
         state: {type: string, enum: [requested, planned, paused, resume_requested, resumed, cancelled]}
         requested_by_principal_id: {type: string, format: uuid}
         requested_at: {type: string, format: date-time}
         reason: {type: string}
-        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. An overdue requested or planned pause becomes cancelled and its control completes with reason pause_deadline_expired, allowing a new pause. Checked on heartbeat, session/control reads, new pause requests and the periodic sweep. Expiry never signals a process; a separate hard-stop executor must use the existing exact process ownership protocol.'}
+        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. Legacy records without a level cancel on expiry. Level-aware requests cancel the cooperative control and queue Stop now for the exact generation. Deadlines are checked on heartbeat, reads and the periodic sweep. Process exit is confirmed only by the owned executor.'}
         handover_point: {type: string}
         planned_at: {type: string, format: date-time}
         paused_at: {type: string, format: date-time}
@@ -12568,6 +12648,8 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
+        pause_can_interrupt: {type: boolean, description: Pause quickly can interrupt the current command only when advertised; otherwise it reacts after the command.}
         pause: {$ref: '#/components/schemas/HarnessPause', description: Durable cooperative stop request and handover. Delivered on every heartbeat until closure.}
         continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:

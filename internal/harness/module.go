@@ -96,6 +96,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
 		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
+		{"GET /api/me/agent-pause-settings", "harness.read", false, 200, m.getPauseSettings},
+		{"PUT /api/me/agent-pause-settings", "harness.read", false, 200, m.putPauseSettings},
+		{"GET /api/me/leaving-at", "harness.read", false, 200, m.getLeavingAt},
+		{"PUT /api/me/leaving-at", "harness.control", false, 200, m.putLeavingAt},
+		{"DELETE /api/me/leaving-at", "harness.control", false, 200, m.cancelLeavingAt},
 		{"POST /api/harness-sessions/pause", "harness.control", false, 200, m.pauseAll},
 		{"POST /api/harness-sessions/resume", "harness.control", false, 200, m.resumeAll},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
@@ -153,6 +158,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	SupportedPauseLevels []string      `json:"supported_pause_levels"`
+	PauseCanInterrupt    bool          `json:"pause_can_interrupt"`
 	Pause                *Pause        `json:"pause,omitempty"`
 	Continuation         *Continuation `json:"continuation,omitempty"`
 	CanReparent          *bool         `json:"can_reparent,omitempty"`
@@ -365,6 +372,8 @@ func scanSession(row pgx.Row) (Session, error) {
 		s.ProgressPct = &value
 	}
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
+	s.SupportedPauseLevels = supportedPauseLevels(s)
+	s.PauseCanInterrupt = cooperativePause(s) && has(s, "interrupt")
 	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -1242,9 +1251,6 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	if s, err = expirePause(ctx, tx, p, s); err != nil {
-		return nil, err
-	}
 	if err := recordMetadataChanges(ctx, tx, p.TenantID, before, s); err != nil {
 		return nil, err
 	}
@@ -1258,6 +1264,12 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	s, err = applyEstimate(ctx, tx, p, s, in.EtaReadyAt, in.EtaLiveAt, in.ProgressPct)
 	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
+	if s, err = m.preparePauseStopHeartbeat(r, tx, p, s); err != nil {
 		return nil, err
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {

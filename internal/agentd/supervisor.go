@@ -1445,12 +1445,20 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 		for len(entry.pending) > 0 {
 			control := entry.pending[0]
 			outcome, reason := "applied", "agentd_applied"
-			if control.Kind == "force_stop" {
+			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
+			operation := control.Kind
+			if stopNow {
+				if control.ExpectedGeneration != entry.harness.ID {
+					return ErrGeneration
+				}
+				operation = "force_stop"
+			}
+			if operation == "force_stop" {
 				reason = "owned_group_signalled_root_exited"
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if entry.managedPolicy && control.Kind != "force_stop" {
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
+			if entry.managedPolicy && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil

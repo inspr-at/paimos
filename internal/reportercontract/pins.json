@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.1",
-    "sha256": "2244dd1e3c002bd0870c1e5495b6c20967a48905598ae5d176f92739216168bc",
+    "version": "harness-session/2.2",
+    "sha256": "0c0c67c285765251e7ea1242ac6eecb3b58b8aba7c531cc5c1b5f0b5180af781",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1245,6 +1245,9 @@
                 "format": "date-time",
                 "type": "string"
               },
+              "deliver": {
+                "type": "boolean"
+              },
               "handover": {
                 "additionalProperties": false,
                 "properties": {
@@ -1296,6 +1299,27 @@
               "handover_point": {
                 "type": "string"
               },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
               "paused_at": {
                 "format": "date-time",
                 "type": "string"
@@ -1319,6 +1343,10 @@
                 "format": "date-time",
                 "type": "string"
               },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
               "state": {
                 "enum": [
                   "requested",
@@ -1329,6 +1357,18 @@
                   "cancelled"
                 ],
                 "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
               },
               "successor_session_id": {
                 "format": "uuid",
@@ -1344,6 +1384,9 @@
               "deadline_at"
             ],
             "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
           },
           "phase": {
             "enum": [
@@ -1466,6 +1509,18 @@
               "string",
               "null"
             ]
+          },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "ticket_node_id": {
             "format": "uuid",
@@ -2121,6 +2176,9 @@
                 "format": "date-time",
                 "type": "string"
               },
+              "deliver": {
+                "type": "boolean"
+              },
               "handover": {
                 "additionalProperties": false,
                 "properties": {
@@ -2172,6 +2230,27 @@
               "handover_point": {
                 "type": "string"
               },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
               "paused_at": {
                 "format": "date-time",
                 "type": "string"
@@ -2195,6 +2274,10 @@
                 "format": "date-time",
                 "type": "string"
               },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
               "state": {
                 "enum": [
                   "requested",
@@ -2205,6 +2288,18 @@
                   "cancelled"
                 ],
                 "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
               },
               "successor_session_id": {
                 "format": "uuid",
@@ -2220,6 +2315,9 @@
               "deadline_at"
             ],
             "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
           },
           "phase": {
             "enum": [
@@ -2343,6 +2441,18 @@
               "null"
             ]
           },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "ticket_node_id": {
             "format": "uuid",
             "type": [
@@ -2464,8 +2574,10 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/handover",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/supported_pause_levels/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/branch",
@@ -2475,8 +2587,10 @@
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/handover",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/supported_pause_levels/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
     ]
   },

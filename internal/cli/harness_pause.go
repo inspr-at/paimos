@@ -14,7 +14,7 @@ import (
 )
 
 func (rt *runtime) harnessPause(kind string) *Command {
-	var project, session, reason, coordinator, leaseFile, registrationFile string
+	var project, session, reason, coordinator, leaseFile, registrationFile, level, note string
 	var all bool
 	var deadline int
 	var except []string
@@ -27,6 +27,8 @@ func (rt *runtime) harnessPause(kind string) *Command {
 		fs.string(&leaseFile, "worker-lease-file", 0, "private coordinator lease file")
 		if kind == "pause" {
 			fs.string(&reason, "reason", 0, "why the worker should pause")
+			fs.string(&level, "level", 0, "stop_now, pause_quickly, pause or wrap_up (uses personal default)")
+			fs.string(&note, "note", 0, "optional note for the handover")
 			fs.int(&deadline, "deadline-minutes", "handover deadline, default 10 (1-60)")
 		} else {
 			fs.string(&registrationFile, "registration-file", 0, "fresh private registration JSON; creates the successor for one session")
@@ -48,6 +50,9 @@ func (rt *runtime) harnessPause(kind string) *Command {
 		}
 		if coordinator != "" && !validUUID(coordinator) || (coordinator == "") != (leaseFile == "") {
 			return usagef("--coordinator-session and --worker-lease-file must be supplied together")
+		}
+		if level != "" && !harness.ValidPauseLevel(level) {
+			return usagef("invalid --level")
 		}
 		if deadline < 0 || deadline > 60 {
 			return usagef("--deadline-minutes must be 1 through 60")
@@ -77,6 +82,12 @@ func (rt *runtime) harnessPause(kind string) *Command {
 		}
 		if kind == "pause" {
 			body["reason"] = reason
+			if level != "" {
+				body["level"] = level
+			}
+			if note != "" {
+				body["note"] = note
+			}
 			if deadline != 0 {
 				body["deadline_minutes"] = deadline
 			}
@@ -136,7 +147,7 @@ func (rt *runtime) readHandover(path string) (*harness.Handover, error) {
 }
 
 func (rt *runtime) printHeartbeatPause(sessionID string, pause *harness.Pause, records bool) {
-	if pause == nil || !validUUID(pause.ControlID) || (pause.State != "requested" && pause.State != "planned") {
+	if pause == nil || pause.StartsAt != nil && !pause.Deliver || !validUUID(pause.ControlID) || (pause.State != "requested" && pause.State != "planned") {
 		return
 	}
 	if records {
@@ -148,5 +159,5 @@ func (rt *runtime) printHeartbeatPause(sessionID string, pause *harness.Pause, r
 		}{"pause_requested", "aeon.harness-pause.v1", sessionID, pause})
 		return
 	}
-	fmt.Fprintf(rt.stderr, "pause requested: control %s; plan a handover, finish or roll back the current step, commit WIP on your branch, then mark-stopped --reason paused --handover-file PATH\n", pause.ControlID)
+	fmt.Fprintf(rt.stderr, "pause requested (%s): control %s; plan a handover, finish or roll back the current step, commit WIP on your branch, then mark-stopped --reason paused --handover-file PATH\n", pause.Level, pause.ControlID)
 }

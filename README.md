@@ -528,7 +528,40 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.1`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.2`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+
+Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
+and an optional `--note` to pause one or all sessions. Omitted levels use the
+person's workspace default, initially Pause; read or change it with
+`aeon harness pause-default [--level pause_quickly]`. Pause quickly interrupts
+where the harness advertises support, commits WIP as it is and requests a short
+handover within two minutes. Pause chooses the next safe point within ten
+minutes. Wrap up finishes only when the estimate is below ten minutes and fits
+the deadline; otherwise it hands over. The API exposes `supported_pause_levels`
+and `pause_can_interrupt`; workers without a cooperative inbox support only
+Stop now. Pause all skips those workers unless Stop now is selected.
+
+`aeon harness leaving-at --at 2026-10-02T17:00:00+02:00 [--note "Continue tomorrow"]`
+sets one durable deadline for all of your running work in authorized projects.
+Fresh ready estimates select Wrap up; otherwise Pause starts at T minus ten
+minutes, Pause quickly at T minus two minutes and Stop now at T. Workers without
+an inbox keep working until T. `aeon harness leaving-at` reads the deadline and
+per-agent plans; `--off` withdraws pending requests and leaves paused handovers
+resumable. A claimed stop cannot be recalled and is reported as in flight.
+Setting the same deadline again is idempotent; changing it replaces pending
+plans. A deadline covers at most 200 owned running sessions atomically, and
+rejects a larger selection before changing any plans.
+
+Stop now uses the existing control queue. Agentd executes it only for its exact
+live generation and owned process identity, with the existing monotonic signal
+fence. `harness run` may stop only the child it launched; a PID-only
+`run-heartbeat` observer receives no signal authority. Requests, scheduling,
+escalation, cancellation, defaults and confirmed outcomes are audited. A stop
+request is not a process exit receipt: offline or older launchers can leave an
+unconfirmed request, which remains visible in the deadline report. The server
+never claims such a process has stopped. Existing part-A records without a
+level retain their original cancel-on-expiry behavior. The response contract
+adds optional fields at `harness-session/2.2`; request headers stay unchanged.
 
 Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
 in contract 2.1. `pause.state` distinguishes requested, planned, paused,
@@ -1769,7 +1802,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.1`, declared by the response-only
+The reporter contract is `harness-session/2.2`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a

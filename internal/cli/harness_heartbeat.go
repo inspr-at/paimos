@@ -72,13 +72,15 @@ var (
 
 // heartbeatDeps replaces clocks, liveness and name lookup in tests.
 type heartbeatDeps struct {
-	alive   func(pid int) bool
-	wait    func(ctx context.Context, pid int, interval time.Duration) error
-	commits func(worktree, since string) ([]heartbeatCommit, error)
-	label   func() (string, bool)
+	stopOwned func(context.Context, *harness.Pause, time.Time) error
+	alive     func(pid int) bool
+	wait      func(ctx context.Context, pid int, interval time.Duration) error
+	commits   func(worktree, since string) ([]heartbeatCommit, error)
+	label     func() (string, bool)
 }
 
 type heartbeatOptions struct {
+	OwnedStop         bool
 	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
@@ -413,11 +415,19 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			return waitHeartbeat(ctx, pid, dep.alive, interval)
 		}
 	}
+	finish := func() error {
+		// An owned launcher observes the child's exit and settles its control
+		// before closing the session. A PID observer retains its old cleanup.
+		if dep.stopOwned != nil {
+			return nil
+		}
+		return rt.finishHeartbeat(o, session)
+	}
 	interval := time.Duration(o.Interval) * time.Second
 	for {
 		rt.noteHeartbeatSources(ctx, o, session)
 		if ctx.Err() != nil || !dep.alive(o.OwnerPID) {
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
@@ -430,7 +440,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			releaseSessionIndex(session)
 			return nil
 		case err != nil && ctx.Err() != nil:
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
@@ -439,7 +449,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 			}
 		}
 		if err := dep.wait(ctx, o.OwnerPID, interval); err != nil {
-			return rt.finishHeartbeat(o, session)
+			return finish()
 		}
 	}
 }
@@ -844,6 +854,12 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	if o.PrintControls {
+		body["advertised_capabilities"] = []string{"status", "pause"}
+	}
+	if o.OwnedStop {
+		body["advertised_capabilities"] = []string{"status", "stop"}
+	}
 	putText(body, "generator", o.Generator, true)
 	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
@@ -1207,6 +1223,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		}
 		return err
 	}
+	beatStarted := time.Now()
 	err = postBeat()
 	if heartbeatTerminalStatus(err) {
 		session.disk.Sequence--
@@ -1263,6 +1280,12 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 		fmt.Fprintln(rt.stderr, "heartbeat: capacity report failed")
 	} else if reported {
 		session.disk.CapacityStarted = true
+	}
+	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
+		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
+		if err := dep.stopOwned(ctx, response.Pause, deadline); err != nil {
+			return err
+		}
 	}
 	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {
