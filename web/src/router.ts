@@ -88,6 +88,7 @@ export const router = createRouter({
     // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
+    { path: '/phone-approvals/:kind(approval|attach)/:requestId', component: () => import('./views/PhoneApprovalView.vue'), meta: { title: 'Review approval' } },
     { path: '/pacing', redirect: '/agents' },
     // The release history is a sheet over the page (App.vue); its own links open it over Projects.
     { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
@@ -172,6 +173,7 @@ router.beforeEach(async (to, from) => {
   if (!session.identity && to.path !== '/signin') {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
+    if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()
     return '/signin'

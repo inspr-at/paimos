@@ -24,12 +24,22 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"POST /api/projects/{projectId}/questions":  "questions.ask",
-	"GET /api/projects/{projectId}/questions":   "questions.read",
-	"GET /api/questions/{questionId}":           "questions.read",
-	"GET /api/questions/{questionId}/status":    "questions.read",
-	"POST /api/questions/{questionId}/decision": "questions.decide",
-	"GET /api/decision-desk":                    "questions.read",
+	"GET /api/me/phone-approvals":                                   "profile.read",
+	"PUT /api/me/phone-approvals/settings":                          "profile.write",
+	"POST /api/me/phone-approvals/passkeys/options":                 "profile.write",
+	"POST /api/me/phone-approvals/passkeys":                         "profile.write",
+	"DELETE /api/me/phone-approvals/passkeys/{credentialId}":        "profile.write",
+	"POST /api/me/phone-approvals/subscriptions":                    "profile.write",
+	"DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}": "profile.write",
+	"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read",
+	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
+	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
+	"POST /api/projects/{projectId}/questions":                      "questions.ask",
+	"GET /api/projects/{projectId}/questions":                       "questions.read",
+	"GET /api/questions/{questionId}":                               "questions.read",
+	"GET /api/questions/{questionId}/status":                        "questions.read",
+	"POST /api/questions/{questionId}/decision":                     "questions.decide",
+	"GET /api/decision-desk":                                        "questions.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",

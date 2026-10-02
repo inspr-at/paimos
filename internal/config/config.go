@@ -19,6 +19,7 @@ import (
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
+	PhonePush       *PhonePushConfig
 	Addr            string
 	DatabaseURL     string
 	Env             string // "dev" or "prod"
@@ -148,6 +149,10 @@ func FromEnv() (Config, error) {
 	}
 	var err error
 	cfg.PairingNixGuide, err = parsePairingNixGuide(os.Getenv("AEON_PAIRING_NIX_GUIDE_JSON"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PhonePush, err = phonePushFromFile(os.Getenv("AEON_PHONE_PUSH_VAPID_FILE"))
 	if err != nil {
 		return Config{}, err
 	}

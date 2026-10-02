@@ -310,6 +310,12 @@ jobs:
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts tests/account-link.test.ts
+      - name: Phone notification pointer safety
+        working-directory: web
+        run: node --experimental-strip-types --test tests/phone-push.test.ts
+      - name: Phone approval regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/phone-approvals.spec.ts --workers=2
       - name: Morning briefing unit checks
         working-directory: web
         run: npx vitest run tests/morning-briefing.unit.test.ts tests/ticket-outcomes.unit.test.ts --maxWorkers=1

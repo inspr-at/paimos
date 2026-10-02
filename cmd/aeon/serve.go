@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -62,6 +63,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -283,6 +285,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
 	}
+	var vapid *webpush.Options
+	if cfg.PhonePush != nil {
+		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
+	}
+	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	go phoneMod.Run(ctx)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -350,6 +358,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
+			phoneMod,
 			questions.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
