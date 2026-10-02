@@ -299,9 +299,15 @@ func testCapacityActiveWindowSelection(t *testing.T, now time.Time) {
 	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
 		t.Fatal("manual bypassed vendor denial")
 	}
-	denied.EndsAt = now
-	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
-		t.Fatal("reset bypassed fresh vendor denial")
+	expiredDenial := denied
+	expiredDenial.ID = "expired-weekly"
+	expiredDenial.capacityKind = "weekly"
+	expiredDenial.EndsAt = now
+	if got := activeWindows([]Window{expiredDenial, manual}, now); len(got) != 1 || got[0].ID != manual.ID {
+		t.Fatal("own reset retained an expired vendor denial", got)
+	}
+	if got := activeWindows([]Window{expiredDenial, fresh}, now); len(got) != 1 || got[0].ID != fresh.ID {
+		t.Fatal("expired denial masked the current reading", got)
 	}
 	// A manual window caps on top of the reading (AEON-384): both bind.
 	got := activeWindows([]Window{fresh, manual}, now)

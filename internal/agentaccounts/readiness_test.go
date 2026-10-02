@@ -674,6 +674,8 @@ func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
 func TestBRestartHeartbeatSurvivesOldCheckFence(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	f := readinessWorld(t, "b-restart-check", now)
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	f.token = issueKey(t, f.runner, f.runner.Scopes)
 	path := "/api/agent-accounts/" + f.account.ID
 	var c AccountCheck
 	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("old", 0), 202, &c)
