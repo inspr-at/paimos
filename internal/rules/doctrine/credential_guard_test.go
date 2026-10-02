@@ -28,6 +28,12 @@ func publicationCredentialForms() map[string]string {
 		"provider":          "sk-proj-" + strings.Repeat("Ab7q", 8),
 		"cloud":             "AK" + "IA" + strings.Repeat("AB12", 4),
 		"cloud-confusable":  "AK" + "IA" + strings.Repeat("A\ua7b412", 4),
+		"cloud-small-caps":  "\u1d00\u1d0b\u026a\u1d00" + strings.Repeat("AB12", 4),
+		"cloud-iota":        "AK\u0196A" + strings.Repeat("AB12", 4),
+		"cloud-mixed":       "\u1d00\u1d0b\u0196\u1d00" + strings.Repeat("AB12", 4),
+		"pem-small-caps":    "-----\u0299EGIN RSA PR\u026aVATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
+		"pem-iota":          "-----BEG\u0196N RSA PR\u0196VATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
+		"jwt-small-caps":    "ey\u1d0a" + strings.Repeat("a", 8) + ".ey\u1d0a" + strings.Repeat("b", 8) + "." + strings.Repeat("c", 8),
 		"vendored-provider": "dop" + "_v1_" + h,
 		"github":            "gh" + "p_" + strings.Repeat("a1B2", 8),
 		"private-key":       "-----BEGIN RSA PRIVATE KEY-----\n" + "synthetic-only\n-----END RSA PRIVATE KEY-----",
@@ -59,7 +65,7 @@ func TestPublicationCredentialGuard(t *testing.T) {
 				requireCredentialRefusal(t, guardPublic(repo, fullwidth(text)))
 				requireCredentialRefusal(t, guardPublic(repo, strings.Join(strings.Split(text, ""), "\u200b")))
 				// Latin capital beta survives the public Latin check and NFKC.
-				// Mapping it must preserve uppercase for cloud-key shapes.
+				// Keep its existing coverage beside the small-capital forms.
 				requireCredentialRefusal(t, guardPublic(repo, strings.ReplaceAll(text, "B", "\ua7b4")))
 			})
 		}
@@ -76,6 +82,7 @@ func TestPublicationCredentialProse(t *testing.T) {
 			"Password: see the vault entry.",
 			"See docs/credential-rotation.md for password guidance.",
 			"Run tests before merging. Prüfen vor der Freigabe.",
+			"Use an AKIA prefix, a PEM BEGIN header or an eyJ prefix as format names.",
 		} {
 			if err := guardPublic(repo, text); err != nil {
 				t.Errorf("ordinary prose fixture %d refused: %v", i, err)

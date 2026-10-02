@@ -55,13 +55,38 @@ func TestRulePublicationCredentialsRollback(t *testing.T) {
 	}
 }
 
+func TestRulePublicationCredentialProse(t *testing.T) {
+	for _, text := range []string{
+		"Never publish private keys or passwords.",
+		"The token: refresh it before retrying.",
+		"Use api_key=${API_KEY} in the example.",
+		"Authorization: Bearer ${TOKEN}",
+		"Password: see the vault entry.",
+		"See docs/credential-rotation.md for password guidance.",
+		"Run tests before merging. Prüfen vor der Freigabe.",
+		"Use an AKIA prefix, a PEM BEGIN header or an eyJ prefix as format names.",
+		"Review \u1d00\u1d0b\u026a\u1d00 and AK\u0196A as typography samples.",
+	} {
+		s := Set{Name: "Rules", Rules: []Rule{testRule("validation", text)}}
+		if err := guardPublicationCredentials(s, text); err != nil {
+			t.Fatal("ordinary publication prose refused")
+		}
+	}
+}
+
 func publicationCredentialForms() map[string]string {
 	return map[string]string{
-		"raw":        "password=" + strings.Repeat("x", 5),
-		"provider":   "sk-proj-" + strings.Repeat("Ab7q", 8),
-		"fullwidth":  "ＡＫＩＡ" + strings.Repeat("ＡＢ１２", 4),
-		"format":     strings.Join(strings.Split("AK"+"IA"+strings.Repeat("AB12", 4), ""), "\u200b"),
-		"confusable": "AK" + "IA" + strings.Repeat("A\ua7b412", 4),
+		"raw":              "password=" + strings.Repeat("x", 5),
+		"provider":         "sk-proj-" + strings.Repeat("Ab7q", 8),
+		"fullwidth":        "ＡＫＩＡ" + strings.Repeat("ＡＢ１２", 4),
+		"format":           strings.Join(strings.Split("AK"+"IA"+strings.Repeat("AB12", 4), ""), "\u200b"),
+		"confusable":       "AK" + "IA" + strings.Repeat("A\ua7b412", 4),
+		"cloud-small-caps": "\u1d00\u1d0b\u026a\u1d00" + strings.Repeat("AB12", 4),
+		"cloud-iota":       "AK\u0196A" + strings.Repeat("AB12", 4),
+		"cloud-mixed":      "\u1d00\u1d0b\u0196\u1d00" + strings.Repeat("AB12", 4),
+		"pem-small-caps":   "-----\u0299EGIN RSA PR\u026aVATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
+		"pem-iota":         "-----BEG\u0196N RSA PR\u0196VATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
+		"jwt-small-caps":   "ey\u1d0a" + strings.Repeat("a", 8) + ".ey\u1d0a" + strings.Repeat("b", 8) + "." + strings.Repeat("c", 8),
 	}
 }
 

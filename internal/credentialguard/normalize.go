@@ -34,7 +34,7 @@ func compatibleText(text string) string {
 	}, text))
 }
 
-// Credential patterns are case-sensitive, and ASCII token bytes are meaningful:
+// ASCII token bytes and case are meaningful to entropy and Basic decoding:
 // UTS #39's ASCII substitutions (I -> l, 1 -> l, m -> rn) would erase prefixes,
 // change entropy and corrupt Basic authorization values. Only non-ASCII glyphs
 // are mapped; neither the input nor the mapping output is casefolded.

@@ -64,6 +64,24 @@ var fixedPatterns = []spanPattern{
 	{basicValue, 1, []string{"basic"}},
 }
 
+// Publication matches shapes without case sensitivity, but keeps the text's
+// case for entropy, prose heuristics and Basic decoding. Ranges keeps the
+// original patterns and offsets used by confirmation flows.
+var publicationFixedPatterns = sync.OnceValue(func() []*regexp.Regexp {
+	patterns := make([]*regexp.Regexp, len(fixedPatterns))
+	for i, p := range fixedPatterns {
+		patterns[i] = publicationPattern(p.re.String())
+	}
+	return patterns
+})
+
+func publicationPattern(pattern string) *regexp.Regexp {
+	// Vendored patterns can explicitly disable folding in a nested group.
+	pattern = strings.ReplaceAll(pattern, "(?-i:", "(?i:")
+	pattern = strings.ReplaceAll(pattern, "(?-i)", "(?i)")
+	return regexp.MustCompile("(?i)" + pattern)
+}
+
 var (
 	bearerValue = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])bearer\s+([A-Za-z0-9._~+/-]{16,}=*)`)
 	basicValue  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])basic\s+([A-Za-z0-9+/]{4,}={0,2})(?:[^A-Za-z0-9+/=]|$)`)
@@ -85,11 +103,20 @@ func Contains(text string) bool {
 		return true
 	}
 	compatible := compatibleText(text)
-	if compatible != text && len(sensitiveSpans(compatible)) > 0 {
+	if len(sensitiveSpansWithCase(compatible, true)) > 0 {
 		return true
 	}
+	// Latin capital iota resembles I as well as the table's lowercase l.
+	// Try I before confusableText irreversibly reduces it to l, keeping both
+	// readings available and leaving ordinary ASCII token bytes unchanged.
+	if strings.ContainsRune(compatible, '\u0196') {
+		asI := confusableText(strings.ReplaceAll(compatible, "\u0196", "I"))
+		if len(sensitiveSpansWithCase(asI, true)) > 0 {
+			return true
+		}
+	}
 	confusable := confusableText(compatible)
-	return confusable != compatible && len(sensitiveSpans(confusable)) > 0
+	return confusable != compatible && len(sensitiveSpansWithCase(confusable, true)) > 0
 }
 
 // Ranges lists the suspected credentials in one field.
@@ -105,6 +132,10 @@ func Ranges(field, text string) []Range {
 
 // sensitiveSpans returns the merged byte ranges that look like credentials.
 func sensitiveSpans(text string) []span {
+	return sensitiveSpansWithCase(text, false)
+}
+
+func sensitiveSpansWithCase(text string, ignoreCase bool) []span {
 	if text == "" {
 		return nil
 	}
@@ -115,11 +146,15 @@ func sensitiveSpans(text string) []span {
 		}
 	}
 	lower := strings.ToLower(text)
-	for _, p := range fixedPatterns {
+	for i, p := range fixedPatterns {
 		if !slices.ContainsFunc(p.needs, func(n string) bool { return strings.Contains(lower, n) }) {
 			continue
 		}
-		for _, m := range p.re.FindAllStringSubmatchIndex(text, -1) {
+		re := p.re
+		if ignoreCase {
+			re = publicationFixedPatterns()[i]
+		}
+		for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
 			start, end := m[2*p.group], m[2*p.group+1]
 			switch value := text[start:end]; p.re {
 			case bearerValue:
@@ -145,7 +180,7 @@ func sensitiveSpans(text string) []span {
 			add(m.start, m.end)
 		}
 	}
-	leakSpans(text, lower, func(_ string, start, end int) { add(start, end) })
+	leakSpansWithCase(text, lower, ignoreCase, func(_ string, start, end int) { add(start, end) })
 	return mergeSpans(spans)
 }
 
@@ -200,6 +235,7 @@ type leakAllow struct {
 type leakRule struct {
 	spec     leakRuleSpec
 	re       *regexp.Regexp
+	foldedRE *regexp.Regexp
 	allow    []leakAllow
 	keywords []int // into leakSet.keywords
 }
@@ -219,7 +255,7 @@ var leakRules = sync.OnceValue(func() *leakSet {
 	set := &leakSet{rules: make([]leakRule, len(gitleaksRules)), global: compileAllow(gitleaksGlobalAllow), byPair: map[[2]byte][]int{}}
 	index := map[string]int{}
 	for i, spec := range gitleaksRules {
-		r := leakRule{spec: spec, re: regexp.MustCompile(spec.regex)}
+		r := leakRule{spec: spec, re: regexp.MustCompile(spec.regex), foldedRE: publicationPattern(spec.regex)}
 		for _, a := range spec.allow {
 			r.allow = append(r.allow, compileAllow(a))
 		}
@@ -271,13 +307,21 @@ func compileAllow(a leakAllowSpec) leakAllow {
 // prefilter, the pattern, the secret group, the entropy floor, then the
 // global and rule allowlists. Paths stay exempt, as everywhere here.
 func leakSpans(text, lower string, add func(rule string, start, end int)) {
+	leakSpansWithCase(text, lower, false, add)
+}
+
+func leakSpansWithCase(text, lower string, ignoreCase bool, add func(rule string, start, end int)) {
 	set := leakRules()
 	present := set.present(lower)
 	for _, r := range set.rules {
 		if len(r.keywords) > 0 && !slices.ContainsFunc(r.keywords, func(id int) bool { return present[id] }) {
 			continue
 		}
-		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+		re := r.re
+		if ignoreCase {
+			re = r.foldedRE
+		}
+		for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
 			start, end := leakSecret(text, m, r.spec.secretGroup)
 			if start < 0 || end <= start {
 				continue
