@@ -105,6 +105,7 @@ CROSS JOIN terms t
 `+nearestProject+`
 `+lastWrite+`
 WHERE n.tenant_id=$1 AND n.deleted_at IS NULL
+ AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'')
   AND ($5::uuid IS NULL OR proj.id=$5::uuid)
   AND ($3::text='' OR n.search_document @@ t.q
        OR n.title ILIKE $7 ESCAPE '\' OR coalesce(n.fields->>'slug','') ILIKE $7 ESCAPE '\'
@@ -260,7 +261,7 @@ func loadEntry(ctx context.Context, tx pgx.Tx, tenantID, id string, deleted bool
 	err := scanItem(tx.QueryRow(ctx, `
 SELECT `+itemColumns+`, n.body, n.fields
 FROM nodes n
-JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug = ANY($3::text[])
+JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug = ANY($3::text[]) AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'')
 `+nearestProject+`
 `+lastWrite+`
 WHERE n.tenant_id=$1 AND n.id=$2::uuid AND (n.deleted_at IS NULL OR $4::bool)`, tenantID, id, kindSlugs(), deleted), &e.Item, &e.Body, &fields)
@@ -452,12 +453,15 @@ func trimDecimal(s string) string {
 func lockNode(ctx context.Context, tx pgx.Tx, tenantID, id string, deleted bool) (nodeSnap, string, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (n.deleted_at IS NULL OR $4::bool)`,
+	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'') AND (n.deleted_at IS NULL OR $4::bool)`,
 		tenantID, id, kindSlugs(), deleted).Scan(&kind); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nodeSnap{}, "", errNotFound
 		}
 		return nodeSnap{}, "", err
+	}
+	if kind == "decision" {
+		return nodeSnap{}, "", fail(403, "decision_service_required", "Correct Decisions through the Decision Desk to preserve their history.")
 	}
 	snap, err := scanSnap(tx.QueryRow(ctx, `SELECT `+nodeReturning+` FROM nodes WHERE tenant_id=$1 AND id=$2::uuid FOR UPDATE`, tenantID, id))
 	return snap, kind, err

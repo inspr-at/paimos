@@ -30,7 +30,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/systemactor"
@@ -312,169 +311,24 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 // text, private quotation guard) but writes nothing to GitHub. Locked rules
 // change only through a person. The outcome job proposes here too.
 func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Principal, in InboxInput) (Proposal, error) {
-	if err := m.proposalAccess(actor); err != nil {
-		return Proposal{}, err
-	}
-	if len(m.guardMaster) < 32 {
-		return Proposal{}, fail(503, "guard_unavailable", missingGuardReason)
-	}
-	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID {
-		return Proposal{}, fail(400, "invalid_request", "Name a canonical request UUID.")
-	}
-	if in.Ticket != "" && !ticketKeyPattern.MatchString(in.Ticket) {
-		return Proposal{}, fail(400, "invalid_request", "ticket must be a key such as INSPR-491.")
-	}
-	if in.RuleSHA != "" && !digestPattern.MatchString(in.RuleSHA) {
-		return Proposal{}, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
-	}
 	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
 	defer cancel()
-	var source Source
-	var files []File
-	var guard *guardCorpus
-	var replay *Proposal
+	var p Proposal
 	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		p, err := getProposal(ctx, tx, in.RequestID)
-		if err == nil {
-			replay = &p
-			return nil
-		}
-		var f *failure
-		if !errors.As(err, &f) || f.Status != 404 {
-			return err
-		}
-		if source, err = inboxSource(ctx, tx, in); err != nil {
-			return err
-		}
-		if !writableSource(source) {
-			return fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
-		}
-		if source.CredentialRef != "" {
-			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
-				return err
-			}
-		}
-		if files, err = cachedFiles(ctx, tx, source); err != nil {
-			return err
-		}
-		if source.Repository == publicRepository {
-			guard, err = m.privateGuard(ctx, tx, actor)
-		}
-		return err
-	})
-	if err != nil {
-		return Proposal{}, err
-	}
-	if replay != nil {
-		// The same request id replays its proposal; anything else is a conflict.
-		if !replay.Inbox || replay.ProposedBy != actor.ID || replay.Path != in.Path || replay.RuleKey != in.RuleKey {
-			return Proposal{}, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
-		}
-		return *replay, nil
-	}
-	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
-	if !ok || file.Problem != "" {
-		return Proposal{}, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
-	}
-	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
-		return Proposal{}, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
-	}
-	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
-	switch {
-	case in.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
-	case rule.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = rule.TLDR.EN, rule.TLDR.DE
-	}
-	if strings.TrimSpace(pin.TLDR.EN) == "" {
-		return Proposal{}, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
-	}
-	if err := pin.validate(); err != nil {
-		return Proposal{}, err
-	}
-	_, old, next, err := editRuleViews(source, files, pin)
-	if err != nil {
-		return Proposal{}, err
-	}
-	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
-		return Proposal{}, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
-	}
-	// A TL;DR alone is a change; adding one to a rule without one is too.
-	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
-		return Proposal{}, fail(400, "no_change", "The proposal matches the pinned rule.")
-	}
-	if _, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation); err != nil {
-		return Proposal{}, err
-	}
-	p := Proposal{
-		ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
-		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
-		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index,
-	}
-	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		current, err := getSource(ctx, tx, source.ID, true)
+		var changes []events.Change
+		var err error
+		p, changes, err = m.recordInboxTx(ctx, tx, actor, in, "", "", "")
 		if err != nil {
 			return err
 		}
-		if current.Commit != source.Commit {
-			return fail(409, "stale_source", "The doctrine pin moved; reload the rule and propose again.")
-		}
-		var total, mine int
-		var sameID, sameSHA string
-		if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE proposed_by=$1),
-			COALESCE(max(id::text) FILTER (WHERE proposed_by=$1 AND source_id=$2 AND path=$3 AND rule_key=$4),''),
-			COALESCE(max(data->>'proposed_rule_sha256') FILTER (WHERE proposed_by=$1 AND source_id=$2 AND path=$3 AND rule_key=$4),'')
-			FROM doctrine_proposals WHERE data->>'inbox'='true' AND data->>'state'='pending'`, actor.ID, source.ID, in.Path, in.RuleKey).Scan(&total, &mine, &sameID, &sameSHA); err != nil {
-			return err
-		}
-		if sameID != "" {
-			if sameSHA == next.SHA256 {
-				existing, err := getProposal(ctx, tx, sameID)
-				replay = &existing
-				return err
-			}
-			return fail(409, "rule_proposal_open", "You already proposed a change to this rule. A person has to act on it first.")
-		}
-		if total >= maxInboxPending || mine >= maxInboxPerProposer {
-			return fail(409, "inbox_full", "The doctrine inbox is full. A person has to act on waiting proposals first.")
-		}
-		if in.Ticket != "" {
-			var projectID string
-			err := tx.QueryRow(ctx, `SELECT id::text, COALESCE(project_id::text,'') FROM nodes WHERE key=$1 AND deleted_at IS NULL`, in.Ticket).Scan(&p.TicketID, &projectID)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fail(404, "ticket_not_found", "That ticket is not in this workspace.")
-			}
-			if err != nil {
-				return err
-			}
-			if err := authz.RequireTx(ctx, tx, actor, "nodes.read", authz.Scope{ProjectID: projectID}); err != nil {
+		for _, change := range changes {
+			if _, err := events.Append(ctx, tx, actor, change); err != nil {
 				return err
 			}
 		}
-		raw, err := jsonData(p)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			actor.TenantID, p.ID, p.SourceID, p.Repository, p.Path, p.RuleKey, inputDigest(pin), source.Commit, actor.ID, raw); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO doctrine_proposal_drafts(tenant_id,proposal_id,source,tldr_en,tldr_de,why) VALUES($1,$2,$3,$4,$5,$6)`,
-			actor.TenantID, p.ID, pin.Source, strings.TrimSpace(pin.TLDR.EN), strings.TrimSpace(pin.TLDR.DE), strings.TrimSpace(pin.Explanation)); err != nil {
-			return err
-		}
-		_, err = events.Append(ctx, tx, actor, events.Change{Type: "doctrine.inbox_proposed", After: map[string]any{
-			"proposal_id": p.ID, "repository": p.Repository, "path": p.Path, "rule_key": p.RuleKey, "proposed_by": actor.ID, "ticket": p.Ticket,
-		}})
-		return err
+		return nil
 	})
-	if err != nil {
-		return Proposal{}, err
-	}
-	if replay != nil {
-		return *replay, nil
-	}
-	return scanStored(ctx, m, actor, p.ID)
+	return p, err
 }
 
 func jsonData(p Proposal) ([]byte, error) {

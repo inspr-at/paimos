@@ -134,7 +134,7 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 				return fail(409, "replay_conflict", "request_id already identifies different input")
 			}
 			replay = true
-			q, err = read(ctx, tx, p, id)
+			q, err = m.read(ctx, tx, p, id)
 			return err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -196,17 +196,17 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if err := event(ctx, tx, p, id, "question.asked", 1); err != nil {
 			return err
 		}
-		q, err = read(ctx, tx, p, id)
+		q, err = m.read(ctx, tx, p, id)
 		return err
 	})
 	return q, replay, err
 }
 func (m *Module) get(ctx context.Context, p tenant.Principal, id string) (Question, error) {
 	var q Question
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; q, err = read(ctx, tx, p, id); return err })
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; q, err = m.read(ctx, tx, p, id); return err })
 	return q, err
 }
-func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Question, error) {
+func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Question, error) {
 	q := Question{Askers: []Asker{}, Pending: []Pending{}}
 	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,q.input,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
@@ -250,21 +250,25 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 		}
 		q.Answer = a
 	}
-	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
+	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,e.error_message,e.effect_data,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
  WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
 	}
 	for rows.Next() {
 		var e Pending
-		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID); err != nil {
+		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ErrorMessage, &e.EffectData, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID); err != nil {
 			rows.Close()
 			return q, err
 		}
 		q.Pending = append(q.Pending, e)
 	}
 	rows.Close()
-	return q, rows.Err()
+	if err := rows.Err(); err != nil {
+		return q, err
+	}
+	q.Outcomes, err = m.availability(ctx, tx, p, q, q.Input.Doctrine)
+	return q, err
 }
 func (m *Module) list(ctx context.Context, p tenant.Principal, project, state string, limit, offset int) (Page, error) {
 	out := Page{Items: []Question{}}
@@ -325,7 +329,7 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 			ids = ids[:limit]
 		}
 		for _, id := range ids {
-			q, err := read(ctx, tx, p, id)
+			q, err := m.read(ctx, tx, p, id)
 			if err != nil {
 				return err
 			}
@@ -368,7 +372,7 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 			return err
 		}
 		var err error
-		q, err = read(ctx, tx, p, id)
+		q, err = m.read(ctx, tx, p, id)
 		if err != nil {
 			return err
 		}
@@ -386,9 +390,6 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if q.Revision != in.ExpectedRevision {
 			return fail(409, "revision_conflict", "question revision changed")
 		}
-		if in.Outcome != "once" {
-			return fail(422, "outcome_unavailable", "this outcome requires its Decision Desk materialization adapter")
-		}
 		answer := in.Answer
 		if in.OptionID != "" {
 			found := false
@@ -403,6 +404,33 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 			if !found {
 				return fail(400, "invalid_request", "option_id must name a question option")
 			}
+		}
+		target := in.Doctrine
+		if target == nil {
+			target = q.Input.Doctrine
+		}
+		available, err := m.availability(ctx, tx, p, q, target)
+		if err != nil {
+			return err
+		}
+		for _, stamp := range available {
+			if stamp.Outcome == in.Outcome && !stamp.Available {
+				return fail(422, "outcome_unavailable", stamp.Why)
+			}
+		}
+		data := outcomeInput{Doctrine: target}
+		if in.Outcome == "requirement" {
+			data.TicketID = q.Input.TicketID
+			if err := tx.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, p.TenantID, data.TicketID).Scan(&data.TicketRevision); err != nil {
+				return err
+			}
+			if in.TicketRevision != nil && !in.TicketRevision.Equal(data.TicketRevision) {
+				return fail(409, "ticket_revision_conflict", "The ticket changed; review its criteria before deciding.")
+			}
+		}
+		rawData, err := json.Marshal(data)
+		if err != nil {
+			return err
 		}
 		var replaces string
 		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT r.node_id::text FROM desk_answers r WHERE r.tenant_id=$1 AND r.question_id=$2 AND EXISTS(SELECT 1 FROM desk_pending e WHERE e.tenant_id=r.tenant_id AND e.question_id=r.question_id AND e.revision=r.revision AND e.effect_ref<>'' AND e.kind IN ('inbox','comment')) ORDER BY r.revision DESC LIMIT 1),'')`, p.TenantID, id).Scan(&replaces); err != nil {
@@ -420,8 +448,8 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after,replaces)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome, now.Add(10*time.Second), nullable(replaces))
+		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after,replaces,outcome_data)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome, now.Add(10*time.Second), nullable(replaces), rawData)
 		if err != nil {
 			return err
 		}
@@ -452,7 +480,7 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if err := event(ctx, tx, p, id, "question.answered", rev); err != nil {
 			return err
 		}
-		q, err = read(ctx, tx, p, id)
+		q, err = m.read(ctx, tx, p, id)
 		return err
 	}()
 	return q, err

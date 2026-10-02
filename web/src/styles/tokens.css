@@ -88,7 +88,7 @@
   --pr-medium: var(--ink-2);
   --pr-low: var(--ink-3);
   /* Knowledge kinds (list icons, graph bubbles, legend): five hues far apart, 3:1 or more on the canvas */
-  --kind-runbook: #0e6f6c; --kind-guideline: #3a5fc4; --kind-memory: #a8680c; --kind-external-system: #8547b0; --kind-related-project: #bf3d6d; --kind-ticket: #7c8c8d;
+  --kind-decision: var(--kind-guideline); --kind-runbook: #0e6f6c; --kind-guideline: #3a5fc4; --kind-memory: #a8680c; --kind-external-system: #8547b0; --kind-related-project: #bf3d6d; --kind-ticket: #7c8c8d;
 
   /* Canvas light */
   --wash-1: rgba(199, 239, 236, 0.85);
@@ -165,7 +165,7 @@
   --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
   /* Copper, so a thin stroke on this surface stays apart from New. */
   --st-new: #e2b45a; --st-backlog: #7f9a99; --st-blocked: #ee6e45; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
-  --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
+  --kind-decision: var(--kind-guideline); --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
   --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
   --grain-opacity: 0;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(0, 0, 0, 0.6);
@@ -210,7 +210,7 @@
   --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
     /* Copper, so a thin stroke on this surface stays apart from New. */
     --st-new: #e2b45a; --st-backlog: #7f9a99; --st-blocked: #ee6e45; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
-    --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
+    --kind-decision: var(--kind-guideline); --kind-runbook: #6fd6cb; --kind-guideline: #94b0f5; --kind-memory: #e4b25c; --kind-external-system: #c8a0ee; --kind-related-project: #f08db1; --kind-ticket: #8aa3a2;
     --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
     --grain-opacity: 0;
     --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(0, 0, 0, 0.6);

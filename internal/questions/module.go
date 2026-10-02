@@ -18,7 +18,8 @@ import (
 )
 
 type Module struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	doctrine DoctrineAdapter
 	// Production uses the database clock; deterministic tests inject one clock for decisions and dispatch.
 	clock func(context.Context, pgx.Tx) (time.Time, error)
 }
@@ -33,6 +34,9 @@ func (m *Module) now(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 }
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
+
+// WithDoctrine must be called before mounting or starting the dispatcher.
+func (m *Module) WithDoctrine(adapter DoctrineAdapter) *Module { m.doctrine = adapter; return m }
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/questions", m.handleAsk)
 	mux.HandleFunc("GET /api/projects/{projectId}/questions", m.handleList)

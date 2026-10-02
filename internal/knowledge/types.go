@@ -23,6 +23,7 @@ type spec struct {
 
 // specs is also the display order: procedures first, then rules, then memory.
 var specs = []spec{
+	{Type: "decision", Kind: "decision", Label: "Decision", Prefix: "DCS"},
 	{Type: "runbook", Kind: "runbook", Label: "Runbook", Prefix: "RUN"},
 	{Type: "guideline", Kind: "guideline", Label: "Guideline", Prefix: "GUI"},
 	{Type: "memory", Kind: "memory", Label: "Memory", Prefix: "MEM"},

@@ -756,7 +756,7 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 	var kept []apiNode
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
-		if !knowledgeSupported(slug) {
+		if !knowledgeSupported(slug) || slug == "decision" && fieldString(fieldMap(n.Fields), "slug") == "" {
 			continue
 		}
 		if want != "" && slug != want {

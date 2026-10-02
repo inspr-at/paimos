@@ -5,7 +5,7 @@
 // agent command). Free of Vue for unit tests.
 import { api } from './api.ts'
 
-export type KnowledgeType = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project'
+export type KnowledgeType = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project' | 'decision'
 export type KnowledgeStatus = 'active' | 'proposed' | 'archived'
 export interface KnowledgePerson { id: string; name: string }
 export interface KnowledgeProject { id: string; key: string; title: string }
@@ -27,11 +27,12 @@ export interface KnowledgePage {
   counts: { type: Partial<Record<KnowledgeType, number>>; status: Partial<Record<KnowledgeStatus, number>> }
 }
 
-// ---------- The five kinds ----------
+// ---------- Knowledge kinds ----------
 export interface TypeMeta { type: KnowledgeType; label: string; plural: string; icon: 'runbook' | 'guideline' | 'memory' | 'server' | 'folders'; hint: string }
 export const TYPES: readonly TypeMeta[] = [
   { type: 'runbook', label: 'Runbook', plural: 'Runbooks', icon: 'runbook', hint: 'Step-by-step procedures: deploys, rotations, recoveries.' },
   { type: 'guideline', label: 'Guideline', plural: 'Guidelines', icon: 'guideline', hint: 'Rules to follow: conventions, safety, style.' },
+  { type: 'decision', label: 'Decision', plural: 'Decisions', icon: 'guideline', hint: 'Approved Always answers; replacements keep their history.' },
   { type: 'memory', label: 'Memory', plural: 'Memory', icon: 'memory', hint: 'What was learned: decisions, pitfalls, preferences.' },
   { type: 'external-system', label: 'External system', plural: 'External systems', icon: 'server', hint: 'Services the work touches: consoles, APIs, vaults.' },
   { type: 'related-project', label: 'Related project', plural: 'Related projects', icon: 'folders', hint: 'Projects this one depends on or feeds.' },
@@ -276,6 +277,7 @@ export function wantsToc(headings: Heading[], body: string): boolean {
 // ---------- Type-specific details ----------
 export interface DetailField { key: string; label: string; kind: 'text' | 'url' | 'choice' | 'list'; placeholder?: string; choices?: string[]; hint?: string }
 export const DETAIL_FIELDS: Record<KnowledgeType, DetailField[]> = {
+ decision: [],
   runbook: [{ key: 'related_agents', label: 'Agents that run it', kind: 'list', placeholder: 'camy, kite', hint: 'Agent names, separated by commas.' }],
   guideline: [{ key: 'rule', label: 'The rule in one line', kind: 'text', placeholder: 'Never mark state with a coloured edge.', hint: 'Agents put this line into their prompts.' }],
   memory: [{ key: 'confidence', label: 'Confidence', kind: 'choice', choices: ['high', 'medium', 'low'] }],

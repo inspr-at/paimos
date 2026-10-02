@@ -2367,6 +2367,20 @@ same-project/principal continuation receives the latest answer; an absent
 successor stays visibly `successor_pending`. Continuation briefs carry references
 whose private text is resolved through authorized `ask status`, preventing
 harness metadata readers from gaining question content. No old process is woken.
-Always/Requirement/Doctrine effects remain P4-owned and `source_handover_id`
-remains unavailable pending its separate verified ask-source adapter. P3 never
-publishes active Always records. Suggestions for all four outcomes are stored.
+Outcome effects (AEON-565) apply after the finalized grace revision. Once keeps
+an immutable Decided record. Always publishes a protected Knowledge entry of type
+`decision`, using the existing knowledge list/filter/resolve/graph surfaces and
+CLI taxonomy. Replacements archive its predecessor and retain the answer lineage.
+Requirement appends one criterion with its exact answer marker, preserves the
+other ticket fields, and compares the captured ticket revision before writing.
+Concurrent edits leave a visible `ticket_revision_conflict`; decide again after
+reviewing the ticket. Corrections replace only the exact tracked criterion.
+Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
+tldr_de?}` on the question or person decision. It creates only a pending AEON-444
+inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
+remain authoritative. Published, edited or closed drafts require a new explicit
+person-reviewed correction. No rule is described as changed merely by proposing.
+Status exposes `outcomes` with availability and a why for disabled stamps, plus
+per-revision `effect_data` and safe failure explanations. Failed effects retry
+with current permissions; failed outcome writes never appear applied.
+`source_handover_id` remains unavailable pending its verified ask-source adapter.

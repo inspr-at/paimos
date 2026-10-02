@@ -92,9 +92,9 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 		}
 		rows, err := tx.Query(ctx, `SELECT e.id::text FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
  LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
- WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment') AND (e.state IN ('pending','failed') OR e.state='delivered' AND r.state='failed' AND r.failure_reason='session_ended')
+ WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment','outcome') AND (e.state IN ('pending','failed') OR e.state='delivered' AND r.state='failed' AND r.failure_reason='session_ended')
  AND e.deliver_after<=$2 AND coalesce(e.retry_at,e.deliver_after)<=$2
- ORDER BY coalesce(e.retry_at,e.deliver_after),e.question_id,e.kind,e.id LIMIT $3`, tid, now, dispatchBatch)
+ ORDER BY coalesce(e.retry_at,e.deliver_after),e.question_id,(e.kind='outcome') DESC,e.kind,e.id LIMIT $3`, tid, now, dispatchBatch)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 			return err
 		}
 		var due *time.Time
-		err = tx.QueryRow(ctx, `SELECT min(greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after))) FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision WHERE e.tenant_id=$1 AND e.state IN ('pending','failed') AND e.kind IN ('inbox','comment')`, tid).Scan(&due)
+		err = tx.QueryRow(ctx, `SELECT min(greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after))) FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision WHERE e.tenant_id=$1 AND e.state IN ('pending','failed') AND e.kind IN ('inbox','comment','outcome')`, tid).Scan(&due)
 		if due != nil && due.Sub(now) < delay {
 			delay = due.Sub(now)
 		}
@@ -160,7 +160,7 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 			return err
 		}
 		d.id = id
-		if err := tx.QueryRow(ctx, `SELECT asker_id::text,revision,kind,state,deliver_after,retry_at,effect_ref,coalesce(delivery_session_id::text,'') FROM desk_pending WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tid, id).Scan(&d.asker, &d.revision, &d.kind, &d.state, &d.due, &d.retry, &d.ref, &d.session); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT coalesce(asker_id::text,''),revision,kind,state,deliver_after,retry_at,effect_ref,coalesce(delivery_session_id::text,'') FROM desk_pending WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tid, id).Scan(&d.asker, &d.revision, &d.kind, &d.state, &d.due, &d.retry, &d.ref, &d.session); err != nil {
 			return err
 		}
 		now, err := m.now(ctx, tx)
@@ -195,17 +195,23 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 		if rollbackErr := effect.Rollback(ctx); rollbackErr != nil {
 			return rollbackErr
 		}
-		code := "delivery_failed"
+		code, message := "delivery_failed", "The delivery could not be saved; it will be retried."
+		if d.kind == "outcome" {
+			code, message = "outcome_failed", "The outcome could not be applied; it will be retried."
+		}
 		var ae *apiError
 		if errors.As(err, &ae) {
-			code = ae.code
+			code, message = ae.code, ae.message
 		}
-		_, err = tx.Exec(ctx, `UPDATE desk_pending SET state='failed',error_code=$3,retry_at=$4 WHERE tenant_id=$1 AND id=$2`, tid, id, code, now.Add(30*time.Second))
+		_, err = tx.Exec(ctx, `UPDATE desk_pending SET state='failed',error_code=$3,retry_at=$4,error_message=$5 WHERE tenant_id=$1 AND id=$2`, tid, id, code, now.Add(30*time.Second), message)
 		return err
 	})
 }
 
 func (m *Module) deliverEffect(ctx context.Context, tx pgx.Tx, tid string, d delivery) error {
+	if d.kind == "outcome" {
+		return m.applyOutcome(ctx, tx, tid, d)
+	}
 	p := tenant.Principal{TenantID: tid, Kind: tenant.Person}
 	a := Asker{}
 	answer := Answer{Revision: d.revision}
