@@ -11,6 +11,9 @@ func TestProfileLine(t *testing.T) {
 		{"grok", "grok-4.7-build-fast", "grok-build-fast", "4.7"}, {"cursor", "grok-4.7-xhigh", "grok", "4.7"},
 		{"cursor", "grok-4.7-xhigh-fast", "grok-fast", "4.7"}, {"cursor", "grok-4.7-low-fast", "grok-fast", "4.7"},
 		{"cursor", "composer-2.5", "composer", "2.5"}, {"cursor", "composer-2.5-fast", "composer-fast", "2.5"},
+		{"gemini", "gemini-2.5-pro", "gemini-pro", "2.5"},
+		{"opencode", "google/gemini-2.5-pro", "gemini-pro", "2.5"},
+		{"opencode", "ollama/qwen3-coder", "qwen-coder", "3"},
 		{"pi", "openrouter/stealth/space-bunny-alpha", "openrouter/stealth/space-bunny-alpha", ""},
 	} {
 		t.Run(tt.h+"/"+tt.id, func(t *testing.T) {

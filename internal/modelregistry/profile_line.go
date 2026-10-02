@@ -8,7 +8,7 @@ import (
 )
 
 var codexLineRE = regexp.MustCompile(`^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$`)
-var concreteLineRE = regexp.MustCompile(`^([a-z][a-z-]*?)-([0-9]+(?:[.-][0-9]+)*)(.*)$`)
+var concreteLineRE = regexp.MustCompile(`^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$`)
 var cursorEffortRE = regexp.MustCompile(`^(.+?)(-(low|medium|high|xhigh|max|ultra))?(-fast)?$`)
 
 // ProfileLine derives vendor line and numeric version from immutable model
@@ -21,6 +21,10 @@ func ProfileLine(p Profile) (family, line, version string) {
 			return family, m[2], m[1]
 		}
 		return family, id, ""
+	}
+	if p.Harness == "opencode" {
+		id = strings.TrimPrefix(id, "google/")
+		id = strings.TrimPrefix(id, "ollama/")
 	}
 	if p.Harness == "pi" {
 		id = strings.TrimPrefix(id, "anthropic/")
