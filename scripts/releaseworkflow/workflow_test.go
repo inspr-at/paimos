@@ -204,8 +204,22 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	release := readWorkflow(t, "release.yml")
 	dry := readWorkflow(t, "release-image-check.yml")
-	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) {
+	web := readWorkflow(t, "docker-web-check.yml")
+	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(web.Permissions, map[string]string{"contents": "read"}) {
 		t.Fatal("workflow defaults must be read-only")
+	}
+	if web.Jobs["docker-web-stage"].RunsOn != "ubuntu-24.04" {
+		t.Fatal("Docker web check must use the hosted ubuntu-24.04 runner")
+	}
+	paths := web.On["pull_request"].(map[string]any)["paths"].([]any)
+	for _, path := range []string{"web/**", "internal/**/*.json", "Dockerfile", "version.json", "scripts/**", "go.mod", "NOTICE", ".dockerignore"} {
+		found := false
+		for _, actual := range paths {
+			found = found || actual == path
+		}
+		if !found {
+			t.Fatalf("web check misses %s", path)
+		}
 	}
 	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
@@ -229,7 +243,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		t.Fatal("Homebrew must remain read-only and publication-triggered")
 	}
 	pin := regexp.MustCompile(`@[a-f0-9]{40}$`)
-	for _, w := range []workflow{release, dry, tap} {
+	for _, w := range []workflow{release, dry, tap, web} {
 		for _, j := range w.Jobs {
 			for _, s := range j.Steps {
 				if s.Uses != "" && !pin.MatchString(s.Uses) {
@@ -238,17 +252,26 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 			}
 		}
 	}
-	for _, j := range dry.Jobs {
-		if (len(j.Permissions) != 0 && !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"})) || j.Environment != "" {
-			t.Fatal("dry run acquires privileged tokens or environments")
+	for _, name := range []string{"release-image-check.yml", "docker-web-check.yml"} {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, s := range j.Steps {
-			if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
-				t.Fatalf("dry run has a publication side effect: %s", s.Name)
+		if strings.Contains(string(data), "secrets.") {
+			t.Fatalf("%s must not request secrets", name)
+		}
+		for _, j := range readWorkflow(t, name).Jobs {
+			if (len(j.Permissions) != 0 && !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"})) || j.Environment != "" {
+				t.Fatal("dry run acquires privileged tokens or environments")
 			}
-			for _, v := range s.Env {
-				if strings.Contains(v, "secrets.") {
-					t.Fatal("dry run must not request secrets")
+			for _, s := range j.Steps {
+				if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
+					t.Fatalf("dry run has a publication side effect: %s", s.Name)
+				}
+				for _, v := range s.Env {
+					if strings.Contains(v, "secrets.") {
+						t.Fatal("dry run must not request secrets")
+					}
 				}
 			}
 		}

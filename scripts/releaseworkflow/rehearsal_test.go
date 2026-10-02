@@ -119,12 +119,33 @@ func TestEveryReleaseStepHasReviewedRehearsalCounterpart(t *testing.T) {
 
 func TestRehearsalGateBeforeSideEffects(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
-	for id, boundary := range map[string]string{"agentd-darwin": "Build darwin paimos-agentd with LocalAuthentication", "image-platform": "Release checks"} {
+	for id, boundaries := range map[string][]string{
+		"agentd-darwin":  {"Build darwin paimos-agentd with LocalAuthentication", "Sign and notarize paimos-agentd"},
+		"image-platform": {"Release checks", "Build and push"},
+	} {
 		gateAt, gate := named(t, w.Jobs[id], "Require exact-SHA release rehearsal")
-		boundaryAt, _ := named(t, w.Jobs[id], boundary)
-		if gateAt >= boundaryAt || gate.If != "" || gate.ContinueOnError || !strings.HasPrefix(gate.Run, `node scripts/check-release-rehearsal.mjs --sha "`) || gate.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || w.Jobs[id].Permissions["actions"] != "read" {
+		for _, boundary := range boundaries {
+			boundaryAt, _ := named(t, w.Jobs[id], boundary)
+			if gateAt >= boundaryAt {
+				t.Fatalf("%s can run %s before the rehearsal gate", id, boundary)
+			}
+		}
+		if gate.If != "" || gate.ContinueOnError || !strings.HasPrefix(gate.Run, `node scripts/check-release-rehearsal.mjs --sha "`) || gate.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || w.Jobs[id].Permissions["actions"] != "read" {
 			t.Fatalf("%s can bypass exact-SHA receipt", id)
 		}
+	}
+	gateAt, _ := named(t, w.Jobs["image-platform"], "Require exact-SHA release rehearsal")
+	loginFound := false
+	for i, s := range w.Jobs["image-platform"].Steps {
+		if strings.HasPrefix(s.Uses, "docker/login-action@") {
+			loginFound = true
+			if gateAt >= i {
+				t.Fatal("image-platform can log in before the rehearsal gate")
+			}
+		}
+	}
+	if !loginFound {
+		t.Fatal("missing image-platform registry login")
 	}
 }
 
@@ -206,15 +227,5 @@ func TestRehearsalBuildsAndReceiptCannotSkip(t *testing.T) {
 	_, build := named(t, web.Jobs["docker-web-stage"], "Build the production Docker web stage")
 	if build.With["context"] != "." || build.With["target"] != "web" || build.With["push"] != "false" {
 		t.Fatal("PR misses real Docker web context")
-	}
-	paths := web.On["pull_request"].(map[string]any)["paths"].([]any)
-	for _, path := range []string{"web/**", "internal/**/*.json", "Dockerfile", "version.json"} {
-		found := false
-		for _, actual := range paths {
-			found = found || actual == path
-		}
-		if !found {
-			t.Fatalf("web check misses %s", path)
-		}
 	}
 }
