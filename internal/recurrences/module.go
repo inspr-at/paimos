@@ -109,18 +109,10 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 	return nil
 }
 
-// Match existing node and project-membership writers: tenant tree, tenant access
-// fence, node/record rows, then event counter. A non-key fence does not block the
-// tenant FK share locks. The worker uses try-locks to yield to foreground work.
+// Match access, rules and Undo writers: tenant access fence, tree, node/record
+// rows, then event counter. A non-key fence permits tenant FK KEY SHARE locks.
+// The worker uses try-locks to yield to foreground work.
 func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, error) {
-	if try {
-		var got bool
-		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got); err != nil || !got {
-			return false, err
-		}
-	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID); err != nil {
-		return false, err
-	}
 	var id string
 	query := `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`
 	if try {
@@ -133,8 +125,17 @@ func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, erro
 	if err != nil {
 		return false, err
 	}
+	if try {
+		var got bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got); err != nil || !got {
+			return false, err
+		}
+	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID); err != nil {
+		return false, err
+	}
 	return true, nil
 }
+
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
