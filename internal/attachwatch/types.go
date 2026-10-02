@@ -54,13 +54,15 @@ const Lease = 60 * time.Second
 // list returns up to exactly this many, so a request that waits is never hidden
 // behind a cut-off. The message is what the paired daemon recognises and prints.
 const (
-	LiveMax          = 32
-	LiveLimitCode    = "attach_live_limit"
-	LiveLimitMessage = "too many attach requests are waiting for approval"
-	RefusalVersion   = "version_mismatch"
-	RefusalPairing   = "pairing_revoked"
-	RefusalTicket    = "ticket_not_visible"
-	RefusalExpired   = "code_expired"
+	LiveMax           = 32
+	LiveLimitCode     = "attach_live_limit"
+	LiveLimitMessage  = "too many attach requests are waiting for approval"
+	RefusalVersion    = "version_mismatch"
+	RefusalPairing    = "pairing_revoked"
+	RefusalTicket     = "ticket_not_visible"
+	RefusalExpired    = "code_expired"
+	RefusalDraining   = "draining"
+	RefusalEnrollment = "enrollment_unavailable"
 )
 
 type Process struct {

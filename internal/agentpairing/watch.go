@@ -153,8 +153,8 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 	if authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}) != nil {
 		return attachFailure(403, "forbidden", "owner delegation no longer valid", attachwatch.RefusalTicket)
 	}
-	var ticketOK, enrollmentOK bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK)
+	var ticketOK, enrollmentOK, draining bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='draining' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK, &draining)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,13 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", attachwatch.RefusalTicket)
 	}
 	if !enrollmentOK {
-		return fail(409, "conflict", "project, ticket or harness enrollment changed")
+		// An existing OS process does not carry attach authority. Drain preserves
+		// owned work for settlement, but cannot grant a new session/consent lease.
+		cause := attachwatch.RefusalEnrollment
+		if draining {
+			cause = attachwatch.RefusalDraining
+		}
+		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", cause)
 	}
 	return nil
 }
@@ -260,8 +266,13 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			// gives repair guidance to an authenticated principal for its own
 			// retained computer row and registered, memory-only poll key.
 			var retainedPrincipal, state string
-			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID && state == "revoked" {
-				return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID {
+				switch state {
+				case "revoked":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+				case "draining":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalDraining)
+				}
 			}
 			return fail(403, "forbidden", "computer proof rejected")
 		}

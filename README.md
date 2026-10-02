@@ -2184,13 +2184,28 @@ the generic auth refusal. After updating the server, restart agentd
 to retry attach registration; there is no in-process registration retry.
 
 Owner refusal guidance distinguishes incompatible attach versions, a pairing
-that no longer authenticates, unavailable project/ticket access, an expired code
-and the live approval-request limit. Server errors preserve `code` and `error`
+that no longer authenticates, unavailable project/ticket access, draining or
+removed harness enrollment, an expired code, lost daemon registration, transport
+failures and the distinct computer, attempt, registration and approval limits.
+Server errors preserve `code` and `error`
 and add `attach_refusal` only after checking the computer proof and principal
-(or the signed-in person owner). Unknown causes remain generic. Revoked HTTP
+(or the signed-in person owner). Fixed English/German hints name the next action;
+unknown causes direct the owner to daemon status and the administrator's server
+logs. Arbitrary server text never becomes terminal output. Revoked HTTP
 bearers stay unauthenticated; pairing repair is offered only by the locally
 authenticated interactive helper. Poll refusals still detach and clear local
 state, and no uncertain conversation submission is retried.
+
+If attach fails after a server restart, the daemon's memory-only poll registration
+was lost: restart agentd when owned work permits, then request fresh approval.
+Re-pairing is not required for lost registration. A local `harness claude draining`
+report alone does not block attach: the attach manager does not use the supervisor's
+launch fence. A server-side draining or removed enrollment does block a fresh
+attach, including `--status-only` for an already running process. That operation
+creates new session/consent authority; draining preserves previously owned work
+for settlement, not new attachment authority. Check the computer's enrollments in
+Aeon and finish the disconnect before adding the harness again. Restarting agentd
+does not undo a server-side disconnect.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.
