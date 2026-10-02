@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { agentDescription, createAgent, effectLine, KEY_SCOPE_PRESETS, keyScopes, presetScopes, neededToGive, suggestAgentRole, type Agent, type Role } from '../../lib/access'
+import { agentDescription, agentRolePermissions, createAgent, effectLine, KEY_SCOPE_PRESETS, keyScopes, presetScopes, neededToGive, suggestAgentRole, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
 import { useProjects } from '../../stores/projects'
@@ -34,7 +34,7 @@ const role = computed(() => roles.value.find(r => r.id === roleId.value))
 const validRole = computed(() => !!role.value && grantable(role.value))
 const availableProjects = computed(() => projects.projects.filter(p => !p.archived))
 const suggested = computed(() => preset.value?.scopes === 'all' ? undefined : suggestAgentRole(roles.value, preset.value?.scopes ?? [], scope.value === 'projects' ? 'project' : 'workspace', access.registry, myPermissions()))
-const roleEffect = (r: Role) => effectLine(neededToGive(r, scope.value === 'projects' ? 'project' : 'workspace', access.registry).filter(key => keyScopes(access.registry).some(p => p.key === key)), access.registry, 3)
+const roleEffect = (r: Role) => effectLine(neededToGive({ permissions: agentRolePermissions(r) }, scope.value === 'projects' ? 'project' : 'workspace', access.registry).filter(key => keyScopes(access.registry).some(p => p.key === key)), access.registry, 3)
 const prefill = computed(() => agentDescription(preset.value?.label ?? '', scope.value, selected.value.map(id => projects.projects.find(p => p.id === id)?.routeKey ?? id)))
 const description = ref(prefill.value)
 watch(prefill, value => { if (!descriptionEdited.value) description.value = value })
@@ -97,7 +97,7 @@ onMounted(() => { void projects.load() })
       </select>
       <p id="agent-role-effect" class="hint">{{ role ? roleEffect(role) : 'Choose the role that covers the work this agent needs to do.' }}</p>
       <p v-if="preset" class="hint" aria-live="polite">
-        <template v-if="preset.scopes === 'all'">Full access follows the role you choose. Admin allows the full agent-grantable set; person-only permissions stay with people.</template>
+        <template v-if="preset.scopes === 'all'">Full access follows the role you choose and your permissions. Built-in roles exclude recurrence automation for agents; it needs an explicit custom-role grant. Person-only permissions stay with people.</template>
         <template v-else-if="suggested">{{ suggested.name }} covers {{ preset.label }} with the fewest permissions you may grant{{ scope === 'projects' ? ' on a project' : '' }}.
           <button v-if="roleId !== suggested.id" type="button" class="btn sm" :disabled="busy" @click="roleId = suggested.id; roleEdited = true">Use {{ suggested.name }}</button>
         </template>

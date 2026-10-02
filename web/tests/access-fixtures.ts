@@ -6,6 +6,7 @@
 // specs see the answers the real server gives. Register after the work mocks.
 import type { Page, Route } from '@playwright/test'
 import projectSelfPermissions from '../../internal/authz/project_self_permissions.json' with { type: 'json' }
+import builtinAgentExclusions from '../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
 
 export const ME = '11111111-1111-4111-8111-111111111111'
 export const MIRA = '22222222-2222-4222-8222-222222222222'
@@ -31,6 +32,7 @@ export const REGISTRY = [
   P('nodes.read', 'Work', 'See projects, tickets and their history', 'low'),
   P('nodes.write', 'Work', 'Create and edit tickets, move them and change their status', 'medium'),
   P('nodes.delete', 'Work', 'Delete tickets and projects', 'high'),
+  P('recurrences.manage', 'Recurrences', 'Manage recurring work', 'high'),
   P('comments.read', 'Work', 'Read ticket comments', 'low'),
   P('comments.write', 'Work', 'Comment on tickets', 'low'),
   P('events.read', 'History', 'Read ticket activity and history', 'low'),
@@ -55,7 +57,7 @@ export const REGISTRY = [
   P('portal.quotes', 'Customer portal', 'See and accept their own quotes', 'low', false),
 ]
 const ALL = REGISTRY.map(p => p.key)
-const MEMBER = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
+const MEMBER = ['nodes.read', 'nodes.write', 'recurrences.manage', 'comments.read', 'comments.write', 'events.read', 'search.read', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
 export interface MockRole { id: string; key: string; name: string; description: string; builtin: boolean; permissions: string[]; based_on: string | null }
 const builtin = (key: string, name: string, description: string, permissions: string[]): MockRole => ({ id: `role-${key}`, key, name, description, builtin: true, permissions, based_on: null })
 export function roles(): MockRole[] {
@@ -70,6 +72,8 @@ export function roles(): MockRole[] {
   ]
 }
 const ref = (role: MockRole) => ({ id: role.id, key: role.key, name: role.name })
+// Apply the server's agent-only restriction without filtering the person catalog.
+const agentPermissions = (role?: MockRole) => (role?.permissions ?? []).filter(key => !role?.builtin || !builtinAgentExclusions.permissions.includes(key))
 
 export interface AccessWorld {
   me: string
@@ -461,9 +465,9 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       // generated private roles; project grants cannot restore removed scopes.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
       const bindings = world.bindings.filter(b => b.principal_id === agentRow.principal_id)
-      const projectScopes = bindings.flatMap(b => world.roles.find(r => r.id === b.role_id)?.permissions ?? []).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(k))
+      const projectScopes = bindings.flatMap(b => agentPermissions(world.roles.find(r => r.id === b.role_id))).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(k))
       const privateRole = agentRole && !agentRole.builtin && agentRole.key === `agent_${agentRow.principal_id.replace(/-/g, '')}`
-      const ceiling = new Set([...(agentRole?.permissions ?? []), ...(old && privateRole ? [] : projectScopes)])
+      const ceiling = new Set([...agentPermissions(agentRole), ...(old && privateRole ? [] : projectScopes)])
       if (scopes.some(k => !mine(world).has(k) || (old || agentRole || bindings.length) && !ceiling.has(k))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
       const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
@@ -485,7 +489,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       const agent = world.agents.find(a => a.principal_id === key.principal_id)
       const role = world.roles.find(r => r.id === agent?.workspace_role)
       const eligible = REGISTRY.filter(p => p.agent_grantable && mine(world).has(p.key)).map(p => p.key)
-      const grantable = eligible.filter(p => role?.permissions.includes(p))
+      const grantable = eligible.filter(p => agentPermissions(role).includes(p))
       const roleGrantable = need('roles.manage') && role && !role.builtin ? eligible.filter(p => !role.permissions.includes(p)) : []
       const before = { ...key, scopes: [...key.scopes] }
       const pruned = key.scopes.filter(k => !REGISTRY.some(p => p.key === k))
@@ -502,7 +506,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const extension = body.role_extension as { role_id: string; add: string[] } | undefined
         const roleBefore = role ? { ...role, permissions: [...role.permissions] } : null
         if (extension && (!need('roles.manage') || !role || role.builtin || role.id !== extension.role_id || extension.add.some(k => !added.includes(k) || !eligible.includes(k)))) return fail(route, 403, 'forbidden', 'Role extension denied.')
-        const roleAfter = [...new Set([...(role?.permissions ?? []), ...(extension?.add ?? [])])]
+        const roleAfter = [...new Set([...agentPermissions(role), ...(extension?.add ?? [])])]
         const after = [...new Set([...cleaned.filter(k => !removed.includes(k)), ...added])]
         if (after.some(k => !eligible.includes(k) || !roleAfter.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed live grants.')
         key.scopes = after

@@ -67,7 +67,7 @@ test('Full access includes mixed workspace/project role scopes without promoting
 test('client/server scope ceiling parity, including project self-service and person-only exclusions', () => {
   const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
   for (const fixture of ceilingParity.cases) {
-    const workspace = fixture.workspace === null ? null : role('workspace', fixture.private_role ? 'agent_parity' : 'workspace', fixture.workspace, false)
+    const workspace = fixture.workspace === null ? null : role('workspace', fixture.builtin_role ?? (fixture.private_role ? 'agent_parity' : 'workspace'), fixture.workspace, !!fixture.builtin_role)
     const projects = fixture.projects.map((permissions, i) => role(`project-${i}`, `project-${i}`, permissions, false))
     const roles = [...(workspace ? [workspace] : []), ...projects]
     const worker = agent('parity', { workspace_role: workspace, project_roles: projects.map(r => ({ project_id: r.id, project_key: r.id, project_title: r.name, role: r })) })
@@ -79,6 +79,28 @@ test('client/server scope ceiling parity, including project self-service and per
       else assert.deepEqual([...ceiling!].sort(), want, fixture.name)
       if (ceiling) assert.deepEqual(grantablePresetScopes('all', ceiling, catalog).sort(), want, fixture.name)
     }
+  }
+})
+
+test('built-in agent roles exclude recurrence automation in every key mode; custom grants remain explicit', () => {
+  const catalog = [P('nodes.read', 'Work', 'low'), P('recurrences.manage', 'Work', 'high')]
+  for (const key of ['owner', 'admin', 'member']) {
+    const builtin = role('builtin', key, catalog.map(p => p.key))
+    const custom = role('custom', 'explicit-recurrence', ['recurrences.manage'], false)
+    const worker = agent('worker', { workspace_role: builtin })
+    const project = { project_id: 'p', project_key: 'P', project_title: 'Project', role: builtin }
+    for (const mode of ['create', 'existing', 'rotate'] as const) {
+      for (const target of [worker, agent('project', { project_roles: [project] })]) {
+        const ceiling = agentScopeCeiling(target, [builtin], catalog, mode)!
+        assert.deepEqual([...ceiling], ['nodes.read'])
+        assert.deepEqual(grantablePresetScopes('all', ceiling, catalog), ['nodes.read'])
+        assert.deepEqual([...selectScopeGroup(new Set(), catalog.map(p => p.key), true, ceiling, catalog)], ['nodes.read'])
+      }
+      const explicit = agent('worker', { workspace_role: builtin, project_roles: [{ ...project, role: custom }] })
+      assert.ok(agentScopeCeiling(explicit, [builtin, custom], catalog, mode)!.has('recurrences.manage'))
+      assert.ok(agentScopeCeiling(agent('custom', { workspace_role: custom }), [custom], catalog, mode)!.has('recurrences.manage'))
+    }
+    assert.deepEqual(builtin.permissions, ['nodes.read', 'recurrences.manage'], 'person role catalog stays intact')
   }
 })
 

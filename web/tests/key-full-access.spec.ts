@@ -4,6 +4,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, DEPLOYER, REGISTRY } from './access-fixtures'
+import { encodeScopeCode } from '../src/lib/scopeCode'
 
 const row = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
 async function open(page: Page, role: 'admin' | 'member' = 'admin', custom = false) {
@@ -36,7 +37,7 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
   test(`${mode} Full access follows ${role}, with group All/None bounded to visible scopes`, async ({ page }) => {
     const world = await open(page, role)
     const sheet = await (mode === 'new' ? create(page) : edit(page))
-    const expected = REGISTRY.filter(p => p.agent_grantable && world.roles.find(r => r.key === role)!.permissions.includes(p.key)).map(p => p.key)
+    const expected = REGISTRY.filter(p => p.agent_grantable && p.key !== 'recurrences.manage' && world.roles.find(r => r.key === role)!.permissions.includes(p.key)).map(p => p.key)
     await expect(sheet.getByRole('button', { name: 'Apply Full access' })).toBeVisible()
     await sheet.getByRole('button', { name: 'Apply Full access' }).click()
     await expect(checked(sheet)).toHaveCount(expected.length)
@@ -72,6 +73,38 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
       await sheet.getByRole('button', { name: 'Create key', exact: true }).click()
       await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
       expect([...world.keys[0]!.scopes].sort()).toEqual([...expected].sort())
+    }
+  })
+}
+
+for (const mode of ['new', 'rotate'] as const) {
+  test(`${mode} Full access on built-in Admin never sends recurrence automation`, async ({ page }) => {
+    const world = await open(page)
+    expect(world.roles.find(r => r.key === 'admin')!.permissions).toContain('recurrences.manage')
+    expect(REGISTRY.find(p => p.key === 'recurrences.manage')!.agent_grantable).toBe(true)
+    if (mode === 'rotate') {
+      await row(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
+    }
+    const sheet = mode === 'new' ? await create(page) : page.getByRole('dialog', { name: 'Rotate key for pharos-deployer' })
+    if (mode === 'rotate') await sheet.getByLabel('Scope code', { exact: true }).fill(encodeScopeCode(['nodes.read']))
+    await sheet.getByRole('button', { name: 'Apply Full access' }).click()
+    const recurrence = sheet.getByRole('checkbox', { name: /recurrences\.manage/ })
+    await expect(recurrence).not.toBeChecked()
+    await expect(recurrence).toBeDisabled()
+    await expect(sheet.getByRole('group', { name: 'Recurrences', exact: true }).getByRole('button', { name: 'All', exact: true })).toBeDisabled()
+    await sheet.getByRole('button', { name: mode === 'new' ? 'Create key' : 'Rotate key', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
+    const calls = world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')
+    expect(calls).toHaveLength(1)
+    const body = calls[0]!.body as { scopes?: string[]; rotation_scopes?: string[]; rotate_key_id?: string }
+    const sent = mode === 'new' ? body.scopes : body.rotation_scopes
+    const expected = REGISTRY.filter(p => p.agent_grantable && p.key !== 'recurrences.manage' && world.roles.find(r => r.key === 'admin')!.permissions.includes(p.key)).map(p => p.key)
+    expect([...sent!].sort()).toEqual([...expected].sort())
+    expect(sent).not.toContain('recurrences.manage')
+    expect([...world.keys[0]!.scopes].sort()).toEqual([...expected].sort())
+    if (mode === 'rotate') {
+      expect(body.rotate_key_id).toBe('k2')
+      expect(world.keys.find(k => k.id === 'k2')!.revoked_at).not.toBeNull()
     }
   })
 }
@@ -191,7 +224,7 @@ test('New agent Full access requires an explicit role choice and passes the pres
   await sheet.getByLabel('Name', { exact: true }).fill('full-agent')
   await sheet.getByLabel('Purpose preset').selectOption('full-access')
   await expect(sheet.getByLabel('Role', { exact: false })).toHaveValue('')
-  await expect(sheet).toContainText('Admin allows the full agent-grantable set')
+  await expect(sheet).toContainText('Built-in roles exclude recurrence automation for agents; it needs an explicit custom-role grant.')
   await sheet.getByLabel('Role', { exact: false }).selectOption('role-admin')
   await sheet.getByRole('button', { name: 'Create agent', exact: true }).click()
   const key = page.getByRole('dialog', { name: 'Create first key for full-agent' })

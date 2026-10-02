@@ -4,6 +4,7 @@
 // helpers below are free of Vue so they can be unit-tested.
 import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
 import projectSelfPermissions from '../../../internal/authz/project_self_permissions.json' with { type: 'json' }
+import builtinAgentExclusions from '../../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
@@ -188,11 +189,16 @@ export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefi
 // that role during creation. Codes and edits respect existing grants. Rotation
 // also caps a generated private role at its configured workspace permissions.
 // null means creation may configure a role; it never applies to rotation.
+export const agentRolePermissions = (role: Pick<Role, 'builtin' | 'permissions'>): string[] =>
+  role.permissions.filter(key => !role.builtin || !builtinAgentExclusions.permissions.includes(key))
 export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], mode: 'create' | 'existing' | 'rotate' = 'create'): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
   const grantable = new Set(keyScopes(registry).map(p => p.key))
   const projectKeys = new Set(keyScopes(registry).filter(p => p.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(p.key)).map(p => p.key))
-  const projectPermissions = (agent.project_roles ?? []).flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k))
+  const projectPermissions = (agent.project_roles ?? []).flatMap(pr => {
+    const projectRole = roles.find(r => r.id === pr.role.id)
+    return projectRole ? agentRolePermissions(projectRole) : []
+  }).filter(k => projectKeys.has(k))
   if (!role && agent.project_roles?.length) return new Set(projectPermissions)
   if (!role) return agent.workspace_role || mode !== 'create' ? new Set() : null
   const privateRole = !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`
@@ -200,7 +206,7 @@ export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace
   if (privateRole && mode === 'rotate') return new Set(role.permissions.filter(key => grantable.has(key)))
   // Like AgentKeyCeilingTx: project permissions may be key scopes too. Actual
   // requests still check the project's binding; this grants no workspace access.
-  return new Set([...role.permissions, ...projectPermissions].filter(key => grantable.has(key)))
+  return new Set([...agentRolePermissions(role), ...projectPermissions].filter(key => grantable.has(key)))
 }
 
 // ---------- Permissions in words ----------

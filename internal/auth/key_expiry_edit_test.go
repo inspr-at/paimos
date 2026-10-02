@@ -112,11 +112,8 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 			at := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour).Truncate(time.Second)
 			expiry = &at
 		}
-		edit := map[string]any{"expires_at": expiry}
-		if i == 0 {
-			edit["add"] = full
-		}
-		// Once Full access is applied, change only expiry, including Never.
+		// Reapply Full access with every expiry choice, including Never.
+		edit := map[string]any{"add": full, "expires_at": expiry}
 		body, _ := json.Marshal(edit)
 		w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(body))
 		if w.Code != http.StatusOK {

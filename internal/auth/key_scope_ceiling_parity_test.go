@@ -30,6 +30,8 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 			Want         []string   `json:"want"`
 			PrivateRole  bool       `json:"private_role"`
 			RotationWant []string   `json:"rotation_want"`
+			BuiltinRole  string     `json:"builtin_role"`
+			Outside      string     `json:"outside_ceiling"`
 		} `json:"cases"`
 	}
 	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
@@ -47,6 +49,19 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 	}
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
+			outside := tc.Outside
+			if outside == "" {
+				outside = "models.read"
+			}
+			if permission, ok := authz.Lookup(outside); !ok || !permission.AgentGrantable || slices.Contains(tc.Want, outside) {
+				t.Fatal("fixture requires an agent-grantable permission outside its ceiling")
+			}
+			if tc.BuiltinRole != "" {
+				permissions, ok := authz.BuiltinPermissions(tc.BuiltinRole)
+				if !ok || !slices.Equal(permissions, tc.Workspace) {
+					t.Fatal("client/server built-in role permissions drift")
+				}
+			}
 			m, owner := keyFixture(t)
 			ctx := dbtest.Seed(t.Context())
 			agent := tenant.Principal{TenantID: owner.TenantID, Kind: tenant.Agent}
@@ -76,12 +91,19 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 					return err
 				}
 				if tc.Workspace != nil {
-					name := "ceiling_workspace"
-					if tc.PrivateRole {
-						name = "agent_" + strings.ReplaceAll(agent.ID, "-", "")
-					}
-					if err := bind(name, "", tc.Workspace); err != nil {
-						return err
+					if tc.BuiltinRole != "" {
+						if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+							SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE key=$3 AND builtin`, owner.TenantID, agent.ID, tc.BuiltinRole); err != nil {
+							return err
+						}
+					} else {
+						name := "ceiling_workspace"
+						if tc.PrivateRole {
+							name = "agent_" + strings.ReplaceAll(agent.ID, "-", "")
+						}
+						if err := bind(name, "", tc.Workspace); err != nil {
+							return err
+						}
 					}
 				}
 				for i, permissions := range tc.Projects {
@@ -132,17 +154,17 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 				t.Fatal("Full access edit changed bearer or lost scopes")
 			}
 			beforeKeys, beforeEvents := keyCounts(t, m, owner)
-			// Known agent-grantable, but outside every fixture's role union.
-			if w := keyRequest(m, owner, map[string]any{"principal_id": agent.ID, "scopes": []string{"models.read"}}); w.Code != http.StatusForbidden {
+			// Known agent-grantable, but outside this fixture's live ceiling.
+			if w := keyRequest(m, owner, map[string]any{"principal_id": agent.ID, "scopes": []string{outside}}); w.Code != http.StatusForbidden {
 				t.Fatalf("outside-ceiling creation status = %d", w.Code)
 			}
-			if w := scopesRequest(m, owner, key.ID, http.MethodPatch, `{"add":["models.read"]}`); w.Code != http.StatusForbidden {
+			if w := scopesRequest(m, owner, key.ID, http.MethodPatch, fmt.Sprintf(`{"add":[%q]}`, outside)); w.Code != http.StatusForbidden {
 				t.Fatalf("outside-ceiling edit status = %d", w.Code)
 			}
 			for _, tc := range []struct {
 				scope  string
 				status int
-			}{{"models.read", http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
+			}{{outside, http.StatusForbidden}, {"keys.read", http.StatusBadRequest}, {"retired.scope", http.StatusBadRequest}} {
 				if w := keyRequest(m, owner, map[string]any{"rotate_key_id": key.ID, "rotation_scopes": []string{tc.scope}}); w.Code != tc.status {
 					t.Fatalf("outside-ceiling rotation status = %d for %s", w.Code, tc.scope)
 				}

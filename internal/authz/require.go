@@ -260,7 +260,7 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 			if p.Kind == tenant.Agent {
 				filtered := make([]string, 0, len(perms))
 				for _, permission := range perms {
-					if permission != "recurrences.manage" {
+					if !contains(builtinAgentExclusions, permission) {
 						filtered = append(filtered, permission)
 					}
 				}
@@ -384,6 +384,22 @@ func ProjectGrantable(key string) bool {
 	}
 	return false
 }
+
+// Built-in agent exclusions are shared with the key dialogs and browser mocks.
+// Custom roles may explicitly grant these permissions; person grants stay intact.
+//
+//go:embed builtin_agent_exclusions.json
+var builtinAgentExclusionsJSON []byte
+
+var builtinAgentExclusions = func() []string {
+	var definition struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(builtinAgentExclusionsJSON, &definition); err != nil {
+		panic("invalid embedded built-in agent exclusions")
+	}
+	return definition.Permissions
+}()
 
 // Project self-service permissions are the workspace-only permissions a role
 // needs to use its projects: the caller's own profile and effective access,
