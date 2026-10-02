@@ -87,6 +87,7 @@
 2 105152 github.com/inspr-at/paimos/internal/agentruns
 2 0 github.com/inspr-at/paimos/internal/agents
 2 7973 github.com/inspr-at/paimos/internal/business/directory
+2 0 github.com/inspr-at/paimos/internal/business/quotedocument
 2 30885 github.com/inspr-at/paimos/internal/business/quotes
 2 0 github.com/inspr-at/paimos/internal/business/quotes/confirmation
 2 269 github.com/inspr-at/paimos/internal/client
