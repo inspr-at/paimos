@@ -12452,7 +12452,7 @@ components:
       properties:
         session: {$ref: '#/components/schemas/HarnessSession'}
         continuation: {$ref: '#/components/schemas/HarnessContinuation'}
-        registration: {$ref: '#/components/schemas/HarnessRegistration', description: Public recipe without private proofs or old run binding. Caller supplies fresh harness_session_ref and worker_lease.}
+        registration: {$ref: '#/components/schemas/HarnessRegistration', description: Public recipe without private proofs or old run binding. Retains generator and command labels from the paused session; a continuation with different run-kind labels is rejected. Caller supplies fresh harness_session_ref and worker_lease.}
         successor: {$ref: '#/components/schemas/HarnessSession'}
     HarnessSession:
       type: object

@@ -393,6 +393,7 @@ func resumeRecipe(s Session) resumeResult {
 	c := Continuation{SucceedsID: s.ID, Handover: *s.Pause.Handover, Brief: handoverBrief(*s.Pause.Handover)}
 	return resumeResult{Session: s, Continuation: c, Registration: map[string]any{
 		"succeeds_session_id": s.ID, "agent_principal_id": s.AgentPrincipalID, "harness": s.Harness, "host": s.Host, "management_mode": s.Management, "role": s.Role, "parent_harness_session_id": s.ParentID, "ticket_node_id": s.TicketNodeID, "work_shape": s.WorkShape, "advertised_capabilities": s.Capabilities,
+		"generator": s.Generator, "command": s.Command,
 		"display_label": s.DisplayLabel, "model": s.Model, "reasoning_effort": s.ReasoningEffort, "account_label": s.AccountLabel, "harness_version": s.HarnessVersion, "worktree": s.Worktree, "branch": s.Branch, "brief": "Continuation of " + s.ID,
 	}}
 }
@@ -665,8 +666,8 @@ func pausedPredecessor(s Session, in registration) error {
 	if s.StoppedAt == nil || s.StopReason == nil || *s.StopReason != "paused" || s.Pause == nil || s.Pause.Handover == nil || s.Pause.State != "resume_requested" || s.HandedOverToID != nil || s.ArchivedAt != nil {
 		return workorders.Fail(409, "requested paused predecessor required")
 	}
-	if s.AgentPrincipalID != in.AgentPrincipalID || s.Role != in.Role || s.Harness != in.Harness || s.Management != in.Management || !same(s.Branch, in.Branch) || !same(s.Worktree, in.Worktree) || !same(s.Model, in.Model) || !same(s.ReasoningEffort, in.ReasoningEffort) || !same(s.TicketNodeID, in.TicketNodeID) || s.WorkShape != in.WorkShape || !same(s.ParentID, in.ParentID) || in.RunID != nil || in.WorkOrderID != nil {
-		return workorders.Fail(409, "continuation must retain principal, harness, model, branch, worktree and ticket")
+	if s.AgentPrincipalID != in.AgentPrincipalID || s.Role != in.Role || s.Harness != in.Harness || !same(s.Generator, in.Generator) || !same(s.Command, in.Command) || s.Management != in.Management || !same(s.Branch, in.Branch) || !same(s.Worktree, in.Worktree) || !same(s.Model, in.Model) || !same(s.ReasoningEffort, in.ReasoningEffort) || !same(s.TicketNodeID, in.TicketNodeID) || s.WorkShape != in.WorkShape || !same(s.ParentID, in.ParentID) || in.RunID != nil || in.WorkOrderID != nil {
+		return workorders.Fail(409, "continuation must retain principal, harness, generator, command, model, branch, worktree and ticket")
 	}
 	return nil
 }
@@ -683,6 +684,7 @@ func inheritPauseRegistration(ctx context.Context, tx pgx.Tx, projectID string, 
 		dst **string
 		src *string
 	}{
+		{&in.Generator, old.Generator}, {&in.Command, old.Command},
 		{&in.Model, old.Model}, {&in.ReasoningEffort, old.ReasoningEffort}, {&in.Worktree, old.Worktree}, {&in.Branch, old.Branch},
 		{&in.AccountLabel, old.AccountLabel}, {&in.DisplayLabel, old.DisplayLabel}, {&in.HarnessVersion, old.HarnessVersion},
 		{&in.ParentID, old.ParentID}, {&in.TicketNodeID, old.TicketNodeID},

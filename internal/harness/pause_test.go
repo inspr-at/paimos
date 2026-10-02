@@ -406,6 +406,113 @@ func TestPauseStateMachineSurvivesRestartAndResumesWorker(t *testing.T) {
 	})
 }
 
+func TestPauseProcessRunContinuationRetainsKindLabels(t *testing.T) {
+	for _, tc := range []struct{ kind, field, label, mismatch string }{
+		{"media", "generator", "higgsfield/kling3_0", "higgsfield/veo3_1"},
+		{"terminal", "command", "ffmpeg", "make render"},
+	} {
+		for _, mode := range []string{"atomic", "registration"} {
+			t.Run(tc.kind+"/"+mode, func(t *testing.T) {
+				f := fixture(t)
+				base := "/api/projects/" + f.project + "/harness-sessions"
+				parent := f.registerSession(t, f.agent.ID, "coordinator", f.ticket, "parent-ref-"+uid(), "parent-lease-"+uid())
+				body := pauseRegistration(f)
+				delete(body, "model")
+				delete(body, "reasoning_effort")
+				body["harness"], body[tc.field], body["parent_harness_session_id"] = tc.kind, tc.label, parent
+				path, lease, control := pauseSession(t, f, body)
+				finishPaused(t, f, path, lease, control)
+				id := strings.TrimPrefix(path, base+"/")
+				proof := map[string]any{"harness_session_ref": "continued-ref-" + uid(), "worker_lease": "continued-lease-" + uid()}
+
+				assertNoSuccessor := func(wantState string) {
+					t.Helper()
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						var state string
+						var noSuccessor bool
+						var activeChildren, resumes int
+						if err := tx.QueryRow(t.Context(), `SELECT pause_record->>'state',handed_over_to_id IS NULL,
+ (SELECT count(*) FROM harness_sessions WHERE parent_id=$2 AND stopped_at IS NULL),
+ (SELECT count(*) FROM events WHERE type='harness.resumed' AND after->>'id'=$1::text)
+ FROM harness_sessions WHERE id=$1`, id, parent).Scan(&state, &noSuccessor, &activeChildren, &resumes); err != nil {
+							return err
+						}
+						if state != wantState || !noSuccessor || activeChildren != 0 || resumes != 0 {
+							t.Errorf("failed continuation changed state: pause=%s unlinked=%t active children=%d resumes=%d", state, noSuccessor, activeChildren, resumes)
+						}
+						return nil
+					})
+				}
+
+				var next map[string]any
+				if mode == "atomic" {
+					// A failed registration must roll back the resume request too.
+					expect(t, f.call(f.person, "POST", path+"/resume", map[string]any{"registration": map[string]any{"harness_session_ref": "short", "worker_lease": proof["worker_lease"]}}, ""), 400)
+					assertNoSuccessor("paused")
+					w := f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, "")
+					expect(t, w, 200)
+					result := decode(t, w)
+					if result["registration"].(map[string]any)[tc.field] != tc.label {
+						t.Fatal("atomic resume recipe lost the run-kind label")
+					}
+					next = result["successor"].(map[string]any)
+					expect(t, f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, ""), 200)
+					if strings.Contains(w.Body.String(), proof["worker_lease"].(string)) || strings.Contains(w.Body.String(), proof["harness_session_ref"].(string)) {
+						t.Fatal("atomic resume exposed private proofs")
+					}
+				} else {
+					w := f.call(f.person, "POST", path+"/resume", map[string]any{}, "")
+					expect(t, w, 200)
+					if decode(t, w)["registration"].(map[string]any)[tc.field] != tc.label {
+						t.Fatal("resume recipe lost the run-kind label")
+					}
+					// Optional metadata and labels must inherit from the predecessor.
+					registration := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.kind, "host": "test", "role": "worker", "management_mode": "unmanaged", "succeeds_session_id": id, "harness_session_ref": proof["harness_session_ref"], "worker_lease": proof["worker_lease"], tc.field: tc.mismatch}
+					w = f.call(f.person, "POST", base, registration, "")
+					expect(t, w, 409)
+					if !strings.Contains(w.Body.String(), "continuation must retain") {
+						t.Fatal("mismatch was not rejected by the predecessor check")
+					}
+					assertNoSuccessor("resume_requested")
+					delete(registration, tc.field)
+					w = f.call(f.person, "POST", base, registration, "")
+					expect(t, w, 201)
+					next = decode(t, w)
+					w = f.call(f.person, "POST", base, registration, "")
+					expect(t, w, 201)
+					if decode(t, w)["id"] != next["id"] {
+						t.Fatal("registration replay created another successor")
+					}
+				}
+				if next["id"] == id || next["harness"] != tc.kind || next[tc.field] != tc.label || next["parent_harness_session_id"] != parent || next["ticket_node_id"] != f.ticket || next["branch"] != body["branch"] || next["worktree"] != body["worktree"] {
+					t.Fatal("continuation lost its run-kind label or binding")
+				}
+				if c := next["continuation"].(map[string]any); c["succeeds_session_id"] != id || !strings.Contains(c["brief"].(string), "remaining checks") {
+					t.Fatal("continuation lost its handover")
+				}
+				w := f.call(f.person, "GET", base+"/"+next["id"].(string), nil, "")
+				expect(t, w, 200)
+				if decode(t, w)[tc.field] != tc.label {
+					t.Fatal("successor run-kind label was not persisted")
+				}
+				w = f.call(f.person, "GET", path, nil, "")
+				expect(t, w, 200)
+				if p := decode(t, w)["pause"].(map[string]any); p["state"] != "resumed" || p["successor_session_id"] != next["id"] {
+					t.Fatal("predecessor did not durably link its successor")
+				}
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					var requests, resumes int
+					err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='harness.resume_requested'),count(*) FILTER(WHERE type='harness.resumed') FROM events WHERE after->>'id'=$1`, id).Scan(&requests, &resumes)
+					if err == nil && (requests != 1 || resumes != 1) {
+						t.Errorf("duplicate or missing resume audit: requests=%d resumes=%d", requests, resumes)
+					}
+					return err
+				})
+			})
+		}
+	}
+}
+
 func TestPauseRequestsConcurrentAndManagedYieldKeepsLegacyStop(t *testing.T) {
 	f := fixture(t)
 	body := pauseRegistration(f)

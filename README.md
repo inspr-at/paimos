@@ -551,8 +551,8 @@ content: never include credentials or private registration proofs.
 `--registration-file` may supply a fresh private reference and lease and create
 the successor atomically; ordinary `harness register --succeeds SESSION_UUID`
 and `run-heartbeat --succeeds` also consume that recipe. The successor keeps
-the principal, harness/model, branch/worktree and ticket, and receives the
-full handover in `continuation.brief` rather than truncating it to the short
+the principal, harness/model, generator/command labels, branch/worktree and
+ticket, and receives the full handover in `continuation.brief` rather than truncating it to the short
 metadata label. Old run and process ownership are never reused. Resume paused
 coordinators before their paused children; the new coordinator adopts those
 children for continuation. Generation registration does not itself launch a
