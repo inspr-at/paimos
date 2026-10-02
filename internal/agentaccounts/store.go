@@ -117,6 +117,10 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	if len(accounts) == 0 {
 		return accounts, nil
 	}
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
 		       w.allowance, w.used, w.reserved, w.pace_model, w.burst_ratio::float8,
@@ -129,8 +133,8 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		             AND r.state = 'settled' AND r.actual_units = 0
 		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
-		WHERE NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
-		ORDER BY w.account_id, w.starts_at, w.id`)
+		WHERE w.account_id=ANY($1::uuid[]) AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
+		ORDER BY w.account_id, w.starts_at, w.id`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +156,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		return nil, err
 	}
 	for i := range accounts {
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage); err != nil {
 			return nil, err
 		}
 		if ws := byAccount[accounts[i].ID]; ws != nil {
@@ -282,6 +286,7 @@ func isNoRows(err error) bool {
 }
 
 type probeWrite struct {
+	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
 	DaemonID          string              `json:"daemon_id"`
 	DaemonGeneration  string              `json:"daemon_generation"`
@@ -342,6 +347,17 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
+	}
+	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
+		return Account{}, err
+	}
+	if in.Readiness != nil {
+		if before.daemonGeneration != nil && *before.daemonGeneration != generation {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			return Account{}, err
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts

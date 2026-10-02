@@ -6601,7 +6601,8 @@ paths:
   /agent-accounts:
     get:
       operationId: listAgentAccounts
-      description: Admin view of opaque local accounts and allowance windows; no credential material.
+      description: Opaque local accounts. Details require ownership or owner sharing; otherwise allowance windows are empty and quota fields are masked. include_checks is enrolling-daemon-only and adds pending revision/generation-bound checks and resource memberships. No credential material.
+      parameters: [{name: include_checks, in: query, schema: {type: boolean, default: false}}]
       security: [{session: []}]
       responses:
         '200': {description: Accounts, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
@@ -6613,6 +6614,56 @@ paths:
       responses:
         '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/readiness:
+    get:
+      operationId: listAgentAccountReadiness
+      summary: Availability and nullable measurements, never launch authority
+      description: Requires account.read. Unknown usage never throttles and carries usage_unknown_reserve_not_enforceable. Model/project admission remains authoritative. Owners and the enrolling daemon see details; teammates see availability only unless the owner shares. No administrator bypass. Keyset paginated, at most 100 accounts per page.
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Readiness page, content: {application/json: {schema: {$ref: '#/components/schemas/AccountReadinessPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/check:
+    post:
+      operationId: requestAgentAccountCheck
+      summary: Request one revision-bound refresh
+      description: Person owner plus account.manage only. Idempotency keys are persisted; changing a key while pending coalesces to the same check. A persisted 60-second minimum gap applies across callers and restarts. Check now may request one early recovery for an unnamed or provider-confirmed money stop, deduplicated with automatic recovery; this endpoint never grants launch authority or clears a stop. Revocation, relinking and daemon-generation changes invalidate pending checks. Audits contain actor, account/revision and check ID, never vendor diagnostics.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckWrite'}}}}
+      responses:
+        '202': {description: Accepted or idempotently reused check, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheck'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Binding/revision stale or conflicting idempotency key, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '429': {description: Minimum gap, headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckRetry'}}}}
+  /agent-accounts/{accountId}/sharing:
+    put:
+      operationId: setAgentAccountUsageSharing
+      summary: Owner opts quota details into workspace sharing
+      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, share_usage]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                share_usage: {type: boolean}
+      responses:
+        '204': {description: Sharing saved}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /agent-accounts/capacity:
     get:
       operationId: listAccountCapacity
@@ -14391,6 +14442,10 @@ components:
         - type: object
           required: [id, registered_by_principal_id, state, created_at]
           properties:
+            pending_check: {$ref: "#/components/schemas/AccountCheck"}
+            readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
+            share_usage: {type: boolean, description: Owner-controlled quota sharing, false until opted in.}
+            details_redacted: {type: boolean}
             owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
             owner_person_name: {type: string}
             linked_at: {type: string, format: date-time}
@@ -14422,6 +14477,101 @@ components:
               description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
               items: {type: string, format: uuid}
             windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AccountReadinessPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountReadiness'}}
+        next_after: {type: [string, 'null'], format: uuid}
+    AccountReadiness:
+      type: object
+      required: [account_id, state, can_try, reason_codes, display_reason, checked_at, next_attempt_at, measured_usage, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        state: {type: string, enum: [ready, unknown, blocked]}
+        can_try: {type: boolean, description: Advisory; reserve and claim recheck all model/project gates.}
+        reason_codes: {type: array, items: {type: string}, description: Stable ordered reasons; usage_unknown_reserve_not_enforceable never means Ready. Unshared peers receive only available/unavailable.}
+        display_reason: {type: string}
+        checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        measured_usage: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFact'}}
+        details_redacted: {type: boolean}
+    AccountCheckWrite:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, idempotency_key]
+      properties:
+        binding_revision: {type: integer, minimum: 0}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+    AccountCheck:
+      type: object
+      required: [id, account_id, actor_principal_id, binding_revision, daemon_generation, state, requested_at, retry_at, early_recovery_requested]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        actor_principal_id: {type: string, format: uuid}
+        binding_revision: {type: integer, minimum: 0}
+        daemon_generation: {type: [string, 'null'], maxLength: 128}
+        state: {type: string, enum: [pending, completed, invalidated]}
+        requested_at: {type: string, format: date-time}
+        retry_at: {type: string, format: date-time}
+        early_recovery_requested: {type: boolean, description: Intent only; package B consumes a resource/wait permit atomically with automatic recovery.}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+    AccountCheckRetry:
+      type: object
+      required: [error, code, retry_at]
+      properties:
+        error: {type: string}
+        code: {type: string, const: check_gap}
+        retry_at: {type: string, format: date-time}
+    ReadinessCheckResult:
+      type: string
+      enum: [success, unsupported, timeout, protocol, launch_failed, identity_mismatch, authentication_failed]
+    ReadinessReport:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, result]
+      properties:
+        check_id: {type: string, format: uuid, description: Omitted for automatic captures.}
+        binding_revision: {type: integer, minimum: 0}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+        facts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFactWrite'}}
+    ReadinessResource:
+      type: object
+      required: [id, kind, binding_revision]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [subscription_quota, key_cap, shared_balance, endpoint_concurrency]}
+        binding_revision: {type: integer, minimum: 0}
+    ReadinessFactWrite:
+      allOf: [{$ref: "#/components/schemas/ReadinessFactFields"}]
+      unevaluatedProperties: false
+    ReadinessFactFields:
+      type: object
+      required: [resource_id, window_key, source, observed_at, credit_state]
+      properties:
+        resource_id: {type: string, format: uuid, description: Must already be a current resource membership; daemon reports cannot invent shared identities.}
+        window_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+        source: {type: string, enum: [agentd, harness, provider]}
+        observed_at: {type: string, format: date-time}
+        resets_at: {type: [string, 'null'], format: date-time}
+        reading_at: {type: [string, 'null'], format: date-time}
+        used_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        credit_state: {type: string, enum: [unknown, available, exhausted], default: unknown}
+        remaining: {type: [number, 'null'], minimum: 0}
+        stop_kind: {type: string, enum: [none, named_reset, unnamed, money_402], default: none}
+        denial_reason: {type: string, enum: ['', vendor_denied, quota_exhausted, key_cap_exhausted, money_exhausted]}
+    ReadinessFact:
+      allOf:
+        - {$ref: '#/components/schemas/ReadinessFactFields'}
+        - type: object
+          properties:
+            reading_error: {$ref: '#/components/schemas/ReadinessCheckResult'}
+            reading_age_seconds: {type: [integer, 'null'], minimum: 0}
+            backoff_step: {type: integer, minimum: 0, maximum: 3}
+            next_attempt_at: {type: [string, 'null'], format: date-time}
+            wait_id: {type: [string, 'null'], format: uuid}
+            early_recovery_used: {type: boolean}
     AccountSignals:
       type: object
       additionalProperties: false
@@ -14526,6 +14676,7 @@ components:
       type: object
       required: [daemon_id, daemon_generation, available]
       properties:
+        readiness: {$ref: "#/components/schemas/ReadinessReport"}
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         available: {type: boolean}

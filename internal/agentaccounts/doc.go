@@ -172,4 +172,24 @@
 // window responses expose provisional=true when a window has no positive
 // measurement for its unit or a settled reservation lacked one. Historical
 // zero telemetry cannot prove measured zero, so it remains provisional.
+// AEON-478 package A adds GET /agent-accounts/readiness (keyset pagination),
+// POST /{accountId}/check (person owner + account.manage; revision-bound,
+// idempotent/coalesced, persisted 60-second gap), and PUT /{accountId}/sharing.
+// Migration 1135 stores opaque resource memberships, per-window facts, durable
+// wait/backoff/early-recovery markers and check receipts. Unknown measurements
+// carry usage_unknown_reserve_not_enforceable and never impose a start budget.
+// Check requests express early-recovery intent only: package B consumes it
+// atomically with automatic recovery, and rechecks launch/admission authority.
+// Package C opts into GET /agent-accounts?include_checks=true with account.read
+// and account.probe, and reports through the existing scoped probe's optional
+// readiness object (check ID, binding revision, bounded result, at most 32 facts).
+// Revocation, relinking, archival and generation changes invalidate pending
+// checks. A provider-confirmed no-reset 402 survives all ordinary check reports;
+// only evidenced successful recovery inference may replenish it.
+// Owners and enrolling daemons see account details; teammates (including admins)
+// require the owner's sharing setting. HTTP account responses and event/SSE
+// replay apply current server-side redaction. Required old shapes remain valid
+// (empty windows/history, null timestamps); projections mark details_redacted.
+// This package supplies no daemon launch, admission permits, or UI. Existing
+// ledgers remain unchanged; rollback disables new callers and retains history.
 package agentaccounts
