@@ -736,6 +736,8 @@ withholds expired details without claiming recovery. `/agents` names affected
 active sessions with a recorded run/account binding. Their parent lead receives
 a durable project-specific inbox summary without quota figures. Exact figures
 on `/agents` follow current owner sharing, including every pooled sibling.
+The internal notice step works for reporting daemons without project access;
+it sends only to leads with current access and restores the reporter's scope.
 
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor
