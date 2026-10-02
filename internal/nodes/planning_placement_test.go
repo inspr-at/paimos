@@ -306,6 +306,7 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 	}
 	// An independent pre-502c snapshot envelope, with known fixture rates and
 	// exact price-row fields, must equal the stored JSON for every legacy row.
+	// AEON-502e adds history evidence; its seeded tests verify those new fields.
 	for _, e := range want {
 		err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 			if err := CapturePlanningStart(t.Context(), tx, e.node.ID, "session"); err != nil {
@@ -333,6 +334,11 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 				return err
 			}
 			_ = json.Unmarshal(expectedRaw, &b)
+			actual := a.(map[string]any)
+			delete(actual, "model_estimate")
+			evidence := actual["rate_basis"].(map[string]any)
+			delete(evidence, "basis_text")
+			delete(evidence, "level")
 			if !reflect.DeepEqual(a, b) {
 				t.Fatalf("%s snapshot changed: %s != %s", e.node.Key, raw, expectedRaw)
 			}

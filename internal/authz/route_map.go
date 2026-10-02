@@ -228,6 +228,7 @@ var RoutePermissions = map[string]string{
 	"PUT /api/harness-sessions/{sessionId}/delivery-rating":                  "nodes.read",
 	"DELETE /api/harness-sessions/{sessionId}/delivery-rating":               "nodes.read",
 	"GET /api/usage/dashboard":                                               "harness.read",
+	"GET /api/usage/model-estimates":                                         "harness.read",
 	"GET /api/health":                                                        "public",
 	"GET /api/aithema/jwks":                                                  "public",
 	"GET /api/ready":                                                         "public",

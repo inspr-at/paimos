@@ -3,6 +3,8 @@
 // their list value. Work-start snapshots are the comparison baseline. Mirrors
 // api/openapi.yaml TicketPlanning. Free of Vue for unit tests.
 
+import type { ModelEstimateHistory } from './modelEstimates'
+
 export interface ModelDisplay { provider?: string; display_name?: string; short_name?: string; model_version?: string }
 export interface ModelDisplayPrefs { effortMeter: boolean; modelNames: 'full' | 'short'; modelVersion: 'show' | 'hide' }
 export const DEFAULT_MODEL_DISPLAY: ModelDisplayPrefs = { effortMeter: true, modelNames: 'short', modelVersion: 'show' }
@@ -19,7 +21,6 @@ export function shownModelName(model: ModelDisplay & { label: string; harness: s
 }
 
 export interface PlanningRoute extends ModelDisplay { effort_level?: number | null; label: string; profile: string; harness: string; model: string; effort: string; revision: string; set_by?: string; follows_latest?: boolean; pinned?: boolean }
-import type { ModelEstimateHistory } from './modelEstimates'
 
 export interface PlanningCalibration { basis_text?: string; level?: 'cell' | 'line' | 'profile' | 'route' | 'default'; basis: 'median' | 'default'; tickets: number; tokens_per_hour: number; any_route?: boolean }
 export interface PlanningTokens {
@@ -200,6 +201,10 @@ function uncalibrated(row: PlanningRow): boolean {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
   return cal?.level === 'default'
 }
+function uncalibratedLine(row: PlanningRow): string {
+  const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
+  return `Uncalibrated · insufficient model history (n=${cal?.tickets ?? 0})`
+}
 function modelDurationLine(row: PlanningRow): string {
   const history = row.planning?.estimate_snapshot?.model_estimate ?? row.planning?.model_estimate
   if (!history) return ''
@@ -240,7 +245,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push(`${sessions} session${sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
     if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
-  else lines.push(uncalibrated(row) ? 'Uncalibrated · no model history yet (n=0)' : tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
+  else lines.push(uncalibrated(row) ? uncalibratedLine(row) : tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
   if (spent === null && live) {
     const count = tokens?.running ?? tokens?.sessions ?? 1
     const models = row.planning?.models ?? []
@@ -276,7 +281,7 @@ export function listCostCell(row: PlanningRow): FigureCell {
   } else if (est !== null) {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
-  } else lines.push(uncalibrated(row) ? 'Uncalibrated · no model history yet (n=0)' : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
+  } else lines.push(uncalibrated(row) ? uncalibratedLine(row) : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
   return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)

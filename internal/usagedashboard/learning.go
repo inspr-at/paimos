@@ -3,7 +3,6 @@ package usagedashboard
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -302,7 +301,7 @@ func (m *Module) modelEstimates(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if len(r.URL.RawQuery) > 2048 || !workorders.UUID(id) || len(kind) == 0 || len(kind) > 64 || strings.ContainsAny(kind, "\r\n\t") || (bucket != "normal" && bucket != "complex") || (project != "" && !workorders.UUID(project)) {
 		return nil, workorders.Fail(http.StatusBadRequest, "invalid model estimate query")
 	}
-	if err := authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project}); err != nil {
+	if err := authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project, AnyProject: project == ""}); err != nil {
 		return nil, err
 	}
 	var profile modelregistry.Profile
@@ -313,25 +312,14 @@ func (m *Module) modelEstimates(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, err
 	}
 	cell := CellFor(profile, kind, bucket)
-	var visibilityErr error
-	cache := map[string]bool{}
-	visible := func(project string) bool {
-		if v, ok := cache[project]; ok {
-			return v
-		}
-		err := authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project})
-		if err != nil && !errors.Is(err, authz.ErrForbidden) {
-			visibilityErr = err
-		}
-		cache[project] = err == nil
-		return err == nil
-	}
-	samples, err := LoadLearningSamples(r.Context(), tx, []LearningCell{cell}, project, visible)
+	check, err := authz.ProjectsTx(r.Context(), tx, p)
 	if err != nil {
 		return nil, err
 	}
-	if visibilityErr != nil {
-		return nil, visibilityErr
+	visible := func(project string) bool { return check("harness.read", project) }
+	samples, err := LoadLearningSamples(r.Context(), tx, []LearningCell{cell}, project, visible)
+	if err != nil {
+		return nil, err
 	}
 	return History(samples, cell), nil
 }

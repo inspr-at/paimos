@@ -43,6 +43,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"POST /api/harness-sessions/pause":            true,
 	"POST /api/harness-sessions/resume":           true,
 	"GET /api/usage/dashboard":                    true,
+	"GET /api/usage/model-estimates":              true,
 	"GET /api/settings/status-autopilot":          true,
 	"GET /api/status-autopilot/changes":           true,
 	"GET /api/status-autopilot/proposals":         true,

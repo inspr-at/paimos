@@ -2,12 +2,16 @@
 package nodes
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,7 +46,7 @@ func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, pr
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO outcome_events(tenant_id,kind,project_id,ticket_node_id,session_id,idempotency_key,actor_principal_id,source,payload,request_digest,recorded_at)
- VALUES($1,'ticket_done',$2,$3,$4,'learning:'||$3::text,$5,'recorded','{}',decode(md5($3::text),'hex'),$6::timestamptz+interval '9 hours')`, w.admin.TenantID, w.root.ID, n.ID, session, w.admin.ID, start)
+ VALUES($1,'ticket_done',$2,$3::uuid,$4,'learning:'||($3::uuid)::text,$5,'recorded','{}',decode(md5(($3::uuid)::text),'hex'),$6::timestamptz+interval '9 hours')`, w.admin.TenantID, w.root.ID, n.ID, session, w.admin.ID, start)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -65,6 +69,46 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	}
 	if view.ModelEstimate == nil || *view.ModelEstimate.Hours != 6 || *view.ModelEstimate.SpeedFactor != 2 || view.ModelEstimate.SpeedTickets != 5 {
 		t.Fatalf("speed from measured active time: %+v", view.ModelEstimate)
+	}
+	var profile string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-astra-xhigh'`).Scan(&profile)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	usagedashboard.New(appPool).Mount(mux)
+	for _, tc := range []struct {
+		name      string
+		principal *tenant.Principal
+		query     string
+		status    int
+	}{
+		{"measured", &w.admin, "profile_id=" + profile + "&kind=backend&bucket=complex", 200},
+		{"permission", &w.viewer, "profile_id=" + profile + "&kind=backend&bucket=complex", 403},
+		{"unauthenticated", nil, "profile_id=" + profile + "&kind=backend&bucket=complex", 401},
+		{"bad bucket", &w.admin, "profile_id=" + profile + "&kind=backend&bucket=L", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/usage/model-estimates?"+tc.query, nil)
+			if tc.principal != nil {
+				r = r.WithContext(tenant.WithPrincipal(r.Context(), *tc.principal))
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, r)
+			if rec.Code != tc.status {
+				t.Fatalf("history %d: %s", rec.Code, rec.Body.String())
+			}
+			if rec.Code == 200 {
+				var h usagedashboard.ModelEstimateHistory
+				if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
+					t.Fatal(err)
+				}
+				if h.Tickets != 5 || h.Hours == nil || *h.Hours != 4 || h.SpeedFactor == nil || *h.SpeedFactor != 2 {
+					t.Fatalf("history %+v", h)
+				}
+			}
+		})
 	}
 	page := listPage(t, w.admin, path)
 	if len(page.Items) != 2 || page.Items[0].ID != target.ID || page.Items[1].ID != other.ID {
