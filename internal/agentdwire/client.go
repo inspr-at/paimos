@@ -67,6 +67,12 @@ func (c Client) token() (string, error) {
 	return string(raw), nil
 }
 
+func (c Client) AccountLink(ctx context.Context, req agentd.AccountLinkRequest) (agentsetup.AccountLinkView, error) {
+	var out agentsetup.AccountLinkView
+	err := c.lifecycleRequest(ctx, "POST", "/v1/account-link", req, &out)
+	return out, err
+}
+
 func (c Client) Lifecycle(ctx context.Context, accountID string) (agentd.LifecycleStatus, error) {
 	var out agentd.LifecycleStatus
 	err := c.lifecycleRequest(ctx, "GET", "/v1/lifecycle?include_readiness=1&account_id="+url.QueryEscape(accountID), nil, &out)

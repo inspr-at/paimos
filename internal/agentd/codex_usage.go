@@ -67,7 +67,38 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		}
 	}
 	if method == "item/started" {
-		p.observe(AdapterEvent{Kind: "tool"})
+		var frame struct {
+			Params struct {
+				ThreadID string `json:"threadId"`
+				TurnID   string `json:"turnId"`
+				Item     struct {
+					Type      string          `json:"type"`
+					Command   string          `json:"command"`
+					Tool      string          `json:"tool"`
+					Arguments json.RawMessage `json:"arguments"`
+					Changes   []struct {
+						Path string `json:"path"`
+					} `json:"changes"`
+				} `json:"item"`
+			} `json:"params"`
+		}
+		ev := AdapterEvent{Kind: "tool"}
+		if json.Unmarshal(raw, &frame) == nil && frame.Params.ThreadID == p.threadID && frame.Params.TurnID == p.turnID && p.threadID != "" {
+			item := frame.Params.Item
+			switch item.Type {
+			case "commandExecution":
+				ev = toolActivityEvent("Bash", json.RawMessage(mustActivityJSON(map[string]string{"command": item.Command})))
+			case "fileChange":
+				target := ""
+				if len(item.Changes) == 1 {
+					target = item.Changes[0].Path
+				}
+				ev = toolActivityEvent("Edit", json.RawMessage(mustActivityJSON(map[string]string{"file_path": target})))
+			case "mcpToolCall":
+				ev = toolActivityEvent(item.Tool, item.Arguments)
+			}
+		}
+		p.observe(ev)
 	}
 	if method == "thread/tokenUsage/updated" || method == "model/rerouted" {
 		// Any usage/reroute after a terminal contradicts this single-turn

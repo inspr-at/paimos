@@ -20,7 +20,7 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 // ownership. All file access goes through the run-bound daemon MCP proxy.
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
-  "aeon_edit", "aeon_glob", "aeon_grep"];
+  "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -247,14 +247,42 @@ function observeTurnActivity(message) {
   if (message?.type === "assistant" || message?.type === "stream_event") turnActive = true;
 }
 
-function observeTool(message) {
-  if (message?.type === "assistant" && Array.isArray(message.message?.content) &&
-      message.message.content.some((block) => block?.type === "tool_use")) {
-    emit({ kind: "tool_started" });
-    return;
+function toolActivity(name, input = {}) {
+  name = String(name).replace(/^mcp__aeon__/, '').replace(/^aeon_/, '').toLowerCase();
+  if (name === 'terminal') { name = 'bash'; input = { command: [input.command, ...(Array.isArray(input.args) ? input.args : [])].join(' ') }; }
+  switch (name) {
+    case 'edit': case 'write': case 'multiedit': {
+      const path = input.file_path ?? input.path ?? '';
+      const base = typeof path === 'string' ? path.split('/').at(-1) : '';
+      if (typeof path === 'string' && path.length <= 1024 && !/[\x00\r\n\\:@?=$%]/.test(path) && !path.toLowerCase().includes('.env') &&
+          /^[A-Za-z][A-Za-z0-9_.-]{0,39}\.(go|ts|tsx|js|mjs|vue|css|html|sql|yaml|yml|json|md|sh|py|rs)$/.test(base) &&
+          !/(secret|token|credential|password|id_|private|_rsa|_ed25519)/i.test(base) &&
+          !/[A-Za-z0-9+/_=-]{24,}/.test(base)) return `Editing ${base}`;
+      return 'Editing code';
+    }
+    case 'read': case 'glob': case 'grep': return 'Reading code';
+    case 'bash': {
+      const shell = typeof input.command === 'string' ? input.command : '';
+      const verb = shell.match(/(?:^|[;&|]\s*|\s)(go\s+test|npm\s+(?:run\s+)?test(?::[a-z-]+)?|npx\s+playwright|playwright|git\s+commit|git\s+push|gh\s+pr\s+checks|git\s+worktree\s+(?:remove|prune))\b/)?.[1]?.replace(/\s+/g, ' ');
+      if (verb?.includes('playwright')) return 'Running browser tests';
+      if (verb?.startsWith('go test')) return 'Running Go tests';
+      if (verb?.startsWith('npm ')) return 'Running web tests';
+      if (verb === 'git commit') return 'Committing';
+      if (verb === 'git push') return 'Pushing';
+      if (verb === 'gh pr checks') return 'Waiting for CI';
+      if (verb?.startsWith('git worktree ')) return 'Cleaning up';
+    }
   }
-  if (message?.type === "stream_event" && message.event?.type === "content_block_start" &&
-      message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
+  return 'Working';
+}
+
+function observeTool(message) {
+  const blocks = message?.type === 'assistant' ? message.message?.content :
+    message?.type === 'stream_event' && message.event?.type === 'content_block_start' ? [message.event.content_block] : [];
+  if (!Array.isArray(blocks)) return;
+  for (const block of blocks) if (block?.type === 'tool_use') {
+    emit({ kind: 'tool_started', activity_text: toolActivity(block.name, block.input) });
+  }
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.

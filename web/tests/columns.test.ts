@@ -41,7 +41,7 @@ test('a saved choice fixes order and visibility across desktop widths', () => {
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
   assert.deepEqual(orderOf({ order: ['title', 'created', 'bogus' as never, 'created'] }).slice(0, 4), ['key', 'title', 'created', 'status'])
-  assert.equal(orderOf(null).length, 17)
+  assert.equal(orderOf(null).length, 18)
   assert.deepEqual(automaticColumns(1600, { eta: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'eta'])
   assert.deepEqual(automaticColumns(1600, { eta: true, progress: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'progress', 'eta'])
   assert.deepEqual(automaticColumns(1200, { progress: true, eta: true }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
@@ -146,7 +146,7 @@ test('planning joins Automatic when filled; saved ticks retain empty columns', (
   const all = { model: true, tokens: true, list_cost: true }
   assert.deepEqual(automaticColumns(1600, all), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'model', 'tokens', 'list_cost', 'created', 'updated'])
   assert.deepEqual(automaticColumns(1200, all), ['key', 'title', 'status', 'priority', 'updated'])
-  assert.deepEqual(orderOf(null).slice(9, 13), ['estimate', 'model', 'tokens', 'list_cost'])
+  assert.deepEqual(orderOf(null).slice(9, 14), ['estimate', 'model', 'suggested', 'tokens', 'list_cost'])
   const prefs = { visible: ['status', 'tokens', 'list_cost', 'paid', 'model'] as ColumnId[] }
   const saved = ['key', 'title', 'status', 'model', 'tokens', 'list_cost']
   assert.deepEqual(ids(1600, { phone: false, prefs, present: {} }), saved)
