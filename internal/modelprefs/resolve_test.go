@@ -80,6 +80,7 @@ func TestResidencyUserChoiceBelowLock(t *testing.T) {
 		{d: "local", y: "eu", p: "any", want: "any", dl: true, yl: true, loose: true, locked: "default"},
 		{d: "any", y: "local", p: "eu", want: "eu", yl: true, loose: true, locked: "person"},
 		{d: "any", y: "local", p: "eu", want: "eu", dl: true, yl: true, loose: true, locked: "default"},
+		{d: "eu", p: "any", want: "any", yl: true, loose: true, locked: "person"},
 		{d: "local", y: "eu", p: "any", want: "any"},
 		{want: "any"},
 	} {

@@ -112,10 +112,14 @@ func ResolveResidency(chain []Scope) ResidencyResult {
 			out.LockValue = out.Value
 		}
 	}
+	lockedValue := "any"
 	for i, s := range chain {
-		if i < selectedAt && s.ResidencyLocked && s.Residency != nil && Strictness(out.Value) < Strictness(*s.Residency) {
+		if s.Residency != nil {
+			lockedValue = NormalizeResidency(*s.Residency)
+		}
+		if i < selectedAt && s.ResidencyLocked && Strictness(out.Value) < Strictness(lockedValue) {
 			out.LoosenedLock = true
-			out.LoosenedLocks = append(out.LoosenedLocks, ResidencyLock{Level: s.Level, Value: NormalizeResidency(*s.Residency)})
+			out.LoosenedLocks = append(out.LoosenedLocks, ResidencyLock{Level: s.Level, Value: lockedValue})
 		}
 	}
 
