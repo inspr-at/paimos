@@ -4021,7 +4021,7 @@ paths:
     get:
       operationId: getAttachment
       summary: Read one visible attachment by UUID
-      description: Requires attachments.read and current live node visibility; missing, deleted, hidden and foreign attachments return 404.
+      description: Requires attachments.read and current live node visibility. Tenant and node row-level security apply to metadata just as to content.
       security: *auth
       responses:
         '200': {description: Attachment metadata, content: {application/json: {schema: {$ref: '#/components/schemas/Attachment'}}}}

@@ -2,12 +2,15 @@
 package attachments
 
 import (
+	"net/http/httptest"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"testing"
 )
 
 func TestMetadataLookupHonorsNodeVisibilityAndDeletion(t *testing.T) {
@@ -50,7 +53,26 @@ func TestMetadataLookupHonorsNodeVisibilityAndDeletion(t *testing.T) {
 	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, p.TenantID, p.ID, visibleProject); err != nil {
 		t.Fatal(err)
 	}
-	if w := request(t, mux, p, "GET", "/api/attachments/"+id, "", nil); w.Code != 404 {
+	// The auth middleware supplies the permitted project scope. Prove both a
+	// project-only read and RLS rejection when the node moves after that scope
+	// was decided, without relying on a workspace-permission denial.
+	projectRead := func() *httptest.ResponseRecorder {
+		ctx := authz.WithRouteScope(tenant.WithPrincipal(t.Context(), p), authz.Scope{ProjectID: visibleProject})
+		r := httptest.NewRequest("GET", "/api/attachments/"+id, nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, visibleProject, node); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectRead(); w.Code != 200 {
+		t.Fatalf("visible project attachment metadata status %d", w.Code)
+	}
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, hiddenProject, node); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectRead(); w.Code != 404 {
 		t.Fatalf("hidden attachment metadata status %d", w.Code)
 	}
 	dbtest.BindLegacy(t, d, p.TenantID, p.ID)
