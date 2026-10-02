@@ -30,7 +30,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
-        '404': {description: Project, ticket, blocked work or source not accessible}
+        '404': {description: 'Project, ticket, blocked work or source not accessible'}
         '409': {description: 'code replay_conflict or session_ended'}
         '413': {description: Body exceeds 64 KiB}
     get:
