@@ -342,6 +342,7 @@ func TestQuotaWarningsReporterWithoutProjectAccess(t *testing.T) {
 	lead := quotaSession(t, f, project, "", nil, "Lead")
 	quotaSession(t, f, project, run, &lead, "Private worker")
 	leadPrincipal := addPrincipal(t, f.admin.TenantID, "agent", "Lead with access", []string{"admin"})
+	dbtest.BindRole(t, testDB, f.admin.TenantID, leadPrincipal.ID, "admin")
 	otherProject, otherRun := insertProjectRun(t, f.admin, f.runner, f.profile, "Revoked project")
 	revokedLead := quotaSession(t, f, otherProject, "", nil, "Revoked lead")
 	quotaSession(t, f, otherProject, otherRun, &revokedLead, "Revoked worker")
