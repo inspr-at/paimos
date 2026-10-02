@@ -8,7 +8,7 @@ import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ nodeId: string; recurrenceId: string; number: number; projectKey: string }>()
 const emit = defineEmits<{ loaded: [item: Recurrence] }>()
 const scope = useIdentityScope(), reads = scope.lane(), name = ref('Recurring work'), deleted = ref(false), error = ref(false)
-watch(() => [props.nodeId, props.recurrenceId, scope.owner.value], () => {
+watch([() => props.nodeId, () => props.recurrenceId, () => scope.owner.value], () => {
   name.value = 'Recurring work'; deleted.value = false; error.value = false
   const id = props.recurrenceId
   void reads.run(({ after, signal }) => after(getRecurrence(id, signal), item => { name.value = recurrenceName(item); emit('loaded', item) }), { failed: failure => { deleted.value = failure instanceof APIError && failure.status === 404; error.value = !deleted.value } })

@@ -37,7 +37,7 @@ watch(() => JSON.stringify(input.value), () => {
   timer = setTimeout(() => void previews.run(({ after, signal }) => after(previewRecurrenceDraft(snapshot, signal), result => { times.value = result.times }), { failed: error => { previewError.value = error instanceof Error ? error.message : 'Preview could not be loaded.' }, settled: () => { previewBusy.value = false } }), 160)
 }, { immediate: true })
 watch(() => scope.owner.value, (owner, previous) => { if (!owner && previous) emit('close') })
-watch(() => [props.project.id, props.source?.id, props.recurrence?.id], () => { scope.reset(); emit('close') }, { flush: 'sync' })
+watch([() => props.project.id, () => props.source?.id, () => props.recurrence?.id], () => { scope.reset(); emit('close') }, { flush: 'sync' })
 const zoneNote = computed(() => schedule.kind === 'time' && schedule.zone !== 'Europe/Vienna' && times.value[0] ? `= ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Vienna', hour: '2-digit', minute: '2-digit' }).format(new Date(times.value[0]))} in Vienna` : '')
 const daylightNote = computed(() => {
   if (!times.value.length) return ''

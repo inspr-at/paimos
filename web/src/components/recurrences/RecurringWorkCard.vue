@@ -34,7 +34,7 @@ function load(older = false) {
     if (!items.value.some(item => item.id === selected.value)) selected.value = items.value.find(item => item.id === props.selectedId)?.id || items.value[0]?.id || ''
   }), { failed: error => { failure.value = error instanceof Error ? error.message : 'Recurring work could not be loaded.' }, settled: () => { loading.value = false } })
 }
-watch(() => [props.project.id, scope.owner.value], () => { clear(); load() }, { immediate: true, flush: 'sync' })
+watch([() => props.project.id, () => scope.owner.value], () => { clear(); load() }, { immediate: true, flush: 'sync' })
 watch(() => props.selectedId, id => { if (id && items.value.some(item => item.id === id)) selected.value = id })
 watch(mayManage, value => { if (!value) { editor.value = null; runPrompt.value = null; menu.value = null } })
 const poller = usePoller(() => { if (!cursor.value) load() }, 20_000)

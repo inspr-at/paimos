@@ -112,7 +112,7 @@ const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
 const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
 const recurrenceScope = useIdentityScope()
-watch(() => [props.item?.id, props.project.id, recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
+watch([() => props.item?.id, () => props.project.id, () => recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
 watch(mayRepeat, value => { if (!value) { repeatSource.value = null; recurrenceEdit.value = null } })
 function repeat() { if (mayRepeat.value && item.value) repeatSource.value = { ...item.value, fields: { ...item.value.fields } } }
 function editRecurrence() {

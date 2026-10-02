@@ -17,7 +17,7 @@ function load(older = false) {
   loading.value = true; failure.value = ''
   void historyLane.run(({ after, signal }) => after(recurrenceHistory(id, selectedFilter, before, signal), page => { entries.value = older ? [...entries.value, ...page.items] : page.items; cursor.value = page.next_cursor }), { failed: error => { failure.value = error instanceof Error ? error.message : 'History unavailable.' }, settled: () => { loading.value = false } })
 }
-watch(() => [props.item.id, props.item.revision, props.item.occurrence_count], () => {
+watch([() => props.item.id, () => props.item.revision, () => props.item.occurrence_count], () => {
   load(); previewFailure.value = ''; times.value = []
   const id = props.item.id
   void previewLane.run(({ after, signal }) => after(previewRecurrence(id, signal), page => { times.value = page.times }), { failed: error => { previewFailure.value = error instanceof Error ? error.message : 'Preview unavailable.' } })
