@@ -191,6 +191,17 @@ func runIdleManagedCodexChild(t *testing.T) {
 				if err := proc.Stop(ctx); err != nil {
 					t.Errorf("clean up owned vendor lifetime: %v", err)
 				}
+				// Stop may return after sending its escalation. Join the adapter's
+				// existing waiter before this fixture releases its resources.
+				if codex, ok := proc.(*codexProcess); ok {
+					select {
+					case <-codex.waitDone:
+					case <-ctx.Done():
+						t.Errorf("join owned vendor lifetime: %v", ctx.Err())
+					}
+				} else {
+					t.Error("idle fixture did not own a Codex process")
+				}
 			}
 		}
 	})
