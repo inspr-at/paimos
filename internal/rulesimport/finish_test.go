@@ -131,6 +131,15 @@ func TestUnrepresentableDraftKeepsPlan(t *testing.T) {
 	}
 }
 
+func TestDraftMappingAcceptsAdditionalHarnessSelectors(t *testing.T) {
+	body := "## Checks\n- Preserve scoped rules.\n  Why: every supported harness uses the same policy.\n  harnesses: claude-code, codex, grok, pi, cursor, gemini, opencode\n"
+	p := mustBuild(t, Request{Context: ContextProject, Files: []string{writeDoc(t, t.TempDir(), "AGENTS.md", body)}})
+	mapped, err := MapDraft(p)
+	if err != nil || len(mapped) != 1 || len(mapped[0].Harnesses) != 7 {
+		t.Fatal("additional selectors rejected", err)
+	}
+}
+
 func TestDraftEnabledAndLockedAreExplicit(t *testing.T) {
 	body := "## Checks\n- 🔴 Keep the safety check.\n  Why: safety floor.\n- [off] Optional check.\n  Why: intentionally disabled.\n"
 	p := mustBuild(t, Request{Context: ContextProject, Files: []string{writeDoc(t, t.TempDir(), "AGENTS.md", body)}})

@@ -448,6 +448,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.create", true
 		}
 		return scope("work_orders")
+	case "queue":
+		if read {
+			return "nodes.read", true
+		}
+		return "work_orders.read", true
 	case "runs":
 		if read {
 			return "run.read", true

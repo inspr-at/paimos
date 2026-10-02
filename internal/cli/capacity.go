@@ -36,7 +36,7 @@ func (rt *runtime) cmdCapacity() *Command {
 				return usagef("--env and --json cannot be combined")
 			}
 			switch args[0] {
-			case "codex", "claude", "grok", "cursor", "pi":
+			case "codex", "claude", "grok", "cursor", "pi", "gemini", "opencode":
 			default:
 				return usagef("unknown harness")
 			}
@@ -117,7 +117,7 @@ func (rt *runtime) cmdCapacity() *Command {
 	}}}
 }
 func capacityExport(local agentd.AccountEnvironment, shell string) (string, error) {
-	names := map[string]string{"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "cursor": "CURSOR_CONFIG_DIR", "grok": "GROK_HOME"}
+	names := map[string]string{"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "cursor": "CURSOR_CONFIG_DIR", "grok": "GROK_HOME", "gemini": "HOME", "opencode": "HOME"}
 	if names[local.Harness] == "" || local.Variable != names[local.Harness] || !filepath.IsAbs(local.Home) || strings.ContainsAny(local.Home, "\x00\r\n") {
 		return "", fmt.Errorf("invalid local account environment")
 	}

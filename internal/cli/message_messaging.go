@@ -17,7 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/inbox"
 )
 
-var messagingAddressRE = regexp.MustCompile(`^(paimos|codex|claude|pi|cursor|grok|grok_bot):[a-z][a-z0-9_-]{0,63}$`)
+var messagingAddressRE = regexp.MustCompile(`^(paimos|codex|claude|pi|cursor|grok|grok_bot|gemini|opencode):[a-z][a-z0-9_-]{0,63}$`)
 
 func (rt *runtime) cmdMessaging() *Command {
 	return &Command{Name: "message", Short: "Messaging targets and redacted deliveries", Use: "message <target|deliveries>", subs: []*Command{
@@ -29,7 +29,7 @@ func (rt *runtime) cmdMessagingTargetSet() *Command {
 	return &Command{Name: "set", Short: "Register an encrypted target", Use: "message target set --project KEY --address harness:agent --adapter NAME --kind KIND --target-ref-file FILE", maxArgs: 0, addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
 		fs.string(&address, "address", 0, "harness:agent address")
-		fs.string(&adapter, "adapter", 0, "codex, agentd_codex, agentd_claude, agentd_pi, agentd_cursor, grok_bot_routine, claude_resume or claude_channel")
+		fs.string(&adapter, "adapter", 0, "codex, agentd_codex, agentd_claude, agentd_pi, agentd_cursor, agentd_gemini, agentd_opencode, grok_bot_routine, claude_resume or claude_channel")
 		fs.string(&kind, "kind", 0, "codex_thread, agentd_session, https_webhook, claude_session, pull or webhook")
 		fs.string(&principal, "principal", 0, "principal UUID (optional address identity check)")
 		fs.string(&webhook, "webhook-url", 0, "R2 webhook URL")

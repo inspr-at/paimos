@@ -96,7 +96,9 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		if out.Items[i].Status != "queued" || out.Items[i].Purpose != "managed" {
 			continue
 		}
-		out.Items[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out.Items[i].ID)
+		if out.Items[i].QueueNodeID == nil || out.Items[i].QueueTargetAgentID != nil || out.Items[i].QueueRoutedAt != nil {
+			out.Items[i].Wait, err = agentaccounts.WaitForRun(r.Context(), tx, out.Items[i].ID)
+		}
 		if err != nil {
 			return nil, err
 		}

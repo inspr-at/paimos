@@ -132,15 +132,18 @@ test('duplicate machine names keep the platform, and a blank name is Paired mach
 })
 
 test('missing harnesses come first, then another account of a vendor that allows one', () => {
-  assert.deepEqual(harnessChoices([]).map(choice => choice.label), ['Codex', 'Claude', 'Grok', 'Cursor', 'Pi'])
+  assert.deepEqual(harnessChoices([]).map(choice => choice.label), ['Codex', 'Claude', 'Grok', 'Cursor', 'Pi', 'Gemini CLI', 'OpenCode'])
   assert.deepEqual(harnessChoices(['cursor', 'codex']).map(choice => [choice.id, choice.label, choice.another]), [
     ['claude', 'Claude', false],
     ['grok', 'Grok', false],
     ['pi', 'Pi', false],
+    ['gemini', 'Gemini CLI', false],
+    ['opencode', 'OpenCode', false],
     ['another:codex', 'Another Codex account', true],
     ['another:cursor', 'Another Cursor account', true],
   ])
-  assert.deepEqual(harnessChoices(['codex', 'claude', 'grok', 'cursor', 'pi']).map(choice => choice.label), [
+  assert.deepEqual(harnessChoices(['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode']).map(choice => choice.label), [
     'Another Codex account', 'Another Claude account', 'Another Grok account', 'Another Cursor account', 'Another Pi account',
+    'Another Gemini CLI account', 'Another OpenCode account',
   ])
 })

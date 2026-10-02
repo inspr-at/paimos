@@ -3,10 +3,50 @@
 package authz
 
 import (
+	"context"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+// RequireQueueCoordinatorTx authenticates the coordinator role from live
+// grants. A stored key ceiling alone, or a plain run.create worker, is not
+// authority to manage other agents' ticket queues. Human-created keys remain
+// bounded by their creator's run.create permission in the ticket's project.
+func RequireQueueCoordinatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	if !liveCoordinator(p, g) || !g.allows("nodes.read", projectID) {
+		return ErrForbidden
+	}
+	if p.KeyCreatorID != "" {
+		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
+		if err := RequireTx(ctx, tx, creator, "run.create", Scope{ProjectID: projectID}); err != nil {
+			return err
+		}
+		if err := RequireTx(ctx, tx, creator, "nodes.read", Scope{ProjectID: projectID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RequireQueueCoordinatorEntryTx checks the live role at the queue's entry
+// boundary. Project authority is checked again for each visible ticket.
+func RequireQueueCoordinatorEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	if !liveCoordinator(p, g) {
+		return ErrForbidden
+	}
+	return nil
+}
 
 // CoordinatorBaseScopes is the CLI coordinator key ceiling minted before
 // AEON-327. These stored scopes identify a coordinator ceiling, not live

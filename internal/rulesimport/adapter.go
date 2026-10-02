@@ -215,11 +215,11 @@ func validateDraftRule(r DraftRule) error {
 		}
 	}
 	for _, harness := range r.Harnesses {
-		if !slices.Contains([]string{"claude-code", "codex", "grok", "pi", "cursor"}, harness) {
+		if !slices.Contains([]string{"claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"}, harness) {
 			return draftRefusal("unknown AR1 harness; choose an explicit supported harness in the source")
 		}
 	}
-	if len(r.Roles) > 4 || len(r.Harnesses) > 5 {
+	if len(r.Roles) > 4 || len(r.Harnesses) > 7 {
 		return draftRefusal("too many AR1 selectors")
 	}
 	return nil
