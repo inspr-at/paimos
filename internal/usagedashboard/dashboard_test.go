@@ -634,3 +634,90 @@ func TestFix2AllowanceOwnerSharingBoundary(t *testing.T) {
 	})
 	check(w.admin, false)
 }
+
+func TestFix3AllowanceWindowLimit(t *testing.T) {
+	for _, count := range []int{1024, 1025} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			w := newWorld(t)
+			account, _ := w.allowanceWindow(t, "fix3-limit", "A visible window", 917, 41, 7)
+			w.tx(t, w.home, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+					SELECT $1,$2,now()-interval '1 hour'+n*interval '1 microsecond',now()+interval '1 hour','tokens',917,'unrestricted' FROM generate_series(1,1023) n`, w.home.TenantID, account)
+				return err
+			})
+			var overflow string
+			if count > 1024 {
+				overflow, _ = w.allowanceWindow(t, "fix3-overflow", "Z overflow window", 719, 31, 2)
+			}
+			code, page, body := w.get(t, w.home, "/api/usage/dashboard")
+			if code != 200 {
+				t.Fatalf("bounded allowance must retain the dashboard: %d %s", code, body)
+			}
+			var raw struct {
+				Allowance struct {
+					Truncated *bool `json:"truncated"`
+				} `json:"allowance"`
+			}
+			if err := json.Unmarshal([]byte(body), &raw); err != nil {
+				t.Fatal(err)
+			}
+			wantState := "visible"
+			if count > 1024 {
+				wantState = "partial"
+			}
+			if len(page.Allowance.Windows) != 1024 || page.Allowance.State != wantState || raw.Allowance.Truncated == nil || *raw.Allowance.Truncated != (count > 1024) {
+				t.Fatalf("allowance limit/coverage: state=%s windows=%d truncated=%v", page.Allowance.State, len(page.Allowance.Windows), raw.Allowance.Truncated)
+			}
+			if len(page.Allowance.Accounts) != 1 || page.Allowance.Accounts[0].AccountID != account {
+				t.Fatalf("overflow identity was included: %+v", page.Allowance.Accounts)
+			}
+			for _, window := range page.Allowance.Windows {
+				if window.AccountID != account || window.Allowance != 917 {
+					t.Fatalf("retained window was lost or changed: %+v", window)
+				}
+			}
+			if overflow != "" && strings.Contains(body, overflow) {
+				t.Fatal("lookahead window leaked into the bounded response")
+			}
+		})
+	}
+}
+
+func TestFix3AllowanceMixedSharingIsPartial(t *testing.T) {
+	w := newWorld(t)
+	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
+	visible, _ := w.allowanceWindow(t, "fix3-visible", "Visible", 917, 41, 7)
+	private, _ := w.allowanceWindow(t, "fix3-private", "Private", 719, 31, 2)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=false WHERE id=$1`, private)
+		return err
+	})
+	check := func(p tenant.Principal, state string, windows int) {
+		t.Helper()
+		code, page, body := w.get(t, p, "/api/usage/dashboard")
+		if code != 200 || page.Allowance.State != state || len(page.Allowance.Windows) != windows || len(page.Allowance.Accounts) != 2 {
+			t.Fatalf("mixed-sharing coverage: %d %+v", code, page.Allowance)
+		}
+		var raw struct {
+			Allowance struct{ Truncated *bool } `json:"allowance"`
+		}
+		if err := json.Unmarshal([]byte(body), &raw); err != nil || raw.Allowance.Truncated == nil || *raw.Allowance.Truncated {
+			t.Fatalf("withholding was confused with truncation: %v %s", err, body)
+		}
+		if windows == 1 && (page.Allowance.Windows[0].AccountID != visible || page.Allowance.Windows[0].Allowance != 917) {
+			t.Fatalf("private quota leaked or visible quota lost: %+v", page.Allowance.Windows)
+		}
+	}
+	check(w.admin, "partial", 1)
+	check(w.home, "visible", 2)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=false WHERE id=$1`, visible)
+		return err
+	})
+	check(w.admin, "withheld", 0)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true WHERE id=ANY($1::uuid[])`, []string{visible, private})
+		return err
+	})
+	check(w.admin, "visible", 2)
+}
