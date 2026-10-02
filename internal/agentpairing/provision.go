@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
@@ -38,8 +39,16 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	var out View
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		// Retiring a replaced principal invokes the last-owner tenant fence.
+		// Approval must acquire it before the pairing advisory and record rows.
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		if err := Lock(ctx, tx); err != nil {
+			return err
+		}
 		rec, err := load(ctx, tx, r.PathValue("requestId"))
 		if err != nil {
 			return notFound(err)
