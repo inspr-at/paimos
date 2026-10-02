@@ -110,6 +110,15 @@ persistent schedule/publication/queue failures followed by valid due work.
 The full Go suite validates the shared authorization, work-order,
 queue, server and OpenAPI integration alongside this package.
 
+AEON-573 fix-round evidence: the full Go suite passed at `2f00b466` on the
+approved offload host with `GOMAXPROCS=6 go test -p 4 -timeout 30m ./...`.
+Overlaying only the new test files on `a2bd6890` reproduces both tree-writer
+deadlocks (`40P01`), rejects the tenant FK key-share fence (`NOWAIT`), rejects
+monthly intervals and both CLI template writes, and starves the later valid
+row for each persistent cursor, publication and queue failure. The fixed
+regressions pass, including denial after the barrier-controlled member
+demotion. Source transfer used Git archives over SSH, without pushing a ref.
+
 DSAR integration note (AEON-490): the inventory is absent from this branch and
 its `origin/main` baseline. Migration 1115 introduces `recurrences` and
 `recurrence_occurrences`, both tenant-scoped with forced RLS and project
