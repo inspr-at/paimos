@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.1",
-    "sha256": "8cd0a12c36aba5ff6d0c27eb491aebc68dc91cfc1f32ddf0838774c575b86dae",
+    "version": "harness-session/2.4",
+    "sha256": "0fdd1ea84bbc31b15f84537400488fab8663a85bda80baf8567671d67053853e",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -874,6 +874,71 @@
             },
             "maxItems": 20,
             "type": "array"
+          },
+          "continuation": {
+            "properties": {
+              "brief": {
+                "type": "string"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "succeeds_session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "succeeds_session_id",
+              "handover",
+              "brief"
+            ],
+            "type": "object"
           },
           "controls": {
             "items": {
@@ -1241,6 +1306,235 @@
               "null"
             ]
           },
+          "pause": {
+            "properties": {
+              "control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "deadline_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "deliver": {
+                "type": "boolean"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "handover_point": {
+                "type": "string"
+              },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              "paused_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "planned_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "requested_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resume_requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "requested",
+                  "planned",
+                  "paused",
+                  "resume_requested",
+                  "resumed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
+              },
+              "successor_session_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "wake_in_ms": {
+                "maximum": 86400000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "control_id",
+              "state",
+              "requested_by_principal_id",
+              "requested_at",
+              "reason",
+              "deadline_at"
+            ],
+            "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
+          },
           "phase": {
             "enum": [
               "starting",
@@ -1362,6 +1656,18 @@
               "string",
               "null"
             ]
+          },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "ticket_node_id": {
             "format": "uuid",
@@ -1647,6 +1953,71 @@
             "maxItems": 20,
             "type": "array"
           },
+          "continuation": {
+            "properties": {
+              "brief": {
+                "type": "string"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "succeeds_session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "succeeds_session_id",
+              "handover",
+              "brief"
+            ],
+            "type": "object"
+          },
           "controls": {
             "items": {
               "properties": {
@@ -2013,6 +2384,235 @@
               "null"
             ]
           },
+          "pause": {
+            "properties": {
+              "control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "deadline_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "deliver": {
+                "type": "boolean"
+              },
+              "handover": {
+                "additionalProperties": false,
+                "properties": {
+                  "commit_sha": {
+                    "pattern": "^[0-9a-fA-F]{7,40}$",
+                    "type": "string"
+                  },
+                  "next_steps": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "open_questions": {
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "state": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktree_state": {
+                    "enum": [
+                      "committed",
+                      "clean",
+                      "rolled_back"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "next_steps",
+                  "open_questions",
+                  "worktree_state"
+                ],
+                "type": "object"
+              },
+              "handover_point": {
+                "type": "string"
+              },
+              "interrupt_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "leaving_request_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "stop_now",
+                  "pause_quickly",
+                  "pause",
+                  "wrap_up"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              "paused_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "planned_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "requested_by_principal_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "resume_requested_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "starts_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "requested",
+                  "planned",
+                  "paused",
+                  "resume_requested",
+                  "resumed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "stop_control_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "stop_expires_in_ms": {
+                "maximum": 45000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "stop_requested": {
+                "type": "boolean"
+              },
+              "successor_session_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "wake_in_ms": {
+                "maximum": 86400000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "control_id",
+              "state",
+              "requested_by_principal_id",
+              "requested_at",
+              "reason",
+              "deadline_at"
+            ],
+            "type": "object"
+          },
+          "pause_can_interrupt": {
+            "type": "boolean"
+          },
+          "pause_progress": {
+            "properties": {
+              "command": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command_left_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "finish_outcome": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "interrupt": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "next_point": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "next_point_in_min": {
+                "maximum": 1440,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reported_at": {
+                "format": "date-time",
+                "readOnly": true,
+                "type": "string"
+              },
+              "step": {
+                "maxLength": 240,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "reported_at"
+            ],
+            "type": "object"
+          },
           "phase": {
             "enum": [
               "starting",
@@ -2135,6 +2735,18 @@
               "null"
             ]
           },
+          "supported_pause_levels": {
+            "items": {
+              "enum": [
+                "stop_now",
+                "pause_quickly",
+                "pause",
+                "wrap_up"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "ticket_node_id": {
             "format": "uuid",
             "type": [
@@ -2252,23 +2864,31 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/branch",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/brief",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/commits/items",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/continuation/properties/handover",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity/oneOf/0",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity_history/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/handover",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/reasoning_effort",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/supported_pause_levels/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/worktree",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/account_label",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/branch",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/brief",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/commits/items",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/continuation/properties/handover",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity/oneOf/0",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity_history/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/handover",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/reasoning_effort",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/supported_pause_levels/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/worktree"
     ]
   },

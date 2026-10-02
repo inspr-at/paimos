@@ -10,6 +10,55 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## HTML attachment previews
+
+HTML uploaded with `aeon attach` or the attachment picker remains an original
+download on the app origin, with a script-denying CSP. HTML fragments named
+`.html`/`.htm` and UTF-8 HTML documents also receive a **text thumbnail**: a
+320×200 PNG of inert text, explicitly not a browser screenshot. The bounded
+rendition reads at most 64 KiB/4096 tokens with a 250 ms deadline; it has no
+network, browser, profile or process access and never executes CSS or scripts.
+Original blobs and PNGs stay in the existing tenant/digest-namespaced file store.
+
+Live previews are off by default. Set `AEON_PUBLIC_URL` and
+`AEON_HTML_SANDBOX_ORIGIN` to exact HTTPS origins without paths or ports, on
+**different registrable domains**. Missing/unsafe configuration or HTML larger
+than 2 MiB leaves the download available and disables execution. The sandbox
+host must be dedicated, freshly provisioned without existing service workers,
+cookies, authentication, redirects or other application routes. Route both
+hosts to the same Aeon instance, preserving the exact Host header; when enabled,
+other hosts receive 421. Provision TLS and ingress in the owning deployment
+repository. Disable access/request-body/URL logging, analytics, CDN caching,
+authentication injection and response-header rewriting for the sandbox host.
+Aeon refuses sandbox requests carrying cookies, Authorization or Service-Worker
+headers and never runs its app/auth middleware there. Do not enable the setting
+until the hostname/TLS/cookie/logging boundary has been verified by the operator.
+
+An authenticated person requests a preview with
+`POST /api/attachments/{id}/preview`. The no-store response carries availability
+and, when enabled, a one-minute view-only capability. Never log, persist or share
+that URL. It is bound to the login session, tenant, project, node, attachment,
+digest and attachment revision. Each use rechecks live session, permissions,
+visibility and immutable bytes. Logout, expiry, deletion, moves, edits or a
+process restart invalidate it; load balancing to another replica fails closed.
+At most 32 live grants per person and 4096 per process are retained. No new table,
+API key, long-lived signing secret, browser storage or background browser worker
+is introduced. The lightbox drops its iframe at expiry and when closed; already
+delivered bytes in a separately opened tab cannot be recalled.
+
+The lightbox uses exactly `sandbox="allow-scripts"` and
+`referrerpolicy="no-referrer"`; the response independently enforces the sandbox
+for a direct/new-tab view. Only inline scripts/styles and data images/fonts are
+supported. Fetch/WebSocket, remote resources, workers, child frames, forms,
+popups, downloads and same-origin access are denied. No frame message is acted
+on by the parent, and frame content cannot resize the lightbox controls.
+**Residual risk:** HTML can navigate its own browsing context (especially a
+direct tab), potentially sending document content or its short-lived capability
+in a destination URL. CSP/sandbox is not a complete network firewall. Use only
+self-contained fragments, and never describe this feature as preventing all
+exfiltration. See the [iframe sandbox flags](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe#sandbox)
+and [CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox).
+
 ## Ticket work queue
 
 `aeon queue list`, `add <ticket>`, `remove <ticket>`, `move <ticket> <position>`,
@@ -80,6 +129,37 @@ Without a configured, enabled workspace provider and feature, CRM generation
 makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
+
+## Morning briefing
+
+People can open **Morning briefing** on Projects or `/briefing`. The daily
+in-app reminder uses a chosen time in the device's local timezone (08:00 by
+default). It reads existing completion and release outcomes, delivered-state
+and recorded ticket merge evidence, Status autopilot deliveries and skipped
+human checks, failed reviews/CI, current approvals, held human
+requests and available journey decisions. Each fact links to its item and source.
+The suggested next step is one of those person actions or recorded findings.
+
+The first visit covers 24 hours; later visits start at that person's saved
+briefing visit. The database statement start establishes the window alongside the first
+event page; only complete successful log reads advance the saved server cutoff.
+Denied logs, failed logs and log pagination limits retain the earlier cutoff.
+Pending approvals, held requests, journey actions and usage are separate current
+snapshots: their page limits or failures do not freeze completed log windows.
+Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
+there is no new activity tracking or generated narrative.
+
+Usage requires `harness.read`. Its API list value is approximate, includes
+lifetime usage of sessions **started** in the window, and is not interval spend
+or an invoice. Recorded ticket totals reuse the planning columns' measured and
+estimated figures and Paid semantics; account budget windows describe current
+reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+`harness.read`, using the workspace dashboard only for a workspace grant; source
+links appear only after successful reads. Merge facts use changes to a ticket’s
+recorded `fields.merge_commit`, available under project visibility; PR URLs alone
+do not count as merges. The visit-bounded autopilot log must also load completely
+before the cutoff advances. Journey next actions use one batch snapshot query.
+This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 
@@ -219,6 +299,14 @@ Developer** (`/settings/developer#flow-controls`). This per-person, per-workspac
 preference reveals the footer flow pill, Journey tab, stages and release walker;
 it does not grant action permissions. Journey bookmarks explain the opt-in while
 it is off. Turning it off removes the flow UI again.
+
+Reserved, never-published versions are hidden in the release history by default.
+**Show reserved versions** under **Settings → Developer**
+(`/settings/developer#reserved-versions`) enables them for that person and
+workspace, including comparison choices and previous/next navigation. Statistics
+and result counts always include reservations; the footer's **N new** count
+includes only visible versions. A direct link still opens a hidden reservation
+with a quiet explanation of the setting.
 
 If a standing candidate or deployment gate expires or is revoked before
 deployment finishes, Journey offers renewal on the Deploy stage. An agent
@@ -669,7 +757,142 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.1`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.4`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+
+Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
+and an optional `--note` to pause one or all sessions. Omitted levels use the
+person's workspace default, initially Pause; read or change it with
+`aeon harness pause-default [--level pause_quickly]`. Pause quickly interrupts
+where the harness advertises support, commits WIP as it is and requests a short
+handover within three minutes. Pause chooses the next safe point within ten
+minutes. Wrap up finishes only when the estimate is below ten minutes and fits
+the deadline; otherwise it hands over. The API exposes `supported_pause_levels`
+and `pause_can_interrupt`; workers without a cooperative inbox support only
+Stop now. Pause all skips those workers unless Stop now is selected.
+
+`aeon harness leaving-at --at 2026-10-02T17:00:00+02:00 [--note "Continue tomorrow"]`
+sets one durable deadline for all of your running work in authorized projects.
+Fresh finish estimates select Wrap up first, including near the deadline when
+finishing fits with one minute to spare. Otherwise Pause starts at T minus ten
+minutes; fresh handover and command timing choose Pause quickly when a full
+handover cannot fit. Without that timing, escalation starts at T minus two
+minutes. A current uninterruptible command keeps cooperative Pause, without an
+interrupt signal. Stop now is requested at each level’s deadline. Pause and
+Wrap up end at the earlier of the leave time and ten minutes after their actual
+start; Pause quickly has a three-minute cap, with a two-minute escalation lead.
+Workers without an inbox keep working until T. `aeon harness leaving-at` reads the deadline and
+per-agent plans; `--off` withdraws pending requests and leaves paused handovers
+resumable. A claimed stop cannot be recalled and is reported as in flight.
+Setting the same deadline and selection again is idempotent; changing either
+replaces pending plans. A deadline covers at most 200 owned running sessions
+atomically, and rejects a larger selection before changing any plans.
+
+Workers can include optional `step`, `next_point`, `next_point_in_min`,
+`finish_in_min`, `finish_outcome`, `interrupt`, `command` and `command_left_min`
+in a heartbeat. These form the optional `pause_progress` response snapshot,
+with a database-clock `reported_at`; the current operation's `command` does not
+change a terminal session's registered command label. Sending any planning
+field replaces the snapshot (omitted fields are unknown, null clears); omitting
+all of them preserves its original timestamp. Minutes count down from that
+instant and expire after two ETA intervals. Once a planning snapshot exists,
+an absent or stale finish prediction never falls back to an older ready ETA.
+Legacy reporters without a snapshot retain their fresh ready-ETA behavior.
+Text is limited to public labels without credentials, paths or command arguments.
+
+The leaving API also accepts `{hosts: "all" | [host identities], agents: [session
+UUIDs]}` alongside `deadline_at`. `agents`, when provided, selects the exact
+owned running generations independently of `hosts`; ended and unauthorized
+sessions are ignored. Omitted `agents` selects running work on the named hosts,
+or all owned work when `hosts` is omitted. An empty agent array selects no work.
+GET returns the effective selection and the stored host scope. Host scope is
+persisted for the approved wind-down UI and later launcher admission integration;
+this backend does not yet enforce refusal of new starts on those hosts.
+
+Stop now uses the existing control queue. Agentd executes it only for its exact
+live generation and owned process identity, with the existing monotonic signal
+fence. A database-clock wake hint schedules the next heartbeat at each transition.
+`harness run` advertises `owned_stop_v1` and may stop only the child it launched; a PID-only
+`run-heartbeat` observer receives no signal authority. Requests, scheduling,
+escalation, cancellation, defaults and confirmed outcomes are audited. A stop
+request is not a process exit receipt: offline or older launchers can leave an
+unconfirmed request, which remains visible in the deadline report. The server
+never claims such a process has stopped. Existing part-A records without a
+level retain their original cancel-on-expiry behavior. The response contract
+adds optional fields at `harness-session/2.4`; request headers stay unchanged.
+
+Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
+in contract 2.2. `pause.state` distinguishes requested, planned, paused,
+resume_requested, resumed and cancelled; the established phase values remain
+unchanged. `state=paused` selects resumable closed generations, including those
+older than 24 hours in `view=current`; existing stopped filters remain compatible.
+
+```sh
+aeon harness pause --project AEON --session SESSION_UUID --reason "Reboot"
+aeon harness pause --all --except KEEP_RUNNING_SESSION_UUID
+aeon harness resume --project AEON --all
+```
+
+A person needs `harness.control` and owns the registration (project owners/admins
+may control other registrations). An agent coordinator uses `--project`,
+`--coordinator-session` and its `--worker-lease-file` to control direct children.
+Global `--all` spans the person's visible authorized projects; `--project` narrows
+it. Batches return up to 200 items and `more`; repeat while `more` is true.
+Requests and the default ten-minute handover deadline persist in Postgres.
+The pause control uses the existing `stop` kind with `request_payload.pause=true`; managed
+yield holds it aside so it cannot accidentally trigger an immediate signal.
+Heartbeat delivers the durable request. `run-heartbeat --print-controls` emits
+an `aeon.harness-pause.v1` JSON record; otherwise it prints guidance on stderr.
+Agentd forwards a heartbeat pause through its existing generation-fenced inbox
+when the adapter supports input, with the ordinary durable input receipt.
+Managed sessions must advertise `inbox`; otherwise an individual pause returns
+409 without creating a request. Project and person-wide pause-all leave these
+sessions running, continue pausing capable sessions, and report the skipped
+session's `id`, `project_id`, optional `display_label` and reason
+`inbox_delivery_unavailable` in `skipped`. Reports are capped at 200 per call;
+`skipped_more` indicates omitted reports. Skips do not consume the 200-pause
+limit or set `more`, so repeating a batch can reach later capable sessions.
+Cursor and Grok daemon runs currently lack that input path. Unmanaged CLI
+heartbeat sessions advertise cooperative pause only with `--print-controls`;
+one-shot `harness run` jobs advertise Stop now only.
+
+An overdue requested or planned pause becomes `cancelled` on the database clock.
+Heartbeat, session/control reads and the periodic sweep complete its cooperative
+control with reason `pause_deadline_expired`. Level-aware requests also queue
+Stop now; historical requests without a level retain cancel-only expiry. Before
+the deadline, a
+`heartbeat_lost` close preserves the pending or claimed pause control so the
+same worker can heartbeat, plan and stop with its handover after revival.
+An unarchived paused or resume-requested generation continues to occupy its
+ticket, suppressing the status autopilot's stale-progress rule until it is
+resumed or archived.
+
+The worker must plan a safe stopping point, finish or roll back the current
+step, commit WIP on its own branch, then submit a handover and exit cleanly:
+
+```sh
+aeon harness pause-plan --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --control-id CONTROL_UUID --handover-point "After the current commit"
+aeon harness mark-stopped --project AEON --session SESSION_UUID --agent AGENT_NAME --worker-lease-file LEASE_PATH --reason paused --handover-file HANDOVER_JSON_PATH
+```
+
+The handover JSON contains `state`, a nonempty `next_steps` array,
+`open_questions` (an empty array is valid), and `worktree_state` (`committed`,
+`clean` or `rolled_back`). `committed` requires `commit_sha`. Session storage,
+the bound-ticket comment, control completion and stopped generation are one
+transaction; a retry cannot duplicate the handover. Notes are public project
+content: never include credentials or private registration proofs.
+
+`resume` persists a launch recipe and full continuation brief. For one session,
+`--registration-file` may supply a fresh private reference and lease and create
+the successor atomically; ordinary `harness register --succeeds SESSION_UUID`
+and `run-heartbeat --succeeds` also consume that recipe. The successor keeps
+the principal, harness/model, generator/command labels, branch/worktree and
+ticket, and receives the full handover in `continuation.brief` rather than truncating it to the short
+metadata label. Old run and process ownership are never reused. Resume paused
+coordinators before their paused children; the new coordinator adopts those
+children for continuation. Generation registration does not itself launch a
+vendor executable. Agentd automatic launch after login and a hard-stop deadline executor
+are separate runtime integration: any hard stop must use the existing exact
+owned-process controls, and these HTTP endpoints never signal a process.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -742,7 +965,12 @@ native binding, give `harness run-heartbeat` that child's `--source-session UUID
 manual registration can use the child's native ID as its private session ref.
 Explicit vendor references remain unique among active generations per tenant and
 agent across all harnesses. Registration conflicts name the conflicting field
-without returning private values.
+without returning private values. Vendor binding conflicts also append
+`(sha256:<16 hex characters>)`, a fingerprint of the supplied reference using
+the first eight bytes of `SHA-256("aeon.harness.ref\0" + reference)`. The same
+reference has the same fingerprint on insertion and replay; the reference
+itself and worker lease remain private. Concurrent children use separate
+`--harness-session-file` and `--worker-lease-file` files.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
@@ -922,12 +1150,22 @@ token values in tenant configuration, API requests, logs or this repository.
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
 snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+Single, batch and restored rule publications reject credential-shaped text in
+snapshot fields and publication notes with a generic `422 credential_text`.
+The detector is shared with knowledge learnings, whose existing explicit
+false-positive confirmation policy is unchanged.
 Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
 GitHub App is enabled for the workspace. The editor creates a proposal branch
 and PR in the rule's owning public/private repo, changing its source and git
 TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
 against only the changed rule, its TL;DR entry and PR explanation before any
-GitHub call or token mint. Comparison removes every Unicode default-ignorable
+GitHub call or token mint. Both public and private proposals also use the shared
+credential detector (provider/cloud keys, private keys, password assignments,
+Markdown labels, authorization values and URLs with passwords). It checks the
+edited fields and complete outgoing blobs and paths before GitHub receives
+anything; refusals never echo matched values. Raw and case-preserving Unicode
+compatibility checks retain token shapes alongside the existing skeleton check.
+Comparison removes every Unicode default-ignorable
 character, applies NFKD, drops combining marks, folds case and uses a vendored
 Unicode 17.0.0 UTS #39 skeleton. Named Latin small capitals are generated from
 UnicodeData as well; ambiguous compatibility/visual forms fail closed. The
@@ -965,9 +1203,13 @@ form admits superscripts, fractions and the information symbol while other
 scripts/digits stay refused. Unchanged file content is excluded.
 
 Regenerate the pinned Unicode table with
-`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+`python3 internal/unicodeguard/unicodegen/generate.py`, then `gofmt` the output.
 The generator verifies immutable input digests; builds and runtime are offline.
 Credential-shaped text is refused for either repository, including private.
+The shared publication detector checks raw text, compatibility forms without
+format controls, and case-preserving confusable forms from the same pinned table.
+Rule snapshots (single, batch and restore) use these checks too. Credential
+range offsets for knowledge confirmation still refer to the original text.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID
 and input when retrying a lost response. Short transactions authorize and reserve
@@ -1274,6 +1516,16 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
+4096 pixels per side, with a square crop up to 2048 pixels. Attachment images
+accept up to 16,777,216 pixels and 8192 pixels per side, in addition to the
+configured file byte limit (50 MiB by default). Dimensions and avatar crops
+are checked before pixel decoding. Both paths share a 256 MiB budget for
+estimated live image work across tenants; queued work observes request
+cancellation. This is an image-processing budget, not a cap on total server
+memory. Avatar orientation and cropping use source views, and generated PNGs
+are stored without decoding them again.
+
 Settings → Workspace → Brand accepts static SVG logos and serves only the
 sanitized drawing. Non-drawing attributes (`role`, `aria-*`, `data-*`, `class`,
 `focusable`, `xml:space`, `enable-background`) and known editor metadata are
@@ -1351,11 +1603,89 @@ When Connect is disabled, its reason appears beside the button.
 ```sh
 cd web
 npm run test:unit
-npx playwright install chromium
-npm test
+npm run test:browser-safety # tiny Node process fixtures; no browser locally
+# Full UI suites: prefer CI; sharded UI jobs are tracked in AEON-410 (PR #29).
+# Prepared mbp2606 entry point (refuses until OPS-247 bootstrap is approved):
+AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
+# Locally, only one targeted file, one worker, when there is a technical reason:
+npm test -- tests/authz.spec.ts --workers=1
 ```
 
-The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
+`just ui-remote` is the same remote entry point from the repository root. It
+currently refuses with exit 3 before SSH or dependency installation: OPS-247
+owns the approved browser bootstrap and shared heavy-job launcher. Use hosted
+draft PR CI while that work is pending. No environment flag enables the lane;
+the coordinator must confirm the launcher contract and review a follow-up change
+to enable it. No browsers or Playwright were installed on mbp2606 for AEON-508.
+
+The prepared runner accepts extra arguments to select files or reporters. Set
+`AEON_REMOTE_CONTROL_DIR` to the existing
+coordinator directory containing `remote-test.sh` and its OPS hold controls. The
+runner respects holds and capture reservations, refuses an active builder pool,
+Mailina's console session, a non-ci console idle less than ten minutes, unknown
+presence/load, load above 18, or any existing heavy-run reservation. It reserves
+one remote browser lane before setup and checks presence/capacity again. Refusal
+or unreachability returns exit 3 and never starts a local suite. It streams only
+committed HEAD through `git archive` (no extra Git push), runs at one worker, and
+copies logs and test artifacts to `web/test-results/remote/<run>/`. The remote
+checkout and artifacts remain for inspection; no other worker's state is cleaned.
+After the gate is enabled, a missing pinned headless shell still refuses the run
+rather than installing one. When the approved shared lane launcher is available,
+`AEON_HEAVY_JOB_LANE=/absolute/launcher` wraps the job using `browser -- COMMAND ARGS`;
+the coordinator must confirm that adapter contract before enabling it.
+
+All three Playwright configs default to one worker locally; `PW_WORKERS` is an
+explicit positive-integer override. Local CLI `--workers` / `-j` values are
+ignored unless `PW_WORKERS` is set. Only the UI config opts into test-level
+parallelism in CI; smoke and performance keep their serial test behavior.
+CI's worker/shard budget remains owned by CI (AEON-410). Local UI runs use
+one project and Playwright's bundled [Chromium headless shell](https://playwright.dev/docs/browsers#chromium-headless-shell)
+with GPU disabled. Smoke and performance runs use the same browser policy.
+
+Use `npm test`, `npm run e2e`, or `npm run audit:ui` to keep the shared per-user
+host lock and process supervisor active, including across worktrees. Direct local
+`npx playwright test` is refused by global setup before browsers start. A second
+suite prints the lock path and owner PID and refuses to start. An interrupted or
+failed run terminates only its own process groups, checks that they are empty, and
+then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
+and wall time. A Node preload records detached browser groups when they spawn,
+preserving Playwright's normal browser shutdown behavior. The lock descriptor
+stays open throughout the run. Root and detached launches retry transient process-table
+misses; a live launch whose identity cannot be verified has its process group killed
+without appending an incomplete record. The root preload verifies its identity before
+executing suite code; an already-exited root keeps its original exit code.
+After forced supervisor termination (SIGKILL),
+the next run recovers a dead owner's lock under an exclusive recovery claim:
+it signals only journalled groups with matching process start identities,
+verifies that they have exited, and removes that owner's journal and lock before
+starting. Live owners and missing identities/journals refuse recovery. Reused
+group PIDs are never signalled and do not retain the lock after verified siblings
+are reaped. Unverified orphan groups and malformed journal rows retain the lock,
+but do not prevent verified sibling groups from being reaped.
+Metrics use stderr so JSON reporter stdout remains parseable. Never kill other
+workers' or desktop browsers.
+Recovery handles SIGINT, SIGTERM and SIGHUP before acquiring its claim, finishes
+verified cleanup and exits without starting a new suite. If the reaper is killed
+with SIGKILL, the next starter reclaims its `.guard` only after proving that the
+reaper PID is gone or its start identity has changed. A matching live reaper or
+an unknown identity still refuses recovery and prints the exact guard path.
+Claims are atomically published as nonempty directories containing a unique
+owner record, so competing reapers cannot remove a new owner's claim. Stale
+file-based claims from earlier versions are also recognized. Invalid claims and
+journals remain for operator inspection.
+
+When AEON-410's runner from PR #29 is integrated, use `npm run test:ui-shards --
+--shard=1/8` (or `node scripts/playwright-ui-shards-safe.mjs --shard=1/8` from
+the root) in place of calling `playwright-ui-shards.mjs` directly. This wrapper
+supervises the whole existing planner, JSON listing, selection verification and
+shard execution, without duplicating its sharding or compiled graph. It sets
+`AEON_PW_SHARD=1` and `PW_WORKERS=1`; keep `workers: 1` and
+`fullyParallel: false` **after** the policy spread in the merged UI config.
+The wrapper refuses before acquiring a lock when that runner is absent.
+
+The Playwright UI suite starts Vite on a stable port derived from its worktree
+path; `PLAYWRIGHT_PORT` overrides it. Set `PLAYWRIGHT_REUSE=1` only for a dev server
+already running from this same worktree. It intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
@@ -1860,7 +2190,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.1`, declared by the response-only
+The reporter contract is `harness-session/2.4`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -1963,3 +2293,36 @@ kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
 rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
+
+Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
+--option '["Title","Description","Answer"]' "Question"` stores a bounded,
+project-scoped question and returns immediately. Add `--ticket KEY`,
+`--context-file PATH`, `--recommend 1 --why "Reason"`, `--meanwhile parked`,
+`--meanwhile-text "Other work"`, `--keep once` or `--anyway "New evidence"`
+as needed. Retain the printed `--request-id UUID` and exact input for retries;
+`aeon ask status UUID` reads the durable question after the original session ends.
+`--session UUID` is a verified public harness generation, separate from the
+CLI's global attribution `--session-id`. Named project/ticket lookup uses the
+existing node read permissions; UUID addressing needs only the question scopes.
+The MCP `ask` tool accepts `{project, ticket?, input}` with the same typed HTTP
+input and mandatory request ID; `ask_status` accepts `{question_id}`.
+
+The additive API is documented in `api/openapi.yaml`: project question create/list,
+question get/status/person decision and a permission-filtered `/decision-desk`
+question projection. `questions.ask` and `questions.read` are explicit agent key
+scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
+three, viewer receives read, guest/customer receive none. Existing keys gain no
+new scopes. Agents read only questions they asked, with only their memberships.
+Generic node/knowledge CRUD cannot modify question/decision authority.
+
+Questions and immutable answer revisions use protected nodes plus tenant/project
+projections. Each asker retains input, principal, exact original session, source
+request, reply-root UUID and comment destination (ticket, or question node).
+The reply root is a reserved correlation identity, not yet a public inbox message:
+P3 must bind the answering person and materialize the inbox counterpart before
+using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
+P1 person answers support Once and record revision-bound pending inbox/comment/
+outcome effects with a database-clock ten-second deadline. They do not dispatch
+messages or claim successful delivery. Always/Requirement/Doctrine publication,
+verified handover sources and post-dispatch corrections require the later adapters;
+unsupported requests fail explicitly. Suggestions for all four outcomes are stored.

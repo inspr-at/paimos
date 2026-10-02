@@ -23,6 +23,8 @@ const escaped = (v: string) => v.replace(/\./g, '\\.')
 async function setup(page: Page, options: { lastSeen?: string; running?: string; bigProject?: number } = {}) {
   const history = releaseHistory()
   const data = fixtures({ bigProject: options.bigProject })
+  // These existing history interactions exercise the complete, opted-in rail.
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   if (options.lastSeen) data.preferences.releases = { last_seen: options.lastSeen }
   const calls = await mockWork(page, data)
   const state = await mockReleases(page, history, { running: options.running })
@@ -323,10 +325,10 @@ test('new since the last visit: a badge on the pill, highlighted releases, and t
   const history = releaseHistory()
   const { data } = await setup(page, { lastSeen: history.releases[4].version })
   await page.goto('/')
-  await expect(page.locator('.new-badge')).toHaveText('3 new')
-  await expect(pill(page)).toHaveAccessibleName(/, 3 new since your last visit$/)
+  await expect(page.locator('.new-badge')).toHaveText('4 new')
+  await expect(pill(page)).toHaveAccessibleName(/, 4 new since your last visit$/)
   await pill(page).click()
-  await expect(sheet(page).locator('.row.fresh')).toHaveCount(3)
+  await expect(sheet(page).locator('.row.fresh')).toHaveCount(4)
   await expect(sheet(page).getByText('New since your last visit')).toBeVisible()
   await expect.poll(() => data.preferences.releases).toEqual({ last_seen: history.current })
   await page.keyboard.press('Escape')
