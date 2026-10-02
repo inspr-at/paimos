@@ -73,7 +73,7 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 					return err
 				}
 				if tc.Workspace != nil {
-					if err := bind("ceiling-workspace", "", tc.Workspace); err != nil {
+					if err := bind("ceiling_workspace", "", tc.Workspace); err != nil {
 						return err
 					}
 				}
@@ -84,7 +84,7 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 						RETURNING id::text`, owner.TenantID, fmt.Sprintf("CEIL-%d", i+1)).Scan(&projectID); err != nil {
 						return err
 					}
-					if err := bind(fmt.Sprintf("ceiling-project-%d", i), projectID, permissions); err != nil {
+					if err := bind(fmt.Sprintf("ceiling_project_%d", i), projectID, permissions); err != nil {
 						return err
 					}
 				}
