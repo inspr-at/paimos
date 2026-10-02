@@ -3941,6 +3941,39 @@ paths:
       responses:
         '204': {description: Soft deleted}
         '404': {$ref: '#/components/responses/Error'}
+  /attachments/{id}/preview:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: createAttachmentPreview
+      summary: Mint a short-lived HTML preview capability for a browser session
+      description: |
+        Person session only; attachments.read and current node/project visibility are
+        checked at issuance and every content request. No request body. The capability
+        is bound to the session, tenant, project, node, attachment and immutable digest.
+        It is not an API credential. Do not persist, log, share or cache the returned URL.
+        Missing/unsafe sandbox configuration returns available=false; originals remain
+        downloadable. The sandbox origin serves no app/auth routes or cookies.
+        Use iframe sandbox="allow-scripts" and referrerpolicy="no-referrer".
+        Inline scripts/styles and data images/fonts only. Frame self-navigation remains
+        possible; this is an origin isolation boundary, not a network sandbox.
+      security: *auth
+      responses:
+        '200':
+          description: Private, no-store preview availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: {type: boolean}
+                  url: {type: string, format: uri}
+                  expires_at: {type: string, format: date-time}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /attachments/{id}/content:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     get:
@@ -14817,6 +14850,7 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
+        thumbnail_kind: {type: string, enum: [html-text], description: Bounded inert text rendition of HTML; not a browser screenshot. Available as variant=thumb.}
     StatusHelp:
       type: object
       required: [definitions, queued, autopilot, triage, limits_source]
