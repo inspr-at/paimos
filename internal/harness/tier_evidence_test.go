@@ -2,11 +2,14 @@
 package harness_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func tierHistoryActions(t *testing.T, f *harnessFixture, path string) []string {
@@ -33,7 +36,7 @@ func tierHistoryEventFence(t *testing.T, f *harnessFixture) {
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION tier_history_event_fence() RETURNS trigger LANGUAGE plpgsql AS $$
  BEGIN
-  IF EXISTS(SELECT 1 FROM events WHERE tenant_id=NEW.tenant_id AND xmin::text=pg_current_xact_id()::text) THEN
+  IF EXISTS(SELECT 1 FROM events WHERE tenant_id=NEW.tenant_id AND xmin=pg_current_xact_id()::xid) THEN
    RAISE EXCEPTION 'tier history must precede the tenant event counter';
   END IF;
   RETURN NEW;
@@ -125,6 +128,12 @@ func TestTierEstimateHasSourceAndHonestEmptyTime(t *testing.T) {
 		t.Fatal("source/unknown speed", e)
 	}
 	defaultEstimate := state["estimates"].([]any)[0].(map[string]any)
+	if defaultEstimate["actual"] != true || defaultEstimate["cost_usd"] != "2.400000000000" || !strings.Contains(defaultEstimate["basis"].(string), "Last run: 2400000 tokens, $2.400000000000, 15.0 min (10.0 min model time) at Default.") {
+		t.Fatal("missing measured sample details", defaultEstimate)
+	}
+	if e["actual"] != false {
+		t.Fatal("projected tier marked actual", e)
+	}
 	if defaultEstimate["duration_ms"] != float64(900000) {
 		t.Fatal("default changed tools/waits", defaultEstimate)
 	}
@@ -206,5 +215,104 @@ func TestTierAuditFailureRollsBackDecisionAndHistory(t *testing.T) {
 	s := decode(t, w)
 	if s["pending"] != nil || len(s["history"].([]any)) != 0 || s["revision"] != before["expected_revision"] {
 		t.Fatal("failed audit committed a tier decision", s)
+	}
+}
+
+func TestTierEvidenceSampleLookupUsesPartialIndex(t *testing.T) {
+	f := fixture(t)
+	path, _, _ := tierSession(t, f)
+	sessionID := path[strings.LastIndex(path, "/")+1:]
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan=off`); err != nil {
+			return err
+		}
+		var plan string
+		err := tx.QueryRow(t.Context(), `EXPLAIN (FORMAT JSON) SELECT id FROM harness_sessions
+   WHERE tenant_id=$1 AND project_id=$2 AND agent_principal_id=$3 AND harness='codex' AND model='fixture-model'
+   AND reasoning_effort IS NOT DISTINCT FROM 'high' AND run_id IS NOT NULL`, f.person.TenantID, f.project, f.agent.ID).Scan(&plan)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(plan, "harness_sessions_tier_sample") {
+			t.Fatal("sample identity has no usable partial index", plan)
+		}
+		var found string
+		err = tx.QueryRow(t.Context(), `SELECT id::text FROM harness_sessions WHERE id=$1 AND run_id IS NOT NULL`, sessionID).Scan(&found)
+		if err == nil && found != sessionID {
+			t.Fatal("fixture lost indexed sample")
+		}
+		return err
+	})
+}
+
+func TestTierHistoryEventFenceFiresAcrossXIDEpochs(t *testing.T) {
+	for _, nextEpoch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current_epoch", true: "next_epoch"}[nextEpoch], func(t *testing.T) {
+			f := fixture(t)
+			path, _, _ := tierSession(t, f)
+			sessionID := path[strings.LastIndex(path, "/")+1:]
+			tierHistoryEventFence(t, f)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if nextEpoch {
+					var definition string
+					if err := tx.QueryRow(t.Context(), `SELECT pg_get_functiondef('tier_history_event_fence()'::regprocedure)`).Scan(&definition); err != nil {
+						return err
+					}
+					// Simulate an xid8 one epoch ahead of the row's 32-bit xmin. Leave
+					// the trigger's comparison untouched so the old text equality fails.
+					definition = strings.ReplaceAll(definition, "pg_current_xact_id()", "((pg_current_xact_id()::text::bigint+4294967296)::text::xid8)")
+					if _, err := tx.Exec(t.Context(), definition); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `SAVEPOINT fence_negative_control`); err != nil {
+					return err
+				}
+				if _, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "harness.test_fence", After: map[string]any{"session_id": sessionID}}); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO harness_tier_history(tenant_id,session_id,action,from_tier,to_tier,actor_id) VALUES($1,$2,'switch_requested','default','fast',$3)`, f.person.TenantID, sessionID, f.person.ID)
+				var pgerr *pgconn.PgError
+				if !errors.As(err, &pgerr) || pgerr.Code != "P0001" || pgerr.Message != "tier history must precede the tenant event counter" {
+					t.Fatalf("event-first write escaped fence: %v", err)
+				}
+				_, err = tx.Exec(t.Context(), `ROLLBACK TO SAVEPOINT fence_negative_control`)
+				return err
+			})
+		})
+	}
+}
+
+func TestTierUndoAlsoRecordsApprovalOfFreshAgentRequest(t *testing.T) {
+	f := fixture(t)
+	tierHistoryEventFence(t, f)
+	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, "fast", identity), "")
+	expect(t, w, 201)
+	control := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "applied", "reason": "tier_applied_safe_point"}, lease), 200)
+	requestID := uid()
+	expect(t, f.call(f.agent, "POST", path+"/tier/ask", map[string]any{"request_id": requestID, "tier": "default", "reason": "Return to the usual tier"}, ""), 201)
+	undo := tierChangeBody(t, f, path, "default", identity)
+	undo["undo_of_control_id"] = control
+	expect(t, f.call(f.person, "POST", path+"/tier", undo, ""), 201)
+	expect(t, f.call(f.person, "POST", path+"/tier", undo, ""), 201)
+	got := tierHistoryActions(t, f, path)
+	want := []string{"undo_requested", "approved", "requested", "changed", "switch_requested"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal("Undo discarded approval or duplicated replay", got)
+	}
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	approved := decode(t, w)["history"].([]any)[1].(map[string]any)
+	if approved["actor_id"] != f.person.ID || approved["asked_by_name"] == nil || approved["from_tier"] != "fast" || approved["to_tier"] != "default" {
+		t.Fatal("Undo approval lost attribution", approved)
+	}
+	reverse := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+reverse+"/complete", map[string]any{"outcome": "applied", "reason": "tier_applied_safe_point"}, lease), 200)
+	if got := tierHistoryActions(t, f, path); got[0] != "undone" {
+		t.Fatal("combined approval lost Undo outcome", got)
 	}
 }

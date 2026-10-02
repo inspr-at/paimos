@@ -1981,13 +1981,40 @@ the tenant event counter. Audit failure rolls the entire decision back.
 
 `estimates` compares tiers against one last completed run with the same project,
 agent, harness, model and effort, with final tokens and a frozen price version.
-Its source names the run, sample count (0 or 1) and basis. Unpriced tiers stay
+Its source names the run, sample count (0 or 1), tokens, actual cost, total time,
+measured model time (or its absence), the frozen sample tier and price version.
+The sample's single measured tier shows actual figures without “≈”; other tiers
+remain projections. Unread or failed evidence shows a quiet placeholder with no
+sample basis, rather than inventing a zero-run result. Telemetry and usage wakes
+refresh only the selected session/run, at most every five seconds with one
+trailing refresh; tier decisions still wake confirmation immediately. The sample
+identity lookup uses the partial index in migration 1134. Unpriced tiers stay
 unavailable; absent priced samples say “no estimate yet”. Optional cumulative
 `model_time_ms` usage measurements and frozen segment speed factors permit time
 comparisons: only model time scales; tools and waits retain their duration.
 `active_ms` is never substituted for model time. Cost estimates can be available
 while time remains unknown. Legacy usage without frozen tiers is not backfilled
 from today's catalog. Mixed-model sessions are excluded from whole-run estimates.
+An Undo that also accepts an agent's fresh request records both approval and Undo.
+
+DSAR handoff (AEON-490): `internal/dsar/inventory.json` is absent from this stacked
+branch and the cached `origin/main`. At integration, classify migration 1134's
+`harness_tier_history.actor_id`, `session_id`, `request_id`, `control_id`,
+`undo_of_control_id`, `action`, `from_tier`, `to_tier` and `created_at` as personal
+(attributed decisions and pseudonymous linkage); classify `tenant_id` and `id`
+as metadata locators. Locate rows by `(tenant_id, id)` and link the affected
+principal through `actor_id` or the tenant-scoped session/request/control joins.
+Actor names and asking-agent names in the response are personal data inherited
+from those principal joins. Classify `harness_session_usage.model_time_ms` as
+metadata (reported performance measurement), located by
+`(tenant_id, session_id, model)` through the tenant-scoped session. No new column
+is a secret. Carry these classifications into the inventory in this same PR if
+AEON-490 lands before integration; this note does not replace that guard.
+
+Browser evidence remains pending OPS-247: the 1440/390 × light/dark picker guards,
+delayed-evidence control checks and zero-run/error cases must run in the approved
+browser lane or CI-equivalent Linux Chromium before release. They are not a
+passing browser gate merely because the specs exist.
 
 Regression coverage includes native acknowledgement and Undo, pending replay,
 tenant/project isolation, revoked authority, vendor cooldown and stored costs

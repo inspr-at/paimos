@@ -351,6 +351,12 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 			action = "approved"
 		}
 		if in.UndoOf != "" {
+			// An Undo can also approve a fresh agent request. Preserve both facts.
+			if approved != "" {
+				if err = appendTierHistory(r.Context(), tx, p, s, "approved", in.Tier, approved, c.ID, in.UndoOf); err != nil {
+					return nil, err
+				}
+			}
 			action = "undo_requested"
 		}
 		if err = appendTierHistory(r.Context(), tx, p, s, action, in.Tier, approved, c.ID, in.UndoOf); err != nil {

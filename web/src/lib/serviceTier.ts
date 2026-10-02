@@ -79,14 +79,15 @@ export interface TierRunCost {
   model: string; run_id: string; cost_usd: string; default_cost_usd: string; provisional: boolean
   segments: { tier: ServiceTier; price_multiplier: number }[]
 }
-export interface TierEstimate { tier: ServiceTier; n: number; basis: string; run_id: string | null; cost_usd: string | null; duration_ms: number | null }
+export interface TierEstimate { actual?: boolean; tier: ServiceTier; n: number; basis: string; run_id: string | null; cost_usd: string | null; duration_ms: number | null }
 const dollars = (value: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value))
 // The multiplier is arithmetic text in the approved fragment, not an icon.
 export const tierRunCostLabel = (cost?: TierRunCost | null) => !cost ? 'Tier cost unavailable' : `${cost.segments.map(s => `${TIER_NAME[s.tier]} ×${s.price_multiplier}`).join(' + ')} · ${dollars(cost.default_cost_usd)} at Default`
 export const tierCostAmount = (cost: TierRunCost) => dollars(cost.cost_usd)
-export const tierEstimate = (state: TierState | undefined, tier: ServiceTier): TierEstimate => state?.estimates?.find(e => e.tier === tier) ?? { tier, n: 0, basis: 'No estimate yet · 0 runs. A completed run with frozen prices is required.', run_id: null, cost_usd: null, duration_ms: null }
-export const estimateCostText = (e: TierEstimate) => e.n > 0 && e.cost_usd !== null ? `≈ ${dollars(e.cost_usd)}` : 'no estimate yet'
-export const estimateTimeText = (e: TierEstimate) => e.n > 0 && e.duration_ms !== null ? `≈ ${Math.round(e.duration_ms / 6000) / 10} min` : 'time: no estimate yet'
+// Missing evidence is an unread/failed read, never a measured zero-run sample.
+export const tierEstimate = (state: TierState | undefined, tier: ServiceTier): TierEstimate | undefined => state?.estimates?.find(e => e.tier === tier)
+export const estimateCostText = (e?: TierEstimate) => !e ? '—' : e.n > 0 && e.cost_usd !== null ? `${e.actual ? '' : '≈ '}${dollars(e.cost_usd)}` : 'no estimate yet'
+export const estimateTimeText = (e?: TierEstimate) => !e ? '—' : e.n > 0 && e.duration_ms !== null ? `${e.actual ? '' : '≈ '}${Math.round(e.duration_ms / 6000) / 10} min` : 'time: no estimate yet'
 export function tierHistoryText(h: TierHistory): string {
   const from = h.from_tier ? TIER_NAME[h.from_tier] : 'unreported tier', to = TIER_NAME[h.to_tier]
   const actor = ` · by ${h.actor_name}`, asked = h.asked_by_name ? `, asked by ${h.asked_by_name}` : ''

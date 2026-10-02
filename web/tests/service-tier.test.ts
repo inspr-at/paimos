@@ -44,7 +44,8 @@ test('run cost names its frozen multiplier and Default cost, independently of th
 })
 test('estimates carry n and basis, with independent unknown time and zero-run cases', async () => {
   const { tierEstimate, estimateCostText, estimateTimeText } = await import('../src/lib/serviceTier.ts')
-  const empty = tierEstimate(undefined, 'fast')
+  const confirmed: TierState = { session_id: 's', revision: 1, active_tier: 'default', pending: null, reports: [report], requests: [], read_only: false, estimates: [{ tier: 'fast', n: 0, basis: 'No estimate yet · 0 runs.', run_id: null, cost_usd: null, duration_ms: null }] }
+  const empty = tierEstimate(confirmed, 'fast')!
   assert.equal(empty.n, 0); assert.match(empty.basis, /0 runs/)
   assert.equal(estimateCostText(empty), 'no estimate yet')
   assert.equal(estimateTimeText(empty), 'time: no estimate yet')
@@ -64,4 +65,22 @@ test('history renders request, approval, decline, confirmation and both Undo for
   assert.match(tierHistoryText({ ...row, action: 'cancelled' }), /Undo: cancelled switch/)
   assert.match(tierHistoryText({ ...row, action: 'undo_requested' }), /Undo requested/)
   assert.match(tierHistoryText({ ...row, action: 'undone', from_tier: 'fast', to_tier: 'default' }), /Tier Fast to Default · by Markus \(undo\)/)
+})
+
+test('unread or failed evidence never claims a confirmed zero-run sample', async () => {
+  const { tierEstimate, estimateCostText, estimateTimeText } = await import('../src/lib/serviceTier.ts')
+  const unread = tierEstimate(undefined, 'fast')
+  assert.equal(unread, undefined)
+  assert.equal(estimateCostText(unread), '—')
+  assert.equal(estimateTimeText(unread), '—')
+  const state: TierState = { session_id: 's', revision: 1, active_tier: 'default', pending: null, reports: [report], requests: [], read_only: false }
+  assert.equal(tierEstimate(state, 'fast'), undefined)
+})
+test('the measured tier shows actual figures and other tiers remain projections', async () => {
+  const { estimateCostText, estimateTimeText } = await import('../src/lib/serviceTier.ts')
+  const measured = { tier: 'fast' as const, actual: true, n: 1, basis: 'Last run at Fast', run_id: 'run', cost_usd: '4.80', duration_ms: 600000 }
+  assert.equal(estimateCostText(measured), '$4.80')
+  assert.equal(estimateTimeText(measured), '10 min')
+  assert.equal(estimateCostText({ ...measured, actual: false }), '≈ $4.80')
+  assert.equal(estimateTimeText({ ...measured, actual: false }), '≈ 10 min')
 })

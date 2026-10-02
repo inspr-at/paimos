@@ -4,10 +4,12 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -38,6 +40,7 @@ type TierRunCost struct {
 	Provisional bool              `json:"provisional"`
 }
 type TierEstimate struct {
+	Actual   bool     `json:"actual"`
 	Tier     string   `json:"tier"`
 	N        int      `json:"n"`
 	Basis    string   `json:"basis"`
@@ -184,7 +187,7 @@ func (m *Module) tierEvidence(r *http.Request, tx pgx.Tx, s Session, out *TierSt
 	err = tx.QueryRow(r.Context(), `SELECT hs.id::text,ar.id::text,extract(epoch FROM (ar.ended_at-ar.started_at))*1000
  FROM harness_sessions hs JOIN agent_runs ar ON ar.tenant_id=hs.tenant_id AND ar.id=hs.run_id
  JOIN harness_session_usage u ON u.tenant_id=hs.tenant_id AND u.session_id=hs.id AND u.model=$4
- WHERE hs.project_id=$1 AND hs.agent_principal_id=$2 AND hs.harness=$3 AND hs.model=$4
+ WHERE hs.run_id IS NOT NULL AND hs.project_id=$1 AND hs.agent_principal_id=$2 AND hs.harness=$3 AND hs.model=$4
  AND hs.reasoning_effort IS NOT DISTINCT FROM $5::text AND ar.status='completed' AND ar.started_at IS NOT NULL AND ar.ended_at>=ar.started_at
  AND NOT u.provisional AND u.billing_mode='api' AND u.price_version IS NOT NULL AND u.estimated_cost_usd IS NOT NULL
  AND (SELECT count(*) FROM harness_session_usage other WHERE other.session_id=hs.id)=1
@@ -207,6 +210,15 @@ func (m *Module) tierEvidence(r *http.Request, tx pgx.Tx, s Session, out *TierSt
 	if cost == nil {
 		return nil
 	}
+	tierNames := make([]string, 0, len(cost.Segments))
+	for _, seg := range cost.Segments {
+		tierNames = append(tierNames, strings.ToUpper(seg.Tier[:1])+seg.Tier[1:])
+	}
+	modelTime := "unreported model time"
+	if u.ModelTimeMS != nil {
+		modelTime = strconv.FormatFloat(float64(*u.ModelTimeMS)/60000, 'f', 1, 64) + " min model time"
+	}
+	sampleBasis := fmt.Sprintf("Last run: %d tokens, $%s, %.1f min (%s) at %s. ", *u.InputTokens+*u.OutputTokens, cost.Cost, duration/60000, modelTime, strings.Join(tierNames, " + "))
 	report := sessionTierReport(s, tierModel(s))
 	for i := range out.Estimates {
 		e := &out.Estimates[i]
@@ -222,7 +234,12 @@ func (m *Module) tierEvidence(r *http.Request, tx pgx.Tx, s Session, out *TierSt
 		e.N = 1
 		e.RunID = &runID
 		e.Duration = tierModelTime(u, duration, cap.SpeedFactor)
-		e.Basis = "Last completed matching run · 1 run · same project, agent, harness, model and effort; frozen price version " + strconv.FormatInt(*u.PriceVersion, 10) + " and tier token segments. Price scales cost; speed scales measured model time only."
+		e.Actual = len(cost.Segments) == 1 && cost.Segments[0].Tier == e.Tier
+		if e.Actual {
+			e.Cost = &cost.Cost
+			e.Duration = &duration
+		}
+		e.Basis = sampleBasis + "Last completed matching run · 1 run · same project, agent, harness, model and effort; frozen price version " + strconv.FormatInt(*u.PriceVersion, 10) + " and tier token segments. Price scales cost; speed scales measured model time only."
 		if e.Duration == nil {
 			e.Basis += " Time: no estimate yet; measured model time or speed is unavailable."
 		}

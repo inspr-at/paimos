@@ -2,6 +2,10 @@
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE harness_session_usage ADD COLUMN model_time_ms bigint
  CHECK (model_time_ms BETWEEN 0 AND 1000000000000);
+-- Narrow the last-run candidate lookup to this exact session identity.
+CREATE INDEX harness_sessions_tier_sample ON harness_sessions
+ (tenant_id,project_id,agent_principal_id,harness,model,reasoning_effort)
+ WHERE run_id IS NOT NULL;
 CREATE TABLE harness_tier_history (
  tenant_id uuid NOT NULL REFERENCES tenants(id),
  id bigint GENERATED ALWAYS AS IDENTITY,

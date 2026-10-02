@@ -13268,6 +13268,7 @@ components:
         tier: {$ref: '#/components/schemas/ServiceTier'}
         n: {type: integer, minimum: 0, maximum: 1, description: 'One last completed matching run, never a sample average.'}
         basis: {type: string}
+        actual: {type: boolean, description: True for the sample's single measured tier; false or absent for projections.}
         run_id: {type: [string, 'null'], format: uuid}
         cost_usd: {type: [string, 'null']}
         duration_ms: {type: [number, 'null'], minimum: 0, description: Only reported model time scales; all other elapsed time stays unchanged.}
