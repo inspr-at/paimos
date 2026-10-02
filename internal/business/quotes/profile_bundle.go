@@ -232,11 +232,18 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 	}
 	sort.Strings(paths)
 	err := db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
+		// Append only after every profile/settings/draft mutation has acquired
+		// its resource locks. The tenant event counter is always last.
+		type pendingEvent struct {
+			nodeID, kind  string
+			before, after map[string]any
+		}
+		var pending []pendingEvent
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.
 			var locked string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-profile:"+in.Name); err != nil {
@@ -290,9 +297,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 					if err := tx.QueryRow(ctx, `INSERT INTO quote_document_profile_assets(tenant_id,sha256,content_type,size,created_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5::uuid) RETURNING id::text`, tenantID, a.hash, a.kind, len(a.raw), actorID).Scan(&a.id); err != nil {
 						return err
 					}
-					if err := appendEvent(ctx, tx, actor, "", "quote.profile_asset_uploaded", nil, map[string]any{"asset_id": a.id, "sha256": a.hash, "content_type": a.kind}); err != nil {
-						return err
-					}
+					pending = append(pending, pendingEvent{"", "quote.profile_asset_uploaded", nil, map[string]any{"asset_id": a.id, "sha256": a.hash, "content_type": a.kind}})
 				} else {
 					a.id = syntheticAssetID(a.hash)
 				}
@@ -408,9 +413,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			if _, err := tx.Exec(ctx, `INSERT INTO quote_document_profile_revisions(tenant_id,profile_id,revision,name,definition,created_by_principal_id) VALUES($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6::uuid)`, tenantID, report.ProfileID, report.Revision, in.Name, string(newRaw), actorID); err != nil {
 				return err
 			}
-			if err := appendEvent(ctx, tx, actor, "", "quote.profile_saved", map[string]any{"profile_id": report.ProfileID, "revision": currentRev}, map[string]any{"profile_id": report.ProfileID, "revision": report.Revision}); err != nil {
-				return err
-			}
+			pending = append(pending, pendingEvent{"", "quote.profile_saved", map[string]any{"profile_id": report.ProfileID, "revision": currentRev}, map[string]any{"profile_id": report.ProfileID, "revision": report.Revision}})
 		}
 		if makeDefault {
 			settings, err := readSettings(ctx, tx)
@@ -426,9 +429,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				if err != nil {
 					return err
 				}
-				if err := appendEvent(ctx, tx, actor, "", "quote.settings_updated", map[string]any{"default_profile_id": settings.DefaultProfileID, "revision": settings.Revision}, map[string]any{"default_profile_id": report.ProfileID, "revision": settings.Revision + 1}); err != nil {
-					return err
-				}
+				pending = append(pending, pendingEvent{"", "quote.settings_updated", map[string]any{"default_profile_id": settings.DefaultProfileID, "revision": settings.Revision}, map[string]any{"default_profile_id": report.ProfileID, "revision": settings.Revision + 1}})
 			}
 		}
 		if sourceInstance != "" || (refreshDrafts && report.ProfileID != "") {
@@ -491,9 +492,12 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				if _, err := tx.Exec(ctx, `UPDATE business_quotes SET revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
 					return err
 				}
-				if err := appendEvent(ctx, tx, actor, id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": draft.DraftRevision}, map[string]any{"profile_id": report.ProfileID, "profile_revision": report.Revision, "draft_revision": draft.DraftRevision + 1}); err != nil {
-					return err
-				}
+				pending = append(pending, pendingEvent{id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": draft.DraftRevision}, map[string]any{"profile_id": report.ProfileID, "profile_revision": report.Revision, "draft_revision": draft.DraftRevision + 1}})
+			}
+		}
+		for _, e := range pending {
+			if err := appendEvent(ctx, tx, actor, e.nodeID, e.kind, e.before, e.after); err != nil {
+				return err
 			}
 		}
 		return nil
