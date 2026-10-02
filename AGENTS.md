@@ -38,7 +38,7 @@ scripts/             release checks
 
 ## Code health (AEON-574)
 
-These rules prevent recurring AEON-545 audit findings. They govern this repo; shared doctrine changes remain proposals until approved and published. Layout follows Markus's refined AEON-541 rule.
+Rules 1–6 prevent recurring AEON-545 audit findings; rule 7 is the companion layout rule from Markus's refined AEON-541 report. They govern this repo; shared doctrine changes remain proposals until approved and published.
 
 1. **Authorize inside the write.** Re-check the current target's permissions with `RequireTx` inside the final mutation transaction, under the lock that serialises access changes. An earlier transaction or a check before a network read is insufficient. Example: attachment uploads could commit after `attachments.write` was revoked (S1-005, `internal/attachments/module.go`).
 2. **One global lock order.** Acquire tenant row → tree → node/record rows → blob locks → event counter last. Take all blob locks in one batch sorted by tenant + hash; never append an event and then acquire another lock in that transaction. Prefer `FOR NO KEY UPDATE` for fences that must allow FK share locks. Example: message sends and webhook workers took target and event-counter locks in opposite orders (S3-001, `internal/inbox/message.go`, `target.go`, `wake.go`).
