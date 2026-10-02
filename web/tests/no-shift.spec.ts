@@ -130,6 +130,8 @@ for (const width of [1440, 1024, 390]) {
       controls: { dial, more, fewer, selector: dial.getByRole('tablist'), row, rowMore: row.getByRole('button', { name: /^More agents/ }), rowFewer: row.getByRole('button', { name: /^Fewer agents/ }) },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
+        { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
+        { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
         ...['More', 'Fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: new RegExp(`^${direction} agents`) }).click() })),
       ],

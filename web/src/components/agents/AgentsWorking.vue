@@ -110,7 +110,7 @@ function tabKeys(event: KeyboardEvent) {
 .step { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); cursor: pointer; transition: transform .12s ease, background .15s ease; }
 .step.big { width: 48px; height: 48px; box-shadow: inset 0 0 0 1px var(--line-2), 0 6px 14px -8px color-mix(in srgb, var(--teal) 50%, transparent); }
 @media (hover: hover) { .step:hover:not(:disabled) { background: var(--row-hover); } }
-.step:active:not(:disabled) { transform: scale(.94); }
+.step:active:not(:disabled) { background: var(--seg-on); }
 .step:disabled { opacity: .35; cursor: default; }
 .step:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .big-num { width: 96px; flex: none; text-align: center; font: 800 64px/1 var(--font); letter-spacing: -.04em; font-variant-numeric: tabular-nums; background-image: linear-gradient(100deg, var(--teal-ink) 0%, var(--teal) 38%, var(--aqua) 47%, var(--aqua-wash) 50%, var(--aqua) 53%, var(--teal) 62%, var(--teal-ink) 100%); background-size: 320% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; }
