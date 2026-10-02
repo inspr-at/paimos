@@ -174,15 +174,17 @@ func TestInviteAcceptanceHoldsAuthorityThroughAliasWait(t *testing.T) {
 	waitAuthorityBlock(t, ctx, f.d, <-started, alias.Conn().PgConn().PID(), done)
 	// Acceptance has checked the inviter but is paused before any binding insert.
 	// A competing demotion/role edit must not take the access lock now.
-	probe, err := f.d.Admin.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.actor.TenantID)
-	_ = probe.Rollback(ctx)
-	var pe *pgconn.PgError
-	if !errors.As(err, &pe) || pe.Code != "55P03" {
-		t.Errorf("authority not fenced before binding: %v", err)
+	for _, mode := range []string{"UPDATE", "NO KEY UPDATE", "SHARE"} {
+		probe, err := f.d.Admin.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR `+mode+` NOWAIT`, f.actor.TenantID)
+		_ = probe.Rollback(ctx)
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "55P03" {
+			t.Errorf("authority not fenced against %s before binding: %v", mode, err)
+		}
 	}
 	if err := alias.Commit(ctx); err != nil {
 		t.Fatal(err)

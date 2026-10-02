@@ -3,7 +3,6 @@ package nodes
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ import (
 // check. An access writer then holds its tenant fence while waiting for that
 // counter. Releasing the move must let both transactions commit, not deadlock.
 func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
-	for _, operation := range []string{"invite", "operator-link", "link-tx"} {
+	for _, operation := range []string{"invite", "operator-link", "link-tx", "link-tx-bound"} {
 		t.Run(operation, func(t *testing.T) {
 			p := newPrincipal(t, "access-move")
 			kind := kindBySlug(t, p, "project")
@@ -30,12 +29,18 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 			var identity, alias string
 			if err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
 				if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email)
-					VALUES('https://access.example.test',$1,'invited@example.test') RETURNING id::text`, operation).Scan(&identity); err != nil {
+					VALUES('https://access.example.test',$1,'invited@example.test') RETURNING id::text`, p.TenantID).Scan(&identity); err != nil {
 					return err
 				}
 				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name)
 					VALUES($1,'person','Synthetic alias') RETURNING id::text`, p.TenantID).Scan(&alias); err != nil {
 					return err
+				}
+				if operation == "link-tx-bound" {
+					if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+						SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='viewer'`, p.TenantID, alias); err != nil {
+						return err
+					}
 				}
 				_, err := tx.Exec(ctx, `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
 					SELECT $1,'invited@example.test',id,decode(repeat('ab',32),'hex'),now()+interval '1 day',$2
@@ -103,7 +108,7 @@ func TestAccessWritesDoNotDeadlockNodeMove(t *testing.T) {
 				}
 			}
 			var moved bool
-			if err := adminPool.QueryRow(ctx, `SELECT parent_id=$2 FROM nodes WHERE id=$1`, node.ID, parent.ID).Scan(&moved); err != nil || !moved {
+			if err := adminPool.QueryRow(ctx, `SELECT parent_id IS NOT DISTINCT FROM $2::uuid FROM nodes WHERE id=$1`, node.ID, parent.ID).Scan(&moved); err != nil || !moved {
 				t.Fatalf("move did not commit: moved=%t err=%v", moved, err)
 			}
 		})
@@ -115,7 +120,7 @@ func waitAccessMoveBlock(t *testing.T, ctx context.Context, blocker uint32, done
 	for {
 		select {
 		case err := <-done:
-			t.Fatal(fmt.Errorf("operation finished before lock barrier: %w", err))
+			t.Fatalf("operation finished before lock barrier: %v", err)
 		default:
 		}
 		var pid uint32

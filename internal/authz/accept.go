@@ -32,8 +32,10 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	// Access changes take the tenant row before invite/alias/principal locks.
 	// Hold it through binding inserts so inviter and role grants remain live.
 	// Manual linking (including the operator path) uses tenant then alias too.
+	// NO KEY UPDATE fences other access writers without blocking the tenant
+	// FK key-share checks of a node writer already holding the event counter.
 	var lockedTenant string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
 		return tenant.Principal{}, err
 	}
 	var hash any

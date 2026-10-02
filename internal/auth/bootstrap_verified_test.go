@@ -3,9 +3,14 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
@@ -55,6 +60,82 @@ func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
 	again, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "verified", "admin@example.com", "Admin", false, "")
 	if err != nil || again.ID != p.ID {
 		t.Fatalf("existing member: %v", err)
+	}
+}
+
+func TestBootstrapConcurrentFirstEnrollment(t *testing.T) {
+	reset(t)
+	tid := insertTenant(t, "inspr", "INSPR")
+	m := newMod(t, Config{BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	start, done := make(chan struct{}), make(chan error, 8)
+	for n := range cap(done) {
+		go func() {
+			<-start
+			_, _, err := m.resolveOIDCPerson(ctx, tid, "inspr", "https://issuer.example", fmt.Sprintf("first-%d", n), "admin@example.com", "Admin", true, "")
+			done <- err
+		}()
+	}
+	close(start)
+	successes := 0
+	for range cap(done) {
+		select {
+		case err := <-done:
+			if err == nil {
+				successes++
+			} else if !errors.Is(err, errNotMember) {
+				t.Errorf("concurrent enrollment: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("enrolled %d issuer/subjects, want exactly one", successes)
+	}
+	for _, table := range []string{"identities", "principals", "events"} {
+		if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != 1 {
+			t.Errorf("%s: got %d rows, want only the first enrollment", table, n)
+		}
+	}
+}
+
+func TestBootstrapCannotReopenAfterProfileChanges(t *testing.T) {
+	reset(t)
+	tid := insertTenant(t, "inspr", "INSPR")
+	m := newMod(t, Config{BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
+	p, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "original", "admin@example.com", "Original", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Even removing the live identity and legacy admin label cannot erase the
+	// durable first-enrollment marker and reenable mailbox-based provisioning.
+	if _, err := adminPool.Exec(t.Context(), `UPDATE principals SET identity_id=NULL,roles=ARRAY[]::text[] WHERE id=$1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "replacement", "admin@example.com", "Replacement", true, ""); !errors.Is(err, errNotMember) {
+		t.Fatalf("bootstrap reopened after profile changes: %v", err)
+	}
+	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 1 {
+		t.Fatalf("refused replacement persisted identity: %d", n)
+	}
+}
+
+func TestBootstrapHonorsOperatorPinnedIdentity(t *testing.T) {
+	reset(t)
+	tid := insertTenant(t, "inspr", "INSPR")
+	pinned, err := tenantbootstrap.BindOIDC(t.Context(), appPool, "inspr", "https://issuer.example", "pinned", "Pinned person", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newMod(t, Config{BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
+	if _, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "other", "admin@example.com", "Other", true, ""); !errors.Is(err, errNotMember) {
+		t.Fatalf("mailbox replaced operator-pinned identity: %v", err)
+	}
+	p, _, err := m.resolveOIDCPerson(t.Context(), tid, "inspr", "https://issuer.example", "pinned", "changed@example.com", "Pinned person", false, "")
+	if err != nil || p.ID != pinned {
+		t.Fatalf("pinned identity no longer resolves: %v", err)
 	}
 }
 
