@@ -88,6 +88,12 @@ type Asker struct {
 	CommentNodeID string    `json:"comment_node_id"`
 	CreatedAt     time.Time `json:"created_at"`
 	Input         Input     `json:"input"`
+	FromRecord    *Reuse    `json:"from_record,omitempty"`
+}
+type Reuse struct {
+	Label      string `json:"label"`
+	DecisionID string `json:"decision_id"`
+	Revision   int64  `json:"revision"`
 }
 type Answer struct {
 	Replaces     string    `json:"replaces,omitempty"`
