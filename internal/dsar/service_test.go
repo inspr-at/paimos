@@ -56,9 +56,6 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'list:fixture','{"layout":"SECRET_IN_ARBITRARY_JSON"}')`, tid, alias); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO person_host_labels(tenant_id,person_id,host,label) VALUES($1,$2,'host-fixture','My workstation')`, tid, alias); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(ctx, `INSERT INTO sessions(id,identity_id,tenant_id,principal_id,expires_at) VALUES(repeat('c',64),$1,$2,$3,now()+interval '1 day')`, identity, tid, subject); err != nil {
 			return err
 		}
@@ -78,6 +75,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	dbtest.BindRole(t, d, tid, owner, "owner")
 	dbtest.BindRole(t, d, tid, admin, "admin")
+	// Fixture writers have system visibility, but this private table also
+	// requires the owning person. Seed through the test-only admin connection.
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO person_host_labels(tenant_id,person_id,host,label) VALUES($1,$2,'host-fixture','My workstation')`, tid, alias); err != nil {
+		t.Fatal(err)
+	}
 	// Share the global identity across tenants: the other membership must never
 	// appear in either packet or be mistaken for a same-tenant alias.
 	if err := db.InTenant(ctx, d.App, foreignTenant, func(tx pgx.Tx) error {
