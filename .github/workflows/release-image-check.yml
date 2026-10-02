@@ -71,7 +71,7 @@ jobs:
         run: |
           go test ./scripts/releaseworkflow
           node --test scripts/release-image-index.test.mjs
-          node --test scripts/release-pin-pr.test.mjs scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs
+          node --test scripts/release-pin-pr.test.mjs scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
           node scripts/check-own-release-notes.mjs
       - name: Validate version and presentation bundle
         id: version

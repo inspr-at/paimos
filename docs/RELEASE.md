@@ -8,7 +8,7 @@ Releases up to `260929113854.0.0` (release 10, sequence 105) were reserved under
 
 The version pill uses the shared INSPR renderer: six segments (`YY·MM·DD hh:mm`, seconds on hover, focus or tap), never the `v` or `.0.0`. Copying always yields the exact canonical version, `.0.0` included. The label table (`schemes.json`) names the schemes INSPR-CalVer3, INSPR-CalVer2 and INSPR-CalVer1.
 
-The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. Create an annotated tag with a message: `git tag -a "$tag" -m "Release $tag"`. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
+The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. The coordinator creates it with `node scripts/create-release-tag.mjs --write` after the rehearsal and release approval below; the helper writes an annotated tag with a `Release <tag>` message. `scripts/release-tag.mjs` checks that a pushed tag has that shape; the release workflow rejects it unless `git cat-file -t "refs/tags/$tag"` returns `tag`. `scripts/verify-release.mjs` checks that `version.json` matches the scheme and that the vendored calendar presentation bundle under `web/src/vendor/calendar-version-display` matches `scripts/calendar-version-bundle-pin.json`. `just release-check` runs the verifier. A production web build runs the same check before it emits assets.
 
 Development builds leave the linker version at `dev`. A release build sets:
 
@@ -33,8 +33,10 @@ Do not tag until the main run completes successfully:
 ```sh
 gh workflow run release-image-check.yml --ref main
 # After the run completes, from the exact main commit intended for release:
-node scripts/check-release-rehearsal.mjs --sha "$(git rev-parse HEAD)"
-# Only a successful check permits the coordinator's existing annotated-tag step.
+node scripts/create-release-tag.mjs
+# After the coordinator's release approval, explicitly create the local tag:
+node scripts/create-release-tag.mjs --write
+# Push the annotated tag only through the coordinator's existing release procedure.
 ```
 
 The check reads the exact workflow identity, paginated runs, every job and step,
@@ -45,6 +47,10 @@ the same receipt before either native signing work or image publication can
 start. A merge/squash commit needs its own main rehearsal; an earlier PR receipt
 never carries over. Receipts expire after 14 days; rerun on the same main commit
 if needed. No tag, release, image or historic version is rewritten.
+The tag helper requires a clean tracked checkout on `main`, validates the version,
+presentation and frozen notes, rejects existing tags and rechecks the checkout
+after the receipt lookup. Its default is a preview; explicit `--write` creates
+only an annotated local tag at the checked immutable SHA, without pushing.
 
 The rehearsal validates `version.json`, the complete pinned presentation bundle
 and the release's own frozen notes; builds and smokes both native Linux images
