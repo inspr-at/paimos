@@ -103,12 +103,18 @@ func TestUIProjectScopedRecurrenceHistoryAndRetirement(t *testing.T) {
 		t.Errorf("retired project-scoped list contains %d definitions", len(page.Items))
 	}
 	t.Run("get", func(t *testing.T) {
+		f := *f
+		f.t = t
 		f.call(reader, "GET", "/api/recurrences/"+r.ID, nil, 404)
 	})
 	t.Run("resume", func(t *testing.T) {
+		f := *f
+		f.t = t
 		f.call(manager, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]int{"expected_revision": 3}, 404)
 	})
 	t.Run("run-now", func(t *testing.T) {
+		f := *f
+		f.t = t
 		f.call(manager, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "retired"}, 404)
 	})
 }
