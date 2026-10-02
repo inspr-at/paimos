@@ -24,7 +24,7 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
-  data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness))
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   const calls = await mockAgents(page, data, { capacity })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
@@ -32,9 +32,16 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
     return route.fulfill({ json: answer })
   })
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: me.id, running: initial.running, running_total: Object.values(initial.running).reduce((n, x) => n + x, 0), source: 'plan', updated_at: null } }))
-  if (state === 'full') await page.route('**/api/agent-accounts/capacity', route => {
-    const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', null)!.json as { routing?: { available_slots: number } }[]
-    return route.fulfill({ json: answer.map(a => ({ ...a, routing: a.routing ? { ...a.routing, available_slots: 0 } : undefined })) })
+  await page.route('**/api/agent-accounts/capacity', route => {
+    const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', null)!.json as { account_id: string }[]
+    const available = { wind: { codex: 3, claude: 2, cursor: 2 }, room: { codex: 4, claude: 3, cursor: 2 }, zero: { codex: 4, claude: 2, cursor: 2 }, off: { codex: 2, claude: 2, cursor: 2 }, full: { codex: 0, claude: 0, cursor: 0 } }[state]
+    const seen = new Set<string>()
+    return route.fulfill({ json: answer.map(a => {
+      const harness = data.accounts.find(account => account.id === a.account_id)?.harness
+      const slots = harness && !seen.has(harness) ? available[harness as keyof typeof available] ?? 0 : 0
+      if (harness) seen.add(harness)
+      return { ...a, routing: { rank: 1, available_slots: slots } }
+    }) })
   })
   const queue = state === 'room' ? [] : Array.from({ length: state === 'off' ? 2 : 3 }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: false, wait_reason: '' } }))
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
@@ -151,8 +158,8 @@ test('zero and thirty are real ceilings; idle glyph rests and disabled boundarie
   await expect(card.locator('[data-key="codex"] button').last()).toBeDisabled()
 })
 
-test('all seven harnesses fit on a phone and remain independent of the total', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 1000 })
+for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and remain independent of the total`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 1000 })
   const { work } = await setup(page, 'room', true)
   work.preferences['agents.working'] = { total: 1, limits: { codex: 30, claude: 30, cursor: 30, grok: 'no_limit', pi: 'off', gemini: 0, opencode: 3 } }
   await page.goto('/agents')
@@ -161,7 +168,7 @@ test('all seven harnesses fit on a phone and remain independent of the total', a
   await expect(card.locator('[data-harness="codex"] .f-n')).toHaveText('30')
   await expect(card.locator('[data-harness="gemini"] .f-n')).toHaveText('0')
   expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-  await card.locator('.f-fold').click()
+  await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.f-fold') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.f-fold').click() }] })
   await expect(card.locator('.rows > li')).toHaveCount(7)
   await expect(card.locator('[data-key="claude"] .lim-num')).toHaveText('30')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)

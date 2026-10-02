@@ -29,7 +29,7 @@ async function setup(page: Page, options: CapacityOptions & { manage?: boolean }
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld(options)
-  data.accounts = capacity.accounts as unknown as typeof data.accounts
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(a => ({ ...a, registered_by_principal_id: me.id }))
   data.approvals = data.approvals.filter(a => a.decision)
   data.messages = data.messages.filter(m => !m.is_action_request)
   await mockAgents(page, data, { capacity, workingPreference: () => work.preferences['agents.working'] })

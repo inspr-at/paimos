@@ -14,7 +14,7 @@ async function setup(page: Page, failDecision = false) {
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
-  data.accounts = capacity.accounts as unknown as typeof data.accounts
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(a => ({ ...a, registered_by_principal_id: me.id }))
   await mockAgents(page, data, { capacity, failDecision, workingPreference: () => work.preferences['agents.working'] })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)

@@ -99,7 +99,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 </script>
 
 <template>
-  <section class="working glass-card" aria-label="Agents at once" :class="{ folded }">
+  <section class="working glass-card" aria-label="Agents at once" :class="{ folded, many: rows.length > 3 }">
     <template v-if="plan && snapshot">
       <div class="f-bar">
         <div class="f-dial"><span>Run up to</span>
@@ -341,9 +341,13 @@ p { margin: 0; }
 .load-state { color: var(--ink-3); font-size: 13.5px; }
 @container working (min-width: 1120px) {
   .f-bar { grid-template-columns: auto auto minmax(0, 1fr) 28px; grid-template-areas: "dial chips live fold"; gap: 6px 24px; }
-  .f-chips { max-width: 342px; margin-left: -10px; gap: 6px 24px; }
+  .f-chips { max-width: 360px; margin-left: -10px; gap: 6px 24px; }
   .f-chips.concealed { display: flex; visibility: hidden; }
   .f-vsep { display: block; margin-right: -10px; }
+  .many .f-bar { grid-template-columns: auto minmax(0, 1fr) 28px; grid-template-areas: "dial live fold" "chips chips chips"; }
+  .many .f-chips { max-width: none; margin-left: 0; }
+  .many .f-chips.concealed { display: none; }
+  .many .f-vsep { display: none; }
 }
 @container working (max-width: 760px) {
   .f-bar { grid-template-columns: minmax(0, 1fr) 28px; grid-template-areas: "dial fold" "chips chips" "live live"; }
