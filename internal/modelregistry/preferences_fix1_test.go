@@ -26,7 +26,7 @@ type reviewLookupFailure struct {
 
 func (f *reviewLookupFailure) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	query := strings.Join(strings.Fields(sql), " ")
-	if f.profiles && strings.Contains(query, "FROM model_profiles ORDER BY slug, version, id") {
+	if f.profiles && strings.Contains(query, "FROM model_profiles p JOIN model_profile_display d") && strings.HasSuffix(query, "ORDER BY p.slug, p.version, p.id") {
 		return nil, f.err
 	}
 	if !f.profiles && strings.HasPrefix(query, "SELECT id::text, account_key, harness, daemon_id") {
