@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -44,7 +45,7 @@ func (m *Module) history(w http.ResponseWriter, r *http.Request) {
 		if err = permission(ctx, tx, p, "autopilot.read", l.ProjectID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of FROM events WHERE node_id=$1 AND type LIKE 'autopilot.%' AND id>$2 ORDER BY id LIMIT $3`, l.ID, after, limit+1)
+		rows, err := tx.Query(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of FROM events WHERE node_id=$1 AND type LIKE 'node.autopilot_%' AND id>$2 ORDER BY id LIMIT $3`, l.ID, after, limit+1)
 		if err != nil {
 			return err
 		}
@@ -106,16 +107,16 @@ type Route struct {
 	Basis     string  `json:"basis"`
 }
 type PreviewItem struct {
-	TicketNodeID   string   `json:"ticket_node_id"`
-	TicketRevision int64    `json:"ticket_revision"`
-	RunID          string   `json:"run_id"`
-	Key            string   `json:"key"`
-	Title          string   `json:"title"`
-	Eligible       bool     `json:"eligible"`
-	Exclusions     []string `json:"exclusions"`
-	Preparation    string   `json:"preparation"`
-	EstimateBasis  string   `json:"estimate_basis"`
-	ProposedRoute  Route    `json:"proposed_route"`
+	TicketNodeID   string    `json:"ticket_node_id"`
+	TicketRevision time.Time `json:"ticket_revision"`
+	RunID          string    `json:"run_id"`
+	Key            string    `json:"key"`
+	Title          string    `json:"title"`
+	Eligible       bool      `json:"eligible"`
+	Exclusions     []string  `json:"exclusions"`
+	Preparation    string    `json:"preparation"`
+	EstimateBasis  string    `json:"estimate_basis"`
+	ProposedRoute  Route     `json:"proposed_route"`
 }
 type Preview struct {
 	LaneID             string          `json:"lane_id"`
@@ -216,7 +217,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 			out.MissingDecisions = append(out.MissingDecisions, "release_order_integration_pending")
 			return nil
 		}
-		rows, err := tx.Query(ctx, workqueue.CTE+`SELECT q.queue_node_id::text,n.row_version,q.id::text,q.key,left(q.title,512),q.state,k.slug,left(n.body,2048),left(q.fields::text,65537),p.kind='person',q.model_profile_id::text,coalesce(q.queue_target_agent_id::text,''),q.queue_position,
+		rows, err := tx.Query(ctx, workqueue.CTE+`SELECT q.queue_node_id::text,n.updated_at,q.id::text,q.key,left(q.title,512),q.state,k.slug,left(n.body,2048),left(q.fields::text,65537),p.kind='person',q.model_profile_id::text,coalesce(q.queue_target_agent_id::text,''),q.queue_position,
    EXISTS(SELECT 1 FROM node_relations r JOIN nodes b ON b.tenant_id=r.tenant_id AND b.id=r.source_node_id WHERE r.target_node_id=n.id AND r.type='blocks' AND b.deleted_at IS NULL AND replace(replace(lower(btrim(b.state)),' ','_'),'-','_') NOT IN ('done','delivered','accepted','cancelled','archived')),
    EXISTS(SELECT 1 FROM agent_runs a WHERE a.tenant_id=q.tenant_id AND (a.queue_node_id=n.id OR a.work_order_id IN (SELECT w.node_id FROM work_orders w WHERE w.tenant_id=q.tenant_id AND w.node_id IN (SELECT child.id FROM nodes child WHERE child.tenant_id=q.tenant_id AND child.parent_id=n.id))) AND a.id<>q.id AND a.status IN ('starting','running','waiting','ownership_lost'))
    FROM queue_heads q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.queue_node_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id JOIN principals p ON p.tenant_id=q.tenant_id AND p.id=q.queue_by_principal_id

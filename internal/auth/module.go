@@ -268,6 +268,16 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "autopilot-lanes":
+		if len(parts) >= 2 && validRouteUUID(parts[1]) {
+			if read && (len(parts) == 2 || len(parts) == 3 && (parts[2] == "preview" || parts[2] == "history")) {
+				return "autopilot.read", true
+			}
+			if len(parts) == 3 && parts[2] == "pause" && r.Method == http.MethodPost {
+				return "autopilot.pause", true
+			}
+		}
+
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
@@ -316,6 +326,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "autopilot-lanes":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "autopilot.read", true
+			}
 		case "questions":
 			if len(parts) == 3 && read {
 				return "questions.read", true

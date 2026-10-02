@@ -311,7 +311,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err = tx.QueryRow(ctx, `INSERT INTO autopilot_lanes(tenant_id,node_id,project_id,owner_principal_id,name,priority,scope_kind,scope_node_id,policy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING revision,created_at,updated_at`, p.TenantID, l.ID, l.ProjectID, p.ID, l.Name, l.Priority, l.Scope.Kind, l.Scope.ReleaseNodeID, raw).Scan(&l.Revision, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &l.ID, Type: "autopilot.lane_created", After: l})
+		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &l.ID, Type: "node.autopilot_lane_created", After: l})
 		return err
 	})
 	respond(w, 201, l, err)
@@ -394,7 +394,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		if reflect.DeepEqual(out, before) {
 			return nil
 		}
-		return save(ctx, tx, p, &out, before, "autopilot.lane_updated")
+		return save(ctx, tx, p, &out, before, "node.autopilot_lane_updated")
 	})
 	respond(w, 200, out, err)
 }
@@ -442,7 +442,7 @@ func (m *Module) action(w http.ResponseWriter, r *http.Request, resume bool) {
 			return fail(409, "lane changed; reload")
 		}
 		out = before
-		event := "autopilot.lane_paused"
+		event := "node.autopilot_lane_paused"
 		if resume {
 			if err = executionAuthority(ctx, tx, p, out); err != nil {
 				return err
@@ -450,7 +450,7 @@ func (m *Module) action(w http.ResponseWriter, r *http.Request, resume bool) {
 			out.Enabled = true
 			out.Paused = false
 			out.PauseReason = ""
-			event = "autopilot.lane_resumed"
+			event = "node.autopilot_lane_resumed"
 		} else {
 			out.Paused = true
 			out.PauseReason = in.Reason

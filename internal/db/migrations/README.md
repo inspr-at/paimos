@@ -75,7 +75,10 @@ The lane scope discriminator supports `queued_tickets` and a same-project
 ordered-item integration. Preparation intents report `requested` and
 `launched=false`; they are neither dispatch ownership nor execution authority.
 The scheduler must recheck their recorded lane/ticket revisions before consuming
-them. Subscription agent-hours are a policy ceiling per work-window instance,
+them. Ticket revisions use the existing node `updated_at` timestamp; lane policy
+revisions are integers. Lane audit uses `node.autopilot_*` events so existing
+project event visibility rules apply without broadening event RLS. Subscription
+agent-hours are a policy ceiling per work-window instance,
 not measured usage. Existing criteria require person acceptance when absent;
 when criteria exist, estimates may be automatic. Window end permits only the
 current already reserved attempt to finish, and Aeon retains coordinator review.

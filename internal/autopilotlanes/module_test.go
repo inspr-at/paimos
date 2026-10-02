@@ -116,13 +116,13 @@ func (f *fixture) lane(t *testing.T, projectID string) Lane {
 	f.call(t, f.owner, "POST", "/api/projects/"+projectID+"/autopilot-lanes", createInput{Name: "Night fixes", Policy: testPolicy()}, 201, &l)
 	return l
 }
-func (f *fixture) ticket(t *testing.T, projectID, kind string, fields map[string]any) (string, int64) {
+func (f *fixture) ticket(t *testing.T, projectID, kind string, fields map[string]any) (string, time.Time) {
 	t.Helper()
 	raw, _ := json.Marshal(fields)
 	var id string
-	var revision int64
+	var revision time.Time
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state,fields) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Ticket',$2,'open',$3 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug=$4 RETURNING id::text,row_version`, f.owner.TenantID, projectID, raw, kind).Scan(&id, &revision)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state,fields) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Ticket',$2,'open',$3 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug=$4 RETURNING id::text,updated_at`, f.owner.TenantID, projectID, raw, kind).Scan(&id, &revision)
 	})
 	return id, revision
 }
@@ -130,7 +130,7 @@ func (f *fixture) eventCount(t *testing.T, id string) int {
 	t.Helper()
 	var n int
 	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type LIKE 'autopilot.%'`, id).Scan(&n)
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type LIKE 'node.autopilot_%'`, id).Scan(&n)
 	})
 	return n
 }
@@ -275,7 +275,7 @@ func TestPrepareIntentRevisionsAndIsolation(t *testing.T) {
 		t.Fatalf("criteria intent %+v", again)
 	}
 	f.call(t, f.owner, "POST", path, prepareInput{99, criteria, rev}, 409, nil)
-	f.call(t, f.owner, "POST", path, prepareInput{l.Revision, criteria, 99}, 409, nil)
+	f.call(t, f.owner, "POST", path, prepareInput{l.Revision, criteria, rev.Add(time.Second)}, 409, nil)
 	other, rev := f.ticket(t, f.otherProject, "ticket", map[string]any{})
 	f.call(t, f.owner, "POST", path, prepareInput{l.Revision, other, rev}, 404, nil)
 	ready, rev := f.ticket(t, f.project, "ticket", map[string]any{"estimate_hours": 2, "acceptance_criteria": "Ready"})

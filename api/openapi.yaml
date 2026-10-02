@@ -9064,7 +9064,7 @@ components:
       properties:
         expected_revision: {type: integer, minimum: 1}
         ticket_node_id: {type: string, format: uuid}
-        expected_ticket_revision: {type: integer, minimum: 1}
+        expected_ticket_revision: {type: string, format: date-time}
     AutopilotLane:
       type: object
       required: [id, project_id, owner_principal_id, name, priority, revision, enabled, paused, scope, policy, pause_reason, created_at, updated_at]
@@ -9111,7 +9111,7 @@ components:
       required: [ticket_node_id, ticket_revision, run_id, key, title, eligible, exclusions, preparation, estimate_basis, proposed_route]
       properties:
         ticket_node_id: {type: string, format: uuid}
-        ticket_revision: {type: integer}
+        ticket_revision: {type: string, format: date-time}
         run_id: {type: string, format: uuid}
         key: {type: string}
         title: {type: string}
@@ -9141,7 +9141,7 @@ components:
         lane_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid}
         ticket_node_id: {type: string, format: uuid}
-        ticket_revision: {type: integer}
+        ticket_revision: {type: string, format: date-time}
         lane_revision: {type: integer}
         requested_by_principal_id: {type: string, format: uuid}
         preparation: {type: string, enum: [automatic_estimate, criteria_draft_requires_person]}

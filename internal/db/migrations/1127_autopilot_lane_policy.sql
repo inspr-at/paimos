@@ -44,7 +44,7 @@ CREATE TABLE autopilot_preparation_requests (
  project_id uuid NOT NULL,
  lane_id uuid NOT NULL,
  ticket_node_id uuid NOT NULL,
- ticket_revision bigint NOT NULL CHECK (ticket_revision>0),
+ ticket_revision timestamptz NOT NULL CHECK (isfinite(ticket_revision)),
  lane_revision bigint NOT NULL CHECK (lane_revision>0),
  requested_by_principal_id uuid NOT NULL,
  preparation text NOT NULL CHECK (preparation IN ('automatic_estimate','criteria_draft_requires_person')),

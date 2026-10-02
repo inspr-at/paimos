@@ -12,16 +12,16 @@ import (
 )
 
 type prepareInput struct {
-	ExpectedRevision       int64  `json:"expected_revision"`
-	TicketNodeID           string `json:"ticket_node_id"`
-	ExpectedTicketRevision int64  `json:"expected_ticket_revision"`
+	ExpectedRevision       int64     `json:"expected_revision"`
+	TicketNodeID           string    `json:"ticket_node_id"`
+	ExpectedTicketRevision time.Time `json:"expected_ticket_revision"`
 }
 type PreparationRequest struct {
 	ID                     string    `json:"id"`
 	LaneID                 string    `json:"lane_id"`
 	ProjectID              string    `json:"project_id"`
 	TicketNodeID           string    `json:"ticket_node_id"`
-	TicketRevision         int64     `json:"ticket_revision"`
+	TicketRevision         time.Time `json:"ticket_revision"`
 	LaneRevision           int64     `json:"lane_revision"`
 	RequestedByPrincipalID string    `json:"requested_by_principal_id"`
 	Preparation            string    `json:"preparation"`
@@ -40,7 +40,7 @@ func (m *Module) prepare(w http.ResponseWriter, r *http.Request) {
 		respond(w, 202, nil, err)
 		return
 	}
-	if in.ExpectedRevision < 1 || in.ExpectedTicketRevision < 1 || !uuid.MatchString(in.TicketNodeID) {
+	if in.ExpectedRevision < 1 || in.ExpectedTicketRevision.IsZero() || !uuid.MatchString(in.TicketNodeID) {
 		respond(w, 202, nil, fail(400, "lane revision, ticket id and ticket revision required"))
 		return
 	}
@@ -61,11 +61,11 @@ func (m *Module) prepare(w http.ResponseWriter, r *http.Request) {
 		}
 		var kind, state, title, body string
 		var fields []byte
-		var revision int64
-		if err = tx.QueryRow(ctx, `SELECT k.slug,n.state,left(n.title,512),left(n.body,2048),left(n.fields::text,65537),n.row_version FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL FOR NO KEY UPDATE OF n`, in.TicketNodeID, l.ProjectID).Scan(&kind, &state, &title, &body, &fields, &revision); err != nil {
+		var revision time.Time
+		if err = tx.QueryRow(ctx, `SELECT k.slug,n.state,left(n.title,512),left(n.body,2048),left(n.fields::text,65537),n.updated_at FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL FOR NO KEY UPDATE OF n`, in.TicketNodeID, l.ProjectID).Scan(&kind, &state, &title, &body, &fields, &revision); err != nil {
 			return err
 		}
-		if revision != in.ExpectedTicketRevision {
+		if !revision.Equal(in.ExpectedTicketRevision) {
 			return fail(409, "ticket changed; reload")
 		}
 		if len(fields) > 65536 {
@@ -90,7 +90,7 @@ func (m *Module) prepare(w http.ResponseWriter, r *http.Request) {
 		if err != nil || !inserted {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &l.ID, Type: "autopilot.preparation_requested", After: out})
+		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &l.ID, Type: "node.autopilot_preparation_requested", After: out})
 		return err
 	})
 	respond(w, 202, out, err)
