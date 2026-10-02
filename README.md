@@ -1272,6 +1272,16 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
+4096 pixels per side, with a square crop up to 2048 pixels. Attachment images
+accept up to 16,777,216 pixels and 8192 pixels per side, in addition to the
+configured file byte limit (50 MiB by default). Dimensions and avatar crops
+are checked before pixel decoding. Both paths share a 256 MiB budget for
+estimated live image work across tenants; queued work observes request
+cancellation. This is an image-processing budget, not a cap on total server
+memory. Avatar orientation and cropping use source views, and generated PNGs
+are stored without decoding them again.
+
 Settings → Workspace → Brand accepts static SVG logos and serves only the
 sanitized drawing. Non-drawing attributes (`role`, `aria-*`, `data-*`, `class`,
 `focusable`, `xml:space`, `enable-background`) and known editor metadata are
