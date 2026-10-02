@@ -323,6 +323,23 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
+Model estimates learn from completed-ticket outcomes, actual session profiles and
+frozen work placements. Fully reported worker runs with measured active time feed
+the newest 30 samples per model version, effort, kind and complexity bucket.
+Token rates back off from the exact cell to the same line across versions, the
+profile across kinds, then the existing harness/model/effort route and documented
+5M/h planning fallback. Every calibration names its basis and sample count;
+uncalibrated fallback tokens and costs are withheld in the UI. Speed factors need
+five exact-cell samples with frozen positive size estimates: model-adjusted hours
+are size × median(active hours / size), while `estimate_hours` stays unchanged.
+Work-start snapshots freeze the adjusted estimate and its basis. The read-only
+`GET /api/usage/model-estimates?profile_id=…&kind=…&bucket=normal|complex`
+endpoint requires `harness.read` and returns null hints below five samples.
+`ChoicePicker` supports this history through each choice's `estimate`, with
+`estimateKind` and `estimateBucket` selecting the context; its hint line reserves
+space while history loads or is absent. The model preference editor is delivered
+separately; its caller must discard cancelled or stale-context history responses.
+
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after
 reconnecting and on lifecycle changes; heartbeats leave it on its 20-second poll.

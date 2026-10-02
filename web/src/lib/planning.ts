@@ -19,7 +19,9 @@ export function shownModelName(model: ModelDisplay & { label: string; harness: s
 }
 
 export interface PlanningRoute extends ModelDisplay { effort_level?: number | null; label: string; profile: string; harness: string; model: string; effort: string; revision: string; set_by?: string; follows_latest?: boolean; pinned?: boolean }
-export interface PlanningCalibration { basis: 'median' | 'default'; tickets: number; tokens_per_hour: number; any_route?: boolean }
+import type { ModelEstimateHistory } from './modelEstimates'
+
+export interface PlanningCalibration { basis_text?: string; level?: 'cell' | 'line' | 'profile' | 'route' | 'default'; basis: 'median' | 'default'; tickets: number; tokens_per_hour: number; any_route?: boolean }
 export interface PlanningTokens {
   spent: number | null; input: number; output: number; cached: number
   sessions: number; running?: number; unreported: number; estimated: number | null
@@ -38,11 +40,13 @@ export interface PlanningCost {
 export interface PlanningModelSession { id: string; profile_id?: string; model_raw?: string; effort: string; effort_level?: number | null; role: string; running: boolean; tokens: number | null }
 export interface PlanningModel extends ModelDisplay { label: string; harness: string; model: string; sessions: PlanningModelSession[] }
 export interface PlanningSnapshot {
+  model_estimate?: ModelEstimateHistory
   id: string; started_at: string; source: 'session' | 'status'; estimate_hours: number | null
   estimated_tokens: number | null; estimated_cost_usd?: string | null; route: PlanningRoute | null
   rate_basis: PlanningCalibration & { list_per_hour?: string | null }
 }
 export interface TicketPlanning {
+  model_estimate?: ModelEstimateHistory
   models?: PlanningModel[]
   estimate_snapshot?: PlanningSnapshot
   route: PlanningRoute | null
@@ -154,7 +158,7 @@ export function modelCell(row: PlanningRow, prefs = DEFAULT_MODEL_DISPLAY): Mode
   if (row.kind_slug !== 'epic' && route) {
     return { text: shownModelName(route, prefs), effort: effortLevel(route.effort_level), fullName: fullModelName(route), provider: route.provider ?? '', harness: route.harness, state: 'planned', more: 0,
       label: `${fullModelName(route)}, estimated (planned)${effortTip(route.effort_level) ? `, ${effortTip(route.effort_level)}` : ''}`,
-      tip: [planLine(row), effortTip(route.effort_level), preferenceLine(route), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].filter(Boolean).join('\n') }
+      tip: [planLine(row), effortTip(route.effort_level), preferenceLine(route), modelDurationLine(row), `${roleArea(row)} · Model registry, revision ${route.revision}`, row.planning?.tokens.sessions ? 'Session model not reported yet' : 'No agent session yet'].filter(Boolean).join('\n') }
   }
   let reason = 'No model planned: set a role and area'
   if (row.kind_slug === 'epic') reason = 'Epics take no model; their tickets do'
@@ -192,6 +196,16 @@ function figure(row: PlanningRow, spent: number | null, est: number | null, form
   const parts = [spent !== null ? `${format(spent)}${unit} measured${live ? ' so far' : ''}` : '', est !== null && state !== 'measured' ? `${format(est)} estimated` : '', over ? 'over the estimate' : '', plan && state === 'measured' ? 'included in your plan' : '']
   return { state, spent: spent !== null ? format(spent) : '', estimated: est !== null ? format(est) : '', over, plan: plan && state === 'measured', label: parts.filter(Boolean).join(', '), tip }
 }
+function uncalibrated(row: PlanningRow): boolean {
+  const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
+  return cal?.level === 'default'
+}
+function modelDurationLine(row: PlanningRow): string {
+  const history = row.planning?.estimate_snapshot?.model_estimate ?? row.planning?.model_estimate
+  if (!history) return ''
+  if (history.hours === null || history.speed_factor === null || history.speed_tickets < 5) return `Model-adjusted hours: uncalibrated (n=${history.speed_tickets})`
+  return `~${Number(history.hours.toFixed(1))} h (×${Number(history.speed_factor.toFixed(2))}, n=${history.speed_tickets}) · ${history.basis}`
+}
 function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const snap = row.planning?.estimate_snapshot
   const cal = snap?.rate_basis ?? tokens.calibration
@@ -200,6 +214,7 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
     return `Sum of ${c.estimated} of ${c.total} open and done children with an estimate`
   }
   if (!cal) return ''
+  if (cal.basis_text) return cal.basis_text
   const est = snap ? snap.estimated_tokens : tokens.estimated
   const hours = snap ? snap.estimate_hours : est !== null && cal.tokens_per_hour > 0 ? est / cal.tokens_per_hour : null
   const rate = `${formatTokenCount(cal.tokens_per_hour)}/h`
@@ -213,7 +228,7 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
 export function tokensCell(row: PlanningRow): FigureCell {
   const tokens = row.planning?.tokens
   const snap = row.planning?.estimate_snapshot
-  const spent = tokens?.spent ?? null, est = snap ? snap.estimated_tokens : tokens?.estimated ?? null
+  const spent = tokens?.spent ?? null, est = uncalibrated(row) ? null : snap ? snap.estimated_tokens : tokens?.estimated ?? null
   const live = running(row)
   const lines: string[] = []
   if (spent !== null) {
@@ -225,7 +240,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push(`${sessions} session${sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
     if (est !== null) lines.push(snapshotLine(row))
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
-  else lines.push(tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
+  else lines.push(uncalibrated(row) ? 'Uncalibrated · no model history yet (n=0)' : tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
   if (spent === null && live) {
     const count = tokens?.running ?? tokens?.sessions ?? 1
     const models = row.planning?.models ?? []
@@ -239,7 +254,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
 // Cost is measured tokens at list prices, with actual billing named in the hover.
 export function listCostCell(row: PlanningRow): FigureCell {
   const cost = row.planning?.cost, snap = row.planning?.estimate_snapshot
-  const spent = num(cost?.list_spent), est = snap ? num(snap.estimated_cost_usd) : num(cost?.list_estimated)
+  const spent = num(cost?.list_spent), est = uncalibrated(row) ? null : snap ? num(snap.estimated_cost_usd) : num(cost?.list_estimated)
   const modes = cost?.billing_modes ?? (cost?.plans.length && row.planning?.tokens.sessions ? ['subscription'] : cost && !cost.paid_unknown && row.planning?.tokens.sessions ? ['api'] : [])
   const subscription = modes.includes('subscription'), api = modes.includes('api'), unknown = modes.includes('unknown')
   const subscriptionOnly = modes.length === 1 && subscription
@@ -261,7 +276,7 @@ export function listCostCell(row: PlanningRow): FigureCell {
   } else if (est !== null) {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
-  } else lines.push(row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
+  } else lines.push(uncalibrated(row) ? 'Uncalibrated · no model history yet (n=0)' : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
   return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)

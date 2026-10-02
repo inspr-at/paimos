@@ -6244,6 +6244,25 @@ paths:
                   truncated: {type: boolean, description: More sessions were live than one answer holds; the freshest are listed}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /usage/model-estimates:
+    get:
+      security: *auth
+      operationId: modelEstimateHistory
+      summary: Read calibrated model history for a kind and complexity bucket
+      parameters:
+        - {name: profile_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+        - {name: bucket, in: query, required: true, schema: {type: string, enum: [normal, complex]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Visible completed-ticket history; numeric hints are null below five samples. Requires harness.read.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ModelEstimateHistory'}
+        '400': {description: Invalid or overly broad query}
+        '401': {description: Unauthorized}
+        '403': {description: Permission denied}
   /usage/dashboard:
     get:
       operationId: getUsageDashboard
@@ -13557,6 +13576,17 @@ components:
         inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
         inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
         has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
+    ModelEstimateHistory:
+      type: object
+      required: [state, basis, tickets, hours, tokens, speed_factor, speed_tickets]
+      properties:
+        state: {type: string, enum: [calibrated, uncalibrated]}
+        basis: {type: string, description: Sample cell and versions used; always includes n.}
+        tickets: {type: integer, minimum: 0}
+        hours: {type: [number, 'null'], description: Median measured active hours in history; model-adjusted estimate hours in planning. Null below five samples.}
+        tokens: {type: [integer, 'null'], description: Median reported input plus output tokens; null below five samples.}
+        speed_factor: {type: [number, 'null'], description: Median active hours divided by frozen estimate hours, exact cell only; null below five valid estimates.}
+        speed_tickets: {type: integer, minimum: 0}
     TicketPlanning:
       description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
       type: object
@@ -13631,6 +13661,8 @@ components:
               required: [basis, tickets, tokens_per_hour]
               properties:
                 basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
+                basis_text: {type: string, description: Backoff level and sample count; uncalibrated for the documented default.}
+                level: {type: string, enum: [cell, line, profile, route, default]}
                 tickets: {type: integer, minimum: 0}
                 tokens_per_hour: {type: integer, minimum: 0}
                 any_route: {type: boolean}
@@ -13649,6 +13681,7 @@ components:
             billing_modes: {type: array, items: {type: string, enum: [api, subscription, unknown]}, description: Billing modes of actual visible usage only; requires harness.read on source and row projects.}
             list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
             paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
           description: 'Epics only: open and done ticket and task children, and how many are estimated.'
@@ -13666,6 +13699,7 @@ components:
         started_at: {type: string, format: date-time}
         source: {type: string, enum: [session, status]}
         estimate_hours: {type: [number, 'null']}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimated_tokens: {type: [integer, 'null']}
         estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
         route: {$ref: '#/components/schemas/TicketPlanning/properties/route'}
@@ -13677,6 +13711,8 @@ components:
             tickets: {type: integer, minimum: 0}
             tokens_per_hour: {type: integer, minimum: 0}
             any_route: {type: boolean}
+            basis_text: {type: string}
+            level: {type: string, enum: [cell, line, profile, route, default]}
             tokens_per_hour_exact: {type: string, description: Unrounded tokens per hour used for the snapshot calculation.}
             list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
             price_version: {type: [integer, 'null']}

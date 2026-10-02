@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/usagedashboard"
 )
 
 // Planning columns (AEON-329). A list row carries the model its role and area
@@ -50,8 +51,9 @@ const (
 )
 
 type planningView struct {
-	Snapshot *planningSnapshot `json:"estimate_snapshot,omitempty"`
-	Route    *planningRoute    `json:"route"`
+	ModelEstimate *usagedashboard.ModelEstimateHistory `json:"model_estimate,omitempty"`
+	Snapshot      *planningSnapshot                    `json:"estimate_snapshot,omitempty"`
+	Route         *planningRoute                       `json:"route"`
 	// RouteGap says why a role has no model: "area" (no area set),
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
@@ -91,6 +93,8 @@ type planningTokens struct {
 type planningCalibration struct {
 	// Basis is "median" (Tickets finished tickets on the route, or on any
 	// route when none resolved) or "default".
+	BasisText     string `json:"basis_text,omitempty"`
+	Level         string `json:"level,omitempty"`
 	Basis         string `json:"basis"`
 	Tickets       int    `json:"tickets"`
 	TokensPerHour int64  `json:"tokens_per_hour"`
@@ -223,6 +227,9 @@ func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []pl
 		}
 	}
 	pl := &planner{routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
+	if err := pl.loadLearning(ctx, tx, seen.costVisible); err != nil {
+		return nil, err
+	}
 	anyRoute := pl.calibration(nil)
 	viewer := ""
 	if person := planningViewer(ctx, tx); person != nil {
@@ -243,13 +250,13 @@ func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []pl
 		if kind == "" {
 			kind = "other"
 		}
-		rate := planSortRate{Placement: key, Project: seed.project, Person: seed.person, Kind: kind, Bucket: seed.bucket, Role: seed.role, Residency: seed.residency, Tokens: c.tokensPerHour, List: c.listPerHour}
+		rate := planSortRate{Placement: key, Project: seed.project, Person: seed.person, Kind: kind, Bucket: seed.bucket, Role: seed.role, Residency: seed.residency, Tokens: c.tokensPerHour * c.speed, List: scaledRate(c.listPerHour, c.speed)}
 		switch billing[route.view.Harness].mode {
 		case "subscription":
 			zero := 0.0
 			rate.Paid = &zero
 		case "api":
-			rate.Paid = c.listPerHour
+			rate.Paid = rate.List
 		}
 		rates = append(rates, rate)
 	}
@@ -372,7 +379,7 @@ type calibrationSample struct {
 
 // routeKey matches samples: same harness and model; a sample that did not
 // report its effort counts for every effort. An empty harness is any route.
-type routeKey struct{ harness, model, effort string }
+type routeKey struct{ harness, model, effort, learning string }
 
 func (k routeKey) matches(s calibrationSample) bool {
 	if k.harness == "" {
@@ -383,10 +390,12 @@ func (k routeKey) matches(s calibrationSample) bool {
 
 // calibration is the rate an estimate multiplies.
 type calibration struct {
-	basis         string
-	tickets       int
-	tokensPerHour float64
-	listPerHour   *float64
+	basisText, level string
+	speed            float64
+	basis            string
+	tickets          int
+	tokensPerHour    float64
+	listPerHour      *float64
 }
 
 // calibrate takes the newest calibrationWindow matching samples (samples are
@@ -611,6 +620,7 @@ type planPrice struct {
 // planRoute is one resolved placement, shared by rows with the same project,
 // person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
+	cell     usagedashboard.LearningCell
 	price    *planPrice
 	view     *planningRoute
 	key      routeKey
@@ -625,6 +635,7 @@ type planBilling struct{ mode, plan string }
 // calibration samples and each routed harness's billing.
 type planner struct {
 	routes       map[string]*planRoute
+	learning     []usagedashboard.LearningSample
 	samples      []calibrationSample
 	billing      map[string]planBilling
 	calibrations map[routeKey]calibration
@@ -657,7 +668,7 @@ func (pl *planner) calibration(route *planRoute) calibration {
 	}
 	c, ok := pl.calibrations[key]
 	if !ok {
-		c = calibrate(pl.samples, key, mix)
+		c = pl.calibrateLearning(route, key, mix)
 		pl.calibrations[key] = c
 	}
 	return c
@@ -671,7 +682,7 @@ func (pl *planner) estimate(r planRow) planEstimate {
 	}
 	route := pl.route(r)
 	c := pl.calibration(route)
-	n := int64(math.Round(*r.hours * c.tokensPerHour))
+	n := int64(math.Round(*r.hours * c.tokensPerHour * c.speed))
 	e := planEstimate{tokens: &n, cal: c, anyRoute: route == nil, unbilled: true, unpriced: c.listPerHour == nil}
 	if route != nil {
 		switch b := pl.billing[route.view.Harness]; b.mode {
@@ -742,8 +753,9 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 			}
 		}
 		e = pl.estimate(self)
+		view.ModelEstimate = pl.modelEstimate(self)
 		if e.tokens != nil {
-			view.Tokens.Calibration = &planningCalibration{Basis: e.cal.basis, Tickets: e.cal.tickets, TokensPerHour: int64(math.Round(e.cal.tokensPerHour)), AnyRoute: e.anyRoute}
+			view.Tokens.Calibration = &planningCalibration{BasisText: e.cal.basisText, Level: e.cal.level, Basis: e.cal.basis, Tickets: e.cal.tickets, TokensPerHour: int64(math.Round(e.cal.tokensPerHour)), AnyRoute: e.anyRoute}
 		}
 	}
 	view.Tokens.Estimated = e.tokens
@@ -823,6 +835,9 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 	}
 	pl := &planner{billing: map[string]planBilling{}, calibrations: map[routeKey]calibration{}}
 	if pl.routes, err = resolvePlanRoutes(ctx, tx, rows); err != nil {
+		return nil, err
+	}
+	if err := pl.loadLearning(ctx, tx, cost); err != nil {
 		return nil, err
 	}
 	if slices.ContainsFunc(rows, func(r planRow) bool { return r.hours != nil }) {
@@ -1067,7 +1082,8 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 				setBy = resolved.Trace.SetBy
 			}
 			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest", Pinned: resolved.Trace.Mode == "pinned"}
-			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort)}
+			route.cell = usagedashboard.CellFor(p, resolved.Trace.Kind, resolved.Trace.Bucket)
+			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort), learning: strings.Join([]string{p.ID, route.cell.Kind, route.cell.Bucket, route.cell.Version}, "|")}
 			var in, outRate, cached *float64
 			price := &planPrice{}
 			err := tx.QueryRow(ctx, `SELECT input_usd_per_million::float8, output_usd_per_million::float8, cached_input_usd_per_million::float8, version, input_usd_per_million::text, output_usd_per_million::text, cached_input_usd_per_million::text
