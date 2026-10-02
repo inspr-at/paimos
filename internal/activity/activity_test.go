@@ -382,17 +382,16 @@ func TestTimelineAtImportScale(t *testing.T) {
 	// requested ticket's items, regardless of unrelated imported event volume.
 	for range 10 {
 		page := f.page("?limit=20")
-		if !reflect.DeepEqual(page.Items, want[:20]) || page.NextCursor == nil {
-			t.Fatalf("invalid first scale page: %+v", page)
+		assertTimelineItems(t, page.Items, want[:20])
+		if page.NextCursor == nil {
+			t.Fatal("first scale page is missing its continuation cursor")
 		}
 	}
 	query := "?limit=20"
 	for offset := 0; offset < len(want); offset += 20 {
 		page := f.page(query)
 		end := min(offset+20, len(want))
-		if !reflect.DeepEqual(page.Items, want[offset:end]) {
-			t.Fatalf("scale page at offset %d: got %+v, want %+v", offset, page.Items, want[offset:end])
-		}
+		assertTimelineItems(t, page.Items, want[offset:end])
 		if end == len(want) {
 			if page.NextCursor != nil {
 				t.Fatal("last scale page has a cursor")
@@ -402,6 +401,22 @@ func TestTimelineAtImportScale(t *testing.T) {
 				t.Fatal("scale page is missing its continuation cursor")
 			}
 			query = "?limit=20&cursor=" + url.QueryEscape(*page.NextCursor)
+		}
+	}
+}
+
+func assertTimelineItems(t *testing.T, got, want []Item) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("timeline item count: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		actual, expected := got[i], want[i]
+		// Postgres may serialize an equivalent timestamp with the connection's
+		// timezone offset. Compare instants independently of time.Location.
+		actual.At, expected.At = actual.At.UTC(), expected.At.UTC()
+		if !reflect.DeepEqual(actual, expected) {
+			t.Fatalf("timeline item %d: got %+v, want %+v", i, actual, expected)
 		}
 	}
 }

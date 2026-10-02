@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -34,8 +33,9 @@ func TestTimelineAtImportScaleLatency(t *testing.T) {
 		start := time.Now()
 		page := f.page("?limit=20")
 		elapsed := time.Since(start)
-		if !reflect.DeepEqual(page.Items, want[:20]) || page.NextCursor == nil {
-			t.Fatal("invalid latency probe page")
+		assertTimelineItems(t, page.Items, want[:20])
+		if page.NextCursor == nil {
+			t.Fatal("latency probe page is missing its continuation cursor")
 		}
 		return elapsed
 	}
@@ -47,7 +47,7 @@ func TestTimelineAtImportScaleLatency(t *testing.T) {
 		durations[i] = read()
 	}
 	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	t.Logf("27422 unrelated imported events, 240 same-ticket history snapshots, 30 comments; 5 warmups, 30 samples: median=%s p95=%s max=%s", durations[14], durations[28], durations[29])
+	t.Logf("27422 unrelated imported events, 240 same-ticket history snapshots, 30 comments; 5 warmups, 30 samples: median=%s p95=%s max=%s", (durations[14]+durations[15])/2, durations[28], durations[29])
 	if durations[28] >= 100*time.Millisecond {
 		t.Errorf("activity p95 exceeds 100ms: %s", durations[28])
 	}
