@@ -24,7 +24,7 @@ watch(() => [props.item.id, props.item.project?.id, session.identity?.tenant.id,
   try {
     const loaded = await loadTicketKinds(async cursor => {
       const query = new URLSearchParams({ limit: '100' })
-      if (project) query.set('project', project)
+      if (project) query.set('project_id', project)
       if (cursor) query.set('cursor', cursor)
       const response = await api(`/work-kinds?${query}`, { signal })
       if (!response.ok) throw new Error('Kind of work is unavailable.')

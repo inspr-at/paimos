@@ -10,9 +10,12 @@ for (const width of [390, 1440]) {
     Object.assign(node.fields, { area: 'backend', area_source: 'suggested', area_confirmed: false, complexity: 'M', complexity_source: 'suggested', complexity_confirmed: false })
     const revision = node.updated_at
     const calls = await mockWork(page, data)
-    await page.route('**/api/work-kinds?**', route => route.fulfill({ json: {
+    await page.route('**/api/work-kinds?**', route => {
+      expect(new URL(route.request().url()).searchParams.get('project_id')).toBe('p-pharos')
+      return route.fulfill({ json: {
       items: ['backend', 'security', 'firmware', 'review', 'other'].map((slug, position) => ({ id: slug, slug, label: slug === 'firmware' ? 'Firmware and embedded hardware' : slug, position, project_id: slug === 'firmware' ? 'p-pharos' : null })), next_cursor: null,
-    } }))
+      } })
+    })
     await page.goto('/p/PHAROS/PHAROS-12')
     const ws = page.getByRole('complementary', { name: 'Ticket details' })
     const area = ws.getByRole('combobox', { name: 'Kind of work', exact: true })
