@@ -170,6 +170,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-accounts/use":                                            "account.read|account.probe",
 	"POST /api/agent-accounts/runs/{runId}/target":                           "run.create",
 	"PUT /api/agent-accounts/{accountId}/metadata":                           "account.manage",
+	"GET /api/agent-accounts/{accountId}/residency-evidence":                 "account.read",
+	"PUT /api/agent-accounts/{accountId}/residency-evidence":                 "account.manage|account.probe", // Handler distinguishes owning person from bound host key.
 	"PUT /api/agent-accounts/{accountId}/label":                              "account.manage",
 	"PUT /api/agent-accounts/{accountId}/limit":                              "account.manage",
 	"GET /api/agent-keys":                                                    "keys.read",
