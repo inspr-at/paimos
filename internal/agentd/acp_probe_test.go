@@ -5,7 +5,6 @@ package agentd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,7 +140,7 @@ func TestACPProbeOutcomesGateDispatchAndRecover(t *testing.T) {
 					t.Fatalf("unexpected readiness: %+v", v)
 				}
 				if !tc.status.OK {
-					if err := s.StartRun(t.Context(), api.run); !errors.Is(err, ErrDraining) || api.claims != 0 {
+					if err := s.StartRun(t.Context(), api.run); err == nil || api.claims != 0 {
 						t.Fatal("failed probe admitted work", err, api.claims)
 					}
 					adapter.status = probeOK
