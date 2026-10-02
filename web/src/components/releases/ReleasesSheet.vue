@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type Directive } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
@@ -182,6 +182,48 @@ const eyebrow = computed(() => view.value === 'details'
 const liveAt = computed(() => runningSince.value ? Date.parse(runningSince.value) : NaN)
 const liveLine = computed(() => Number.isNaN(liveAt.value) ? 'Live here' : `Live here since ${clockSince(liveAt.value, now.value)} · ${span(Math.max(60_000, now.value - liveAt.value))}`)
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// Fit each badge's own text, keeping state labels ahead of the New hint.
+// Measure in the real font so a wider version or a narrow rail changes only
+// the labels that cannot fit beside the name's ellipsis and the other badges.
+const badgeFits = new WeakMap<HTMLElement, { fit: () => void; stop: () => void }>()
+const vFitBadges: Directive<HTMLElement> = {
+  mounted(identity) {
+    const fit = () => {
+      if (!identity.isConnected || !identity.getBoundingClientRect().width) return
+      const tags = [...identity.querySelectorAll<HTMLElement>('.tag')]
+      if (!tags.length) return
+      tags.forEach(tag => tag.classList.remove('compact'))
+      const widths = tags.map(tag => tag.getBoundingClientRect().width)
+      const name = identity.querySelector<HTMLElement>('.rn-name')!
+      const ellipsis = document.createElement('span')
+      ellipsis.textContent = '…'
+      ellipsis.style.cssText = 'position:absolute;white-space:nowrap'
+      name.append(ellipsis)
+      const minimumName = ellipsis.getBoundingClientRect().width
+      ellipsis.remove()
+      const style = getComputedStyle(identity)
+      const dotWidth = parseFloat(style.getPropertyValue('--compact-badge-width'))
+      let available = identity.getBoundingClientRect().width - minimumName - parseFloat(style.columnGap) * tags.length - dotWidth * tags.length
+      // Reserve a dot for every sibling before admitting a full label.
+      const priority = tags.map((tag, index) => ({ tag, index })).sort((a, b) => Number(a.tag.classList.contains('new-tag')) - Number(b.tag.classList.contains('new-tag')))
+      for (const { tag, index } of priority) {
+        const extra = widths[index]! - dotWidth
+        const fits = extra <= available
+        tag.classList.toggle('compact', !fits)
+        if (fits) available -= extra
+      }
+    }
+    const observer = new ResizeObserver(fit)
+    observer.observe(identity)
+    document.fonts.addEventListener('loadingdone', fit)
+    void document.fonts.ready.then(fit)
+    badgeFits.set(identity, { fit, stop: () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', fit) } })
+    fit()
+  },
+  updated(identity) { badgeFits.get(identity)?.fit() },
+  beforeUnmount(identity) { badgeFits.get(identity)?.stop(); badgeFits.delete(identity) },
+}
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -541,7 +583,7 @@ const KINDS = [
                 </span>
                 <span class="main" role="gridcell">
                   <span class="line1">
-                    <span class="row-identity">
+                    <span v-fit-badges class="row-identity">
                       <ReleaseName plain :version="r.version" :name="r.codename" class="row-name" :title="r.codename || codenameOf(r.version) || r.version"><template v-for="(p, i) in marked(r.codename || codenameOf(r.version) || r.version)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseName>
                       <span v-if="r.version === current" class="tag current-tag" title="Current"><span class="live-dot" aria-hidden="true" /><span class="tag-label">Current</span></span>
                       <span v-if="store.highlight.has(r.version)" class="tag new-tag" title="New"><span class="tag-label">New</span></span>
@@ -725,33 +767,22 @@ const KINDS = [
 .main { display: grid; gap: 3px; min-width: 0; container: release-row / inline-size; }
 /* The version owns its slot, including the canonical reveal and copy icon.
    Only the name gives way; the 44 px copy target keeps the same position. */
-.line1 { display: grid; grid-template-columns: minmax(0, 1fr) 146px; align-items: start; gap: 8px; min-width: 0; }
-.row-identity { display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
+.line1 { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px; min-width: 0; }
+.row-identity { --compact-badge-width: 8px; display: flex; align-items: baseline; gap: 8px; min-width: 0; min-height: 44px; }
 .row-name { flex: 1; min-height: 44px; font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: .005em; color: var(--ink); }
 .row-name :deep(.rn-name) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .row-identity .tag { flex: none; align-items: baseline; padding-block: 4.5px; }
 .row-identity .live-dot { align-self: center; }
-.row-version { justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-version { min-width: max-content; justify-self: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .row-version :deep(.version-copy) { justify-content: flex-end; gap: 6px; padding: 0; margin: 0; line-height: 20px; }
 .row-version :deep(.version-layers) { justify-items: end; }
-/* Two badges in a desktop rail must still leave room for the name's ellipsis.
-   Compact the New hint first, keeping the Current / Rollback label readable. */
-@container release-row (max-width: 380px) {
-  .row-identity:has(.tag ~ .tag) .new-tag { position: relative; align-self: center; align-items: center; justify-content: center; width: 16px; padding: 0; }
-  .row-identity:has(.tag ~ .tag) .new-tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .row-identity:has(.tag ~ .tag) .new-tag .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-/* Use the actual rail width: tablet and ticket-peek rails can be as narrow
-   as a phone. Badge text remains available to assistive technology. */
+/* Only measured overflow compacts a badge; its text remains accessible. */
+.row-identity .tag.compact { position: relative; align-self: center; align-items: center; justify-content: center; width: var(--compact-badge-width); height: 12px; padding: 0; }
+.row-identity .tag.compact:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.row-identity .tag.compact .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @container release-row (max-width: 310px) {
-  .row-identity { gap: 6px; }
-  .row-identity .tag { position: relative; align-self: center; align-items: center; justify-content: center; width: 16px; padding: 0; }
-  .row-identity .tag:not(.current-tag)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .row-identity .tag-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-@container release-row (max-width: 210px) {
   .row-identity { gap: 1.5px; }
-  .row-identity .tag, .row-identity:has(.tag ~ .tag) .new-tag { width: 8px; height: 12px; }
+  .row-identity .tag:not(.compact) { padding-inline: 5px; }
 }
 .tag { display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .current-tag { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }

@@ -220,11 +220,25 @@ for (const width of [1440, 1024, 390, 320]) {
           const canvas = document.createElement('canvas').getContext('2d')!
           canvas.font = getComputedStyle(text).font
           canvas.letterSpacing = getComputedStyle(text).letterSpacing
+          const identity = el.querySelector<HTMLElement>('.row-identity')!
+          const badges = [...identity.querySelectorAll<HTMLElement>('.tag')].map(tag => {
+            const label = tag.querySelector<HTMLElement>('.tag-label')!
+            // Measure intrinsic text without changing the badge on screen.
+            const full = tag.cloneNode(true) as HTMLElement
+            full.classList.remove('compact')
+            full.style.cssText = 'position:absolute;visibility:hidden;width:max-content'
+            identity.append(full)
+            const fullWidth = full.getBoundingClientRect().width
+            full.remove()
+            return {
+              ...rect(tag), fullWidth, label: rect(label),
+              labelPosition: getComputedStyle(label).position,
+              baseline: getComputedStyle(label).position === 'absolute' ? null : baseline(label),
+            }
+          })
           return {
             name: rect(name), text: rect(text), version: rect(version), layers: rect(layers), heading: rect(heading),
-            tags: [...el.querySelectorAll<HTMLElement>('.row-identity .tag')].map(rect),
-            badgeBaselines: [...el.querySelectorAll<HTMLElement>('.row-identity .tag-label')]
-              .filter(label => getComputedStyle(label).position !== 'absolute').map(baseline),
+            identity: rect(identity), badgeGap: parseFloat(getComputedStyle(identity).columnGap), badges,
             nameBaseline: baseline(text),
             versionBaseline: baseline(version.querySelector('.version-pretty')!),
             renderers: [...layers.children].map(rect),
@@ -239,7 +253,6 @@ for (const width of [1440, 1024, 390, 320]) {
         expect(geometry.version.top, label).toBe(geometry.name.top)
         expect(geometry.layers.top, label).toBe(geometry.text.top)
         expect(geometry.versionBaseline, `${label} text baseline`).toBe(geometry.nameBaseline)
-        for (const baseline of geometry.badgeBaselines) expect(baseline, `${label} badge baseline`).toBe(geometry.nameBaseline)
         expect(geometry.heading.height, label).toBe(geometry.version.height)
         expect(geometry.version.right, label).toBeCloseTo(geometry.heading.right, 0)
         expect(geometry.text.right, label).toBeLessThanOrEqual(geometry.version.left)
@@ -248,7 +261,20 @@ for (const width of [1440, 1024, 390, 320]) {
         if (index === 3) expect(geometry.truncated, label).toBe(true)
         if (geometry.truncated) expect(geometry.text.width, `${label} ellipsis fits`).toBeGreaterThanOrEqual(geometry.ellipsisWidth)
         expect(geometry.overflow, label).toBe(0)
-        for (const badge of geometry.tags) {
+        for (const badge of geometry.badges) {
+          const otherWidth = geometry.badges.reduce((sum, other) => sum + (other === badge ? 0 : other.width), 0)
+          const available = geometry.identity.width - geometry.ellipsisWidth - geometry.badgeGap * geometry.badges.length - otherWidth
+          if (badge.fullWidth <= available) {
+            expect(badge.labelPosition, `${label} fitting badge stays in flow`).toBe('static')
+          } else {
+            expect(badge.labelPosition, `${label} overflowing badge uses its dot`).toBe('absolute')
+          }
+          if (badge.labelPosition === 'static') {
+            expect(badge.baseline, `${label} badge baseline`).toBe(geometry.nameBaseline)
+            expect(badge.label.width, `${label} readable badge`).toBeGreaterThan(1)
+            expect(badge.label.left, label).toBeGreaterThanOrEqual(badge.left)
+            expect(badge.label.right, label).toBeLessThanOrEqual(badge.right)
+          }
           expect(badge.left, label).toBeGreaterThanOrEqual(geometry.text.right)
           expect(badge.right, label).toBeLessThanOrEqual(geometry.version.left)
           expect(badge.top, label).toBeGreaterThanOrEqual(geometry.name.top)
@@ -258,6 +284,9 @@ for (const width of [1440, 1024, 390, 320]) {
           expect(renderer.left, label).toBeGreaterThanOrEqual(geometry.version.left)
           expect(renderer.right, label).toBeLessThanOrEqual(geometry.version.right)
           expect(renderer.height, label).toBe(geometry.text.height)
+        }
+        if (index === 0 && (width === 1024 || width === 390)) {
+          expect(geometry.badges[0]!.labelPosition, `${label} Current stays readable`).toBe('static')
         }
         await row.hover()
         expect(await button.boundingBox(), `${label} row hover`).toEqual(before)
@@ -289,9 +318,38 @@ for (const width of [1440, 1024, 390, 320]) {
         await mkdir(process.env.RELEASE_LIST_SHOTS, { recursive: true })
         await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS, `row-${width}-${theme}.png`) })
       }
+      if (width === 390) {
+        const current = options(page).first()
+        await page.setViewportSize({ width: 1440, height: 1000 })
+        await expect(current.locator('.new-tag .tag-label')).toHaveCSS('position', 'static')
+        await page.setViewportSize({ width, height: 1000 })
+        await expect(current.locator('.new-tag .tag-label')).toHaveCSS('position', 'absolute')
+        await expect(current.locator('.current-tag .tag-label')).toHaveCSS('position', 'static')
+      }
     })
   }
 }
+
+test('the version track grows with wider monospace glyphs without covering a badge', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open(page)
+  const row = options(page).first()
+  await row.locator('.version-copy').evaluate(el => { el.style.fontSize = '16px' })
+  await expect.poll(async () => {
+    const [identity, version, button, heading] = await Promise.all([
+      row.locator('.row-identity').boundingBox(), row.locator('.row-version').boundingBox(),
+      row.locator('.version-copy').boundingBox(), row.locator('.line1').boundingBox(),
+    ])
+    return identity!.x + identity!.width <= version!.x && version!.width === button!.width && version!.x + version!.width <= heading!.x + heading!.width
+  }).toBe(true)
+  expect((await row.locator('.row-version').boundingBox())!.width).toBeGreaterThan(146)
+  const version = row.locator('.row-version')
+  const before = await version.boundingBox()
+  await version.getByRole('button').hover()
+  await expect(version.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+  expect(await version.boundingBox()).toEqual(before)
+  expect(await row.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+})
 
 test('the detail heading is the name; the number is a quiet line in the notes; search finds a name', async ({ page }) => {
   const history = await open(page)
