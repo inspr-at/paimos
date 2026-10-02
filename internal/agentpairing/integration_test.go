@@ -126,18 +126,8 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, d.App)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pairing := agentpairing.New(d.App, origin, "pairtest")
-	if err := pairing.ConfigureAccountLink(sessionKey); err != nil {
-		t.Fatal(err)
-	}
-	api := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{am, pairing, events.New(d.App), agentaccounts.New(d.App), nodes.New(d.App, nil), modelregistry.New(d.App), harness.New(d.App), workorders.New(d.App), agentruns.New(d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
-	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
-	f := &fixture{pairing: pairing, t: t, db: d, h: api.Handler(), tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
 	if len(cookies) == 0 {
@@ -167,6 +157,25 @@ func newFixture(t *testing.T) *fixture {
 	}
 	return f
 }
+
+// Reuse the complete production-like fixture on restart; only process memory
+// changes. Database rows, signing configuration and modules remain identical.
+func (f *fixture) rebuildHandler() {
+	f.t.Helper()
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	pairing := agentpairing.New(f.db.App, origin, "pairtest")
+	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
+		f.t.Fatal(err)
+	}
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
+		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	f.pairing, f.h = pairing, api.Handler()
+}
+
 func (f *fixture) request(method, path string, body any, person bool, key string) *http.Request {
 	if person && method == "POST" && strings.HasSuffix(path, "/disconnect") && strings.Contains(path, "/computers/") {
 		b, _ := json.Marshal(body)
