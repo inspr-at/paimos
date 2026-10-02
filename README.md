@@ -523,6 +523,12 @@ Focus preserves the graph's reduced-motion preference.
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
 
+CLI issue and knowledge updates, estimate plans, project-tag attachment and
+declarative plan updates send the revision of the node they read. A concurrent
+edit returns a conflict instead of replacing newer fields; read the current
+node before retrying. If a tag was created but could not be attached, the error
+names that retained tag. A failed plan leaves earlier successful writes applied.
+
 ```sh
 paimos auth login --url https://aeon.example --name default --key-file ./agent.key
 paimos whoami

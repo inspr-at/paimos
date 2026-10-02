@@ -127,6 +127,16 @@ func lockNodes(ctx context.Context, tx pgx.Tx, p tenant.Principal, source, targe
 	return nil
 }
 
+// Endpoint locks cannot serialize disjoint edges closing the same cycle.
+// Take the graph fence before any endpoint or relation row lock.
+func lockGraph(ctx context.Context, tx pgx.Tx, tenantID, typ string) error {
+	if !acyclic(typ) {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":relation-graph:"+typ)
+	return err
+}
+
 func (m *module) create(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -161,6 +171,9 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 	}
 	var result Relation
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockGraph(r.Context(), tx, p.TenantID, input.Type); err != nil {
+			return err
+		}
 		if err := lockNodes(r.Context(), tx, p, source, target); err != nil {
 			return err
 		}
@@ -201,6 +214,13 @@ func (m *module) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var typ string
+		if err := tx.QueryRow(r.Context(), `SELECT type FROM node_relations WHERE tenant_id=$1 AND id=$2`, p.TenantID, id).Scan(&typ); err != nil {
+			return err
+		}
+		if err := lockGraph(r.Context(), tx, p.TenantID, typ); err != nil {
+			return err
+		}
 		// Unlinking changes both ends, so it needs relations.delete in both
 		// items' projects, as linking needs relations.write (ADR-003 P2).
 		var source, target string
