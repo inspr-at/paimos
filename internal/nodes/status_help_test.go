@@ -30,7 +30,7 @@ func TestStatusDefinitions(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(states, want) || help.Queued.IsStatus || !strings.Contains(help.Queued.Meaning, "AEON-522") {
+	if !reflect.DeepEqual(states, want) || help.Queued.IsStatus || !strings.Contains(help.Queued.Meaning, "Open or Blocked plus a place") || !strings.Contains(help.Queued.Meaning, "Blocked waits on its named blocker") || !strings.Contains(help.Queued.Meaning, "AEON-522") {
 		t.Fatalf("status order or queued: %+v", help)
 	}
 	for key, days := range map[string]int{"new": 7, "backlog": 90, "blocked": 14, "progress": 3, "done": 14, "publish": 0, "accept": 30} {

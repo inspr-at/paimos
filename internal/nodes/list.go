@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type listPerson struct {
@@ -597,8 +598,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				return err
 			}
+			queued, err := workqueue.Load(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+				page.Items[i].Queued = queued[page.Items[i].ID]
 			}
 			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money)
 			if err != nil {

@@ -6,6 +6,111 @@ info:
 servers:
   - url: /api
 paths:
+  /queue:
+    get:
+      operationId: listWorkQueue
+      description: Visible queued ticket runs, ordered by priority then FIFO until a manual move. Targeted Start now lines are separate. Positions are relative to the caller's visible queue. No hard cap; hours are advisory. People need nodes.read; coordinator agents need their live coordinator binding.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: addWorkQueue
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [node_id]
+              properties:
+                node_id: {type: string, format: uuid}
+                agent_principal_id: {type: string, format: uuid}
+                model_profile_id: {type: string, format: uuid}
+                requested_account_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Active run or changed target conflicts}
+        '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/{nodeId}/readiness:
+    get:
+      operationId: workQueueReadiness
+      description: Check a visible ticket without modifying it. Missing estimate returns a conservative complexity-based suggestion, not an invented acceptance criterion.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/{nodeId}/estimate:
+    post:
+      operationId: applyWorkQueueEstimate
+      description: Explicitly apply an estimate to a queueable ticket that has no valid estimate. Preserves existing estimates, stamps actor provenance and audits the change. Same queue management permission as add.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [estimate_hours], properties: {estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}}}
+      responses:
+        '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/{nodeId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: removeWorkQueue
+      description: Idempotently cancel only a queued ticket run and release its capacity holds. Cancel its generated work order and soft-delete that work-order node in the same transaction. The ticket stays Open or Blocked. Same queue permissions as add.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Run has already started}
+  /queue/{nodeId}/move:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: moveWorkQueue
+      description: Move to a one-based position in the visible shared queue. All affected visible entries must be manageable. The full shared partition is renumbered under the tree lock; hidden entries retain their slots and relative order. Targeted entries cannot move into the shared queue. Manual order lasts until Reset; new arrivals append after the full shared partition while manual order is active.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [position], properties: {position: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Targeted entry cannot be reordered}
+  /queue/reset:
+    post:
+      operationId: resetWorkQueue
+      description: Reset the full shared partition to priority then original FIFO. Requires queue management authority for every visible shared ticket; clears hidden ranks internally under the tree lock without exposing hidden entries. Targeted lines are untouched.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/next:
+    post:
+      operationId: nextWorkQueue
+      description: Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QueueTarget'}
+      responses:
+        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -3580,6 +3685,8 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        The tenant tree lock is acquired before the node row lock. A database deadlock
+        rolls back the update and returns 409 with code retryable_conflict; retry the request.
         Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
@@ -3599,7 +3706,9 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+          description: |
+            A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+            A database deadlock leaves the node unchanged and returns code retryable_conflict; retry the request.
           content:
             application/json:
               schema:
@@ -3617,7 +3726,7 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
+      description: Soft-delete; cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
       security: *auth
       responses:
         '204':
@@ -12705,10 +12814,74 @@ components:
         message_id: {type: string, format: uuid}
         decision: {type: string, enum: [resolved, dismissed]}
         created_at: {type: string, format: date-time}
+    QueueReadiness:
+      type: object
+      required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
+      properties:
+        queueable: {type: boolean}
+        ready: {type: boolean}
+        missing: {type: array, items: {type: string, enum: [status, estimate, criteria, blocker]}}
+        suggested_estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}
+        security_review_required: {type: boolean}
+    QueueTarget:
+      type: object
+      additionalProperties: false
+      properties:
+        agent_principal_id: {type: string, format: uuid}
+        model_profile_id: {type: string, format: uuid}
+        requested_account_id: {type: string, format: uuid}
+    QueuedTicket:
+      type: object
+      required: [position, by, at, run_id, targeted, waiting]
+      properties:
+        position: {type: integer, minimum: 1}
+        by: {type: object, required: [id, name, kind], properties: {id: {type: string, format: uuid}, name: {type: string}, kind: {type: string, enum: [person, agent]}}}
+        at: {type: string, format: date-time}
+        run_id: {type: string, format: uuid}
+        targeted: {type: boolean}
+        target_agent_id: {type: [string, 'null'], format: uuid}
+        expected_agent_id: {type: [string, 'null'], format: uuid}
+        model_profile_id: {type: [string, 'null'], format: uuid}
+        expected_start_at: {type: [string, 'null'], format: date-time}
+        manual_order: {type: boolean}
+        waiting: {type: boolean}
+        wait_reason: {type: string}
+        security_review_required: {type: boolean}
+    WorkQueueEntry:
+      type: object
+      required: [node_id, key, title, state, priority, estimate_hours, queued]
+      properties:
+        node_id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        key: {type: string}
+        title: {type: string}
+        state: {type: string}
+        priority: {type: string}
+        estimate_hours: {type: number, exclusiveMinimum: 0}
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
+        run: {allOf: [{$ref: '#/components/schemas/AgentRun'}], description: Present only with run.read permission or coordinator queue authority.}
+    WorkQueue:
+      type: object
+      required: [items, count, manual_order, capacity]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/WorkQueueEntry'}}
+        count: {type: integer, minimum: 0}
+        manual_order: {type: boolean}
+        capacity:
+          type: object
+          required: [queued_hours, parallel_runs, work_hours, warning]
+          properties:
+            queued_hours: {type: number, minimum: 0}
+            parallel_runs: {type: integer, minimum: 0}
+            work_hours: {type: [number, 'null'], minimum: 0}
+            warning: {type: boolean, description: 'True from approximately four hours, or when no capacity is available'}
     AgentRun:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        queue_node_id: {type: [string, 'null'], format: uuid}
+        queue_target_agent_id: {type: [string, 'null'], format: uuid}
+        queue_routed_at: {type: [string, 'null'], format: date-time}
         read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
@@ -14064,6 +14237,7 @@ components:
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
         id:
           type: string
           format: uuid

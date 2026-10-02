@@ -74,7 +74,7 @@ const triageWord = computed(() => { const mode = help.value.triage.mode; return 
         <thead><tr><th scope="col">Status</th><th scope="col">Meaning</th><th scope="col">Set by</th><th scope="col">Automatic rule</th></tr></thead>
         <tbody>
           <template v-for="def in help.definitions" :key="def.state">
-            <tr v-if="def.state === 'cancelled'" class="queued"><td class="st"><span class="st-cell"><AppIcon name="inbox" :size="14" />{{ help.queued.label }}</span></td><td class="meaning">{{ help.queued.meaning }}</td><td data-label="Set by">Work queue</td><td data-label="Automatic rule">Open in the queue; not a status</td></tr>
+            <tr v-if="def.state === 'cancelled'" class="queued"><td class="st"><span class="st-cell"><AppIcon name="inbox" :size="14" />{{ help.queued.label }}</span></td><td class="meaning">{{ help.queued.meaning }}</td><td data-label="Set by">Work queue</td><td data-label="Automatic rule">Open or Blocked in the queue; not a status</td></tr>
             <tr v-if="def.state === 'cancelled'" class="group"><td colspan="4"><span class="eyebrow">Exits</span></td></tr>
             <tr :data-status="def.state"><td class="st"><span class="st-cell"><StatusIcon :state="def.state" />{{ def.label }}</span></td><td class="meaning">{{ def.meaning }}</td><td data-label="Set by">{{ def.set_by }}</td><td data-label="Automatic rule">
               <div v-if="def.state === 'blocked'" class="rule-line">Blocker required</div>
