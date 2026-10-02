@@ -13057,6 +13057,7 @@ components:
       required: [report_id, model, sequence, provisional, billing_mode]
       properties:
         service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
         report_id: {type: string, format: uuid}
         model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
         sequence: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
@@ -13074,6 +13075,7 @@ components:
       required: [session_id, model, sequence, input_tokens, output_tokens, cached_input_tokens, provisional, price_version, estimated_cost_usd, cost_status, currency, account_id, account_label, billing_mode, subscription_label, metadata_source, reported_at]
       properties:
         service_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000, description: Optional cumulative measured model time for this session and model; missing is unknown.}
         tier_segments:
           type: array
           items:
@@ -13081,6 +13083,8 @@ components:
             properties:
               tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
               price_multiplier: {type: [number, 'null']}
+              speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
+              model_time_ms: {type: [integer, 'null'], minimum: 0, maximum: 1000000000000}
               usage_multiplier: {type: [number, 'null']}
               input_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
               output_tokens: {$ref: '#/components/schemas/UsageTokenCount'}
@@ -13192,6 +13196,7 @@ components:
       properties:
         request_id: {type: string, format: uuid}
         tier: {$ref: '#/components/schemas/ServiceTier'}
+        undo_of_control_id: {type: string, format: uuid, description: Exact completed or pending tier control being undone.}
         expected_revision: {type: integer, minimum: 0}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
     ServiceTierRequest:
@@ -13220,7 +13225,50 @@ components:
         read_only: {type: boolean}
         read_only_reason: {type: string}
         reports: {type: array, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+        history: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ServiceTierHistory'}}
+        history_truncated: {type: boolean}
+        run_cost: {oneOf: [{$ref: '#/components/schemas/ServiceTierRunCost'}, {type: 'null'}]}
+        estimates: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/ServiceTierEstimate'}}
         requests: {type: array, items: {$ref: '#/components/schemas/ServiceTierRequest'}}
+    ServiceTierHistory:
+      type: object
+      required: [id, action, from_tier, to_tier, actor_id, actor_name, at, asked_by_name]
+      properties:
+        id: {type: integer, format: int64}
+        action: {type: string, enum: [requested, switch_requested, approved, declined, changed, cancelled, undo_requested, undone, rejected]}
+        from_tier: {type: [string, 'null'], enum: [default, fast, fastest, null]}
+        to_tier: {$ref: '#/components/schemas/ServiceTier'}
+        actor_id: {type: string, format: uuid}
+        actor_name: {type: string}
+        asked_by_name: {type: [string, 'null']}
+        at: {type: string, format: date-time}
+    ServiceTierRunCost:
+      type: object
+      required: [run_id, cost_usd, default_cost_usd, segments, provisional]
+      properties:
+        run_id: {type: string, format: uuid}
+        cost_usd: {type: string, description: Frozen token-price estimate; never billed cost.}
+        default_cost_usd: {type: string}
+        provisional: {type: boolean}
+        segments:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            required: [tier, price_multiplier]
+            properties:
+              tier: {$ref: '#/components/schemas/ServiceTier'}
+              price_multiplier: {type: number, exclusiveMinimum: 0}
+    ServiceTierEstimate:
+      type: object
+      required: [tier, n, basis, run_id, cost_usd, duration_ms]
+      properties:
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        n: {type: integer, minimum: 0, maximum: 1, description: One last completed matching run, never a sample average.}
+        basis: {type: string}
+        run_id: {type: [string, 'null'], format: uuid}
+        cost_usd: {type: [string, 'null']}
+        duration_ms: {type: [number, 'null'], minimum: 0, description: Only reported model time scales; all other elapsed time stays unchanged.}
     HarnessPauseLevel:
       type: string
       enum: [stop_now, pause_quickly, pause, wrap_up]

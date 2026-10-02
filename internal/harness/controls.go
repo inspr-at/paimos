@@ -325,5 +325,10 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if err != nil {
 		return nil, err
 	}
+	if c.Kind == "tier" {
+		if err = completeTierHistory(ctx, tx, p, s, c); err != nil {
+			return nil, err
+		}
+	}
 	return c, record(ctx, tx, p, s, "control_completed", before, c)
 }

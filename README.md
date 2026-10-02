@@ -1966,10 +1966,22 @@ Pending agent requests are carried by the session list row, so its “asks for�
 hint does not depend on opening the panel. Host controls remain visible in the
 compact layout alongside the tier control. The session list uses cards below
 760 px container width, including a 1280 px viewport with the panel open;
-1366 px and 1440 px panel-open viewports retain the table. Frozen run-cost labels,
-tier history
-and last-run comparisons are tracked in AEON-609 and must land before paid tiers
-are offered.
+1366 px and 1440 px panel-open viewports retain the table. AEON-612 adds frozen token-estimate labels (for example `Fast ×2 · $2.40 at
+Default`), independent of the session's current tier. Mixed tiers name each
+frozen multiplier. This is an estimate, never vendor billed cost. The tier API's
+bounded `history` records requests, approvals, declines, confirmations and both
+forms of Undo with the person's identity and agent attribution. Cancelling an
+approval preserves its history even when the request becomes pending again.
+
+`estimates` compares tiers against one last completed run with the same project,
+agent, harness, model and effort, with final tokens and a frozen price version.
+Its source names the run, sample count (0 or 1) and basis. Unpriced tiers stay
+unavailable; absent priced samples say “no estimate yet”. Optional cumulative
+`model_time_ms` usage measurements and frozen segment speed factors permit time
+comparisons: only model time scales; tools and waits retain their duration.
+`active_ms` is never substituted for model time. Cost estimates can be available
+while time remains unknown. Legacy usage without frozen tiers is not backfilled
+from today's catalog. Mixed-model sessions are excluded from whole-run estimates.
 
 Regression coverage includes native acknowledgement and Undo, pending replay,
 tenant/project isolation, revoked authority, vendor cooldown and stored costs

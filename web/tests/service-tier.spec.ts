@@ -15,7 +15,7 @@ const report: TierReport = { harness: 'codex', model: 'fixture-model', harness_v
   { tier: 'fast', name: 'Fast', offered: true, price_multiplier: 2, usage_multiplier: 3, speed_factor: 2, mechanism: 'fixture fast' },
   { tier: 'fastest', name: 'Fastest', offered: true, price_multiplier: 6, usage_multiplier: 8, speed_factor: 8, mechanism: 'fixture fastest' },
 ] }
-async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: boolean; ended?: boolean; denied?: boolean; request?: boolean; fail?: boolean; active?: 'default' | 'fast'; agent?: boolean; cancelReceipt?: boolean } = {}) {
+async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: boolean; ended?: boolean; denied?: boolean; request?: boolean; fail?: boolean; active?: 'default' | 'fast'; agent?: boolean; cancelReceipt?: boolean; evidence?: boolean } = {}) {
   await mockWork(page, fixtures(), { admin: true, principalKind: options.agent ? 'agent' : 'person' })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   data.approvals.splice(0)
@@ -32,6 +32,15 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
     return route.fulfill({ json: effective })
   })
   let state: TierState = { session_id: id, revision: 1, active_tier: active, pending: null, read_only: !!(options.unmanaged || options.ended), read_only_reason: options.unmanaged ? 'Reported by fixture-cli; change it in its terminal.' : options.ended ? 'This session has ended' : '', reports, requests: options.request ? [{ id: 'request-fixture', session_id: id, tier: 'fast', reason: 'QA waits on this screen', state: 'pending', requested_by_principal_id: String(data.sessions[0]!.agent_principal_id), created_at: new Date().toISOString() }] : [] }
+  if (options.evidence) {
+    state.run_cost = { run_id: String(data.sessions[0]!.run_id), cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast', price_multiplier: 2 }] }
+    state.estimates = report.tiers.map(t => ({ tier: t.tier, n: 1, basis: 'Last completed matching run · 1 run · frozen price version 7. Only model time scales; tools and waits keep their time.', run_id: 'last-run-fixture', cost_usd: String(2.4 * t.price_multiplier!), duration_ms: 300000 + 600000 / t.speed_factor! }))
+    state.history = [
+      { id: 4, action: 'changed', from_tier: 'default', to_tier: 'fast', actor_id: me.id, actor_name: 'Markus', asked_by_name: 'fixture-agent', at: '2026-10-02T10:00:00Z' },
+      { id: 3, action: 'approved', from_tier: 'default', to_tier: 'fast', actor_id: me.id, actor_name: 'Markus', asked_by_name: 'fixture-agent', at: '2026-10-02T09:00:00Z' },
+      { id: 2, action: 'requested', from_tier: 'default', to_tier: 'fast', actor_id: 'fixture-agent', actor_name: 'fixture-agent', asked_by_name: 'fixture-agent', at: '2026-10-02T08:00:00Z' },
+    ]
+  }
   const writes: Record<string, unknown>[] = []
   let reads = 0
   function cancel(requestID: string) {
@@ -297,4 +306,33 @@ test('an agent asks for its own tier; field shortcuts and the active tier stay i
   await expect(page.locator('.tier-request')).toContainText('Waiting for a person')
   expect(writes[0]).toMatchObject({ tier: 'fast', reason: 'QA waits on this screen' })
   expect(getState().active_tier).toBe('default')
+})
+
+for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`${width} ${theme}: frozen cost, tier history and sourced estimates keep controls stable`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
+    const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
+    await setup(page, { evidence: true })
+    await page.goto(`/agents/${id}`)
+    const panel = page.getByRole('region', { name: 'Service tier', exact: true })
+    await expect(panel.locator('.estimate-source')).toContainText('1 run · frozen price version 7')
+    await expect(page.locator('.tier-cost')).toHaveText('Fast ×2 · $2.40 at Default')
+    await expect(page.getByRole('list', { name: 'Recent session changes' })).toContainText('Tier Default to Fast · by Markus, asked by fixture-agent')
+    await panel.getByRole('button', { name: 'Change tier', exact: true }).click()
+    const dialog = picker(page)
+    await expect(dialog.locator('[data-option=fast] .tp-estimate')).toContainText('≈ $4.80')
+    await expect(dialog.locator('[data-option=fast] .tp-estimate')).toContainText('≈ 10 min')
+    const controls = { choices: dialog.getByRole('radiogroup'), fast: dialog.locator('[data-option=fast]'), default: dialog.locator('[data-option=default]'), fastest: dialog.locator('[data-option=fastest]'), cancel: dialog.getByRole('button', { name: /Cancel/ }), confirm: dialog.locator('.tp-go'), ...(width === 390 ? { frame: dialog } : {}) }
+    await expectStableControls({ controls, scrollAreas: { body: dialog, notes: dialog.locator('.tp-notes') }, interactions: ['fast', 'fastest', 'default'].map(t => ({ name: `estimate choice ${t}`, run: async () => { await dialog.locator(`[data-option=${t}]`).click(); await expect(dialog.locator(`[data-option=${t}]`)).toHaveAttribute('aria-checked', 'true') } })) })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+    expect(errors).toEqual([])
+  })
+}
+test('zero-run estimates are explicit in the panel and picker', async ({ page }) => {
+  await setup(page); await page.goto(`/agents/${id}`)
+  const panel = page.getByRole('region', { name: 'Service tier', exact: true })
+  await expect(panel.locator('.estimate-source')).toContainText('0 runs')
+  await expect(panel.locator('.compare-estimate').first()).toContainText('no estimate yet')
+  await panel.getByRole('button', { name: 'Change tier', exact: true }).click()
+  await expect(picker(page).locator('[data-option=fast] .tp-estimate')).toContainText('no estimate yet')
 })
