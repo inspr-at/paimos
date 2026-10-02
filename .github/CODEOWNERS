@@ -8,4 +8,6 @@
 /scripts/post-cross-family-gate* @markus-barta
 /scripts/trusted-cross-family-poster* @markus-barta
 /scripts/release-pin-pr* @markus-barta
+/scripts/release-completion* @markus-barta
+/scripts/release-retry* @markus-barta
 /scripts/ci-runner-guard/ @markus-barta
