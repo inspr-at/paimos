@@ -4,7 +4,7 @@
 // next question a person asks ("and per day? per year?"), and the data for a
 // small visual. The cadence chart counts releases per day, week or month over a
 // chosen range. Calendar days are local, as in the list. Free of Vue for unit tests.
-import { presentRelease, releasedAt, span, type Release } from './releases.ts'
+import { presentRelease, releasedAt, span, visibleReleases, type Release } from './releases.ts'
 
 const HOUR = 3_600_000, DAY = 86_400_000, WEEK = 7 * DAY
 const MONTH = 30.436875 * DAY
@@ -77,10 +77,10 @@ const plural = (n: number, one: string, many: string) => `${whole.format(n)} ${n
 
 // ---------- Inputs ----------
 interface Dated { release: Release; at: number }
-// Published releases with a time, oldest first.
-function publishedOf(releases: Release[]): Dated[] {
-  return releases
-    .filter(r => r.state === 'published')
+// Statistics include reservations even when the person's history hides their rows.
+// Use publication, tag or reservation time, oldest first.
+function datedReleases(releases: Release[]): Dated[] {
+  return visibleReleases(releases, true)
     .map(release => { const at = releasedAt(release); return { release, at: at ? Date.parse(at) : NaN } })
     .filter(x => Number.isFinite(x.at))
     .sort((a, b) => a.at - b.at)
@@ -151,7 +151,7 @@ const FAST = [{ upTo: 15, label: '<15m' }, { upTo: 30, label: '15–30m' }, { up
 const SLOW = [{ upTo: 60, label: '<1h' }, { upTo: 240, label: '1–4h' }, { upTo: 720, label: '4–12h' }, { upTo: 1440, label: '12–24h' }, { upTo: 4320, label: '1–3d' }, { upTo: Infinity, label: '>3d' }]
 
 export function releaseStats(releases: Release[], now: number): Stat[] {
-  const all = publishedOf(releases)
+  const all = datedReleases(releases)
   if (!all.length) return []
   const first = all[0]!.at
   const { from, short } = windowOf(first, now)
@@ -201,7 +201,7 @@ export function releaseStats(releases: Release[], now: number): Stat[] {
   // 3. Since the last release
   const last = all[all.length - 1]!
   const sinceLast = Math.max(0, now - last.at)
-  const verb = last.release.published_at ? 'published' : 'tagged'
+  const verb = last.release.state === 'reserved' ? 'reserved' : last.release.published_at ? 'published' : 'tagged'
   const shown = Math.max(40 * HOUR, Math.min(14 * DAY, sinceLast + 4 * HOUR))
   const start = now - shown
   const lastBeforeWindow = last.at < start
@@ -344,7 +344,7 @@ export interface Cadence {
 
 export function cadence(releases: Release[], now: number, key: RangeKey): Cadence {
   const range = RANGES.find(r => r.key === key) ?? RANGES[0]!
-  const all = publishedOf(releases)
+  const all = datedReleases(releases)
   const firstAt = all.length ? all[0]!.at : null
   const N = range.count
   const startOf = (i: number) => range.unit === 'day' ? addDays(dayStart(now), i - N + 1)

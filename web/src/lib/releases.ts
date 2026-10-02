@@ -23,7 +23,8 @@ export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
   // The release's sci-fi codename from its sequence (AEON-430), English in
-  // both languages. Failed attempts have no public name.
+  // both languages. Absent on withdrawn attempts and reservations whose
+  // sequence a published release took.
   codename?: string
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'withdrawn'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
@@ -42,11 +43,10 @@ export async function getReleases(): Promise<ReleaseHistory> {
   }
   const body = await response.json() as ReleaseHistory
   if (body.schema !== 'inspr.release-history.v1' || !Array.isArray(body.releases)) throw new Error('The server sent an unknown release history format.')
-  return { ...body, releases: publishedReleases(body.releases).map(withPublicNoteItems) }
+  return { ...body, releases: visibleReleases(body.releases, true).map(withPublicNoteItems) }
 }
 
-// Also filters older servers' diagnostic entries before names reach the footer,
-// release sheet, search, numbering or comparisons.
+// Published-only projection for surfaces that describe shipped versions.
 export function publishedReleases(releases: readonly Release[]): Release[] {
   return releases.filter(release => release.state === 'published')
 }
@@ -64,7 +64,7 @@ export async function getRelease(version: string): Promise<Release | null> {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
     if (!response.ok) return null
     const release = await response.json() as Release
-    return release.state === 'published' ? withPublicNoteItems(release) : null
+    return release.state === 'published' || release.state === 'reserved' ? withPublicNoteItems(release) : null
   } catch { return null }
 }
 
@@ -527,10 +527,16 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
 }
 
 // ---------- New since the last visit ----------
-// Releases newer than the one the person last saw; nothing on a first visit.
-export function newSince(releases: Release[], lastSeen: string | null) {
+// Reservations remain loaded for statistics and deep links, but are opt-in in
+// the sheet. Withdrawn coordinates never belong to either visibility scope.
+export function visibleReleases(releases: readonly Release[], showReservedVersions = false): Release[] {
+  if (!showReservedVersions) return publishedReleases(releases)
+  return releases.filter(r => r.state === 'published' || r.state === 'reserved')
+}
+// Visible releases newer than the one the person last saw; nothing on a first visit.
+export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {
   if (!lastSeen) return new Set<string>()
-  return new Set(releases.filter(r => r.state === 'published' && r.version > lastSeen).map(r => r.version))
+  return new Set(visibleReleases(releases, showReservedVersions).filter(r => r.version > lastSeen).map(r => r.version))
 }
 export const shortCommit = (sha: string) => sha.slice(0, 7)
 

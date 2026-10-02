@@ -14,13 +14,15 @@ const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON rele
 const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, version?: string, now?: number) {
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   const history = presentedHistory(now)
   Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Bold Booster' })
   await mockReleases(page, history)
   await page.goto(`/releases/${version ?? history.releases[0].version}`)
   await expect(sheet(page)).toBeVisible()
-  return { ...history, releases: history.releases.filter(r => r.state === 'published') }
+  return history
 }
 
 test('release list screenshot', async ({ page }) => {
@@ -42,15 +44,15 @@ test('the marketing name leads every row; codename and Pretty version are both v
   const newest = options(page).nth(0)
   await expect(newest.locator('.rn-name')).toHaveText(CODENAMES[5])
   await expect(newest.locator('.headline')).toHaveText('Releases with a name')
-  // Old servers can return failed attempts; public surfaces still omit them.
-  await expect(options(page)).toHaveCount(6)
-  await expect(sheet(page)).not.toContainText('Bold Booster')
-  await expect(sheet(page)).not.toContainText('Reserved, never published')
-  // No brief: the name and Pretty version both appear, including on row hover.
-  const untitled = options(page).nth(2)
+  // A reservation keeps its sequence's name beside its state.
+  const reserved = options(page).nth(2)
+  await expect(reserved.locator('.rn-name')).toHaveText('Bold Booster')
+  await expect(reserved.locator('.headline')).toHaveText('Reserved, never published')
+  // No brief: the name and version still both appear, including on row hover.
+  const untitled = options(page).nth(3)
   await expect(untitled.locator('.rn-name')).toHaveText(CODENAMES[3])
   await expect(untitled.locator('.headline')).toHaveCount(0)
-  const version = untitled.getByRole('button', { name: `Copy version ${history.releases[2]!.version}`, exact: true })
+  const version = untitled.getByRole('button', { name: `Copy version ${history.releases[3]!.version}`, exact: true })
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
   await expect(version.locator('.version-pretty')).toContainText(/^\d\d·\d\d·\d\d \d\d:\d\d/)
   await expect(version.locator('[data-version-character="pretty"]').last()).toHaveCSS('opacity', '1')
@@ -194,7 +196,7 @@ test('phones show the name without horizontal scroll', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await open(page)
   await page.getByRole('button', { name: 'All releases' }).click()
-  await expect(options(page).nth(2).locator('.rn-name')).toHaveText(CODENAMES[3])
+  await expect(options(page).nth(3).locator('.rn-name')).toHaveText(CODENAMES[3])
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })

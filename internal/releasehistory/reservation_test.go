@@ -108,28 +108,42 @@ func TestWithdrawnTagKeepsEvidenceNotNotes(t *testing.T) {
 	}
 }
 
-func TestPublicReleaseHTTPExcludesFailedAttempts(t *testing.T) {
+func TestPublicReleaseHTTPKeepsReservationsAndExcludesWithdrawals(t *testing.T) {
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Releases: []Release{
 		{Version: "261002030000.0.0", ReleaseSequence: 119, State: StatePublished},
 		{Version: "261002020000.0.0", ReleaseSequence: 119, State: StateReserved},
 		{Version: "261002010000.0.0", ReleaseSequence: 119, State: StateWithdrawn},
+		{Version: "261002000000.0.0", ReleaseSequence: 120, State: StateReserved},
 	}}
 	mux := http.NewServeMux()
 	NewWith(h, h.Releases[0].Version).Mount(mux)
 	for _, kind := range []tenant.PrincipalKind{tenant.Person, tenant.Agent} {
-		for _, path := range []string{"/api/releases", "/api/releases/261002020000.0.0", "/api/releases/261002010000.0.0"} {
+		for _, path := range []string{"/api/releases", "/api/releases/261002030000.0.0", "/api/releases/261002020000.0.0", "/api/releases/261002010000.0.0", "/api/releases/261002000000.0.0"} {
 			req := httptest.NewRequest("GET", path, nil)
 			req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: "p1", TenantID: "t1", Kind: kind}))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 			if path == "/api/releases" {
 				var body Response
-				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body.Releases) != 1 || body.Releases[0].State != StatePublished {
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body.Releases) != 3 || body.Releases[0].State != StatePublished || body.Releases[1].State != StateReserved || body.Releases[2].State != StateReserved {
 					t.Fatalf("public list: %d %s", w.Code, w.Body)
 				}
-			} else if w.Code != 404 {
-				t.Fatalf("failed detail remains public: %d", w.Code)
+				if body.Releases[1].Codename != "" || body.Releases[2].Codename != codename.Codename(120) {
+					t.Fatalf("reservation names: %+v", body.Releases)
+				}
+			} else if path == "/api/releases/261002010000.0.0" {
+				if w.Code != 404 {
+					t.Fatalf("withdrawn detail remains public: %d", w.Code)
+				}
+			} else {
+				var body Release
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Version != strings.TrimPrefix(path, "/api/releases/") {
+					t.Fatalf("published/reserved detail: %d %s", w.Code, w.Body)
+				}
 			}
 		}
+	}
+	if len(h.Releases) != 4 || h.Releases[2].State != StateWithdrawn || CodenameOf(h, h.Releases[2].Version) != "" {
+		t.Fatal("public projection changed diagnostic history or named a withdrawal")
 	}
 }

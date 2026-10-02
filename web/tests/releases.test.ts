@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import { publishedReleases, withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -11,7 +11,7 @@ const rel = (version: string, at: string, extra: Partial<Release> = {}): Release
 })
 const change = (commit: string, type: Release['changes'][number]['type'], subject: string, tickets: string[] = []) => ({ commit, type, subject, scope: '', tickets, at: '' })
 
-test('failed attempts stay out of public release names, numbers and comparisons', () => {
+test('the default published projection excludes reserved and withdrawn names', () => {
   const releases = [rel('261002120000.0.0', '', { release_sequence: 119, codename: 'Published Name' }), rel('261002110000.0.0', '', { state: 'reserved', release_sequence: 119, codename: 'Failed Name' }), rel('261002100000.0.0', '', { state: 'withdrawn', release_sequence: 119, codename: 'Withdrawn Name' })]
   assert.deepEqual(publishedReleases(releases).map(r => r.codename), ['Published Name'])
   assert.equal(releases.length, 3)
@@ -309,9 +309,22 @@ test('feature and fix filters follow the visible ticket lines, in the viewer loc
 })
 
 test('new since the last visit: newer published releases, nothing on a first visit', () => {
-  const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
+  const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('2.6', '', { state: 'withdrawn' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+  assert.deepEqual([...newSince(releases, '1', true)].sort(), ['2', '2.5', '3'])
+  assert.equal(newSince(releases, null, true).size, 0)
+})
+
+test('reserved rows are opt-in without mutating loaded history; withdrawals are never visible', () => {
+  const published = rel('3', '')
+  const reserved = rel('2', '', { state: 'reserved' })
+  const withdrawn = rel('2.5', '', { state: 'withdrawn', codename: 'Withdrawn Name' })
+  const releases = [published, reserved, withdrawn]
+  const before = structuredClone(releases)
+  assert.deepEqual(visibleReleases(releases), [published])
+  assert.deepEqual(visibleReleases(releases, true), [published, reserved])
+  assert.deepEqual(releases, before)
 })
 
 test('regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap', () => {

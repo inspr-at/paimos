@@ -20,9 +20,11 @@ const pill = (page: Page) => page.getByRole('button', { name: /^Release history,
 async function setup(page: Page) {
   const history = releaseHistory()
   for (const release of history.releases) delete release.codename
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
-  return { ...history, releases: history.releases.filter(r => r.state === 'published') }
+  return history
 }
 
 // The rendered version inside `scope`, and its seconds segment.
@@ -77,6 +79,7 @@ test('unnamed release rows: only the version copy control reveals; the row still
   await page.goto('/releases')
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const row = options(page).nth(2)
+  await expect(row).toContainText('Reserved, never published')
   await expectRest(row)
   await row.locator('.row-name').hover()
   await expectRest(row)

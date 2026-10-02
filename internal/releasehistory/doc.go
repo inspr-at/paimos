@@ -18,8 +18,9 @@
 //     out) are the release's changes.
 //   - version.json at the build: its unpublished_reservations are versions that
 //     were reserved but never published. They stay in the history, marked
-//     "reserved", in offline diagnostics only. withdrawn_releases records
-//     failed immutable image digests. HTTP surfaces show published entries only.
+//     "reserved", for opt-in rows, statistics and direct links.
+//     withdrawn_releases records failed immutable image digests; those
+//     coordinates remain only in offline diagnostics, never HTTP surfaces.
 //   - release-notes/<version>.json at the immutable tag: an explicit export
 //     of journey_tickets membership and nodes.fields. Notes hold both languages,
 //     a source digest and gaps; hidden text is excluded. Missing snapshots do
@@ -47,8 +48,10 @@
 //	release_sequence   the sequence from the tag message or version.json
 //	codename           the release's alliterative sci-fi name, a pure function
 //	                   of release_sequence (package codename, AEON-430). Every
-//	                   published release has one; failed attempts have none.
-//	state              "published", "reserved" or "withdrawn" (offline only)
+//	                   published release has one; reservations keep theirs
+//	                   unless a published release took the sequence. Withdrawn
+//	                   attempts have no name.
+//	state              "published", "reserved", or offline-only "withdrawn"
 //	reserved_at        when the version was reserved (version.json reserved_at)
 //	tagged_at          when the annotated tag was made
 //	published_at       when it was published (GitHub release), or null

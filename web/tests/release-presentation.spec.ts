@@ -14,7 +14,9 @@ const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, ne
 
 async function open(page: Page, index = 0, locale?: string) {
   const history = presentedHistory(NOW)
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
   if (locale) {
     const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale, greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
@@ -90,7 +92,7 @@ test('without a presentation: the blocks lead, and a release without them is ver
   await expect(d.locator('.tickets')).toContainText('PHAROS-11')
   await expect(rows(page).nth(1).locator('.headline')).toHaveText('Wide lists')
   await expect(rows(page).nth(1).locator('.headline')).not.toHaveClass(/theme/)
-  await rows(page).nth(2).click()
+  await rows(page).nth(3).click()
   await expect(d.locator('.summary')).toHaveCount(0)
   await expect(d.locator('.tickets')).toContainText('PAI-1057')
   // No ticket tells a benefit, so the fix commit is listed under Other.

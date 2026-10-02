@@ -43,13 +43,25 @@ func validateWithdrawals(v versionFile) error {
 	return nil
 }
 
-// PublishedOnly is the public projection. The full offline manifest retains
-// failed attempts for operators without giving them public names or notes.
+// PublishedOnly keeps the shipped releases that consume allocation sequences.
 func PublishedOnly(h History) History {
 	out := h
 	out.Releases = []Release{}
 	for _, r := range h.Releases {
 		if r.State == StatePublished {
+			out.Releases = append(out.Releases, r)
+		}
+	}
+	return out
+}
+
+// PublicHistory retains reservations for opt-in history rows, deep links and
+// statistics. Withdrawn attempts remain exclusively in the offline manifest.
+func PublicHistory(h History) History {
+	out := h
+	out.Releases = []Release{}
+	for _, r := range h.Releases {
+		if r.State == StatePublished || r.State == StateReserved {
 			out.Releases = append(out.Releases, r)
 		}
 	}
