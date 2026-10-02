@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { openModelPrefs } from '../../lib/modelPrefsCommand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
@@ -351,6 +352,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
           <AppIcon name="chevron-right" :size="14" class="chev" />
         </button>
         <h2 id="ac-title" tabindex="-1">Accounts and computers</h2>
+        <button type="button" class="icon-btn sm flat" aria-label="Account model preferences" data-tip="Which models do which work" @click="openModelPrefs()"><AppIcon name="gear" :size="15" /></button>
         <span v-if="summary" class="pill" :class="summary.tone">{{ summary.text }}</span>
         <span v-if="capacity.away" class="away-chip" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
           Away until {{ when(capacity.away, now) }}
