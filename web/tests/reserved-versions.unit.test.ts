@@ -2,17 +2,19 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { effectScope, nextTick, reactive, ref, type EffectScope } from 'vue'
-import type { Identity } from '../src/lib/api'
+import { api, type Identity } from '../src/lib/api'
+import { codenameOf } from '../src/lib/codenames'
 import { readPreference, writePreference } from '../src/lib/preferences'
 import { useDeveloperSettings } from '../src/lib/developerSettings'
 import { useReleases } from '../src/stores/releases'
-import type { Release, ReleaseHistory } from '../src/lib/releases'
+import { getRelease, getReleases, type Release, type ReleaseHistory } from '../src/lib/releases'
 
 const session = reactive<{ identity: Identity | null }>({ identity: null })
 const lastSeen = ref({ last_seen: '261001000000.0.0' })
 const running = { version: '261002120000.0.0', scheme: 'inspr-calendar-v2' }
 vi.mock('../src/stores/session', () => ({ useSession: () => session }))
 vi.mock('../src/stores/version', () => ({ useVersion: () => ({ value: running, load: async () => {} }) }))
+vi.mock('../src/lib/api', () => ({ api: vi.fn() }))
 vi.mock('../src/lib/preferences', () => ({
   readPreference: vi.fn(), writePreference: vi.fn(),
   usePreference: () => ({ value: lastSeen, ready: Promise.resolve(), save: vi.fn() }),
@@ -29,6 +31,7 @@ beforeEach(() => {
   session.identity = person()
   vi.mocked(readPreference).mockReset().mockResolvedValue(null)
   vi.mocked(writePreference).mockReset().mockResolvedValue(true)
+  vi.mocked(api).mockReset()
 })
 
 it.each([null, {}, { show_reserved_versions: 'true' }, { show_reserved_versions: 1 }, { show_reserved_versions: false }])('defaults off for missing or malformed preferences (%j)', async value => {
@@ -120,8 +123,29 @@ it('the footer counts visible new versions and does not invent one for hidden-on
   expect(store.newCount).toBe(0)
   await prefs.setShowReservedVersions(true)
   expect(store.newCount).toBe(1)
-  store.history.releases.push(release('261002100000.0.0', 'published'), release('261003100000.0.0', 'published'))
+  store.history.releases.push(release('261002100000.0.0', 'published'), release('261003100000.0.0', 'published'), release('261002110000.0.0', 'withdrawn'))
   expect(store.newCount).toBe(2) // A future release beyond the running build is not new here.
   await prefs.setShowReservedVersions(false)
   expect(store.newCount).toBe(1)
+})
+
+it('loads reservations for opt-in rows but never remembers withdrawn names from an older server', async () => {
+  const published = { ...release('261002120000.0.0', 'published'), codename: 'Published Name' }
+  const reserved = { ...release('261002110000.0.0', 'reserved'), codename: 'Reserved Name' }
+  const withdrawn = { ...release('261002100000.0.0', 'withdrawn'), codename: 'Withdrawn Name' }
+  const history = { schema: 'inspr.release-history.v1', current: running.version, releases: [published, reserved, withdrawn] }
+  vi.mocked(api).mockImplementation(async () => new Response(JSON.stringify(history)))
+  expect((await getReleases()).releases).toEqual([published, reserved])
+  const store = useReleases()
+  await store.load()
+  expect(store.history?.releases).toEqual([published, reserved])
+  expect(codenameOf(published.version)).toBe('Published Name')
+  expect(codenameOf(reserved.version)).toBe('Reserved Name')
+  expect(codenameOf(withdrawn.version)).toBe('')
+})
+
+it.each(['published', 'reserved', 'withdrawn'] as const)('detail reads retain published and reserved rows only (%s)', async state => {
+  const value = release('261002080000.0.0', state)
+  vi.mocked(api).mockResolvedValue(new Response(JSON.stringify(value)))
+  expect(await getRelease(value.version)).toEqual(state === 'withdrawn' ? null : value)
 })

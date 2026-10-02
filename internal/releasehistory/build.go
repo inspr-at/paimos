@@ -34,15 +34,16 @@ type Options struct {
 
 // versionFile is the part of version.json the history reads.
 type versionFile struct {
-	Product                 string   `json:"product"`
-	VersionScheme           string   `json:"version_scheme"`
-	Version                 string   `json:"version"`
-	ReleaseChannel          string   `json:"release_channel"`
-	ReleaseSequence         int      `json:"release_sequence"`
-	Codename                string   `json:"codename"`
-	ReservedAt              string   `json:"reserved_at"`
-	Ticket                  string   `json:"ticket"`
-	UnpublishedReservations []string `json:"unpublished_reservations"`
+	Product                 string       `json:"product"`
+	VersionScheme           string       `json:"version_scheme"`
+	Version                 string       `json:"version"`
+	ReleaseChannel          string       `json:"release_channel"`
+	ReleaseSequence         int          `json:"release_sequence"`
+	Codename                string       `json:"codename"`
+	ReservedAt              string       `json:"reserved_at"`
+	Ticket                  string       `json:"ticket"`
+	UnpublishedReservations []string     `json:"unpublished_reservations"`
+	WithdrawnReleases       []Withdrawal `json:"withdrawn_releases"`
 }
 
 type tagRef struct {
@@ -66,6 +67,9 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	if err := json.Unmarshal(raw, &head); err != nil {
 		return History{}, fmt.Errorf("parse version.json: %w", err)
 	}
+	if err := validateWithdrawals(head); err != nil {
+		return History{}, err
+	}
 	h := History{
 		Schema: Schema, Product: head.Product, Repository: opts.Repository, VersionScheme: head.VersionScheme,
 		GeneratedAt: now().UTC().Truncate(time.Second), Source: "git", Releases: []Release{},
@@ -77,6 +81,11 @@ func Build(ctx context.Context, opts Options) (History, error) {
 	for _, v := range head.UnpublishedReservations {
 		reserved[strings.TrimPrefix(v, "v")] = true
 	}
+	withdrawn := map[string]Withdrawal{}
+	for _, w := range head.WithdrawnReleases {
+		withdrawn[w.Version] = w
+		reserved[w.Version] = true
+	}
 	tags, err := listTags(git, reserved)
 	if err != nil {
 		return History{}, err
@@ -84,7 +93,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 
 	// named holds each sequence with the codename its version.json recorded,
 	// for codename.Guard.
-	named := []codename.Named{{Sequence: head.ReleaseSequence, Name: head.Codename}}
+	named := []codename.Named{{Sequence: head.ReleaseSequence, Name: head.Codename, Reusable: reserved[head.Version]}}
 
 	// Oldest first, so each release knows the one before it.
 	byVersion := map[string]bool{}
@@ -94,6 +103,9 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		r := Release{Version: tag.version, Tag: tag.name, State: StatePublished, TaggedAt: tag.tagged, Tickets: []string{}, Changes: []Change{}}
 		if reserved[tag.version] {
 			r.State = StateReserved
+		}
+		if _, ok := withdrawn[tag.version]; ok {
+			r.State = StateWithdrawn
 		}
 		headline, channel, sequence := ParseTagMessage(tag.message)
 		r.Headline, r.ReleaseChannel, r.ReleaseSequence = headline, channel, sequence
@@ -116,7 +128,10 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		if strings.TrimPrefix(atTag.Version, "v") == tag.version {
 			stamp = atTag.Codename
 		}
-		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: stamp})
+		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: stamp, Reusable: r.State != StatePublished})
+		if r.State == StateWithdrawn {
+			r.ReleaseSequence = 0
+		}
 		if len(r.Tickets) == 0 {
 			r.Tickets = Tickets(headline)
 		}
@@ -129,7 +144,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		// Changes: a published release lists everything since the previous published
 		// one; a reservation lists what was new when it was made.
 		from := previousPublished
-		if r.State == StateReserved {
+		if r.State != StatePublished {
 			from = previousAny
 		}
 		r.Changes, r.ChangesOmitted, err = changes(git, from, tag.name)
@@ -144,7 +159,7 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		if listErr != nil {
 			return History{}, listErr
 		}
-		if strings.TrimSpace(present) != "" {
+		if r.State == StatePublished && strings.TrimSpace(present) != "" {
 			raw, readErr := git("show", tag.name+":"+snapshotPath)
 			if readErr != nil {
 				return History{}, readErr
@@ -158,6 +173,10 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		if opts.Repository != "" {
 			r.Evidence.SourceURL = "https://github.com/" + opts.Repository + "/commit/" + tag.commit
 		}
+		if w, ok := withdrawn[tag.version]; ok {
+			r.Evidence.Image = &Image{Reference: "ghcr.io/inspr-at/aeon:" + w.Version, Digest: w.Digest}
+			r.Evidence.Unavailable = append(r.Evidence.Unavailable, "Withdrawn: "+w.Reason)
+		}
 		h.Releases = append(h.Releases, r)
 		previousAny = tag.name
 		if r.State == StatePublished {
@@ -169,10 +188,15 @@ func Build(ctx context.Context, opts Options) (History, error) {
 		if byVersion[v] || !ValidVersion(v) {
 			continue
 		}
-		h.Releases = append(h.Releases, Release{
+		r := Release{
 			Notes: MissingNotes(), Version: v, State: StateReserved, ReleaseChannel: "stable", ReservedAt: coordinateTime(v), Tickets: []string{}, Changes: []Change{},
 			Evidence: Evidence{Unavailable: []string{"This version was reserved but never tagged or published."}},
-		})
+		}
+		if w, ok := withdrawn[v]; ok {
+			r.State = StateWithdrawn
+			r.Evidence = Evidence{Image: &Image{Reference: "ghcr.io/inspr-at/aeon:" + v, Digest: w.Digest}, Unavailable: []string{"Withdrawn: " + w.Reason}}
+		}
+		h.Releases = append(h.Releases, r)
 	}
 	Sort(h.Releases)
 	if raw, err := os.ReadFile(filepath.Join(opts.Repo, ProductNotesPath)); err == nil {

@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { checkGH } from './release-rehearsal-gh.mjs';
 import { attestationArgs } from './release-pin-pr.mjs';
 
 const args = attestationArgs('261002004358.0.0', `sha256:${'a'.repeat(64)}`, 'b'.repeat(40));
+test('pin rehearsal supplies the exact-main withdrawal ledger to the production dry-run', () => {
+  const result = spawnSync(process.execPath, ['scripts/release-rehearsal-pin.mjs'], {
+    cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, GITHUB_SHA: 'a'.repeat(40) },
+  });
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Pin-bot dry-run passed/);
+});
 test('real gh accepts the pin-bot attestation argv before blocked network', () => {
   assert.equal(checkGH(args), 'attestation verify');
 });

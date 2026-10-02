@@ -119,7 +119,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.annotated(r.Context(), h), Current: m.current, LiveSince: m.started})
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.annotated(r.Context(), PublicHistory(h)), Current: m.current, LiveSince: m.started})
 }
 
 func (m *Module) one(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func (m *Module) one(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusInternalServerError, "release notes unavailable")
 		return
 	}
-	for _, rel := range m.annotated(r.Context(), h).Releases {
+	for _, rel := range m.annotated(r.Context(), PublicHistory(h)).Releases {
 		if rel.Version == v {
 			w.Header().Set("Cache-Control", "no-store")
 			httpapi.WriteJSON(w, http.StatusOK, rel)

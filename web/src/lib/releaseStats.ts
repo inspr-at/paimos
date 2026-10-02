@@ -4,7 +4,7 @@
 // next question a person asks ("and per day? per year?"), and the data for a
 // small visual. The cadence chart counts releases per day, week or month over a
 // chosen range. Calendar days are local, as in the list. Free of Vue for unit tests.
-import { presentRelease, releasedAt, span, type Release } from './releases.ts'
+import { presentRelease, releasedAt, span, visibleReleases, type Release } from './releases.ts'
 
 const HOUR = 3_600_000, DAY = 86_400_000, WEEK = 7 * DAY
 const MONTH = 30.436875 * DAY
@@ -80,7 +80,7 @@ interface Dated { release: Release; at: number }
 // Statistics include reservations even when the person's history hides their rows.
 // Use publication, tag or reservation time, oldest first.
 function datedReleases(releases: Release[]): Dated[] {
-  return releases
+  return visibleReleases(releases, true)
     .map(release => { const at = releasedAt(release); return { release, at: at ? Date.parse(at) : NaN } })
     .filter(x => Number.isFinite(x.at))
     .sort((a, b) => a.at - b.at)

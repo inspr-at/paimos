@@ -237,3 +237,28 @@ test('no footer badge is invented when only hidden reservations are newer', asyn
   await showReserved(page, true)
   await expect(footer(page).locator('.new-badge')).toHaveText('1 new')
 })
+
+for (const show of [false, true]) {
+  test(`withdrawn coordinates stay out of rows, details, names and statistics with opt-in ${show}`, async ({ page }) => {
+    const { history } = await setup(page, { show_reserved_versions: show })
+    const withdrawn = { ...history.releases[2], version: '261002083000.0.0', state: 'withdrawn', codename: 'Withdrawn Name', reserved_at: '2026-10-02T08:30:00Z' }
+    history.releases.unshift(withdrawn)
+    await page.goto(`/releases/${withdrawn.version}`)
+    await expect(rows(page)).toHaveCount(show ? 7 : 6)
+    await expect(row(page, withdrawn.version)).toHaveCount(0)
+    await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
+    await expect(sheet(page).getByText(/not in this build/)).toBeVisible()
+    await expect(sheet(page).locator('.detail').getByRole('button', { name: `Copy version ${withdrawn.version}`, exact: true })).toHaveCount(0)
+    await expect(sheet(page)).not.toContainText(withdrawn.codename)
+    await expect(sheet(page).getByRole('region', { name: 'Release cadence' }).locator('.total')).toHaveText('7 releases')
+    expect(await page.evaluate(async version => {
+      const { codenameOf } = await import('/src/lib/codenames.ts')
+      return codenameOf(version)
+    }, withdrawn.version)).toBe('')
+    await sheet(page).getByRole('button', { name: 'Compare', exact: true }).click()
+    const comparison = sheet(page).locator('section.compare')
+    await expect(comparison).toBeVisible()
+    await expect(comparison).not.toContainText(withdrawn.codename)
+    await expect(comparison.locator(`.pair .calendar-version[aria-label^="${withdrawn.version}"]`)).toHaveCount(0)
+  })
+}

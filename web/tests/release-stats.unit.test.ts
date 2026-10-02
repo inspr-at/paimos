@@ -222,6 +222,19 @@ describe('the seven stats', () => {
     expect(cadence(releases, NOW, '7d').total).toBe(1)
     expect(releaseStats([], NOW)).toEqual([])
   })
+
+  it('withdrawals never affect any statistic, cadence range, feature count or name', () => {
+    const releases = canvas()
+    const withdrawal = told(NOW, [['AEON-530', 'features'], ['AEON-531', 'fixes']])
+    Object.assign(withdrawal, { state: 'withdrawn', codename: 'Withdrawn Name' })
+    const mixed = [...releases, withdrawal]
+    expect(releaseStats(mixed, NOW)).toEqual(releaseStats(releases, NOW))
+    for (const range of ['7d', '14d', '30d', '90d', '1y'] as const) {
+      expect(cadence(mixed, NOW, range)).toEqual(cadence(releases, NOW, range))
+    }
+    expect(releaseStats([withdrawal], NOW)).toEqual([])
+    expect(cadence([withdrawal], NOW, '7d').total).toBe(0)
+  })
 })
 
 describe('cadence over a range', () => {

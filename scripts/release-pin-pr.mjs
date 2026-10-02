@@ -7,6 +7,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { appJWT } from "./homebrew-tap-pr.mjs";
 import { validCalendarVersion } from "./verify-release.mjs";
+import { assertDeployable, readPolicy } from "./release-withdrawals.mjs";
 
 export const SOURCE = "inspr-at/paimos";
 export const TARGET = "markus-barta/nixcfg";
@@ -16,8 +17,9 @@ const sha = value => typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
 const blobSHA = text => createHash("sha1").update(`blob ${Buffer.byteLength(text)}\0`).update(text).digest("hex");
 const fail = message => { throw new Error(`pin bot: ${message}`); };
 
-export function planPin(text, version, digest) {
+export function planPin(text, version, digest, policy = readPolicy()) {
   if (!validCalendarVersion(version) || !/^sha256:[a-f0-9]{64}$/.test(digest)) fail("invalid release coordinate or digest");
+  assertDeployable(version, digest, policy);
   const lines = text.split("\n");
   const candidates = lines.map((line, i) => line.includes(IMAGE) ? i : -1).filter(i => i >= 0);
   if (candidates.length !== 1) fail("expected exactly one Aeon image pin");
@@ -98,16 +100,25 @@ export async function proposePin(env = process.env, options = {}, dependencies =
   if (main.ref !== "refs/heads/main" || main.object?.type !== "commit" || !sha(main.object.sha)) fail("source main is unavailable");
   const ancestry = await get(env.GH_TOKEN, `${sourcePath}/compare/${commit}...${main.object.sha}`);
   if (!["ahead", "identical"].includes(ancestry.status) || ancestry.base_commit?.sha !== commit || ancestry.merge_base_commit?.sha !== commit) fail("release commit is not on main");
+  // A tag predates its withdrawal. Read approved main, never that tag's ledger.
+  const ledger = await get(env.GH_TOKEN, `${sourcePath}/contents/version.json?ref=${main.object.sha}`);
+  if (ledger.type !== "file" || ledger.encoding !== "base64" || typeof ledger.content !== "string" || !sha(ledger.sha)) fail("withdrawal ledger is unavailable");
+  const ledgerBytes = Buffer.from(ledger.content, "base64");
+  const ledgerText = ledgerBytes.toString("utf8");
+  if (!ledgerBytes.equals(Buffer.from(ledgerText)) || blobSHA(ledgerText) !== ledger.sha) fail("withdrawal ledger blob mismatch");
+  const policy = readPolicy(ledgerText);
+  assertDeployable(version, digest, policy);
   await verify(env);
   const evidence = [
     `Verified index: ${IMAGE}@${digest}`,
     `Annotated tag: ${SOURCE}@refs/tags/${tagName}; commit ${commit} is on main.`,
     "GitHub build-provenance verified for release.yml, exact source ref/commit and hosted runners.",
+    `Withdrawal ledger verified at ${SOURCE}@${main.object.sha}:version.json.`,
   ];
   let token;
   try {
     if (options.pinFile) {
-      const plan = planPin(readFileSync(options.pinFile, "utf8"), version, digest);
+      const plan = planPin(readFileSync(options.pinFile, "utf8"), version, digest, policy);
       return { status: "dry-run", ...plan, evidence: evidence.join("\n") };
     }
     const appId = String(env.AEON_PIN_APP_ID ?? "");
@@ -141,7 +152,7 @@ export async function proposePin(env = process.env, options = {}, dependencies =
     const bytes = Buffer.from(current.content, "base64");
     const text = bytes.toString("utf8");
     if (!bytes.equals(Buffer.from(text)) || blobSHA(text) !== current.sha) fail("pin content does not match its blob");
-    const plan = planPin(text, version, digest);
+    const plan = planPin(text, version, digest, policy);
     const recorded = [...evidence, `Previous pin (rollback): ${plan.previous}`, `nixcfg base/backup reference: ${baseSHA}:${PIN_PATH}`];
     if (!plan.changed || !write) return { status: plan.changed ? "dry-run" : "current", ...plan, baseSHA, evidence: recorded.join("\n") };
     const branch = `aeon-pin-v${version}`;

@@ -180,6 +180,12 @@ jobs:
       - name: Release checks
         run: node scripts/verify-release.mjs --release
 
+      - name: Enforce current release withdrawal ledger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-withdrawals.mjs coordinate "$VERSION" --current-main
+
       - name: Tag matches version.json
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -364,6 +370,12 @@ jobs:
       - name: Validate inspr-calendar-v2 tag
         id: version
         run: node scripts/release-tag.mjs
+
+      - name: Enforce current release withdrawal ledger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-withdrawals.mjs coordinate "$VERSION" --current-main
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4

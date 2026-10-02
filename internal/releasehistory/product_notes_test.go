@@ -2,6 +2,7 @@
 package releasehistory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -81,7 +82,7 @@ func TestProductNotesProjectionAndImmutability(t *testing.T) {
 }
 
 func TestProductNotesNeverReadLiveTickets(t *testing.T) {
-	h := History{Product: "PAIMOS AEON", Repository: "inspr-at/aeon", Releases: []Release{{Version: notesVersion, Notes: &Notes{Source: ProductNotesSource, Items: []NoteItem{{Key: "AEON-7", Group: GroupFixes, PillEN: "Frozen fix", BenefitEN: "Captured benefit."}}}, Changes: []Change{{Commit: "a", Subject: "AEON-7: repair the release", Type: "other", Tickets: []string{"AEON-7"}}}}, {Version: "260927120000.0.0", Notes: MissingNotes(), Changes: []Change{{Commit: "b", Subject: "AEON-7: an older change", Type: "other", Tickets: []string{"AEON-7"}}}}}}
+	h := History{Product: "PAIMOS AEON", Repository: "inspr-at/aeon", Releases: []Release{{Version: notesVersion, State: StatePublished, Notes: &Notes{Source: ProductNotesSource, Items: []NoteItem{{Key: "AEON-7", Group: GroupFixes, PillEN: "Frozen fix", BenefitEN: "Captured benefit."}}}, Changes: []Change{{Commit: "a", Subject: "AEON-7: repair the release", Type: "other", Tickets: []string{"AEON-7"}}}}, {Version: "260927120000.0.0", State: StatePublished, Notes: MissingNotes(), Changes: []Change{{Commit: "b", Subject: "AEON-7: an older change", Type: "other", Tickets: []string{"AEON-7"}}}}}}
 	mod := NewWith(h, notesVersion)
 	mod.UseTickets(func(context.Context, string, []string) (map[string]TicketMeta, error) {
 		t.Fatal("read live ticket fields")
@@ -124,8 +125,8 @@ func TestHistoryExportIgnoresLiveAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/aeon", Releases: []Release{
-		{Version: notesVersion, Notes: notes, Changes: []Change{{Linked: []TicketNote{{Key: "AEON-7", PillEN: "LIVE EDIT NEVER EMBED"}}}}},
-		{Version: "260927120000.0.0", Notes: MissingNotes(), Changes: []Change{{Linked: []TicketNote{{Key: "AEON-9", PillEN: "UNFROZEN NEVER EMBED"}}}}},
+		{Version: notesVersion, State: StatePublished, Notes: notes, Changes: []Change{{Linked: []TicketNote{{Key: "AEON-7", PillEN: "LIVE EDIT NEVER EMBED"}}}}},
+		{Version: "260927120000.0.0", State: StatePublished, Notes: MissingNotes(), Changes: []Change{{Linked: []TicketNote{{Key: "AEON-9", PillEN: "UNFROZEN NEVER EMBED"}}}}},
 	}}
 	bundle := EmptyProductNotes()
 	if err := bundle.AddHistory(h); err != nil {
@@ -254,7 +255,7 @@ func TestGrouplessCaptureUsesLiveClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/paimos", Releases: []Release{{
-		Version: notesVersion, Notes: notes,
+		Version: notesVersion, State: StatePublished, Notes: notes,
 		Changes: []Change{
 			{Commit: "a", Subject: "AEON-7: repair the release", Type: "other", Tickets: []string{"AEON-7"}},
 			{Commit: "b", Subject: "AEON-8: keep the frozen group", Type: "other", Tickets: []string{"AEON-8"}},
@@ -372,13 +373,13 @@ func TestGrouplessAndUncapturedCommitsMatchBaseGroups(t *testing.T) {
 		t.Fatalf("grouped capture %+v", kept)
 	}
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/paimos", Releases: []Release{
-		{Version: notesVersion, Notes: notes, Changes: []Change{
+		{Version: notesVersion, State: StatePublished, Notes: notes, Changes: []Change{
 			{Commit: "a", Subject: "AEON-11: told bug", Type: "other", Tickets: []string{"AEON-11"}},
 			{Commit: "b", Subject: "AEON-12: hidden bug", Type: "other", Tickets: []string{"AEON-12"}},
 			{Commit: "c", Subject: "AEON-13: textless bug", Type: "other", Tickets: []string{"AEON-13"}},
 			{Commit: "d", Subject: "AEON-14: not a member", Type: "other", Tickets: []string{"AEON-14"}},
 		}},
-		{Version: "260927120000.0.0", Notes: MissingNotes(), Changes: []Change{
+		{Version: "260927120000.0.0", State: StatePublished, Notes: MissingNotes(), Changes: []Change{
 			{Commit: "e", Subject: "AEON-15: bug without a capture", Type: "other", Tickets: []string{"AEON-15"}},
 			{Commit: "f", Subject: "AEON-16: benefit without a capture", Type: "other", Tickets: []string{"AEON-16"}},
 		}},
@@ -530,6 +531,44 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 		}
 		return bundle
 	}
+	rejectFailedImport := func(dir string, args ...string) {
+		t.Helper()
+		versionPath := filepath.Join(dir, "version.json")
+		original, err := os.ReadFile(versionPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundlePath := filepath.Join(dir, ProductNotesPath)
+		frozen, err := os.ReadFile(bundlePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []string{StateReserved, StateWithdrawn} {
+			var policy map[string]any
+			if err := json.Unmarshal(original, &policy); err != nil {
+				t.Fatal(err)
+			}
+			if state == StateWithdrawn {
+				policy["withdrawn_releases"] = []Withdrawal{{Version: notesVersion, Digest: "sha256:" + strings.Repeat("a", 64), Ticket: "AEON-530", Reason: "failed publication"}}
+			} else {
+				policy["unpublished_reservations"] = []string{notesVersion}
+			}
+			raw, _ := json.Marshal(policy)
+			if err := os.WriteFile(versionPath, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := run(dir, args...); err == nil || !strings.Contains(string(out), "failed coordinate") {
+				t.Fatalf("%s capture accepted: %v %s", state, err, out)
+			}
+			got, err := os.ReadFile(bundlePath)
+			if err != nil || !bytes.Equal(got, frozen) {
+				t.Fatal("rejected import changed existing captures", err)
+			}
+		}
+		if err := os.WriteFile(versionPath, original, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := repo(t)
 	s := noteFixture()
 	s.Frozen = true
@@ -563,6 +602,7 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 	if snapped.Releases[notesVersion].Items[0].Group != GroupFixes || snapped.Releases[plain.Version].Items[0].Key != "AEON-9" || snapped.Releases[plain.Version].Items[0].Group != "" {
 		t.Fatalf("snapshots %+v", snapped.Releases)
 	}
+	rejectFailedImport(dir, "-snapshots", snapDir, "-tenant", s.TenantID, "-project", s.ProjectID)
 
 	dir = repo(t)
 	s = noteFixture()
@@ -575,7 +615,7 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := History{Schema: Schema, Product: "PAIMOS AEON", Repository: "inspr-at/paimos", Releases: []Release{{
-		Version: notesVersion, Notes: notes,
+		Version: notesVersion, State: StatePublished, Notes: notes,
 		Changes: []Change{{Commit: "a", Subject: "AEON-7: repair the release", Type: "other", Tickets: []string{"AEON-7"}, Linked: []TicketNote{{Key: "AEON-7", PillEN: "LIVE TEXT NEVER EMBED", BenefitEN: "LIVE BENEFIT"}}}},
 	}}}
 	writeHistory := func(tenantID string) string {
@@ -621,4 +661,5 @@ func TestPackNotesSnapshotsAndHistory(t *testing.T) {
 	if len(exported.Releases[notesVersion].Items) != 1 || exported.Releases[notesVersion].Items[0].Group != GroupFixes || exported.Releases[notesVersion].Items[0].PillEN != "Clear release notes" {
 		t.Fatalf("history bundle %+v", exported.Releases[notesVersion])
 	}
+	rejectFailedImport(dir, "-history", historyPath, "-tenant", s.TenantID, "-project", s.ProjectID)
 }

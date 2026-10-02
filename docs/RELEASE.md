@@ -602,6 +602,17 @@ the exact tag-scoped certificate identity and signer commit, and
 tags and failed or ambiguous API reads fail closed before any target write.
 It rejects older versions and conflicting digests for an existing coordinate.
 
+The bot also reads `version.json` at the exact current source-main commit and
+checks `withdrawn_releases` and `unpublished_reservations` before attestation or
+target authentication. A withdrawn coordinate **or its digest under any other
+coordinate** is denied in dry-run, snapshot and write modes. A tag's older
+ledger cannot authorize a withdrawn image. Both image jobs enforce the current
+main ledger before publishing. For manual pins and rollbacks, the owning pin
+gate must run `node scripts/release-withdrawals.mjs image VERSION DIGEST --current-main`
+with read access to the source repository; lookup/ledger failures deny the pin.
+Foreign pin-gate integration belongs to its owning coordinator, through that
+repository's review path; this change does not edit or activate foreign gates.
+
 Default mode is read-only. With App credentials it requests a contents-read
 installation token and prints the one-line diff. Without those credentials it
 records a held proposal explicitly; the lead must provide a read-only snapshot
@@ -813,10 +824,60 @@ once `release_sequence` is set. Both are idempotent and refuse a name that
 differs from the sequence's. The codename is presentation only: the version
 stays the identity, and every earlier release has its name from the same
 function. To change the lists, append a new `version N from S` block with `S`
-above every reserved sequence; never edit, reorder or delete a line, so no
+above every published or active reserved sequence; never edit, reorder or delete a line, so no
 existing name moves. `codename.Guard` enforces this in `just release-history` (and `TestGuard`, `TestRepositoryCodenames`): a recorded codename must stay its sequence's name, and a version after 1 must start above every release without one. Two-word collisions with obscure titles are an accepted
 residual risk. A reported collision is added to the pair deny list in the next
 list version; names of already-published releases never change.
+
+### Retry names and withdrawn coordinates (AEON-530)
+
+Reserve with `just release-reserve VERSION AEON-TICKET` from a full checkout
+after fetching all release tags. `VERSION` is a fresh UTC coordinate, later
+than every prior published or failed attempt. The allocator writes
+`max(published release_sequence in the channel) + 1` and its deterministic
+codename into `version.json`. It never increments from an abandoned attempt.
+The previous coordinate must already be published or explicitly classified by
+the coordinator; an unclassified pending attempt fails closed. A successful
+publication consumes the slot; any number of failed attempts can reuse that
+same slot and name with fresh coordinates. No published sequence is renumbered.
+
+Before retrying, verify whether the previous attempt distributed any release
+assets. A coordinate with no published index belongs in
+`unpublished_reservations`. An index that was published but never became a
+release belongs in `withdrawn_releases`, an append-only list of `{version,
+digest, ticket, reason}` in `version.json`. Record the exact immutable index
+digest and remove that coordinate from the unpublished list. Commit the ledger
+through the normal source-main review path before the replacement tag/pin.
+Keep the failed tag, image and frozen capture unchanged. A withdrawn coordinate
+has no sequence or codename in diagnostics, cannot be captured or deployed,
+and cannot become a release again. Already distributed releases remain releases;
+rollbacks use their exact prior artifacts rather than withdrawing their names.
+
+If the scope is unchanged, restore the **original raw export** and use:
+
+```sh
+go run ./internal/releasehistory/packnotes -repo . -historic ORIGINAL.json -reserve NEW_VERSION -reuse-from FAILED_VERSION -tenant TENANT_UUID -project AEON_PROJECT_UUID
+```
+
+This verifies the original bytes against the failed coordinate's frozen digest,
+ticket scope, channel, sequence and public projection. It adds a new version
+entry with that same capture time, digest and notes; the old entry stays
+unchanged. A fresh live export, changed scope, or a sequence already passed by
+a published release cannot use this retry path. Changed scope needs its own
+reviewed capture under the new coordinate. Neither DB nor note bundles require
+sequence uniqueness across failed coordinates; captures and identity use the
+version. Published sequences still strictly follow coordinate order per channel.
+
+HTTP release lists/details, the release sheet, CLI/API consumers and the footer
+name show published releases only. `just release-history` retains the complete
+offline diagnostic history, including reserved and withdrawn coordinates;
+failed attempts receive no public codename or attached note capture.
+
+The 2026-10-01 night has one permanent historical gap: Lucky Lune (115) precedes
+Rugged Ratio (118). Mild Model (116, failed index) is withdrawn and Pure Probe
+(117, no index) is unpublished. Rugged Ratio keeps its published name/number;
+slots below 118 are not reissued. The next allocation is 119 (S), and prospective
+retries reuse that slot until publication. The 15-letter cycle stays unchanged.
 
 For historical backfill where snapshots exist, export stored snapshots as `VERSION.json` in
 one directory and run the same command with `-snapshots DIRECTORY -tenant

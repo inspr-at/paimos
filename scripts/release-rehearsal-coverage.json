@@ -113,6 +113,12 @@
       "step": "Validate inspr-calendar-v2 tag"
     },
     {
+      "counterpart": "TestCurrentWithdrawalLedgerBeforeImagePublication",
+      "mode": "test",
+      "sha256": "dfef68c7d1e52761498673d9ed53694d48fa4947a25ac3dbcb79c97a7399304a",
+      "step": "Enforce current release withdrawal ledger"
+    },
+    {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
       "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
@@ -209,6 +215,12 @@
       "mode": "step",
       "sha256": "e08cb7d242e48b6e1433b432d6fc85e3d3b6d6cf8f4b93f3b876902377f0c84a",
       "step": "Release checks"
+    },
+    {
+      "counterpart": "TestCurrentWithdrawalLedgerBeforeImagePublication",
+      "mode": "test",
+      "sha256": "dfef68c7d1e52761498673d9ed53694d48fa4947a25ac3dbcb79c97a7399304a",
+      "step": "Enforce current release withdrawal ledger"
     },
     {
       "counterpart": "TestTagMatchesVersionFailsClosed",

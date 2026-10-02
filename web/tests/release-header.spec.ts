@@ -184,7 +184,7 @@ test('the light codename leads one glass status dock; Details adds the generatio
   await expect(version.locator('.version-pretty')).toHaveAttribute('data-canonical', history.current)
   await expect(version.locator('.version-canonical')).toHaveText(history.current)
   await sheet(page).getByRole('radio', { name: 'Details' }).click()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published · 1 reserved')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published')
 })
 
 test('Pretty dock separators use the muted ink in both themes and after a live theme change', async ({ page }) => {

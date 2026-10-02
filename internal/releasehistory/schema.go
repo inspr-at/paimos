@@ -54,6 +54,7 @@ type Release struct {
 const (
 	StatePublished = "published"
 	StateReserved  = "reserved"
+	StateWithdrawn = "withdrawn"
 )
 
 // Change is one commit of a release.
