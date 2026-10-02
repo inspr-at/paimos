@@ -472,3 +472,58 @@ func TestHeldReplyUsesExistingQuestionSourceAndKeepsRetryRevision(t *testing.T) 
 		t.Fatal("source reply correlation lost")
 	}
 }
+
+func TestDeliveryWaitsForSuccessorRegistration(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	in := input()
+	in.SessionID = f.session
+	q := f.answer(t, f.ask(t, in), "answer during registration")
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp() WHERE id=$1`, f.session); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(10 * time.Second)
+	// Model AEON-524's in-flight registration with its actual hierarchy fence.
+	registering, err := f.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registering.Rollback(t.Context())
+	if _, err = registering.Exec(t.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, f.project); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := f.m.DispatchTenant(t.Context(), f.person.TenantID); done <- err }()
+	// Wait for the observable lock barrier, never a duration assumption or sleep.
+	barrier, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for {
+		var waiting bool
+		err = f.d.Admin.QueryRow(barrier, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()))`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+	}
+	var successor string
+	if err = registering.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,work_shape,ref_digest,lease_digest,continuation_handover) VALUES($1,$2,$3,'codex','test','unmanaged','worker','unknown',$4,$5,jsonb_build_object('succeeds_session_id',$6::text)) RETURNING id::text`, f.person.TenantID, f.project, f.agent.ID, []byte(uid()), []byte(uid()), f.session).Scan(&successor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registering.Exec(t.Context(), `UPDATE harness_sessions SET handed_over_to_id=$2 WHERE id=$1`, f.session, successor); err != nil {
+		t.Fatal(err)
+	}
+	if err = registering.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	f.expectEffects(t, q, "delivered")
+	if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1`, successor); n != 1 {
+		t.Fatal("dispatch missed the committed successor")
+	}
+	if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1`, f.session); n != 0 {
+		t.Fatal("in-flight registration woke old generation")
+	}
+}

@@ -757,7 +757,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.4`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.5`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -2096,7 +2096,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.4`, declared by the response-only
+The reporter contract is `harness-session/2.5`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -2239,6 +2239,8 @@ the request atomically, returning `status: pending`, a question ID, revision and
 deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
 permission approvals keep their existing immediate semantics.
 
+The additive `harness-session/2.5` response contract adds optional `desk_answers`
+references; registration and heartbeat request requirements remain unchanged.
 Ended generations retain bounded durable answer references. Only a verified
 same-project/principal continuation receives the latest answer; an absent
 successor stays visibly `successor_pending`. Continuation briefs carry references
