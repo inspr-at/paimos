@@ -147,9 +147,11 @@ it never launches candidate code or `go list` on the controller host. Missing,
 invalid, incomplete or unsupported metadata produces a full selection. Without
 metadata, omit the three analysis options to record that fallback explicitly.
 
-The metadata recipe is `/opt/aeon/bin/go list -mod=readonly -deps -test -json
-./...` in B's disposable offline Linux/amd64 guest. Collect base and candidate
-separately under the same pinned image/environment. The context has `goos`,
+The metadata recipe is `/opt/aeon/bin/go list -mod=readonly -deps -test
+-json=<required-fields> ./...` in B's disposable offline Linux/amd64 guest. The
+installed recipe fixes the complete required field list and excludes large
+unused transitive-dependency lists to fit the artifact bound. Collect base and
+candidate separately under the same pinned image/environment. The context has `goos`,
 `goarch`, `tags` (empty), `toolchain_digest`, `dependency_digest` and
 `environment_digest`. The decoder covers production/test/external-test imports,
 test variants, ignored source files and production/test embeds; immutable source

@@ -19,6 +19,7 @@ import (
 
 const goModule = "github.com/inspr-at/paimos"
 const analysisRoot = "/workspace/source"
+const goMetadataFields = "Dir,ImportPath,ForTest,Name,Standard,Incomplete,Module,Error,DepsErrors,Imports,TestImports,XTestImports,GoFiles,TestGoFiles,XTestGoFiles,IgnoredGoFiles,CgoFiles,CFiles,CXXFiles,MFiles,HFiles,FFiles,SFiles,SwigFiles,SwigCXXFiles,SysoFiles,EmbedFiles,TestEmbedFiles,XTestEmbedFiles"
 
 // GoAnalysisContext is fixed by the installed metadata image, not candidate
 // GOFLAGS or go env. Unsupported targets/tags widen to full work. Toolchain and
@@ -39,7 +40,7 @@ type GoAnalysisContext struct {
 // bytes. Missing images/cache/metadata mean a full shadow selection.
 func GoMetadataRecipe(obligationID string) Recipe {
 	return Recipe{ObligationID: obligationID, Stage: "metadata", Reporter: "command",
-		Argv:     []string{"/opt/aeon/bin/go", "list", "-mod=readonly", "-deps", "-test", "-json", "./..."},
+		Argv:     []string{"/opt/aeon/bin/go", "list", "-mod=readonly", "-deps", "-test", "-json=" + goMetadataFields, "./..."},
 		Expected: []string{"command/" + obligationID}, OutputArtifact: "go-metadata.json"}
 }
 
@@ -90,7 +91,7 @@ func localImport(s string) bool { return s == goModule || strings.HasPrefix(s, g
 // repository paths. The full source inventory must be represented, including
 // ignored build-tag/platform files and external test variants.
 func DecodeGoMetadata(s Snapshot, c GoAnalysisContext, raw []byte) (*GoMetadata, error) {
-	if len(raw) == 0 || len(raw) > maxGuestOutput || s.ManifestDigest != digest("tree-manifest", s.Entries) || !objectID.MatchString(s.Commit) ||
+	if len(raw) == 0 || len(raw) > maxArtifact || s.ManifestDigest != digest("tree-manifest", s.Entries) || !objectID.MatchString(s.Commit) ||
 		c.GOOS != "linux" || c.GOARCH != "amd64" || len(c.Tags) != 0 || !digestID.MatchString(c.ToolchainDigest) || !digestID.MatchString(c.DependencyDigest) || !digestID.MatchString(c.EnvironmentDigest) {
 		return nil, fmt.Errorf("unsupported or unbound Go metadata")
 	}
@@ -137,7 +138,10 @@ func DecodeGoMetadata(s Snapshot, c GoAnalysisContext, raw []byte) (*GoMetadata,
 		if strings.HasSuffix(pkg, ".test") && p.Name == "main" {
 			continue
 		}
-		if p.ForTest != "" {
+		// ForTest names the test binary, not necessarily this package's
+		// owner: reader [external.test] still owns reader's sources. Only
+		// the synthetic external-test package maps back to its tested owner.
+		if p.ForTest != "" && pkg == normalizedImport(p.ForTest)+"_test" {
 			pkg = normalizedImport(p.ForTest)
 		}
 		if !localImport(pkg) || p.Module == nil || !p.Module.Main || p.Module.Path != goModule || p.Standard {
@@ -211,6 +215,11 @@ func DecodeGoMetadata(s Snapshot, c GoAnalysisContext, raw []byte) (*GoMetadata,
 			pkg += "/" + dir
 		}
 		g := m.packages[pkg]
+		// Standalone build-ignored script files need no runtime owner: every
+		// scripts/** change already invalidates the complete inventory.
+		if g == nil && path.Dir(e.Path) == "scripts" && !strings.HasSuffix(e.Path, "_test.go") {
+			continue
+		}
 		if g == nil || !g.files[e.Path] {
 			return nil, fmt.Errorf("Git Go source absent from metadata")
 		}
@@ -257,6 +266,9 @@ func confirmGoImports(ctx context.Context, r *Repository, s Snapshot, m *GoMetad
 			return nil, err
 		}
 		g := copy.packages[localGoOwner(h.Name)]
+		if g == nil && path.Dir(h.Name) == "scripts" && !strings.HasSuffix(h.Name, "_test.go") {
+			continue
+		}
 		if g == nil {
 			return nil, fmt.Errorf("Git package absent from analysis")
 		}

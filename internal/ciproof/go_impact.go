@@ -66,6 +66,10 @@ type GoImpactReport struct {
 
 func goImpactID(r GoImpactReport) string { r.ID = ""; return digest("go-impact-shadow", r) }
 
+func goImpactPolicyDigest() string {
+	return Hash("go-impact-policy", goImpactPolicyBytes, []byte("union-Git-test-imports/runtime-audit/full-fresh-shadow/v1"), []byte(digest("go-metadata-recipe", GoMetadataRecipe("job/go-test"))))
+}
+
 // AnalyzeGoImpact never changes the foundation/controller's complete plan.
 // Invalid graphs, inputs or event eligibility schedule the full shadow inventory.
 // Metadata errors must be passed as nil, not replaced by a smaller graph.
@@ -88,7 +92,7 @@ func AnalyzeGoImpact(ctx context.Context, r *Repository, p Plan, base, candidate
 	} else {
 		candidate = nil
 	}
-	return analyzeGoImpact(p, base, candidate, policy, Hash("go-impact-policy", goImpactPolicyBytes)), nil
+	return analyzeGoImpact(p, base, candidate, policy, goImpactPolicyDigest()), nil
 }
 
 func globalGoInput(file string) bool {

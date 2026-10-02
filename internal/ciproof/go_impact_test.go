@@ -40,7 +40,7 @@ func goFixtureFiles(t *testing.T) map[string]string {
 	return c
 }
 
-func fixtureGoMetadata(t *testing.T, s Snapshot, c map[string]string, env string) *GoMetadata {
+func fixtureGoList(t *testing.T, c map[string]string) []byte {
 	t.Helper()
 	packages := map[string]*goListPackage{}
 	for name, src := range c {
@@ -105,11 +105,49 @@ func fixtureGoMetadata(t *testing.T, s Snapshot, c map[string]string, env string
 			t.Fatal(err)
 		}
 	}
-	m, err := DecodeGoMetadata(s, GoAnalysisContext{GOOS: "linux", GOARCH: "amd64", ToolchainDigest: Hash("tool", []byte("pinned")), DependencyDigest: Hash("modules", []byte("pinned")), EnvironmentDigest: env}, out.Bytes())
+	return out.Bytes()
+}
+
+func fixtureGoMetadata(t *testing.T, s Snapshot, c map[string]string, env string) *GoMetadata {
+	t.Helper()
+	m, err := DecodeGoMetadata(s, GoAnalysisContext{GOOS: "linux", GOARCH: "amd64", ToolchainDigest: Hash("tool", []byte("pinned")), DependencyDigest: Hash("modules", []byte("pinned")), EnvironmentDigest: env}, fixtureGoList(t, c))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m
+}
+
+func TestGoMetadataVariantsKeepActualSourceOwners(t *testing.T) {
+	_, p, _, _, _ := impactFixture(t, func(map[string]string) {})
+	files := goFixtureFiles(t)
+	raw := fixtureGoList(t, files)
+	for _, variant := range []goListPackage{
+		{ImportPath: goModule + "/internal/reader [" + goModule + "/internal/external.test]", ForTest: goModule + "/internal/external", Dir: analysisRoot + "/internal/reader", GoFiles: []string{"reader.go"}, Module: &goListModule{Path: goModule, Main: true}},
+		{ImportPath: goModule + "/internal/external_test [" + goModule + "/internal/external.test]", ForTest: goModule + "/internal/external", Dir: analysisRoot + "/internal/external", GoFiles: []string{"external_test.go"}, Imports: []string{goModule + "/internal/reader"}, Module: &goListModule{Path: goModule, Main: true}},
+		{ImportPath: goModule + "/internal/external.test", Name: "main", Dir: analysisRoot + "/internal/external", GoFiles: []string{"/cache/generated_testmain.go"}, Module: &goListModule{Path: goModule, Main: true}},
+	} {
+		b, err := json.Marshal(variant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = append(raw, b...)
+	}
+	c := GoAnalysisContext{GOOS: "linux", GOARCH: "amd64", ToolchainDigest: Hash("tool", nil), DependencyDigest: Hash("deps", nil), EnvironmentDigest: p.EnvironmentDigest}
+	m, err := DecodeGoMetadata(p.Base, c, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.packages[goModule+"/internal/external"].imports[goModule+"/internal/reader"] || m.packages[goModule+"/internal/reader"].dir != "internal/reader" {
+		t.Fatal("test binary stole dependency source ownership")
+	}
+	files["scripts/ignored-probe.go"] = "//go:build ignore\n\npackage main\n"
+	s := p.Base
+	s.Entries = append(s.Entries, Entry{Path: "scripts/ignored-probe.go", Mode: "100644", Blob: strings.Repeat("a", 40), ContentDigest: Hash("blob", []byte(files["scripts/ignored-probe.go"]))})
+	sort.Slice(s.Entries, func(i, j int) bool { return s.Entries[i].Path < s.Entries[j].Path })
+	s.ManifestDigest = digest("tree-manifest", s.Entries)
+	if _, err := DecodeGoMetadata(s, c, raw); err != nil {
+		t.Fatalf("globally invalidated ignored script forced permanent cold graph: %v", err)
+	}
 }
 
 func impactFixture(t *testing.T, mutate func(map[string]string)) (*fixture, Plan, *GoMetadata, *GoMetadata, goImpactPolicy) {
