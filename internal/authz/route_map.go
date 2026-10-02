@@ -31,6 +31,12 @@ var RoutePermissions = map[string]string{
 	"POST /api/models/reports":                                                  "models.report",
 	"PUT /api/models/refresh/settings":                                          "models.manage",
 	"PUT /api/models/refresh/credentials/{accountId}":                           "models.manage",
+	"POST /api/projects/{projectId}/questions":                                  "questions.ask",
+	"GET /api/projects/{projectId}/questions":                                   "questions.read",
+	"GET /api/questions/{questionId}":                                           "questions.read",
+	"GET /api/questions/{questionId}/status":                                    "questions.read",
+	"POST /api/questions/{questionId}/decision":                                 "questions.decide",
+	"GET /api/decision-desk":                                                    "questions.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",

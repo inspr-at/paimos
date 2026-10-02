@@ -33,7 +33,7 @@ func makeRegistry() []Permission {
 		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage recover force_stop watch"},
 		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
-		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
+		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
 		{"models", "read manage resolve report refresh"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
@@ -74,7 +74,7 @@ func makeRegistry() []Permission {
 func agentGrantable(key string) bool {
 	switch key {
 	case "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
-		"approvals.decide", "approvals.decide_high",
+		"questions.decide", "approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
 	default:
@@ -114,6 +114,14 @@ func builtinPermissions(key string) []string {
 		}
 		allow := false
 		resource, _, _ := strings.Cut(p.Key, ".")
+		// Explicit Decision Desk defaults. Existing agent keys gain no scopes;
+		// decide is person-only even if a role includes it.
+		if resource == "questions" {
+			if key == "owner" || key == "admin" || key == "member" || key == "viewer" && p.Key == "questions.read" {
+				out = append(out, p.Key)
+			}
+			continue
+		}
 		switch key {
 		case "owner":
 			allow = true

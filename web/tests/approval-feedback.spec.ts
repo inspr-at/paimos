@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { COLLAPSE_MS, SUCCESS_MS } from '../src/components/agents/approvalSettle'
 
 const world: AgentWorld = {
   me: me.id,
@@ -66,6 +67,9 @@ test.describe('with motion', () => {
     await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
     await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(0)
     await expect(settled(page)).toHaveCount(0)
+    // Hold the short collapse phase so hosted scheduling cannot skip it.
+    await page.clock.install({ time: new Date() })
+    await page.clock.pauseAt(new Date(Date.now() + 100))
     release()
     const done = settled(page)
     await expect(done).toHaveClass(/approved/)
@@ -79,9 +83,11 @@ test.describe('with motion', () => {
     await expect(decidedCount(page)).toHaveText('4')
     await expect(queue(page).locator('.count-badge')).toHaveText('4')
     // The fold: Decided ticks, the card goes, the count follows.
+    await page.clock.runFor(SUCCESS_MS)
     await expect(done).toHaveClass(/collapsing/)
     await expect(decidedCount(page)).toHaveText('5')
     await expect(decidedCount(page)).toHaveClass(/tick/)
+    await page.clock.runFor(COLLAPSE_MS)
     await expect(done).toHaveCount(0)
     await expect(queue(page).locator('[data-row^="a:"]')).toHaveCount(2)
     await expect(queue(page).locator('.count-badge')).toHaveText('3')
@@ -156,7 +162,7 @@ test.describe('with motion', () => {
     expect(samples.every(sample => sample.scroll === 80)).toBe(true)
   })
 
-  for (const emptyHistory of [false, true]) test(`deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history)`, async ({ page }) => {
+  for (const eventless of [false, true]) for (const emptyHistory of [false, true]) test(`deciding the last request folds Needs you away without a jump and focuses Decided (${emptyHistory ? 'empty' : 'existing'} history${eventless ? ', completion fallback' : ''})`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 640 })
     await setup(page, { only: 'nodes.read', emptyHistory })
     await openAgents(page)
@@ -168,15 +174,31 @@ test.describe('with motion', () => {
     const main = page.locator('#main')
     await main.evaluate(el => { el.scrollTop = 80 })
     await expect.poll(() => main.evaluate(el => el.scrollTop)).toBe(80)
+    // The component also completes through its fallback when a browser omits
+    // transitionend. Motion and the final removal still have to be smooth.
+    if (eventless) await queue(page).evaluate(el => {
+      el.addEventListener('transitionend', event => {
+        if (event.target === el && (event as TransitionEvent).propertyName === 'height') event.stopImmediatePropagation()
+      }, { capture: true })
+    })
     const before = await page.evaluate(() => {
       const section = document.querySelector<HTMLElement>('.agents-page .main-col > .queue')!
       const next = section.nextElementSibling as HTMLElement
       const tops: number[] = []
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.tops = tops; w.sampling = true
+      const w = window as unknown as { tops: number[]; sampling: boolean; foldRemoved: boolean }
+      w.tops = tops; w.sampling = true; w.foldRemoved = false
       const main = document.getElementById('main')!
       const sample = () => { tops.push(next.getBoundingClientRect().top + main.scrollTop); if (w.sampling) requestAnimationFrame(sample) }
-      requestAnimationFrame(sample)
+      sample()
+      const removed = new MutationObserver(() => {
+        if (section.isConnected) return
+        // Observe the actual removal, including the component's completion
+        // fallback, then sample the final layout without a clock delay.
+        removed.disconnect()
+        w.sampling = false
+        requestAnimationFrame(() => { sample(); w.foldRemoved = true })
+      })
+      removed.observe(section.parentElement!, { childList: true })
       return { height: section.getBoundingClientRect().height, gap: parseFloat(getComputedStyle(section.parentElement!).rowGap) }
     })
     await item.getByRole('button', { name: 'Approve permission' }).click()
@@ -185,12 +207,8 @@ test.describe('with motion', () => {
     const decided = page.getByRole('region', { name: 'Decided requests' }).getByRole('button', { name: /^Decided/ })
     await expect(decided).toBeFocused()
     await expect(decided.locator('.mono')).toHaveText(emptyHistory ? '1' : '5')
-    const tops = await page.evaluate(async () => {
-      await new Promise(resolve => setTimeout(resolve, 150))
-      const w = window as unknown as { tops: number[]; sampling: boolean }
-      w.sampling = false
-      return w.tops
-    })
+    await expect.poll(() => page.evaluate(() => (window as unknown as { foldRemoved: boolean }).foldRemoved)).toBe(true)
+    const tops = await page.evaluate(() => (window as unknown as { tops: number[] }).tops)
     expect(await main.evaluate(el => el.scrollTop)).toBe(80)
     // What followed Needs you rose by exactly its height and gap, over many frames,
     // with no single-frame jump and no snap when the card was removed.

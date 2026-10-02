@@ -129,6 +129,53 @@ func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
 	}
 }
 
+// Both route tables must retain independent retirement and health fences.
+func TestRefreshLaddersPreserveRetirementAndSuppression(t *testing.T) {
+	for _, role := range []string{"build", "review-gate-security"} {
+		t.Run(role, func(t *testing.T) {
+			reset(t)
+			p := makePrincipal(t, "retired-refresh", "person", "Owner", []string{"admin"})
+			decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				now, err := dbNow(t.Context(), tx)
+				if err != nil {
+					return err
+				}
+				q := resolveQuery{Role: role, AuthorFamily: "openai"}
+				before, err := resolveRole(t.Context(), tx, q, now)
+				if err != nil {
+					return err
+				}
+				if before.Profile == nil {
+					t.Fatal("fixture must select the first route")
+				}
+				profile := before.Profile
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'merge regression',$3)`, p.TenantID, profile.ID, p.ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,$2,$3,$4,2,$5,$6,'agent')`, p.TenantID, profile.Harness, profile.Model, profile.Effort, now, now.Add(time.Hour)); err != nil {
+					return err
+				}
+				for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
+					out, err := resolveRole(t.Context(), tx, q, at)
+					if err != nil {
+						return err
+					}
+					if out.Profile == nil || out.Profile.ID == profile.ID {
+						t.Fatalf("retired route selected or fallback lost: %+v", out)
+					}
+					first := out.Ladder[0]
+					reasons := strings.Join(first.SkipReasons, "; ")
+					if first.ProfileID != profile.ID || first.Selected || !strings.Contains(reasons, "retired") || strings.Contains(reasons, "model invalid until") != at.Before(now.Add(time.Hour)) {
+						t.Fatalf("retirement and timed health fence diverged: %+v", first)
+					}
+				}
+				return nil
+			})
+		})
+	}
+}
+
 func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 	for _, expanded := range []bool{false, true} {
 		t.Run(fmt.Sprintf("additional-harnesses-%t", expanded), func(t *testing.T) {

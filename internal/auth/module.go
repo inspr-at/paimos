@@ -268,6 +268,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "decision-desk":
+		if len(parts) == 1 && read {
+			return "questions.read", true
+		}
+	case "questions":
+		if read && (len(parts) == 2 || len(parts) == 3 && parts[2] == "status") {
+			return "questions.read", true
+		}
 	case "releases":
 		// Build history is readable by agents. Presentation writes remain person-only.
 		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {
@@ -308,6 +316,13 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "questions":
+			if len(parts) == 3 && read {
+				return "questions.read", true
+			}
+			if len(parts) == 3 && r.Method == http.MethodPost {
+				return "questions.ask", true
+			}
 		case "instruction-provenance":
 			if len(parts) == 3 && read {
 				return "harness.read", true

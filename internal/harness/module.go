@@ -41,6 +41,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -434,22 +435,31 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 	if existing.vendorRefDigest == nil {
 		// The body names the row it was made from: keep its version current.
 		if err := tx.QueryRow(ctx, `UPDATE harness_sessions SET vendor_ref_digest=$2 WHERE id=$1 AND vendor_ref_digest IS NULL RETURNING row_version`, existing.ID, vendor).Scan(&existing.RowVersion); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return registrationConflict(err)
+			return registrationConflict(err, vendor)
 		}
 		existing.vendorRefDigest = vendor
 	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
-		return workorders.Fail(409, "vendor_session_ref differs from this active generation's existing binding")
+		return vendorRefConflict("vendor_session_ref differs from this active generation's existing binding", vendor)
 	}
 	existing.HasVendorSessionRef = true
 	return nil
 }
 
-func registrationConflict(err error) error {
+// Identify the submitted native reference without returning it, a lease, or
+// Postgres's unique-constraint detail. Use the stored reference hash domain.
+func vendorRefConflict(message string, vendor []byte) error {
+	if len(vendor) == sha256.Size {
+		message += fmt.Sprintf(" (sha256:%x)", vendor[:8])
+	}
+	return workorders.Fail(409, message)
+}
+
+func registrationConflict(err error, vendor []byte) error {
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
 		switch pg.ConstraintName {
 		case "harness_one_active_vendor_ref":
-			return workorders.Fail(409, "vendor_session_ref is already bound to an active generation for this agent")
+			return vendorRefConflict("vendor_session_ref is already bound to an active generation for this agent", vendor)
 		case "harness_one_active_ref":
 			return workorders.Fail(409, "harness_session_ref is already bound to an active generation in this project")
 		default:
@@ -836,7 +846,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
 	if err != nil {
-		return nil, registrationConflict(err)
+		return nil, registrationConflict(err, vendor)
 	}
 	owner := p.KeyCreatorID
 	if p.Kind == tenant.Person {
