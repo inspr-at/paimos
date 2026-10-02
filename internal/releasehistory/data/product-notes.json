@@ -4242,8 +4242,8 @@
     "261002171043.0.0": {
       "release_channel": "stable",
       "release_sequence": 120,
-      "snapshot_sha256": "dac3a96dafc0f3cd30b5d352c503e997e5019de3aad1cdd5e453eb1783c0540a",
-      "captured_at": "2026-10-02T17:25:12Z",
+      "snapshot_sha256": "2779860562bc27d427ecc0b85a1e8b3777437e0f34f0ec224435922f9639f77e",
+      "captured_at": "2026-10-02T17:34:03Z",
       "release_revision": 1,
       "items": [
         {
@@ -4257,9 +4257,9 @@
         {
           "key": "AEON-440",
           "pill_en": "Easy attach approval",
-          "pill_de": "Einfache Anhänge-Freigabe",
+          "pill_de": "Freigabe der Sitzungsverknüpfung",
           "benefit_en": "When you attach to a session, Aeon shows you right away where to approve it, without searching.",
-          "benefit_de": "Wenn du dich an eine Sitzung anhängst, zeigt Aeon dir sofort, wo du freigibst, ohne Suchen.",
+          "benefit_de": "Wenn du eine laufende Sitzung verknüpfst, zeigt Aeon dir sofort, wo du die Verknüpfung freigibst, ohne Suchen.",
           "group": "features"
         },
         {
@@ -4274,8 +4274,8 @@
           "key": "AEON-460",
           "pill_en": "Touch ID for attach",
           "pill_de": "Touch ID beim Verknüpfen",
-          "benefit_en": "On a supported Mac, you can require Touch ID and a signed local confirmation before a session attach is approved.",
-          "benefit_de": "Auf einem unterstützten Mac kannst du Touch ID und eine signierte lokale Bestätigung verlangen, bevor eine Sitzung verknüpft wird.",
+          "benefit_en": "On a supported Mac, after you approve an attach in Aeon, Touch ID and a signed local confirmation are required before the session is linked.",
+          "benefit_de": "Auf einem unterstützten Mac braucht es nach deiner Freigabe in Aeon noch Touch ID und eine signierte lokale Bestätigung, bevor die Sitzung verknüpft wird.",
           "group": "features"
         },
         {
@@ -4290,8 +4290,8 @@
           "key": "AEON-524",
           "pill_en": "Pause agents",
           "pill_de": "Agenten pausieren",
-          "benefit_en": "You can pause supported agents one by one or all at once; each records where it stopped so a later run can continue from there.",
-          "benefit_de": "Du kannst unterstützte Agenten einzeln oder alle auf einmal pausieren; jeder hält fest, wo er aufgehört hat, damit ein späterer Lauf dort weitermachen kann.",
+          "benefit_en": "You can request a pause for supported agents, one by one or all at once; a completed pause saves a handover so a later run can continue from there.",
+          "benefit_de": "Du kannst für unterstützte Agenten eine Pause anfordern, einzeln oder alle auf einmal; eine abgeschlossene Pause speichert eine Übergabe, damit ein späterer Lauf dort weitermachen kann.",
           "group": "features"
         },
         {
@@ -4346,8 +4346,8 @@
           "key": "AEON-573",
           "pill_en": "Recurring work",
           "pill_de": "Wiederkehrende Arbeit",
-          "benefit_en": "Recurring tasks, like a weekly check or work after each release, now create their own tickets on time, without anyone having to remember them.",
-          "benefit_de": "Wiederkehrende Aufgaben wie eine wöchentliche Prüfung oder Arbeit nach jedem Release erstellen ihre Tickets jetzt selbst, ohne dass jemand daran denken muss.",
+          "benefit_en": "Recurring tasks, like a weekly check or work after each release, now create their own tickets on a schedule; missed runs after downtime are combined, and a run can be skipped while the previous ticket is still open.",
+          "benefit_de": "Wiederkehrende Aufgaben wie eine wöchentliche Prüfung oder Arbeit nach jedem Release erstellen ihre Tickets jetzt nach Plan; verpasste Läufe nach einer Pause werden zusammengefasst, und ein Lauf kann ausfallen, solange das vorige Ticket noch offen ist.",
           "group": "features"
         },
         {
