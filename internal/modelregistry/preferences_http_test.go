@@ -413,12 +413,12 @@ func TestPreferencePickerEvidence(t *testing.T) {
 		t.Fatal("missing or unbounded picker choices")
 	}
 	total := 0
-	var retiredID string
+	var profileID string
 	foundUnqualified := false
 	for _, choice := range view.Choices {
 		total += choice.ResidencyRoutes
 		if choice.Profile.Slug == "codex-sol-high" {
-			retiredID = choice.Profile.ID
+			profileID = choice.Profile.ID
 			if choice.Line != "sol" || choice.ModelVersion == "" {
 				t.Fatal("picker used catalog revision instead of model version", choice)
 			}
@@ -427,7 +427,7 @@ func TestPreferencePickerEvidence(t *testing.T) {
 			foundUnqualified = strings.Contains(choice.ReviewReason, "Codex")
 		}
 	}
-	if total != 1 || view.Residency.QualifyingRoutes != 1 || !foundUnqualified || retiredID != allowedID {
+	if total != 1 || view.Residency.QualifyingRoutes != 1 || !foundUnqualified || profileID != allowedID {
 		t.Fatal("picker evidence does not match routing or qualification", total, view.Residency.QualifyingRoutes, foundUnqualified)
 	}
 	// The same allowed account has no EU evidence: test this before retirement.
@@ -445,10 +445,10 @@ func TestPreferencePickerEvidence(t *testing.T) {
 	if prefDoc(t, admin).Views["person"].Residency.QualifyingRoutes != 1 {
 		t.Fatal("allowed route did not return")
 	}
-	decode[map[string]any](t, &admin, "POST", "/api/models/"+retiredID+"/retire", `{"reason":"Picker regression"}`, 200)
+	decode[map[string]any](t, &admin, "POST", "/api/models/"+profileID+"/retire", `{"reason":"Picker regression"}`, 200)
 	doc = prefDoc(t, admin)
 	for _, choice := range doc.Views["person"].Choices {
-		if choice.Profile.ID == retiredID {
+		if choice.Profile.ID == profileID {
 			t.Fatal("retired model still offered", choice)
 		}
 	}

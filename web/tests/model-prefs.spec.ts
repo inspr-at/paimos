@@ -8,7 +8,7 @@ import { prefsDocument, prefsFixture, PREF_MODELS, prefScope, customKind } from 
 import type { ModelPreferences, PrefLevel, PrefRow } from '../src/lib/modelPrefs'
 import { expectStableControls } from './helpers/stable'
 
-async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void>; truncated?: boolean } = {}) {
+async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; rejectWrite?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void>; truncated?: boolean } = {}) {
   const data = fixtures()
   data.preferences['list:p-pharos'] = { visible: ['status', 'model'] }
   const ticket = data.nodes.find(n => n.key === 'PHAROS-11')!
@@ -35,6 +35,7 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
     const body = method === 'PUT' ? route.request().postDataJSON() : undefined
     calls.push({ method, path, body })
     await options.beforeWrite?.()
+    if (options.rejectWrite) return route.fulfill({ status: 422, json: { error: 'This preference is locked above', code: 'locked_above' } })
     if (conflict) { conflict = false; state.levels.person!.revision++; return route.fulfill({ status: 409, json: { error: 'stale_revision', code: 'stale_revision' } }) }
     const level = path.split('/')[4] as PrefLevel, kind = path.split('/')[6], scope = state.levels[level]!
     const revision = method === 'PUT' ? body.revision : Number(url.searchParams.get('revision'))
@@ -166,6 +167,7 @@ test('conflicts refresh honestly and read-only default keeps its explanation', a
   await setup(page, { conflict: true, readOnly: true }); await open(page)
   await dialog(page).getByRole('radio', { name: /EU-hosted only/ }).click()
   await expect(dialog(page).locator('.save-status')).toHaveText('Changed elsewhere, refreshed')
+  await expect(dialog(page).locator('.save-status')).toBeInViewport()
   await dialog(page).getByRole('tab', { name: 'Default', exact: true }).click()
   await expect(dialog(page)).toContainText('Only workspace admins change the default')
   await expect(dialog(page).getByRole('radio', { name: /Any provider/ })).toBeDisabled()
@@ -357,4 +359,94 @@ test('picker restores keyboard focus to the model cell during and after its save
     release(); await expect(dialog(page).locator('.save-status')).toHaveText('')
     await expect(chip).toBeFocused()
   } finally { release() }
+})
+
+
+for (const width of [1440, 1024, 390]) {
+  for (const conflict of [false, true]) test(`save feedback stays visible through ${conflict ? 'conflict' : 'rollback'} at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    let release!: () => void
+    const held = new Promise<void>(done => { release = done })
+    const { state, calls } = await setup(page, { conflict, rejectWrite: !conflict, beforeWrite: () => held })
+    for (let i = 0; i < 12; i++) state.kinds.push(customKind(`extra-${i}`, `Extra kind ${i}`))
+    try {
+      await open(page)
+      const modal = dialog(page), backend = row(page, 'backend'), chip = backend.locator('.model-chip').first()
+      const body = modal.locator(':scope > .card > .body'), status = modal.locator('.save-status')
+      expect(await body.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+      await expectStableControls({ controls: { done: modal.locator('.done'), resetAll: modal.locator('.reset-all'), tabs: modal.getByRole('tablist'), providers: modal.getByRole('radiogroup'), row: backend, normal: chip, frame: modal.locator(':scope > .card') }, scrollAreas: { body }, interactions: [
+        { name: 'hold the optimistic save', run: async () => {
+          await chip.press('Enter')
+          await page.getByRole('dialog', { name: 'Backend · Normally', exact: true }).getByRole('button', { name: '5.1', exact: true }).press('Enter')
+          await expect.poll(() => calls.length).toBe(1)
+          await expect(chip).toHaveAttribute('aria-label', 'Backend, normally: Claude Fable')
+          await expect(status).toHaveText('Saving…'); await expect(status).toBeInViewport()
+        } },
+        { name: 'show the rejected or conflicted result', run: async () => {
+          release()
+          await expect(status).toHaveText(conflict ? 'Changed elsewhere, refreshed' : 'This preference is locked above')
+          await expect(status).toBeInViewport()
+          await expect(chip).toHaveAttribute('aria-label', 'Backend, normally: Automatic')
+          await expect(chip).toBeFocused()
+        } },
+      ] })
+    } finally { release() }
+  })
+}
+
+test('preferences lock retains keyboard focus and rejects extra toggles during save', async ({ page }) => {
+  let release!: () => void
+  const held = new Promise<void>(done => { release = done })
+  const { calls } = await setup(page, { beforeWrite: () => held })
+  try {
+    await open(page)
+    const modal = dialog(page), lock = modal.locator('.prefs-lock input'), body = modal.locator(':scope > .card > .body')
+    await lock.focus()
+    await expectStableControls({ controls: { lock, row: modal.locator('.prefs-lock'), done: modal.locator('.done'), tabs: modal.getByRole('tablist'), frame: modal.locator(':scope > .card') }, scrollAreas: { body }, interactions: [
+      { name: 'hold the keyboard lock write', run: async () => {
+        await lock.press('Space'); await expect.poll(() => calls.length).toBe(1)
+        await expect(lock).toHaveAttribute('aria-disabled', 'true'); await expect(lock).toBeFocused()
+        const checked = await lock.isChecked()
+        await lock.press('Space'); await expect(lock).toBeFocused()
+        expect(await lock.isChecked()).toBe(checked); expect(calls).toHaveLength(1)
+      } },
+      { name: 'finish the keyboard lock write', run: async () => {
+        release(); await expect(modal.locator('.save-status')).toHaveText('')
+        await expect(lock).not.toBeChecked(); await expect(lock).toHaveAttribute('aria-disabled', 'false')
+        await expect(lock).toBeFocused(); expect(calls).toHaveLength(1)
+      } },
+    ] })
+  } finally { release() }
+})
+
+test('keyboard row reset restores focus to its normal model chip', async ({ page }) => {
+  const { state, calls } = await setup(page)
+  state.levels.person!.rows = [{ kind_id: 'backend', locked: false, normal: { mode: 'pinned', profile_id: PREF_MODELS[2]!.id }, complex: { mode: 'auto' } }]
+  await open(page)
+  const modal = dialog(page), backend = row(page, 'backend'), chip = backend.locator('.model-chip').first(), reset = backend.locator('.row-reset')
+  await reset.focus()
+  await expectStableControls({ controls: { row: backend, normal: chip, done: modal.locator('.done'), tabs: modal.getByRole('tablist'), frame: modal.locator(':scope > .card') }, scrollAreas: { body: modal.locator(':scope > .card > .body') }, interactions: [
+    { name: 'reset by keyboard', run: async () => {
+      await reset.press('Enter'); await expect(reset).toBeHidden()
+      await expect(chip).toHaveAttribute('aria-label', 'Backend, normally: Automatic')
+      await expect(chip).toBeFocused()
+      expect(calls).toHaveLength(1); expect(calls[0]!.method).toBe('DELETE')
+    } },
+  ] })
+})
+
+test('keyboard kind removal restores focus to the Everything else model chip', async ({ page }) => {
+  await setup(page); await open(page)
+  const modal = dialog(page)
+  await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+  await row(page, 'backend').getByRole('button', { name: 'Remove Backend', exact: true }).press('Enter')
+  const confirmation = modal.locator('.remove-confirmation')
+  await expect(confirmation.getByRole('button', { name: 'Keep', exact: true })).toBeFocused()
+  await confirmation.getByRole('button', { name: 'Remove kind', exact: true }).press('Enter')
+  await expect(row(page, 'backend')).toHaveCount(0)
+  await expect(confirmation).toHaveCount(0)
+  const chip = row(page, 'other').locator('.model-chip').first()
+  await expect(chip).toBeFocused()
+  await chip.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Everything else · Normally', exact: true })).toBeVisible()
 })

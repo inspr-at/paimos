@@ -51,7 +51,22 @@ async function toggleReset(value: boolean) {
   ;(value ? resetKeep.value : resetButton.value)?.focus({ preventScroll: true })
 }
 async function confirmReset() { await editor.reset(); if (!notice.value) await toggleReset(false) }
-async function remove(kind: string) { await editor.archive(kind); if (!notice.value) archiveKind.value = '' }
+async function focusKind(kind: string | undefined) {
+  await nextTick()
+  const slug = doc.value?.kinds.find(k => k.id === kind)?.slug
+  const chip = slug ? content.value?.querySelector<HTMLButtonElement>(`[data-kind="${CSS.escape(slug)}"] .model-chip:not(:disabled)`) : null
+  ;(chip ?? resetButton.value)?.focus({ preventScroll: true })
+}
+async function resetRow(kind: string) {
+  await editor.reset(kind)
+  if (!notice.value) await focusKind(kind)
+}
+async function remove(kind: string) {
+  // Removed kinds resolve to Everything else; its surviving chip is the focus target.
+  const fallback = doc.value?.kinds.find(k => k.system === 'other')?.id
+  await editor.archive(kind)
+  if (!notice.value) { archiveKind.value = ''; await focusKind(fallback) }
+}
 onMounted(async () => {
   await Promise.all([editor.load(), loadWhy()]); await nextTick()
   if (!props.context.why && props.context.kind && focusedKind.value) content.value?.querySelector(`[data-kind="${CSS.escape(focusedKind.value.slug)}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -71,7 +86,7 @@ function keys(event: KeyboardEvent) {
   <RulesDialog title="Which models do which work" lede="Default, then You, then Project. The dot shows where each setting comes from." size="wide" class="model-prefs-dialog" :busy="busy" @close="emit('close')" @keydown.capture="keys">
     <template #pinned><p class="eyebrow">Agents · settings</p><LevelTabs :level="level" :project="context.project?.title" :busy="busy" @change="switchLevel" /></template>
     <template #footer><div class="prefs-footer">
-      <p class="summary" role="status">{{ resetAll ? level === 'default' ? 'Every default goes back to Automatic and Any provider.' : `Remove ${view?.changes ?? 0} ${(view?.changes ?? 0) === 1 ? 'change' : 'changes'}?` : summaryLabel(level, view?.changes ?? 0) }}</p>
+      <p class="summary" :title="busy ? 'Saving…' : notice || undefined"><span class="save-status" role="status">{{ busy ? 'Saving…' : notice }}</span><span v-if="!busy && !notice">{{ resetAll ? level === 'default' ? 'Every default goes back to Automatic and Any provider.' : `Remove ${view?.changes ?? 0} ${(view?.changes ?? 0) === 1 ? 'change' : 'changes'}?` : summaryLabel(level, view?.changes ?? 0) }}</span></p>
       <button ref="resetButton" type="button" class="btn ghost reset-all" :disabled="!editable" :aria-disabled="busy || !view?.changes" @click="!busy && !!view?.changes && (resetAll ? confirmReset() : toggleReset(true))">{{ resetAll ? 'Confirm reset' : resetLevelLabel(level) }}</button>
       <button v-if="resetAll" ref="resetKeep" type="button" class="btn ghost done" :aria-disabled="busy" @click="toggleReset(false)">Keep</button>
       <button v-else type="button" class="btn primary done" :aria-disabled="busy" data-autofocus @click="!busy && emit('close')">Done <kbd class="keycap">Esc</kbd></button>
@@ -94,14 +109,14 @@ function keys(event: KeyboardEvent) {
       <template v-if="doc && view && scope">
         <p class="read-only">{{ editable ? level === 'default' ? 'The default applies to everyone.' : level === 'person' ? 'Your settings apply across your projects.' : `Settings for ${context.project?.title}.` : level === 'default' ? 'Read only. Only workspace admins change the default.' : level === 'project' ? 'Read only. Project permission is needed to change this level.' : 'Read only. Sign in as a person to change your settings.' }}</p>
         <ProvidersPanel :level="level" :view="view.residency" :mode="doc.residency_lock_mode" :locked="scope.residency_locked" :editable="editable" :busy="busy" :outside="outside" :truncated="view.choices_truncated" @show-runs="emit('close')" @choose="value => editor.scope({ residency: value })" @lock="value => editor.scope({ residency_locked: value })" />
-        <section class="kinds-section" aria-label="Kinds of work"><h3 class="eyebrow">Kinds of work</h3><KindTable :doc="doc" :level="level" :busy="busy" :archive-kind="archiveKind" @remove="remove" @keep="archiveKind = ''" @pick="openPicker" @reset="editor.reset" @lock="kind => editor.row(kind, undefined, true)" @archive="kind => archiveKind = archiveKind === kind ? '' : kind" /></section>
+        <section class="kinds-section" aria-label="Kinds of work"><h3 class="eyebrow">Kinds of work</h3><KindTable :doc="doc" :level="level" :busy="busy" :archive-kind="archiveKind" @remove="remove" @keep="archiveKind = ''" @pick="openPicker" @reset="resetRow" @lock="kind => editor.row(kind, undefined, true)" @archive="kind => archiveKind = archiveKind === kind ? '' : kind" /></section>
         <div class="legend"><span v-for="value in (['default', 'person', 'project'] as const)" :key="value"><span class="level-dot" :style="{ '--lv': `var(--level-${value})` }" />{{ value === 'default' ? 'Default' : value === 'person' ? 'You, all your projects' : `This project${context.project ? ` (${context.project.title})` : ''}` }}</span></div>
-        <label v-if="level !== 'project'" class="switch prefs-lock"><input type="checkbox" :checked="!scope.prefs_locked" :disabled="busy || !editable || level === 'person' && !!doc.levels.default?.prefs_locked" @change="editor.scope({ prefs_locked: !($event.target as HTMLInputElement).checked })">{{ lowerLevelLabel(level) }}</label>
+        <label v-if="level !== 'project'" class="switch prefs-lock"><input type="checkbox" :checked="!scope.prefs_locked" :disabled="!editable || level === 'person' && !!doc.levels.default?.prefs_locked" :aria-disabled="busy || !editable || level === 'person' && !!doc.levels.default?.prefs_locked" @click="busy && $event.preventDefault()" @change="!busy && editor.scope({ prefs_locked: !($event.target as HTMLInputElement).checked })">{{ lowerLevelLabel(level) }}</label>
         <button v-if="canAddKind(doc, level)" type="button" class="btn ghost add-kind" :disabled="busy" @click="openAdd"><AppIcon name="plus" :size="14" />Add a kind of work {{ level === 'project' ? 'for this project only' : '(becomes a ticket area)' }}</button>
         <p class="footnote"><AppIcon name="refresh" :size="12" /> follows new versions · <AppIcon name="pin" :size="12" /> pinned · {{ mac ? 'Option' : 'Alt' }}-click Set by to toggle a row lock. Kinds of work are ticket areas.</p>
         <form v-if="addOpen" class="add-form" @submit.prevent="add"><label for="model-kind-label">Name</label><input id="model-kind-label" ref="labelInput" v-model="newKind" maxlength="60" :disabled="busy" autocomplete="off"><button class="btn" type="submit" :disabled="busy || !newKind.trim()">Add <KeyCap k="mod" /><KeyCap k="enter" /></button></form>
       </template>
-      <p class="save-status" role="status">{{ busy ? 'Saving…' : notice }}</p><button v-if="!doc && !loading" type="button" class="btn" @click="editor.load">Try again</button>
+      <button v-if="!doc && !loading" type="button" class="btn" @click="editor.load">Try again</button>
     </div>
     <ModelPicker v-if="picker && pickedKind && pickedRow && view" :key="`${level}-${picker.kind}-${picker.bucket}`" :label="`${pickedKind.label} · ${picker.bucket === 'normal' ? 'Normally' : 'If it’s complex'}`" :choices="view.choices" :selector="pickedRow[picker.bucket].selector" :residency="view.residency" :review="pickedKind.system === 'review'" :truncated="view.choices_truncated" @close="closePicker" @choose="choose" />
   </RulesDialog>
@@ -114,12 +129,11 @@ function keys(event: KeyboardEvent) {
 </style>
 <style scoped>
 .prefs-content { display: grid; gap: 16px; min-width: 0; } .prefs-content p, h3 { margin: 0; } .read-only { font-size: 12px; color: var(--ink-3); min-height: 18px; }
-.kinds-section { display: grid; gap: 8px; } .prefs-footer { display: grid; grid-template-columns: minmax(0, 1fr) 210px 110px; gap: 8px; align-items: center; width: 100%; } .summary { margin: 0; font-size: 12px; color: var(--ink-2); } .reset-all { font-size: 12px; white-space: normal; height: 40px; } .done { height: 40px; }
+.kinds-section { display: grid; gap: 8px; } .prefs-footer { display: grid; grid-template-columns: minmax(0, 1fr) 210px 110px; gap: 8px; align-items: center; width: 100%; } .summary { margin: 0; min-width: 0; font-size: 12px; line-height: 18px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .reset-all { font-size: 12px; white-space: normal; height: 40px; } .done { height: 40px; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ink-2); font-size: 12px; } .legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .prefs-lock { font-size: 12px; white-space: normal; } .add-kind { justify-self: start; min-height: 44px; height: auto; white-space: normal; text-align: left; }
 .footnote { color: var(--ink-3); font-size: 12px; line-height: 1.6; } .footnote svg { display: inline-block; vertical-align: -2px; }
 .add-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .add-form input { min-width: 0; width: 180px; height: 36px; padding: 0 8px; }
 .why ol { margin: 0; padding-left: 20px; display: grid; gap: 5px; } .why { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-2); } .why h3 { color: var(--ink); font-size: 13px; }
-.save-status { min-height: 18px; font-size: 12px; color: var(--ink-2); }
 @media (max-width: 600px) { .prefs-footer { grid-template-columns: minmax(0, 1fr) 110px; } .summary { grid-column: 1 / -1; min-height: 18px; } .reset-all { width: 100%; } .prefs-lock { min-height: 44px; } .read-only { min-height: 36px; } }
 </style>
