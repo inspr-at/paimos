@@ -5,13 +5,96 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestBriefingReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *testing.T) {
+	f := setup(t)
+	human := "Touch ID"
+	delivered := f.add("AUT-2", "ticket", "done", 15, nil)
+	skipped := f.add("AUT-3", "ticket", "done", 15, &human)
+	release := f.release([]string{delivered, skipped})
+	foreignProject := f.add("AUT-20", "project", "open", 1, nil)
+	start := time.Now().UTC().Add(-time.Second)
+	// This uses the real service path, which has no current principal and
+	// therefore records no ticket_done outcome on a done -> delivered update.
+	f.tx(func(tx pgx.Tx) error { return PublishTx(t.Context(), tx, f.p.TenantID, release) })
+	reader := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Person}
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Project reader') RETURNING id::text`, reader.TenantID).Scan(&reader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, reader.TenantID, reader.ID, f.project)
+		return err
+	})
+	// Also store real merge evidence on a project-readable ticket update.
+	f.tx(func(tx pgx.Tx) error {
+		var before, after json.RawMessage
+		if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, delivered).Scan(&before); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `UPDATE nodes SET fields=fields || '{"merge_commit":"abcdef1234567"}'::jsonb WHERE id=$1 RETURNING to_jsonb(nodes)`, delivered).Scan(&after); err != nil {
+			return err
+		}
+		if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &delivered, Type: "node.updated", Before: before, After: after}); err != nil {
+			return err
+		}
+		// The old telemetry source remains hidden. Widening the autopilot
+		// policy must not admit run events or unknown automation domains.
+		for _, typ := range []string{"run.telemetry", "status_autopilot.private"} {
+			if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &delivered, Type: typ, After: after}); err != nil {
+				return err
+			}
+		}
+		// Even an allowed automation type must remain hidden if its snapshot
+		// refers to a project this reader cannot see.
+		var crossProject map[string]any
+		if err := json.Unmarshal(after, &crossProject); err != nil {
+			return err
+		}
+		crossProject["fields"] = map[string]any{"dependency": foreignProject}
+		_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &delivered, Type: Changed, After: crossProject})
+		return err
+	})
+	path := "/api/events?briefing=true&since=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + "&type=node.updated,status_autopilot.changed,status_autopilot.skipped,run.telemetry,status_autopilot.private"
+	w := f.call(reader, "GET", path, "", 200)
+	var page struct {
+		Items []events.Event `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 3 {
+		t.Fatalf("project-visible log missing facts or leaking telemetry: %s", w.Body)
+	}
+	seen := map[string]bool{}
+	for _, event := range page.Items {
+		var after node
+		if err := json.Unmarshal(event.After, &after); err != nil {
+			t.Fatal(err)
+		}
+		switch event.Type {
+		case Changed:
+			seen["delivery"] = after.ID == delivered && after.State == "delivered"
+		case "status_autopilot.skipped":
+			seen["skip"] = after.ID == skipped && after.State == "done" && after.HumanCheck != nil && *after.HumanCheck == human
+		case "node.updated":
+			seen["merge"] = after.ID == delivered && fieldString(after, "merge_commit") == "abcdef1234567"
+		default:
+			t.Fatalf("workspace-only domain leaked: %s", event.Type)
+		}
+	}
+	if !seen["delivery"] || !seen["skip"] || !seen["merge"] {
+		t.Fatalf("wrong stored facts: %+v", seen)
+	}
+}
 
 func TestProgressUsesPersistedWorkEvidence(t *testing.T) {
 	f := setup(t)

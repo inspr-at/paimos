@@ -4236,11 +4236,20 @@ paths:
   /events:
     get:
       operationId: listEvents
-      description: Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes.
+      description: >-
+        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a statement_timestamp() window in the same statement snapshot as the first page (commits after the snapshot are not consumed by its cutoff): since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: after, in: query, description: Exclusive event ID, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [id, time]}}
+        - {name: cursor, in: query, description: 'Opaque exclusive (at,id) cursor; requires from/to and enables order=time', schema: {type: string, maxLength: 256}}
+        - {name: briefing, in: query, schema: {type: boolean}, description: 'Establish the first briefing window; excludes from/to, after and cursor.'}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: Previous server cutoff; only with briefing=true.}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: Restrict to events attached to nodes in this visible project.}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: type, in: query, schema: {type: string, maxLength: 1031}, description: Comma-separated exact event types; at most eight names of 1–128 characters each.}
         - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
@@ -6135,7 +6144,7 @@ paths:
       operationId: listApprovals
       description: Workspace readers see their tenant's approvals. Project-only readers see approvals in projects where they hold approvals.read; workspace-level approvals require a workspace binding. agent_name is conditional as documented on Approval.
       security: *auth
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters: [{$ref: '#/components/parameters/Limit'}, {name: pending, in: query, schema: {type: boolean}, description: Only undecided unexpired requests; filtering precedes the limit.}]
       responses:
         '200': {description: Approval requests, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
     post:
@@ -6655,6 +6664,18 @@ paths:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /journey/next-actions:
+    get:
+      operationId: listJourneyNextActions
+      summary: Read derived next actions for a batch of projects
+      description: Person-only snapshot. Reads all projection inputs in one query and derives actions with the existing journey rules. Requires journey.read and journey.act in each project. Invisible or unauthorized projects are omitted. No initialization, mutations or approval decisions.
+      security: *auth
+      parameters:
+        - {name: project_ids, in: query, required: true, schema: {type: string}, description: 'Comma-separated unique project UUIDs; at most 100.'}
+      responses:
+        '200': {description: Current actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [project_node_id, next_action], properties: {project_node_id: {type: string, format: uuid}, next_action: {$ref: '#/components/schemas/JourneyNextAction'}}}}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey:
     get:
       operationId: getProjectJourney
@@ -8383,12 +8404,16 @@ paths:
     get:
       operationId: listOutcomes
       summary: List objective outcome events
-      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id or rules_version is required. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
+      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
         - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
         - {name: session_id, in: query, schema: {type: string, format: uuid}}
+        - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
         - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by this list; retain the same filters.}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
       responses:
         '200': {description: Newest outcomes first, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeList'}}}}
@@ -13859,6 +13884,7 @@ components:
       additionalProperties: false
       required: [outcomes]
       properties:
+        next_cursor: {type: [string, 'null'], description: Continue with the same filters; null at the end.}
         outcomes:
           type: array
           items: {$ref: '#/components/schemas/OutcomeEvent'}
@@ -14909,6 +14935,17 @@ components:
       type: object
       required: [items, next_after]
       properties:
+        next_cursor:
+          type: [string, 'null']
+          description: Exclusive time cursor for order=time or briefing=true pages.
+        window:
+          type: object
+          required: [from, to, first, capped]
+          properties:
+            from: {type: string, format: date-time}
+            to: {type: string, format: date-time}
+            first: {type: boolean}
+            capped: {type: boolean}
         items:
           type: array
           items:

@@ -81,6 +81,37 @@ makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
 
+## Morning briefing
+
+People can open **Morning briefing** on Projects or `/briefing`. The daily
+in-app reminder uses a chosen time in the device's local timezone (08:00 by
+default). It reads existing completion and release outcomes, delivered-state
+and recorded ticket merge evidence, Status autopilot deliveries and skipped
+human checks, failed reviews/CI, current approvals, held human
+requests and available journey decisions. Each fact links to its item and source.
+The suggested next step is one of those person actions or recorded findings.
+
+The first visit covers 24 hours; later visits start at that person's saved
+briefing visit. The database statement start establishes the window alongside the first
+event page; only complete successful log reads advance the saved server cutoff.
+Denied logs, failed logs and log pagination limits retain the earlier cutoff.
+Pending approvals, held requests, journey actions and usage are separate current
+snapshots: their page limits or failures do not freeze completed log windows.
+Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
+there is no new activity tracking or generated narrative.
+
+Usage requires `harness.read`. Its API list value is approximate, includes
+lifetime usage of sessions **started** in the window, and is not interval spend
+or an invoice. Recorded ticket totals reuse the planning columns' measured and
+estimated figures and Paid semantics; account budget windows describe current
+reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+`harness.read`, using the workspace dashboard only for a workspace grant; source
+links appear only after successful reads. Merge facts use changes to a ticket’s
+recorded `fields.merge_commit`, available under project visibility; PR URLs alone
+do not count as merges. The visit-bounded autopilot log must also load completely
+before the cutoff advances. Journey next actions use one batch snapshot query.
+This slice delivers the in-app briefing; e-mail, push and spoken delivery remain future work.
+
 ## Link a vendor account to yourself
 
 On a paired computer, select your enrolled login with `paimos use` as usual.
