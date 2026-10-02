@@ -3,16 +3,19 @@ package decisiondesk
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (f *fixture) notices(t *testing.T, limit int) []Item {
@@ -164,6 +167,100 @@ func TestClaimWaitsForHeldOpenDeactivation(t *testing.T) {
 				t.Fatalf("deactivated recipient retained a claim: %d %v", count, err)
 			}
 		})
+	}
+}
+
+func TestClaimWaitsForProjectAccessMutationWithoutTenantInversion(t *testing.T) {
+	f := setup(t)
+	q := f.ask(t, f.project, "paused", []string{f.ticket})
+	page := f.page(t, f.reader, 100, nil)
+	if len(page.Items) != 1 || page.Items[0].ID != q.ID || !page.Items[0].Held {
+		t.Fatal("fixture must retain an authorized, unclaimed held question")
+	}
+	item := page.Items[0]
+	// Pause the real project-member DELETE after it owns the tree fence but
+	// before LockProjectMutation acquires tenant UPDATE. The claim must wait
+	// on that tree without owning tenant SHARE and preventing DELETE's progress.
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
+		return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+	})
+	ctx, cancel := context.WithCancel(db.AllProjects(ctx, "project access notification regression"))
+	defer cancel()
+	mux := http.NewServeMux()
+	authz.New(pool).Mount(mux)
+	r := httptest.NewRequest(http.MethodDelete, "/api/projects/"+f.project+"/members/"+f.reader.ID, nil).
+		WithContext(tenant.WithPrincipal(ctx, f.person))
+	w := httptest.NewRecorder()
+	mutationDone := make(chan struct{})
+	go func() {
+		defer close(mutationDone)
+		mux.ServeHTTP(w, r)
+	}()
+	mutationPID := barrier.Wait(t, ctx)
+
+	claimDone := make(chan struct{})
+	var won bool
+	var claimErr error
+	go func() {
+		defer close(claimDone)
+		claimErr = db.InTenant(ctx, f.d.App, f.reader.TenantID, func(tx pgx.Tx) error {
+			var err error
+			won, err = ClaimTx(ctx, tx, f.reader, item)
+			return err
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		barrier.Release()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		dbtest.Await(t, cleanupCtx, mutationDone)
+		dbtest.Await(t, cleanupCtx, claimDone)
+	})
+	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, mutationPID, claimDone); lock != "advisory" {
+		t.Fatalf("claim did not overlap the project's tree fence: lock=%q", lock)
+	}
+	// NOWAIT proves the ordering at the observed overlap, without depending on
+	// the deadlock detector's timing or choice of victim. The paused mutation
+	// has no tenant lock yet, so only an inverted claim could block this probe.
+	probe, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Rollback(context.Background())
+	if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.reader.TenantID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+			t.Fatal("claim waiting for tree already holds tenant fence (SQLSTATE 55P03)")
+		}
+		t.Fatalf("unexpected tenant lock probe failure: %v", err)
+	}
+	if err := probe.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	dbtest.Await(t, ctx, mutationDone)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("project access removal failed: %d %s", w.Code, w.Body.String())
+	}
+	dbtest.Await(t, ctx, claimDone)
+	if claimErr != nil || won {
+		t.Fatalf("claim survived committed project access removal: %t %v", won, claimErr)
+	}
+	var bindings, claims int
+	if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$3`, f.reader.TenantID, f.reader.ID, f.project).Scan(&bindings); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM desk_notification_claims WHERE tenant_id=$1 AND recipient_id=$2 AND item_id=$3`, f.reader.TenantID, f.reader.ID, item.ID).Scan(&claims); err != nil {
+		t.Fatal(err)
+	}
+	if bindings != 0 || claims != 0 {
+		t.Fatalf("revoked recipient retained a binding or claim: bindings=%d claims=%d", bindings, claims)
+	}
+	// An authorized recipient can still claim this exact source/revision: the
+	// denial must be caused by committed access removal, not missing held work.
+	if won, err := f.claim(t, f.person, item); err != nil || !won {
+		t.Fatalf("access removal lost the held source for other recipients: %t %v", won, err)
 	}
 }
 
