@@ -52,6 +52,8 @@ code fail with exit 1, malformed inputs with exit 2. The map covers deploy
 Compose, root/web embeds, web configuration and end-to-end tests as well as
 the original nine areas. Assigned context files also require manifest entries;
 use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
+Account quota privacy policy and its tests (`internal/accountprivacy/**`)
+belong to S1, alongside agent accounts and authorization.
 
 ```bash
 AUDIT_DIR=tmp/code-health
