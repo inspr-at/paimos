@@ -453,3 +453,85 @@ func TestPlanningResidencyAliasesMatchDispatchPlacement(t *testing.T) {
 		})
 	}
 }
+
+// Unlike newPrincipal, startup creates its tenant through EnsureTenant and does
+// not explicitly call SeedKinds. Exercise the real bootstrap path under RLS.
+func TestStartupTenantWorkKindsAndPlanning(t *testing.T) {
+	reset(t)
+	ctx := t.Context()
+	if err := db.EnsureTenant(ctx, appPool, "startup-placement", "Startup"); err != nil {
+		t.Fatal(err)
+	}
+	p := tenant.Principal{Kind: tenant.Person, Name: "Startup admin", Roles: []string{"admin"}}
+	if err := appPool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug='startup-placement'`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person',$2,$3) RETURNING id::text`, p.TenantID, p.Name, p.Roles).Scan(&p.ID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindLegacy(t, testDB, p.TenantID, p.ID)
+	// Registry seeding is separate from kind seeding, as in normal first use.
+	code, raw := callAs(t, modelregistry.New(appPool), &p, "GET", "/api/models", "")
+	if code != 200 {
+		t.Fatalf("registry: %d %s", code, raw)
+	}
+	kind := kindBySlug(t, p, "ticket")
+	explicit := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Explicit backend","fields":{"area":"backend","route_role":"build","estimate_hours":2}}`, kind.ID))
+	suggested := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"RLS permissions migration","fields":{"estimate_hours":2}}`, kind.ID))
+	fields := routeFieldMap(t, suggested.Fields)
+	if fields["area"] != "security" || fields["area_source"] != "suggested" || fields["route_role"] != "build-hard" {
+		t.Fatal("startup classifier lost work kind", fields)
+	}
+	views := planningOf(t, p, "/api/nodes?kind=ticket&sort=tokens&limit=100")
+	for _, n := range []nodeJSON{explicit, suggested} {
+		v := views[n.Key]
+		if v == nil || v.Route == nil || v.Route.Profile == "" || v.RouteGap != "" || v.Tokens.Estimated == nil {
+			t.Fatalf("startup route %s: %+v", n.Key, v)
+		}
+	}
+}
+
+func TestPlanningLookupWorkSharedWithinReadTransaction(t *testing.T) {
+	w := planningSetup(t)
+	for i, area := range []string{"backend", "frontend"} {
+		for j, role := range []string{"build", "build-hard"} {
+			for k, complexity := range []string{"M", "L"} {
+				placementNode(t, w, fmt.Sprintf("CACHE-%d", i*4+j*2+k+1), map[string]any{"area": area, "route_role": role, "complexity": complexity, "estimate_hours": 2})
+			}
+		}
+	}
+	for _, order := range []string{"key", "tokens", "model"} {
+		tracer := &ticketGraphTracer{}
+		pool := tracedPool(t, tracer)
+		code, body := callAs(t, New(pool, nil), &w.admin, "GET", "/api/nodes?within="+w.root.ID+"&kind=ticket&limit=100&sort="+order, "")
+		page := decode[nodePage](t, code, body, 200)
+		if len(page.Items) != 8 {
+			t.Fatalf("%s rows: %d", order, len(page.Items))
+		}
+		for _, item := range page.Items {
+			if item.Planning == nil || item.Planning.Route == nil {
+				t.Fatalf("%s missing route: %+v", order, item)
+			}
+			want := "claude-opus-high"
+			if routeFieldMap(t, item.Fields)["route_role"] == "build-hard" {
+				want = "codex-astra-xhigh"
+			}
+			if item.Planning.Route.Profile != want {
+				t.Fatal("cache mixed roles", item.Planning.Route)
+			}
+		}
+		calls := tracer.snapshot()
+		for marker, want := range map[string]int{
+			"WHERE r.role = $1": 2,
+			"SELECT id::text,slug,label,hint,project_id::text,system,position FROM work_kinds": 2,
+			"SELECT coalesce(cp.linked_to,cp.id) FROM principals cp WHERE cp.id=($1)":          1,
+			"SELECT n.id::text, '' AS parent":                                                  1,
+		} {
+			if got := countMarker(calls, marker); got != want {
+				t.Errorf("%s %q: %d queries, want %d", order, marker, got, want)
+			}
+		}
+	}
+}

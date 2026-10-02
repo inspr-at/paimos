@@ -5,6 +5,8 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"gopkg.in/yaml.v3"
 )
 
 func TestCanonicalRouteFields(t *testing.T) {
@@ -211,4 +214,42 @@ func routeFieldMap(t *testing.T, raw []byte) map[string]any {
 		t.Fatal(err)
 	}
 	return fields
+}
+
+func TestTicketRoleContractMatchesWritableSchema(t *testing.T) {
+	p := newPrincipal(t, "role-contract")
+	data, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Enum []any `yaml:"enum"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	advertised := doc.Components.Schemas["TicketRouteFields"].Properties["route_role"].Enum
+	if len(advertised) == 0 {
+		t.Fatal("missing route role contract")
+	}
+	for _, slug := range []string{"ticket", "task"} {
+		var schema struct {
+			Properties map[string]struct {
+				Enum []any `json:"enum"`
+			} `json:"properties"`
+		}
+		kind := kindBySlug(t, p, slug)
+		if err := json.Unmarshal(kind.FieldSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(advertised, schema.Properties["route_role"].Enum) {
+			t.Fatalf("%s role contract %v != writable schema %v", slug, advertised, schema.Properties["route_role"].Enum)
+		}
+	}
 }
