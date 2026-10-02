@@ -226,6 +226,9 @@ jobs:
     needs: [image-platform]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Preserve the original publishing environment and any coordinator gates.
+    # Pin proposals use their own completion job in this same boundary.
+    environment: release-pinning
     permissions:
       contents: write
       packages: write

@@ -104,6 +104,9 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 		t.Fatal("assets must wait for signed binaries and validation, independently of pin proposals")
 	}
 	image := w.Jobs["image"]
+	if image.Environment != "release-pinning" {
+		t.Fatal("index publication must retain its original environment boundary")
+	}
 	if image.Outputs["digest"] != "${{ steps.push.outputs.digest }}" || image.Outputs["version"] != "${{ steps.version.outputs.version }}" {
 		t.Fatal("missing image outputs")
 	}
