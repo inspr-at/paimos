@@ -102,7 +102,7 @@ func loadPolicy(ctx context.Context, r *Repository, commit string) (policy, erro
 			}
 			shard, e1 := strconv.Atoi(f[0])
 			ms, e2 := strconv.Atoi(f[1])
-			if e1 != nil || e2 != nil || ms < 0 || shard < 1 || shard > count || !strings.HasPrefix(f[2], "github.com/inspr-at/paimos/") {
+			if e1 != nil || e2 != nil || ms < 0 || shard < 1 || shard > count || (f[2] != "github.com/inspr-at/paimos" && !strings.HasPrefix(f[2], "github.com/inspr-at/paimos/")) {
 				return policy{}, fmt.Errorf("invalid trusted shard identity")
 			}
 			test := ""

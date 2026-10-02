@@ -100,6 +100,7 @@ func files() map[string]string {
 		}
 		fmt.Fprintln(&rows, "1 0 github.com/inspr-at/paimos/internal/split TestFirst")
 		fmt.Fprintln(&rows, "2 0 github.com/inspr-at/paimos/internal/split TestSecond")
+		fmt.Fprintln(&rows, "2 0 github.com/inspr-at/paimos")
 		out[path] = rows.String()
 	}
 	return out
