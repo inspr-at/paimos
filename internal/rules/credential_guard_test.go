@@ -84,9 +84,11 @@ func publicationCredentialForms() map[string]string {
 		"cloud-small-caps": "\u1d00\u1d0b\u026a\u1d00" + strings.Repeat("AB12", 4),
 		"cloud-iota":       "AK\u0196A" + strings.Repeat("AB12", 4),
 		"cloud-mixed":      "\u1d00\u1d0b\u0196\u1d00" + strings.Repeat("AB12", 4),
-		"pem-small-caps":   "-----\u0299EGIN RSA PR\u026aVATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
-		"pem-iota":         "-----BEG\u0196N RSA PR\u0196VATE KEY-----\nsynthetic-only\n-----END RSA PRIVATE KEY-----",
-		"jwt-small-caps":   "ey\u1d0a" + strings.Repeat("a", 8) + ".ey\u1d0a" + strings.Repeat("b", 8) + "." + strings.Repeat("c", 8),
+		// Single-line PEM fixtures reach the credential guard in bounded rule
+		// fields, which reject newlines before the publication boundary.
+		"pem-small-caps": "-----\u0299EGIN RSA PR\u026aVATE KEY----- synthetic-only -----END RSA PRIVATE KEY-----",
+		"pem-iota":       "-----BEG\u0196N RSA PR\u0196VATE KEY----- synthetic-only -----END RSA PRIVATE KEY-----",
+		"jwt-small-caps": "ey\u1d0a" + strings.Repeat("a", 8) + ".ey\u1d0a" + strings.Repeat("b", 8) + "." + strings.Repeat("c", 8),
 	}
 }
 
