@@ -145,3 +145,22 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
     assert.deepEqual(evaluate(shardExpression, github, outputs), [1, 2, 3, 4, 5, 6, 7]);
   }
 });
+
+test("key dialog CI passes concurrency limits to each runner and covers the shared access markup", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const e2e = workflow.split("  e2e:\n")[1].split("\n  migration-compat:")[0];
+  assert.match(e2e, /sudo apt-get install -y -qq zsh fish/);
+  assert.ok(e2e.indexOf("Install shells for web unit checks") < e2e.indexOf("Key dialog layout regression"));
+  const step = e2e.split("      - name: Key dialog layout regression\n")[1].split("\n      - name:")[0];
+  const commands = step.split("        run: |\n")[1].trim().split("\n").map(line => line.trim());
+  // npm forwards trailing flags only to the last command in a compound script.
+  // Require each unit runner's own invocation, so Node's file fan-out is bounded too.
+  assert.match(commands[0], /^node .*--test(?: |$)/);
+  assert.match(commands[0], /(?:^| )--test-concurrency=1(?: |$)/);
+  assert.match(commands[0], /grep -v '\\.unit\\.test\\.ts\$'/);
+  assert.match(commands[1], /^npx vitest run \.unit\.test\.ts --maxWorkers=1$/);
+  assert.match(commands[2], /playwright .*tests\/key-layout\.spec\.ts --workers=1$/);
+  const accessStep = workflow.split("      - name: Access dialog regressions (hosted only)\n")[1].split("\n      - name:")[0];
+  assert.match(accessStep, /tests\/access\.spec\.ts/);
+  assert.match(accessStep, /tests\/key-dialog\.spec\.ts/);
+});

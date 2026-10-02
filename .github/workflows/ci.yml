@@ -494,6 +494,14 @@ jobs:
       - name: Install Playwright
         working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Install shells for web unit checks
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+      - name: Key dialog layout regression
+        working-directory: web
+        run: |
+          node --experimental-strip-types --test --test-concurrency=1 $(ls tests/*.test.ts | grep -v '\.unit\.test\.ts$')
+          npx vitest run .unit.test.ts --maxWorkers=1
+          npx playwright test -c playwright.ui.config.ts tests/key-layout.spec.ts --workers=1
       - name: Start server and run smoke
         run: |
           set -euo pipefail
