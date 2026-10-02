@@ -858,6 +858,8 @@ remaining credit unknown, and an unavailable measurement does not invalidate a
 locally configured key. No /credits request or management key is introduced;
 null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
 An explicit zero key cap stays exhausted even when `/key` omits remaining.
+Legacy Pi credit probes also populate the durable key facts, so replacing the
+credit snapshot with a null cap cannot erase a previously confirmed stop.
 Readings with room expire after ten minutes; quota at 100%, zero key caps and
 vendor stops keep blocking until their own reset or newer same-window room
 evidence. Null checks retain the stop's original observation time and cannot
