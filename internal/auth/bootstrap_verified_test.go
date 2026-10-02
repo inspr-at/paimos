@@ -34,7 +34,11 @@ func TestBootstrapResolverRequiresVerifiedEmail(t *testing.T) {
 		t.Fatalf("later subject: %v", err)
 	}
 	for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
-		if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != 1 {
+		want := 1
+		if table == "principals" {
+			want = 2
+		} // Person plus the system audit actor.
+		if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != want {
 			t.Fatalf("%s: got %d, want only the verified member", table, n)
 		}
 	}
@@ -96,8 +100,12 @@ func TestBootstrapCallbackRequiresVerifiedEmail(t *testing.T) {
 				count = 1
 			}
 			for _, table := range []string{"identities", "principals", "role_bindings", "sessions"} {
-				if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != count {
-					t.Fatalf("%s: %d rows, want %d", table, n, count)
+				want := count
+				if table == "principals" && count == 1 {
+					want = 2
+				} // Person plus the system audit actor.
+				if n := scalar(t, adminPool, `SELECT count(*) FROM `+table); n != want {
+					t.Fatalf("%s: %d rows, want %d", table, n, want)
 				}
 			}
 		})

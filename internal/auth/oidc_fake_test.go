@@ -58,6 +58,7 @@ func startFakeOIDC(t *testing.T, clientID string) *fakeOIDC {
 func (f *fakeOIDC) allow(code, challenge, nonce, subject, email, name string, badNonce bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	verified := true
 	f.codes[code] = pendingCode{
 		challenge:     challenge,
 		nonce:         nonce,
@@ -65,11 +66,9 @@ func (f *fakeOIDC) allow(code, challenge, nonce, subject, email, name string, ba
 		email:         email,
 		name:          name,
 		badNonce:      badNonce,
-		emailVerified: newTrue(),
+		emailVerified: &verified,
 	}
 }
-
-func newTrue() *bool { v := true; return &v }
 
 func (f *fakeOIDC) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {

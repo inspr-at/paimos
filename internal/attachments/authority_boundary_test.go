@@ -81,7 +81,7 @@ func TestAttachmentMutationRechecksLiveAuthority(t *testing.T) {
 				var source, destination, role, attachment string
 				if err := db.InTenant(dbtest.Seed(ctx), d.App, p.TenantID, func(tx pgx.Tx) error {
 					for i, project := range []*string{&source, &destination} {
-						key := []string{"SRC", "DST"}[i]
+						key := []string{"SRC-1", "DST-1"}[i]
 						if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,$2,id,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, p.TenantID, key).Scan(project); err != nil {
 							return err
 						}

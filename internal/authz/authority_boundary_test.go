@@ -54,7 +54,7 @@ func newAuthorityFixture(t *testing.T) authorityFixture {
 		if _, err := tx.Exec(ctx, `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by) VALUES($1,'invited@example.com',$2,decode(repeat('ab',32),'hex'),now()+interval '1 day',$3)`, tid, f.role, f.actor.ID); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AUTH',id,'Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&f.project)
+		return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AUTH-1',id,'Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&f.project)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestProjectAssignmentReadsRoleAfterAuthorityLock(t *testing.T) {
 			go func() {
 				done <- db.InTenant(ctx, f.d.App, f.actor.TenantID, func(tx pgx.Tx) error {
 					started <- tx.Conn().PgConn().PID()
-					_, err := New(f.d.App).setProjectBindingTx(ctx, tx, f.actor, f.project, f.target, f.role, false)
+					_, err := (&Module{pool: f.d.App}).setProjectBindingTx(ctx, tx, f.actor, f.project, f.target, f.role, false)
 					return err
 				})
 			}()
