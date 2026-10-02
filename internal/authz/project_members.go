@@ -166,33 +166,31 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 	return nil
 }
 
-// LockProjectMutation fences project-scoped writes against tree moves and
-// access changes. Lock order is tree (advisory seed 0), tenant row, then resource
+// LockProjectMutation fences project-scoped writes against access changes and
+// tree moves. Lock order is tenant row, tree (advisory seed 0), then resource
 // rows. Call before reading the target or any grants and hold through commit;
-// never hold these locks while reading a request body. Access-only writers may
-// take just the tenant row, but must not subsequently acquire the tree lock.
+// never hold these locks while reading a request body. NO KEY UPDATE leaves
+// tenant FK key-share locks compatible so resource/event writers can finish.
 func LockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
-		return err
-	}
 	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id); err != nil {
 		return err
 	}
-	return nil
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID)
+	return err
 }
 
-// LockProjectWrite holds project placement and authority steady for a resource
-// write that does not change bindings. Tree precedes tenant, as for membership
-// edits, but SHARE suffices to fence their UPDATE lock. It remains compatible
-// with tenant FK key-share locks taken by other resource/event writers: those
-// writers can finish without a resource-row/tenant-FK deadlock.
+// LockProjectWrite holds authority and project placement steady for a resource
+// write that does not change bindings. Tenant SHARE precedes the tree lock and
+// fences membership mutations while remaining compatible with tenant FK
+// key-share locks taken by resource/event writers.
 func LockProjectWrite(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, tenantID).Scan(&id); err != nil {
 		return err
 	}
-	var id string
-	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, tenantID).Scan(&id)
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID)
+	return err
 }
 
 func bindableTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) error {

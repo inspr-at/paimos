@@ -32,7 +32,7 @@ func makeRegistry() []Permission {
 		{"journey", "read act manage"}, {"requirements", "read write agree"},
 		{"releases", "read write deploy"}, {"intake", "read write decide"},
 		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage recover force_stop watch"},
-		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
+		{"autopilot", "read manage pause"}, {"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
@@ -74,7 +74,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "autopilot.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"questions.decide", "approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
@@ -156,7 +156,7 @@ func builtinPermissions(key string) []string {
 
 func productReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
+	case "autopilot", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
 		return true
 	}
 	return false
