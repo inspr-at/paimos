@@ -36,6 +36,11 @@ var workflowConcurrency = map[string]map[string]any{
 	"release-image-check.yml": {
 		"group": `release-image-check-${{ github.ref }}`, "cancel-in-progress": true,
 	},
+	// Completion serializes both tag callers and main dispatches by the same
+	// tag, in a namespace distinct from its release.yml caller and CI.
+	"release-completion.yml": {
+		"group": `release-completion-${{ inputs.tag }}`, "cancel-in-progress": false,
+	},
 }
 
 var reservedCIJobs = map[string]bool{
@@ -131,7 +136,7 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 		reject("pull_request_target is forbidden")
 	}
 	if concurrency, exists := workflow["concurrency"]; exists {
-		if hasEvent(workflow["on"], "workflow_call") {
+		if hasEvent(workflow["on"], "workflow_call") && name != "release-completion.yml" {
 			reject("reusable workflows must not define concurrency")
 		}
 		group, _ := mapping(concurrency)["group"].(string)
@@ -238,7 +243,18 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 		job := mapping(value)
 		reject := func(reason string) { problems = append(problems, name+"/"+id+": "+reason) }
 		if uses, ok := job["uses"].(string); ok {
-			// Only the hosted-only router has a reviewed reuse boundary. Other
+			// The completion target is protectedJob and checked independently as
+			// hosted-only; only the verified release index may call it. No pool
+			// routing expression is admitted anywhere in that target.
+			if uses == "./.github/workflows/release-completion.yml" && name == "release.yml" && id == "completion" &&
+				reflect.DeepEqual(job["needs"], []any{"image"}) &&
+				reflect.DeepEqual(mapping(job["with"]), map[string]any{
+					"tag": "v${{ needs.image.outputs.version }}", "digest": "${{ needs.image.outputs.digest }}",
+					"index-pushed-at": "${{ needs.image.outputs.pushed_at }}",
+				}) && job["secrets"] == nil {
+				continue
+			}
+			// Only the hosted-only router has the other reviewed reuse boundary. Other
 			// reusable workflows need caller-sensitive analysis before admission:
 			// a hosted-looking release caller could otherwise call routed tests.
 			if uses != "./.github/workflows/test-runner-route.yml" {
@@ -421,7 +437,7 @@ func matrixLabels(job map[string]any, axis string) ([]any, bool) {
 func protectedJob(file, id string, job map[string]any) bool {
 	file = strings.ToLower(file)
 	switch strings.TrimSuffix(file, filepath.Ext(file)) {
-	case "release", "pairing-platform", "test-runner-route":
+	case "release", "release-completion", "pairing-platform", "test-runner-route":
 		return true
 	}
 	name, _ := job["name"].(string)

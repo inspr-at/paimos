@@ -73,6 +73,10 @@ export function prepare(env, run = command, { inspect = true } = {}) {
   const policy = JSON.parse(Buffer.from(policyFile.content, 'base64'));
   if (policy.unpublished_reservations !== undefined && !Array.isArray(policy.unpublished_reservations)) fail('invalid retired reservation policy');
   if (policy.unpublished_reservations?.includes(release.version)) fail('coordinate was retired; completion is forbidden');
+  // AEON-530's ledger is on current main, including for tags made before it.
+  const withdrawn = policy.withdrawn_releases ?? [];
+  if (!Array.isArray(withdrawn) || withdrawn.some(item => !validCalendarVersion(item?.version) || !digestOK(item.digest))) fail('invalid withdrawal policy');
+  if (withdrawn.some(item => item.version === release.version || item.digest === release.digest)) fail('coordinate or digest was withdrawn; completion is forbidden');
   const metadata = api(`repos/${REPOSITORY}/contents/version.json?ref=${release.source_sha}`, false, run);
   if (metadata.type !== 'file' || metadata.encoding !== 'base64' || typeof metadata.content !== 'string') fail('tagged version source missing');
   const version = JSON.parse(Buffer.from(metadata.content, 'base64'));

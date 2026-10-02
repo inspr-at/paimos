@@ -501,7 +501,7 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 
 The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. After index publication, **never rerun the publishing jobs or replace the index**. A late completion failure can use the existing coordinate only through the verified completion stage below. A failed index attestation, changed source or changed artifact set requires a new coordinate. Real registry push/attestation and deployment verification remain coordinator release gates.
 
-After the verified index job succeeds, `release.yml` calls `release-completion.yml`. Its hosted preparation job validates the existing annotated tag, the tag commit's ancestry on current main, tagged `version.json`, the current GHCR coordinate's exact index digest, both runtime/provenance descriptors and the original hosted `release.yml` attestation. Retired coordinates in current main's `unpublished_reservations` are refused. macOS runners then build darwin `paimos-agentd` from that exact source SHA with CGO enabled, sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in `release-signing` (docs/AGENT_INTEGRATION.md, Signed release daemon). They restore and verify an existing uploaded Darwin binary instead of signing it again. The `assets` job waits for both Darwin targets and preparation, builds Linux `paimos-agentd` and all `aeon-cli` targets from the same tagged source, and assembles the nine assets. Pin proposals run independently; their failure cannot block asset assembly.
+After the verified index job succeeds, `release.yml` calls `release-completion.yml`. Its hosted preparation job validates the existing annotated tag, the tag commit's ancestry on current main, tagged `version.json`, the current GHCR coordinate's exact index digest, both runtime/provenance descriptors and the original hosted `release.yml` attestation. Retired coordinates in current main's `unpublished_reservations`, and coordinates/digests in AEON-530's `withdrawn_releases`, are refused. macOS runners then build darwin `paimos-agentd` from that exact source SHA with CGO enabled, sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in `release-signing` (docs/AGENT_INTEGRATION.md, Signed release daemon). They restore and verify an existing uploaded Darwin binary instead of signing it again. The `assets` job waits for both Darwin targets and preparation, builds Linux `paimos-agentd` and all `aeon-cli` targets from the same tagged source, and assembles the nine assets. Pin proposals run independently; their failure cannot block asset assembly.
 
 ### Completion retry and unpublished reservation retry (AEON-532)
 
@@ -561,7 +561,7 @@ node scripts/release-retry.mjs "$NEW_VERSION" "$UTC_RESERVED_AT" --write
 
 The first command is a plan. Both commands perform complete paginated lookups
 including drafts and fail on lookup errors or an index/release at either old or
-new coordinate. The second updates only local `version.json` and the public
+new coordinate, or an already-existing new tag. The second updates only local `version.json` and the public
 notes bundle: it retires the old reservation, retains its capture unchanged,
 and clones that exact capture under the new key. It does not refetch ticket
 text, change the reviewed scope, create a tag or write remotely. An untagged

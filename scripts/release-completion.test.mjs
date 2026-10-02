@@ -44,7 +44,7 @@ function fixture(names = [], { published = false } = {}) {
       if (path.includes('/git/tags/')) return json({ sha: 'd'.repeat(40), tag, object: { type: 'commit', sha: state.tagSource } });
       if (path.endsWith('/git/ref/heads/main')) return json({ ref: 'refs/heads/main', object: { type: 'commit', sha: tooling } });
       if (path.includes('/compare/')) return json({ status: state.ancestry, base_commit: { sha: source }, merge_base_commit: { sha: source } });
-      if (path.includes('/contents/version.json')) return json({ type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify({ product: 'PAIMOS AEON', version: state.version ?? version, version_scheme: 'inspr-calver-3', ...(path.endsWith(tooling) ? { unpublished_reservations: state.retired ?? [] } : {}) })).toString('base64') });
+      if (path.includes('/contents/version.json')) return json({ type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify({ product: 'PAIMOS AEON', version: state.version ?? version, version_scheme: 'inspr-calver-3', ...(path.endsWith(tooling) ? { unpublished_reservations: state.retired ?? [], withdrawn_releases: state.withdrawn ?? [] } : {}) })).toString('base64') });
       if (path.startsWith('orgs/')) return json([[{ name: state.indexDigest, metadata: { container: { tags: [version] } } }]]);
       if (path.includes('/releases/assets/')) return bytes.get(ASSETS[Number(path.split('/').at(-1)) - 1]);
       if (path.includes('/releases/99/assets')) return json([state.assets]);
@@ -100,6 +100,9 @@ for (const [name, mutate] of [
   ['missing architecture', state => state.index.manifests.pop()],
   ['unattested index', state => state.unattested = true],
   ['retired coordinate', state => state.retired = [version]],
+  ['withdrawn coordinate', state => state.withdrawn = [{ version, digest }]],
+  ['withdrawn digest under another tag', state => state.withdrawn = [{ version: '261002110000.0.0', digest }]],
+  ['malformed withdrawal policy', state => state.withdrawn = [{ version: 'bad', digest }]],
 ]) test(`${name} cannot reach asset writes`, () => {
   const f = fixture(); mutate(f.state);
   assert.throws(() => prepare(env(), f.run));
