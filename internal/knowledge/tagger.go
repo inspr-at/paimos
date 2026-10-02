@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/systemactor"
@@ -134,10 +135,52 @@ type tagRun struct {
 var taggerBeforeStamp func(nodeID string)
 
 func tagTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
+	return retryTagTenant(ctx, func() (int, error) {
+		return tagTenantPass(ctx, pool, tenantID)
+	})
+}
+
+// Retry the whole tenant transaction, including its cursor, after a conflict.
+// db.InTenant has rolled back before the backoff, so no locks or partial tags
+// survive into the next attempt. Other errors retain their original meaning.
+func retryTagTenant(ctx context.Context, pass func() (int, error)) (int, error) {
+	const attempts = 3
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		n, err := pass()
+		if err == nil {
+			return n, nil
+		}
+		var pe *pgconn.PgError
+		if attempt == attempts-1 || !errors.As(err, &pe) || (pe.Code != "40P01" && pe.Code != "40001") {
+			return 0, err
+		}
+		timer := time.NewTimer((50 * time.Millisecond) << attempt)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
 	var run tagRun
 	err := db.InTenant(db.AllProjects(ctx, "method learning tagger"), pool, tenantID, func(tx pgx.Tx) error {
 		run = tagRun{}
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true)`); err != nil {
+			return err
+		}
+		// Match delete/updateNode and queue writers: pairing, then tree, then
+		// rows. Node UPDATE triggers also take this tree lock; taking a node
+		// row first can deadlock with the status autopilot's startup pass.
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
 			return err
 		}
 		var tickets, comments, verdicts tagCursor
@@ -184,7 +227,10 @@ func tagTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, e
 			tenantID, tickets.at, tickets.id, comments.at, comments.id, verdicts.at, verdicts.id, verdictsOK)
 		return err
 	})
-	if err == nil && run.skipped > 0 {
+	if err != nil {
+		return 0, err
+	}
+	if run.skipped > 0 {
 		// The count only. The skipped text may be a credential.
 		slog.Info("method learning tagger skipped candidates that look like credentials", "tenant_id", tenantID, "skipped", run.skipped)
 	}
