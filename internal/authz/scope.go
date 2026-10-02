@@ -27,6 +27,7 @@ import (
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/features":                           true,
+	"GET /api/recurrences":                        true,
 	"GET /api/decision-desk":                      true,
 	"GET /api/journey/next-actions":               true,
 	"GET /api/queue":                              true,
@@ -85,6 +86,7 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/recurrences":                          true,
 	"POST /api/queue":                                true,
 	"POST /api/queue/reset":                          true,
 	"POST /api/queue/next":                           true,
@@ -124,6 +126,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["recurrenceId"] != "":
+		return "recurrence", values["recurrenceId"]
 	case values["questionId"] != "":
 		return "node", values["questionId"]
 	case values["nodeId"] != "":
@@ -229,6 +233,11 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	var query string
 	args := []any{id}
 	switch kind {
+	case "recurrence":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		query = `SELECT project_id::text FROM recurrences WHERE id=$1::uuid`
 	case "node":
 		if !uuidPattern.MatchString(id) {
 			return "", nil
