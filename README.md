@@ -1939,7 +1939,16 @@ pricing defaults. Vendor facts are pinned in `internal/servicetier`; account or
 vendor rejection remains authoritative. Usage snapshots retain tier segments and
 their multipliers, and run telemetry records the active tier. Earlier tokens are
 never repriced when a tier changes; vendor billed costs remain vendor costs.
-The UI is delivered separately in part B.
+On Agents, the Tier column uses one small chevron per offered tier. Clicking the
+glyph, or Enter/Space, opens Change tier; plain Left/Right and the hover minus/plus
+step among offered tiers. The eight-second Undo toast cancels an unclaimed change
+or reverses the confirmed change, and refuses an intervening revision or process
+replacement. The session menu and Service tier block open the same picker;
+phones use a full-height sheet with pinned actions. Agent requests can be approved
+or declined in the session panel; Decision Desk integration remains AEON-536.
+Unavailable tiers show their adapter reason, including “not offered: no published
+price”. Unknown prices and model-time baselines remain explicit rather than
+producing last-run estimates from the design fragment's sample numbers.
 
 Regression coverage includes native acknowledgement and Undo, pending replay,
 tenant/project isolation, revoked authority, vendor cooldown and stored costs

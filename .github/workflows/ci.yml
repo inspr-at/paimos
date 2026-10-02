@@ -258,6 +258,9 @@ jobs:
       - name: Browser runner safety (no browsers)
         working-directory: web
         run: npm run test:browser-safety
+      - name: Service tier controls and layout stability
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1
       - working-directory: web
         run: npm run build
       - name: Access scope and role helper tests
