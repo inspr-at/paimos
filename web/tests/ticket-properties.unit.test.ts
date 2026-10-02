@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 // The real properties and hours components run in Vue's in-memory host. The
 // browser spec separately measures the controls' pixel bounds in both layouts.
-type Node = { tag: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
+type Node = { tag: string; props: Record<string, unknown>; children: Node[]; parent: Node | null; onInsert?: () => void }
 const node = (tag: string): Node => ({ tag, props: {}, children: [], parent: null })
 function detach(child: Node) {
   const siblings = child.parent?.children
@@ -19,7 +19,12 @@ const renderer = Vue.createRenderer<Node, Node>({
   setText() {}, setElementText() {}, parentNode: child => child.parent,
   nextSibling: child => child.parent?.children[child.parent.children.indexOf(child) + 1] ?? null,
   patchProp: (el, key, _old, value) => { el.props[key] = value }, remove: detach,
-  insert: (child, parent, anchor) => { detach(child); child.parent = parent; const i = anchor ? parent.children.indexOf(anchor) : -1; if (i < 0) parent.children.push(child); else parent.children.splice(i, 0, child) },
+  insert: (child, parent, anchor) => {
+    detach(child); child.parent = parent
+    const i = anchor ? parent.children.indexOf(anchor) : -1
+    if (i < 0) parent.children.push(child); else parent.children.splice(i, 0, child)
+    for (let current: Node | null = parent; current; current = current.parent) current.onInsert?.()
+  },
 })
 function component(path: string, modules: Record<string, unknown>): Vue.Component {
   const source = readFileSync(new URL(`../src/components/${path}.vue`, import.meta.url), 'utf8')
@@ -60,6 +65,11 @@ it.each(['column', 'row'])('late logged hours leave the %s placement control pre
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
   })
   const root = node('root')
+  let hoursInserted!: () => void
+  const renderedHours = new Promise<void>(resolve => { hoursInserted = resolve })
+  root.onInsert = () => {
+    if (flatten(root).some(el => String(el.props.class).includes('ticket-hours'))) hoursInserted()
+  }
   const app = renderer.createApp({ render: () => Vue.h(props, { layout, editable: true, now: 0, item: { id: 'ticket', kind_slug: 'ticket', fields: {}, state: 'open', created_at: '', updated_at: '' } }) })
   app.component('RouterLink', { setup: (_props, { slots }) => () => Vue.h('a', slots.default?.()) })
   app.mount(root)
@@ -75,9 +85,7 @@ it.each(['column', 'row'])('late logged hours leave the %s placement control pre
     }
     const before = controls.map(prefix)
     releaseTotals()
-    await totals
-    await Promise.resolve()
-    await Vue.nextTick()
+    await renderedHours
     expect(flatten(root).filter(el => String(el.props.class).includes('ticket-hours'))).toHaveLength(1)
     for (const [i, control] of controls.entries()) expect(prefix(control)).toEqual(before[i])
   } finally { app.unmount() }
