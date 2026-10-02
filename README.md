@@ -2339,8 +2339,10 @@ messages or claim successful delivery. Always/Requirement/Doctrine publication,
 verified handover sources and post-dispatch corrections require the later adapters;
 unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
 
-Release image publication compares the pushed runtime image ID with the image
-that passed smoke before attestation and release index publication. An image ID
-binds runtime configuration and the ordered rootfs layer identities; provenance
-index digests are intentionally not compared. The PDF visual diff gate returns
+Release image publication compares architecture, OS, variant, ordered rootfs
+diff IDs and runtime configuration from `docker image inspect` between the pushed
+image and the image that passed smoke, before attestation and release index
+publication. Both exports share `SOURCE_DATE_EPOCH` from
+`git show -s --format=%ct HEAD`; image IDs, `created`, history and provenance index
+digests are not compared. The PDF visual diff gate returns
 exit 2 for any missing page, including blank pages, independently of pixel tolerance.
