@@ -212,6 +212,27 @@ func TestUIProjectRecurrenceEventsPreserveVisibilityBoundaries(t *testing.T) {
 	}
 	ctx := tenant.WithPrincipal(t.Context(), reader)
 	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
+		var priorVisibility, afterVisibility string
+		if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects')`).Scan(&priorVisibility); err != nil {
+			return err
+		}
+		snapshot, err := json.Marshal(tagged)
+		if err != nil {
+			return err
+		}
+		var refs []string
+		if err := tx.QueryRow(ctx, `SELECT aeon_recurrence_event_node_refs($1,'recurrence.updated',$2,$2)::text[]`, reader.TenantID, snapshot).Scan(&refs); err != nil {
+			return err
+		}
+		if len(refs) != 0 {
+			t.Errorf("workspace tags alone produced visibility references %v", refs)
+		}
+		if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects')`).Scan(&afterVisibility); err != nil {
+			return err
+		}
+		if afterVisibility != priorVisibility {
+			t.Fatal("workspace-tag classification widened caller visibility")
+		}
 		rows, err := tx.Query(ctx, `SELECT id FROM events WHERE id=ANY($1::bigint[]) ORDER BY id`, ids)
 		if err != nil {
 			return err
