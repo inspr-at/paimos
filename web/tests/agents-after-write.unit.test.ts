@@ -115,7 +115,8 @@ async function writeDuringReads(write: (stores: { agents: ReturnType<typeof useA
   await Promise.all([agents.loadAll(), capacity.load(), agents.refreshAgentRuns('agent')])
   hold = true
   const old = Promise.all([agents.loadAll(), capacity.load(), agents.refreshAgentRuns('agent')])
-  await vi.waitFor(() => expect(held.length).toBe(7))
+  // Accounts, runs, agent runs and the three capacity reads; no unused desk read.
+  await vi.waitFor(() => expect(held.length).toBe(6))
   hold = false
   await write({ agents, capacity })
   await settle()

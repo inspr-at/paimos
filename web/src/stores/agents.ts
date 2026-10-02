@@ -13,9 +13,7 @@ import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSession
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { managedControlSession } from '../lib/managedControl'
-import { usePolledData, initialRefreshStatus } from '../lib/usePolledData'
-import { onAccessChange } from '../lib/authz'
-import { readDeskProjection, type DeskProjection } from '../lib/decisionDesk'
+import { usePolledData } from '../lib/usePolledData'
 import { useProjects } from './projects'
 import { useAgentAppearance } from '../lib/agentAppearance'
 import { carry, createReadOrder, lowestPosition, onReset, positionOf, readOrdered, stampAt, tick as requestTick, type ReadOrder } from '../lib/position'
@@ -170,12 +168,6 @@ export const useAgents = defineStore('agents', () => {
   let loadFlight: Promise<void> | undefined
   const approvalsRead = usePolledData(listApprovals, [] as Approval[], undefined, { order: createReadOrder() })
   const approvals = approvalsRead.data
-  const deskRead = usePolledData(() => readDeskProjection(1), null as DeskProjection | null)
-  const deskProjection = deskRead.data
-  const deskState = computed(() => deskRead.status.value.state)
-  const clearDesk = () => { deskRead.invalidate(); deskProjection.value = null; deskRead.status.value = initialRefreshStatus(); needsAt = 0 }
-  onReset(clearDesk)
-  onAccessChange(clearDesk)
   const approvalsState = computed(() => approvalsRead.status.value.state)
   const approvalsError = computed(() => approvalsRead.status.value.error)
   const approvalsHardError = computed(() => approvalsRead.status.value.state === 'error')
@@ -217,7 +209,7 @@ export const useAgents = defineStore('agents', () => {
   })
   const initialRuns: Paged<AgentRun> = { items: [], next_cursor: null }
   const runsRead = usePolledData(() => listRuns({ limit: 200 }), initialRuns, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
-  const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || deskRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
+  const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------
   const refreshApprovals = approvalsRead.refresh
@@ -269,7 +261,7 @@ export const useAgents = defineStore('agents', () => {
     loading.value = true
     loadFlight = (async () => {
         // Sessions do not wait for optional project or account metadata.
-        await Promise.all([projects.load(), refreshApprovals(), deskRead.refresh(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
+        await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
         await Promise.all([refreshMessaging(), resourceNodes()])
         loaded.value = true
         needsAt = Date.now()
@@ -280,7 +272,7 @@ export const useAgents = defineStore('agents', () => {
   async function loadNeeds(force = false) {
     if (!force && Date.now() - needsAt < 30_000) return
     needsAt = Date.now()
-    await Promise.all([projects.load(), refreshApprovals(), refreshSessions(), deskRead.refresh()])
+    await Promise.all([projects.load(), refreshApprovals(), refreshSessions()])
     await refreshMessaging(force)
     now.value = Math.max(now.value, Date.now())
   }
@@ -439,7 +431,7 @@ export const useAgents = defineStore('agents', () => {
     writeReaders.add(reader)
     return () => { writeReaders.delete(reader) }
   }
-  function invalidatePolls() { sessionsRead.invalidate(); approvalsRead.invalidate(); deskRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() }
+  function invalidatePolls() { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() }
   let rereadAfterWrite: Promise<void> | undefined
   // Every write raises the floor in api(), so a read the server ordered by position
   // that started before it is read again or dropped by its data. Superseding is for
@@ -452,7 +444,7 @@ export const useAgents = defineStore('agents', () => {
     // Writes in one burst (a bulk removal) share one re-read.
     rereadAfterWrite ??= new Promise<void>(resolve => setTimeout(resolve)).then(async () => {
       rereadAfterWrite = undefined
-      await Promise.allSettled([refreshSessions(), refreshApprovals(), deskRead.refresh(), refreshAccounts(), refreshModels(), refreshRuns(), refreshMessaging(true), ...[...writeReaders].map(reader => reader.refresh())])
+      await Promise.allSettled([refreshSessions(), refreshApprovals(), refreshAccounts(), refreshModels(), refreshRuns(), refreshMessaging(true), ...[...writeReaders].map(reader => reader.refresh())])
       now.value = Math.max(now.value, Date.now())
     })
     return rereadAfterWrite
@@ -556,7 +548,7 @@ export const useAgents = defineStore('agents', () => {
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
-    loading, loaded, pending, held, needsCount, deskProjection, deskState, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
+    loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,

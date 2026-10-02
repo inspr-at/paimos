@@ -80,7 +80,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
         ] : [], truncated: false } }
       },
     },
-    '../lib/decisionDesk': { loadDeskProjection: async () => {
+    '../lib/decisionDesk': { readDeskProjection: async () => {
       paths.push('/decision-desk/projection?limit=100')
       if (options.pendingFailure) throw new APIError(500, 'failed')
       const items = options.noDecide ? [{ id: 'cannot-decide', kind: 'approval', title: 'Change tickets', held: true, href: '/agents?needs=a:cannot-decide', source: '/agents?needs=a:cannot-decide' }] : options.fullQueue ? [{ id: 'question', kind: 'question', title: 'Ordinary question', held: false, href: '/agents?needs=q:question', source: '/api/questions/question' }] : []
