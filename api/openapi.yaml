@@ -8575,7 +8575,7 @@ components:
       required: [kind]
       properties:
         kind: {type: string, enum: [time, event]}
-        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
+        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1). Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
         time_of_day: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', description: Time only; HH:MM wall time.}
         timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}

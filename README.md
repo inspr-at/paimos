@@ -18,12 +18,27 @@ server-owned schedules. Create reads a JSON definition from stdin or
 `expected_revision`. Pause/resume accept `--revision`, or read the current
 revision before writing. Run now requires `--idempotency-key` so retries return
 the original occurrence receipt. Named instances and `--json` work as usual.
+Create and update also accept repeatable `--tag NAME|UUID`, resolved in the
+target project or workspace and added to the JSON template's tags.
+`--description-file FILE` replaces the template description;
+`--criteria-file FILE` replaces its criteria with one nonblank criterion per
+line. Other template fields remain as supplied in JSON. Only one input can
+read stdin (`-`). For example:
+
+```sh
+aeon recur create --body-file audit.json --tag website-audit \
+  --description-file playbook.txt --criteria-file checklist.txt
+```
 
 A definition names a project and an immutable parent, a ticket/task template,
 and a trigger. Time triggers accept `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,FR`, or
 `FREQ=MONTHLY;BYMONTHDAY=1,-1`, plus `time_of_day` (`HH:MM`), an IANA `timezone`,
 and an optional `start_date` (defaults to today's local date). Omitted weekday
-or month-day comes from that start date; other RRULE parts are rejected. Invalid
+or month-day comes from that start date. Monthly rules also allow `INTERVAL=1`,
+`2`, `3` or `6` (default `1`), stepping from the month of `start_date`; daily
+and weekly rules reject `INTERVAL`. For example,
+`FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1` runs on the last day every three months.
+Other RRULE parts are rejected. Invalid
 month dates and spring gaps are skipped; a repeated fall time uses its first
 instant. Preview uses the same calendar and returns UTC timestamps without
 writing anything, including while paused. Event triggers use
@@ -69,6 +84,11 @@ occurrence number. Resume discards work accumulated while paused; manual run
 now is allowed while paused and does not move the schedule. Queueing reuses
 queue readiness, work orders and the inert queue holder, awaiting coordinator
 routing. It requires a positive estimate and acceptance criteria.
+Each tenant pass attempts at most 50 due rows. A failing row rolls back,
+records a `recurrence.failed` audit event when its claim is available, and is
+excluded for the rest of that pass so later rows can run. The pass reports
+the accumulated failures. Its original cursor remains available for retry
+on the next pass; failed attempts do not increment the occurrence number.
 
 Journey publications and the configured product's immutable release history
 produce tenant/project-scoped `release.published` events; the same project and
@@ -84,7 +104,10 @@ The recurrence tests cover calendar/DST edges, preview, replica and foreground
 claim barriers, restart recovery, overlap/catch-up, publication deduplication,
 queue/provenance, transaction rollback, tenant/project RLS and permission
 changes during a write. They use an injected database clock and channels rather
-than sleeps. The full Go suite validates the shared authorization, work-order,
+than sleeps. Regression coverage includes monthly intervals across short months,
+gaps and folds, tree-writer lock barriers, CLI template files/project tags, and
+persistent schedule/publication/queue failures followed by valid due work.
+The full Go suite validates the shared authorization, work-order,
 queue, server and OpenAPI integration alongside this package.
 
 DSAR integration note (AEON-490): the inventory is absent from this branch and

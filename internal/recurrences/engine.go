@@ -91,8 +91,11 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 	if err = m.syncPublications(ctx, actor); err != nil {
 		return err
 	}
+	failedIDs := []string{}
+	failures := []error{}
 	for i := 0; i < batchSize; i++ {
 		processed := false
+		var claimed Recurrence
 		err = db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 			got, err := lock(ctx, tx, tenantID, true)
 			if err != nil || !got {
@@ -104,8 +107,9 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			}
 			// The tenant/tree claim comes before node rows and recurrence rows. This
 			// single-row unit never takes a later resource lock after events.Append.
-			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND
-    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now))
+			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND NOT (id=ANY($2::uuid[])) AND
+    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now, failedIDs))
+			claimed = r
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -161,13 +165,47 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			return err
 		})
 		if err != nil {
-			return err
+			if claimed.ID == "" || ctx.Err() != nil {
+				return errors.Join(append(failures, err)...)
+			}
+			// A bad row must not repeatedly win LIMIT 1. Keep its durable cursor
+			// for a later retry, but exclude it for the rest of this bounded pass.
+			// Its transaction rolled back, so partial tickets/receipts cannot leak.
+			failedIDs = append(failedIDs, claimed.ID)
+			failure := fmt.Errorf("recurrence %s: %w", claimed.ID, err)
+			failures = append(failures, failure)
+			slog.ErrorContext(ctx, "recurrence failed; continuing tenant pass", "recurrence_id", claimed.ID, "err", err)
+			if err := m.recordFailure(ctx, actor, claimed); err != nil {
+				failures = append(failures, fmt.Errorf("record recurrence %s failure: %w", claimed.ID, err))
+			}
+			continue
 		}
 		if !processed {
 			break
 		}
 	}
-	return nil
+	return errors.Join(failures...)
+}
+
+// Persist a value-free diagnostic after the failed occurrence rolled back.
+// Existing node locks precede the recurrence lock and the event counter stays
+// last. Foreground work can make us yield; the returned/logged failure remains
+// visible and the next tenant pass retries the row.
+func (m *Module) recordFailure(ctx context.Context, actor tenant.Principal, r Recurrence) error {
+	return db.InTenant(ctx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
+		got, err := lock(ctx, tx, actor.TenantID, true)
+		if err != nil || !got {
+			return err
+		}
+		var id string
+		if err = tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE id=$1 FOR KEY SHARE`, r.ProjectID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err = load(ctx, tx, r.ID, true); err != nil {
+			return err
+		}
+		return record(ctx, tx, actor, r.ProjectID, "recurrence.failed", nil, map[string]string{"recurrence_id": r.ID, "reason": "processing_failed"})
+	})
 }
 
 // syncPublications projects durable journey state and the binary's immutable

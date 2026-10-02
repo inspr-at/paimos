@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fixture struct {
@@ -632,5 +633,203 @@ func TestDefinitionEditsPreserveDueCursorAndPausedManualRun(t *testing.T) {
 	after := f.get(r.ID)
 	if !after.Paused || !after.NextAt.Equal(*paused.NextAt) || after.EventCursor != paused.EventCursor {
 		t.Fatal("manual run moved schedule")
+	}
+}
+
+// Signal at the exact tree-lock statement. On the old implementation the
+// recurrence already held the tenant row here; existing writers held the tree
+// and then needed that row. This barrier deterministically creates that cycle.
+type treeBarrierTx struct {
+	pgx.Tx
+	attempted chan struct{}
+	once      sync.Once
+}
+
+func (tx *treeBarrierTx) signal(sql string) {
+	if strings.Contains(sql, "pg_advisory_xact_lock") {
+		tx.once.Do(func() { close(tx.attempted) })
+	}
+}
+func (tx *treeBarrierTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx.signal(sql)
+	return tx.Tx.Exec(ctx, sql, args...)
+}
+func (tx *treeBarrierTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.signal(sql)
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
+	for _, writer := range []string{"node write", "membership change"} {
+		t.Run(writer, func(t *testing.T) {
+			f := setup(t)
+			r := f.create(f.input())
+			ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 10*time.Second)
+			defer cancel()
+			other, err := f.d.App.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Rollback(t.Context())
+			if _, err = other.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = other.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, f.p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			attempted := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- db.InTenant(ctx, f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+					barrier := &treeBarrierTx{Tx: tx, attempted: attempted}
+					if _, err := lock(ctx, barrier, f.p.TenantID, false); err != nil {
+						return err
+					}
+					if err := manage(ctx, tx, f.p, f.project); err != nil {
+						return err
+					}
+					_, err := tx.Exec(ctx, `UPDATE recurrences SET paused=true WHERE id=$1`, r.ID)
+					return err
+				})
+			}()
+			select {
+			case <-attempted:
+			case err := <-done:
+				t.Fatalf("recurrence failed before tree barrier: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if writer == "node write" {
+				// The normal node INSERT takes a tenant FK key-share lock.
+				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
+ SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='ticket'`, f.p.TenantID, f.parent)
+			} else {
+				// Match lockProjectMutation: tree first, then tenant FOR UPDATE.
+				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, f.p.TenantID)
+				if err == nil {
+					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='admin') WHERE principal_id=$1 AND scope_type='workspace'`, f.p.ID)
+				}
+			}
+			if err == nil {
+				err = other.Commit(ctx)
+			} else {
+				_ = other.Rollback(t.Context())
+			}
+			recurrenceErr := <-done
+			if err != nil || recurrenceErr != nil {
+				t.Fatalf("%s error %v; recurrence error %v", writer, err, recurrenceErr)
+			}
+			if !f.get(r.ID).Paused {
+				t.Fatal("recurrence write did not commit")
+			}
+		})
+	}
+}
+
+func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
+	for _, failure := range []string{"invalid time cursor", "invalid publication", "queue rollback"} {
+		t.Run(failure, func(t *testing.T) {
+			f := setup(t)
+			in := f.input()
+			in.OverlapPolicy = "create"
+			if failure == "invalid publication" {
+				in.Trigger = Trigger{Kind: "event", Event: "release.published"}
+			}
+			in.QueueEach = failure == "queue rollback"
+			bad := f.create(in)
+			in.QueueEach = false
+			if failure != "invalid publication" {
+				in.Trigger.TimeOfDay = "10:00"
+			}
+			if failure == "invalid publication" {
+				in.ProjectID = f.node("project", nil, "Other project")
+				in.ParentID = f.node("epic", &in.ProjectID, "Other parent")
+			}
+			good := f.create(in)
+			f.now = timestamp(t, "2026-10-19T12:00:00Z")
+			f.tx(func(tx pgx.Tx) error {
+				if failure == "invalid publication" {
+					// Force deterministic claim ordering for the NULL next_at rows.
+					if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET id=$2 WHERE id=$1`, bad.ID, "10000000-0000-4000-8000-000000000010"); err != nil {
+						return err
+					}
+					bad.ID = "10000000-0000-4000-8000-000000000010"
+					if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET id=$2 WHERE id=$1`, good.ID, "10000000-0000-4000-8000-000000000020"); err != nil {
+						return err
+					}
+					good.ID = "10000000-0000-4000-8000-000000000020"
+					if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &bad.ProjectID, Type: "release.published", After: "invalid publication"}); err != nil {
+						return err
+					}
+					_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &good.ProjectID, Type: "release.published", After: Publication{ProjectID: good.ProjectID, PublishedAt: f.now, Name: "Release", Version: "261019120000.0.0"}})
+					return err
+				}
+				badAt := *bad.NextAt
+				if failure == "invalid time cursor" {
+					badAt = badAt.Add(time.Minute)
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, bad.ID, badAt); err != nil {
+					return err
+				}
+				if failure == "invalid time cursor" {
+					// Latest slot is 09:00 Vienna, but the corrupt cursor is 09:01.
+					if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, bad.ID, timestamp(t, "2026-10-19T07:01:00Z")); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, good.ID, timestamp(t, "2026-10-19T08:00:00Z")); err != nil {
+					return err
+				}
+				if failure == "queue rollback" {
+					_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY[]::text[] WHERE slug='ticket'`)
+					return err
+				}
+				return nil
+			})
+			// Both passes see the persistent bad row; the first must still run
+			// the later good row, and the second must not duplicate its receipt.
+			for pass := 0; pass < 2; pass++ {
+				err := f.m.RunTenant(t.Context(), f.p.TenantID)
+				if err == nil || !strings.Contains(err.Error(), bad.ID) {
+					t.Fatalf("pass %d did not report bad row: %v", pass, err)
+				}
+				if got := f.receipts(good.ID); len(got) != 1 || got[0].Outcome != "created" {
+					t.Fatalf("pass %d starved good row: %+v", pass, got)
+				}
+				if len(f.receipts(bad.ID)) != 0 || f.get(bad.ID).OccurrenceCount != 0 {
+					t.Fatal("failure left a partial occurrence")
+				}
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var count int
+				err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='recurrence.failed' AND after->>'recurrence_id'=$1`, bad.ID).Scan(&count)
+				if count != 2 {
+					t.Fatalf("failure audit count %d want 2", count)
+				}
+				return err
+			})
+		})
+	}
+}
+
+func TestRecurrenceFenceAllowsTenantKeyShare(t *testing.T) {
+	f := setup(t)
+	tx, err := f.d.App.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = lock(t.Context(), tx, f.p.TenantID, false); err != nil {
+		t.Fatal(err)
+	}
+	// NOWAIT proves compatibility directly, without a timing assertion.
+	if err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.p.TenantID, func(other pgx.Tx) error {
+		_, err := other.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, f.p.TenantID)
+		return err
+	}); err != nil {
+		t.Fatalf("recurrence fence blocks tenant FK key-share: %v", err)
 	}
 }
