@@ -4242,16 +4242,16 @@
     "261002171043.0.0": {
       "release_channel": "stable",
       "release_sequence": 120,
-      "snapshot_sha256": "b1d59631cd1c4063d16b18ffe1e5613147f5344515868fdf4a782af93165a024",
-      "captured_at": "2026-10-02T17:10:54Z",
+      "snapshot_sha256": "dac3a96dafc0f3cd30b5d352c503e997e5019de3aad1cdd5e453eb1783c0540a",
+      "captured_at": "2026-10-02T17:25:12Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-432",
           "pill_en": "Bigger rule budgets",
           "pill_de": "Größere Regelbudgets",
-          "benefit_en": "You can give your agents up to 500 KB of rules, see what each one costs per session, and older clients simply receive what they can handle.",
-          "benefit_de": "Du kannst deinen Agenten bis zu 500 KB Regeln geben, siehst, was das pro Sitzung kostet, und ältere Clients bekommen einfach so viel, wie sie verarbeiten können.",
+          "benefit_en": "You can give your agents up to 500 KB of rules and see the estimated token cost of the whole budget; an older client gets a clear error when locked rules exceed what it can handle.",
+          "benefit_de": "Du kannst deinen Agenten bis zu 500 KB Regeln geben und siehst die geschätzten Token-Kosten des ganzen Budgets; ein älterer Client bekommt eine klare Fehlermeldung, wenn gesperrte Regeln sein Limit überschreiten.",
           "group": "features"
         },
         {
@@ -4266,40 +4266,32 @@
           "key": "AEON-454",
           "pill_en": "Morning briefing",
           "pill_de": "Briefing am Morgen",
-          "benefit_en": "Start the day knowing what your agents did overnight and what needs you, in two minutes.",
-          "benefit_de": "Starte den Tag in zwei Minuten mit dem Wissen, was deine Agenten über Nacht getan haben und was dich braucht.",
+          "benefit_en": "Open a briefing of what your agents recorded since your last visit (the first one covers 24 hours) and what needs you.",
+          "benefit_de": "Öffne ein Briefing mit dem, was deine Agenten seit deinem letzten Besuch festgehalten haben (das erste umfasst 24 Stunden), und mit dem, was dich braucht.",
           "group": "features"
         },
         {
           "key": "AEON-460",
-          "pill_en": "Unforgeable Touch ID",
-          "pill_de": "Fälschungssichere Touch ID",
-          "benefit_en": "Only you, at your Mac, can approve an attach with Touch ID; no program on your computer can fake it.",
-          "benefit_de": "Nur du an deinem Mac kannst ein Andocken per Touch ID freigeben; kein Programm auf deinem Computer kann das fälschen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-502",
-          "pill_en": "Choose models per work",
-          "pill_de": "Modelle je Arbeit wählen",
-          "benefit_en": "You decide which models do which kind of work, for the company, for yourself or per project, and always see where a setting comes from.",
-          "benefit_de": "Sie legen fest, welche Modelle welche Arbeit erledigen – für das Unternehmen, für sich oder je Projekt – und sehen immer, woher eine Einstellung stammt.",
+          "pill_en": "Touch ID for attach",
+          "pill_de": "Touch ID beim Verknüpfen",
+          "benefit_en": "On a supported Mac, you can require Touch ID and a signed local confirmation before a session attach is approved.",
+          "benefit_de": "Auf einem unterstützten Mac kannst du Touch ID und eine signierte lokale Bestätigung verlangen, bevor eine Sitzung verknüpft wird.",
           "group": "features"
         },
         {
           "key": "AEON-511",
           "pill_en": "Estimates versus real numbers",
           "pill_de": "Schätzung oder echter Wert",
-          "benefit_en": "Every token, cost and model value in the ticket list shows whether it is an estimate or measured, and a hover shows the other value and how far the estimate was off.",
-          "benefit_de": "Jeder Token-, Kosten- und Modellwert in der Ticketliste zeigt, ob er geschätzt oder gemessen ist; beim Überfahren sehen Sie den anderen Wert und die Abweichung.",
+          "benefit_en": "Where the ticket list shows token, cost and model columns, each value says whether it is an estimate or measured.",
+          "benefit_de": "Wo die Ticketliste Token-, Kosten- und Modellspalten zeigt, sagt jeder Wert, ob er geschätzt oder gemessen ist.",
           "group": "features"
         },
         {
           "key": "AEON-524",
-          "pill_en": "Pause and resume agents",
-          "pill_de": "Agenten pausieren und fortsetzen",
-          "benefit_en": "You can pause one or all agents before a restart or a break; each one stops at a clean handover point and picks up from there later.",
-          "benefit_de": "Sie können einzelne oder alle Agenten vor einem Neustart oder einer Pause anhalten; jeder stoppt an einem sauberen Übergabepunkt und macht später dort weiter.",
+          "pill_en": "Pause agents",
+          "pill_de": "Agenten pausieren",
+          "benefit_en": "You can pause supported agents one by one or all at once; each records where it stopped so a later run can continue from there.",
+          "benefit_de": "Du kannst unterstützte Agenten einzeln oder alle auf einmal pausieren; jeder hält fest, wo er aufgehört hat, damit ein späterer Lauf dort weitermachen kann.",
           "group": "features"
         },
         {
@@ -4316,14 +4308,6 @@
           "pill_de": "Klares Release-Abzeichen",
           "benefit_en": "The release badge in the footer reads cleanly and says what it is at a glance.",
           "benefit_de": "Das Release-Abzeichen in der Fußzeile ist sauber lesbar und sagt auf einen Blick, was es ist.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-543",
-          "pill_en": "Gemini and OpenCode ready",
-          "pill_de": "Gemini und OpenCode bereit",
-          "benefit_en": "Gemini CLI and OpenCode accounts can take work from the workspace like the other harnesses.",
-          "benefit_de": "Gemini-CLI- und OpenCode-Konten können Aufgaben aus dem Arbeitsbereich übernehmen wie die anderen Harnesses.",
           "group": "features"
         },
         {
@@ -4352,10 +4336,10 @@
         },
         {
           "key": "AEON-561",
-          "pill_en": "No secrets in rules",
-          "pill_de": "Keine Geheimnisse in Regeln",
-          "benefit_en": "Published rules can no longer carry passwords or keys by mistake.",
-          "benefit_de": "Veröffentlichte Regeln können keine Passwörter oder Schlüssel mehr versehentlich enthalten.",
+          "pill_en": "Secret check for rules",
+          "pill_de": "Geheimnisprüfung für Regeln",
+          "benefit_en": "Publishing a rule now rejects text that looks like a password or key.",
+          "benefit_de": "Beim Veröffentlichen einer Regel wird jetzt Text abgelehnt, der wie ein Passwort oder Schlüssel aussieht.",
           "group": "features"
         },
         {
@@ -4376,18 +4360,18 @@
         },
         {
           "key": "AEON-583",
-          "pill_en": "Reliable agent stops",
-          "pill_de": "Verlässliches Beenden von Agents",
-          "benefit_en": "Agent runs stop on time, even when a tool or child process hangs.",
-          "benefit_de": "Agent-Läufe enden pünktlich, auch wenn ein Werkzeug oder Kindprozess hängt.",
+          "pill_en": "Cleaner agent stops",
+          "pill_de": "Saubereres Beenden von Agenten",
+          "benefit_en": "Supervised agent runs now enforce deadlines on tool input and output and clean up their own child processes when they hang.",
+          "benefit_de": "Beaufsichtigte Agentenläufe erzwingen jetzt Fristen für Tool-Ein- und -Ausgaben und räumen ihre eigenen Kindprozesse auf, wenn sie hängen.",
           "group": "features"
         },
         {
           "key": "AEON-586",
           "pill_en": "Fewer deadlocks",
           "pill_de": "Weniger Blockaden",
-          "benefit_en": "Concurrent edits no longer deadlock or silently overwrite each other.",
-          "benefit_de": "Gleichzeitige Änderungen blockieren sich nicht mehr und überschreiben sich nicht still.",
+          "benefit_en": "Several concurrent edit paths now avoid known deadlocks; affected CLI edits report a conflict instead of overwriting a newer revision.",
+          "benefit_de": "Mehrere gleichzeitige Bearbeitungswege vermeiden jetzt bekannte Blockaden; betroffene CLI-Bearbeitungen melden einen Konflikt, statt eine neuere Version zu überschreiben.",
           "group": "features"
         }
       ]
