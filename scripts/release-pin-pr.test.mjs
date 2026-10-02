@@ -102,6 +102,20 @@ test("default dry run verifies source then reads target with a restricted token,
   assert.equal(f.calls.at(-1).method, "DELETE");
 });
 
+test('main completion dispatch verifies the original tag source, independently of tooling SHA', async () => {
+  const f = fixture();
+  const input = { ...env(), GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: headSHA, RELEASE_TAG: `v${version}`, RELEASE_SOURCE_SHA: sourceCommit };
+  assert.equal((await proposePin(input, {}, f.dependencies)).status, 'dry-run');
+  const verified = f.calls.find(call => call.method === 'VERIFY').args;
+  assert.equal(verified[verified.indexOf('--source-digest') + 1], sourceCommit);
+  assert.equal(verified[verified.indexOf('--signer-digest') + 1], sourceCommit);
+  for (const override of [{ GITHUB_REF: 'refs/heads/work/bad' }, { RELEASE_SOURCE_SHA: '' }, { RELEASE_TAG: 'vwrong' }]) {
+    const rejected = fixture();
+    await assert.rejects(proposePin({ ...input, ...override }, {}, rejected.dependencies));
+    assert.equal(rejected.calls.length, 0);
+  }
+});
+
 test("write creates only a pin branch and a draft PR, recording rollback and verification evidence", async () => {
   const f = fixture();
   const result = await proposePin(env(), { write: true }, f.dependencies);
@@ -252,19 +266,20 @@ test("real CLI verifier binds the image and provenance; its output never enters 
   assert.equal(f.calls.some(call => call.path?.startsWith(`/repos/${TARGET}/`)), false);
 });
 
-test("release records the digest before the non-blocking pin proposal and preserves asset dependencies", () => {
+test("release records the digest before separate completion; optional pin cannot block assets", () => {
   const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  const image = workflow.split("\n  image:\n")[1].split("\n  assets:\n")[0];
+  const image = workflow.split("\n  image:\n")[1].split("\n  completion:\n")[0];
   const record = image.indexOf("      - name: Record pushed digest\n");
-  const proposal = image.indexOf("      - name: Propose verified nixcfg deployment pin\n");
-  assert.ok(record >= 0 && proposal > record);
-  assert.match(image.slice(proposal), /^        continue-on-error: true$/m);
+  assert.ok(record >= 0);
+  assert.ok(!image.includes('Propose verified nixcfg deployment pin'));
   assert.match(image, /^      digest: \$\{\{ steps.push.outputs.digest \}\}$/m);
-  assert.match(workflow.split("\n  assets:\n")[1], /^    needs: \[agentd-darwin, image\]$/m);
+  const completion = readFileSync(new URL('../.github/workflows/release-completion.yml', import.meta.url), 'utf8');
+  assert.match(completion.split('\n  assets:\n')[1], /^    needs: \[prepare, agentd-darwin\]$/m);
+  assert.match(completion.split('      - name: Propose verified nixcfg deployment pin\n')[1], /^        continue-on-error: true$/m);
 });
 
 test("release pin shell reports failures in dry-run and write modes without hiding the failed outcome", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const workflow = readFileSync(new URL("../.github/workflows/release-completion.yml", import.meta.url), "utf8");
   const proposal = workflow.split("      - name: Propose verified nixcfg deployment pin\n")[1].split("\n  assets:\n")[0];
   const script = proposal.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n");
   const directory = mkdtempSync(join(tmpdir(), "aeon-pin-workflow-"));

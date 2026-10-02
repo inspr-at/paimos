@@ -102,6 +102,28 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("changed-cancel/"+file, file, "reviewed concurrency policy", func(w map[string]any) { mapping(w["concurrency"])["cancel-in-progress"] = "${{ true }}" })
 		add("extra-concurrency-key/"+file, file, "reviewed concurrency policy", func(w map[string]any) { mapping(w["concurrency"])["extra"] = true })
 	}
+	for _, key := range []string{"group", "cancel-in-progress"} {
+		add("completion-concurrency/"+key, "release-completion.yml", "reviewed concurrency policy", func(w map[string]any) {
+			mapping(w["concurrency"])[key] = "unsafe"
+		})
+	}
+	for _, key := range []string{"tag", "digest", "index-pushed-at"} {
+		add("completion-unbound-input/"+key, "release.yml", "opaque reusable workflow", func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["completion"])["with"])[key] = "unbound"
+		})
+	}
+	add("completion-wrong-dependency", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["completion"])["needs"] = []any{"image-platform"}
+	})
+	add("completion-secrets-inherited", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["completion"])["secrets"] = "inherit"
+	})
+	add("completion-opaque-nested-workflow", "release-completion.yml", "opaque reusable workflow", func(w map[string]any) {
+		mapping(w["jobs"])["nested"] = map[string]any{"uses": "./.github/workflows/release-completion.yml"}
+	})
+	add("completion-pool-routing", "release-completion.yml", "must use hosted runners", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["prepare"])["runs-on"] = routedRunner
+	})
 	add("second-workflow-uses-job-concurrency", "extra.yaml", "must not override workflow-level concurrency", func(w map[string]any) {
 		w["jobs"] = map[string]any{"runner-route": map[string]any{"uses": "./.github/workflows/test-runner-route.yml", "concurrency": map[string]any{"group": ciGroup, "cancel-in-progress": true}}}
 	})

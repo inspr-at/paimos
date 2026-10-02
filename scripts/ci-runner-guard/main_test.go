@@ -126,6 +126,7 @@ func TestProtectedJobsAndSecrets(t *testing.T) {
 	for _, tc := range []struct{ file, id, extra string }{
 		{"release.yml", "tests", ""}, {"release.yaml", "tests", ""},
 		{"RELEASE.YML", "tests", ""}, {"release.YaMl", "tests", ""},
+		{"release-completion.yml", "tests", ""}, {"RELEASE-COMPLETION.YAML", "tests", ""},
 		{"test-runner-route.yml", "tests", ""}, {"test-runner-route.YML", "tests", ""},
 		{"test-runner-route.yaml", "tests", ""},
 		{"pairing-platform.yml", "tests", ""}, {"pairing-platform.yaml", "tests", ""},

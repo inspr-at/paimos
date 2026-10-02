@@ -13,7 +13,7 @@ import (
 )
 
 func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
-	workflow := readRepo(t, ".github/workflows/release.yml")
+	workflow := readRepo(t, ".github/workflows/release-completion.yml")
 	script := readRepo(t, "scripts/build-release-binaries.sh")
 	flake := readRepo(t, "flake.nix")
 	for _, needle := range []string{"macos-15", "macos-15-intel", "scripts/build-release-binaries.sh darwin-agentd", "scripts/build-release-binaries.sh linux-agentd", "scripts/build-release-binaries.sh verify-darwin"} {
@@ -35,11 +35,11 @@ func TestReleaseBuildsSplitDarwinCGO(t *testing.T) {
 }
 
 func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
-	workflow := readRepo(t, ".github/workflows/release.yml")
+	workflow := readRepo(t, ".github/workflows/release-completion.yml")
 	script := readRepo(t, "scripts/build-release-binaries.sh")
-	darwin, rest, ok := strings.Cut(workflow, "\n  image:\n")
+	darwin, rest, ok := strings.Cut(workflow, "\n  pin:\n")
 	if !ok {
-		t.Fatal("release workflow has no image job after agentd-darwin")
+		t.Fatal("release completion has no independent pin/assets jobs after agentd-darwin")
 	}
 	for _, needle := range []string{"environment: release-signing", "AEON_DEVELOPER_ID_TEAM: P66J39QV6V", "bash scripts/sign-notarize.sh", "secrets.APPLE_CERTIFICATE"} {
 		if !strings.Contains(darwin, needle) {
@@ -55,15 +55,19 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	if strings.Contains(rest, "secrets.APPLE_") || strings.Contains(rest, "release-signing") {
 		t.Fatal("signing secrets leak beyond the agentd-darwin job")
 	}
-	if !strings.Contains(rest, "SHA256SUMS") {
-		t.Fatal("checksums must be computed in the assets job, after signing")
+	if !strings.Contains(rest, "node scripts/release-completion.mjs complete release-source/dist --write") || !strings.Contains(readRepo(t, "scripts/release-completion.mjs"), "checksumMap(bytes.get('SHA256SUMS').toString())") {
+		t.Fatal("assets must reconcile and verify checksums after signing")
 	}
 	var wf releaseWorkflow
 	if err := yaml.Unmarshal([]byte(workflow), &wf); err != nil {
-		t.Fatalf("release.yml: %v", err)
+		t.Fatalf("release-completion.yml: %v", err)
 	}
-	if want := map[string]any{"push": map[string]any{"tags": []any{"v*"}}}; !reflect.DeepEqual(wf.On, want) {
-		t.Fatalf("release workflow must trigger on v* tags only, got %#v", wf.On)
+	var publisher releaseWorkflow
+	if err := yaml.Unmarshal([]byte(readRepo(t, ".github/workflows/release.yml")), &publisher); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]any{"push": map[string]any{"tags": []any{"v*"}}}; !reflect.DeepEqual(publisher.On, want) {
+		t.Fatalf("release publisher must trigger on v* tags only, got %#v", publisher.On)
 	}
 	steps := wf.Jobs["agentd-darwin"].Steps
 	signAt := -1
@@ -104,7 +108,7 @@ func TestReleaseSignsDarwinAgentdBeforeChecksums(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name == "release.yml" || !(strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
+		if name == "release-completion.yml" || !(strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
 			continue
 		}
 		other := readRepo(t, ".github/workflows/"+name)
@@ -156,26 +160,29 @@ func TestReleaseHomebrewTapBumpUsesEnvironmentSecrets(t *testing.T) {
 
 func TestReleaseCreatesDraftUntilExplicitPublication(t *testing.T) {
 	workflow := readRepo(t, ".github/workflows/release.yml")
-	var wf releaseWorkflow
-	if err := yaml.Unmarshal([]byte(workflow), &wf); err != nil {
-		t.Fatalf("release.yml: %v", err)
-	}
 	creates := 0
-	for _, job := range wf.Jobs {
-		for _, step := range job.Steps {
-			if strings.Contains(step.Run, "gh release edit") || strings.Contains(step.Run, "--draft=false") {
-				t.Fatal("the tag build must never publish a draft")
-			}
-			if strings.Contains(step.Run, "gh release create") {
-				creates++
-				if !strings.Contains(step.Run, "--draft ") || !strings.Contains(step.Run, "--verify-tag ") {
-					t.Fatal("release creation must draft the existing tag")
+	for _, name := range []string{"release.yml", "release-completion.yml"} {
+		var wf releaseWorkflow
+		if err := yaml.Unmarshal([]byte(readRepo(t, ".github/workflows/"+name)), &wf); err != nil {
+			t.Fatal(err)
+		}
+		for _, job := range wf.Jobs {
+			for _, step := range job.Steps {
+				if strings.Contains(step.Run, "gh release edit") || strings.Contains(step.Run, "--draft=false") || strings.Contains(step.Run, "gh release create") {
+					t.Fatal("workflows must delegate draft-only creation to the completion helper")
+				}
+				if strings.Contains(step.Run, "node scripts/release-completion.mjs complete release-source/dist --write") {
+					creates++
 				}
 			}
 		}
 	}
 	if creates != 1 {
-		t.Fatalf("want one draft creation step, got %d", creates)
+		t.Fatalf("want one draft completion step, got %d", creates)
+	}
+	helper := readRepo(t, "scripts/release-completion.mjs")
+	if !strings.Contains(helper, "['release', 'create', release.tag, '--repo', REPOSITORY, '--draft', '--verify-tag'") || strings.Contains(helper, "'--draft=false'") {
+		t.Fatal("completion must create a draft using the existing tag; Node regressions exercise the actual command")
 	}
 	if !strings.Contains(workflow, `gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100"`) {
 		t.Fatal("release immutability guard must list drafts as well as published releases")
@@ -188,10 +195,17 @@ func TestReleaseExistingDraftGuardFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var guard string
-	for _, step := range wf.Jobs["assets"].Steps {
-		if step.Name == "Reject an existing GitHub release" {
-			guard = step.Run
+	for _, name := range []string{"image-platform", "image"} {
+		var current string
+		for _, step := range wf.Jobs[name].Steps {
+			if step.Name == "Reject an existing GitHub release" {
+				current = step.Run
+			}
 		}
+		if current == "" || (guard != "" && guard != current) {
+			t.Fatal("both image publishers must refuse existing drafts with the same guard")
+		}
+		guard = current
 	}
 	if guard == "" {
 		t.Fatal("release immutability guard missing")

@@ -1,0 +1,297 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Release completion
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated release tag
+        required: true
+        type: string
+      digest:
+        description: Previously verified immutable multi-arch index digest
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      digest:
+        required: true
+        type: string
+      index-pushed-at:
+        required: false
+        type: string
+
+concurrency:
+  group: release-completion-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  DIGEST: ${{ inputs.digest }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'inspr-at/paimos' &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    outputs:
+      source_sha: ${{ steps.prepare.outputs.source_sha }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      version: ${{ steps.prepare.outputs.version }}
+      digest: ${{ steps.prepare.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Verify existing index and tagged source
+        id: prepare
+        run: node scripts/release-completion.mjs prepare
+      - name: Record completion provenance
+        env:
+          SOURCE_SHA: ${{ steps.prepare.outputs.source_sha }}
+        run: |
+          printf 'Completion tooling: %s; tagged build source: %s; original index: %s\n' \
+            "$GITHUB_WORKFLOW_SHA" "$SOURCE_SHA" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  agentd-darwin:
+    needs: [prepare]
+    permissions:
+      contents: write
+      packages: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    # Coordinator must approve main completion dispatch in this environment.
+    # Only verified tagged source is built; PR/branch dispatch never reaches it.
+    environment: release-signing
+    # Notarization waits on Apple; it usually takes a few minutes.
+    timeout-minutes: 45
+    env:
+      # Must match the signing identity; the daemon embeds it (expectedTeamID).
+      AEON_DEVELOPER_ID_TEAM: P66J39QV6V
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          path: release-source
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - name: Restore immutable darwin asset when present
+        id: restore
+        env:
+          ASSET_NAME: paimos-agentd-darwin-${{ matrix.arch }}
+        run: node scripts/release-completion.mjs restore "$ASSET_NAME" release-source/dist
+      - name: Build darwin paimos-agentd with LocalAuthentication
+        if: steps.restore.outputs.restored != 'true'
+        working-directory: release-source
+        env:
+          AEON_DARWIN_ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-release-binaries.sh darwin-agentd
+      # Before upload: SHA256SUMS in the assets job is computed over the signed
+      # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
+      - name: Sign and notarize paimos-agentd
+        if: steps.restore.outputs.restored != 'true'
+        working-directory: release-source
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          if [ "$APPLE_TEAM_ID" != "$AEON_DEVELOPER_ID_TEAM" ]; then
+            echo "::error::signing team does not match AEON_DEVELOPER_ID_TEAM; Mac confirmation would fail closed"
+            exit 1
+          fi
+          bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+      # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
+      # notarization can skip: however the signing step ended, delete the
+      # temporary keychain (private key), drop it from the search list and
+      # remove every signing temp file (.p12, .p8, zip). Idempotent. Every
+      # operation is attempted; failures are collected and fail the step at
+      # the end.
+      - name: Remove signing keychain and temp files
+        if: always()
+        run: |
+          set +e +o pipefail
+          : "${RUNNER_TEMP:?RUNNER_TEMP is not set}"
+          rt="$(cd "$RUNNER_TEMP" 2>/dev/null && pwd -P)"
+          if [ -z "$rt" ] || [ "$rt" -ef / ]; then
+            echo "::error::RUNNER_TEMP is not a usable directory; refusing to clean up"
+            exit 1
+          fi
+          failed=0
+          for kc in "$rt"/sign.*/signing.keychain-db; do
+            [ -e "$kc" ] || continue
+            security delete-keychain "$kc" || { echo "::error::could not delete $kc"; failed=1; }
+          done
+          # Without a readable search list the restore is skipped rather than
+          # guessed; delete-keychain above already unlisted what it removed.
+          if current="$(security list-keychains -d user)"; then
+            kept=()
+            while IFS= read -r k; do
+              k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
+              case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
+            done <<<"$current"
+            [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
+            security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
+          else
+            echo "::error::could not read the keychain search list"
+            failed=1
+          fi
+          rm -rf "$rt"/sign.* || failed=1
+          if compgen -G "$rt/sign.*" >/dev/null; then
+            echo "::error::signing temp files remain"
+            failed=1
+          fi
+          if list="$(security list-keychains -d user)"; then
+            case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
+          else
+            echo "::error::could not verify the keychain search list"
+            failed=1
+          fi
+          [ "$failed" = 0 ] || exit 1
+          echo "signing keychain and temp files removed"
+      - name: Verify darwin signature
+        env:
+          ASSET_NAME: paimos-agentd-darwin-${{ matrix.arch }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          codesign --verify --strict "release-source/dist/$ASSET_NAME"
+          codesign -dv --verbose=4 "release-source/dist/$ASSET_NAME" 2>&1 | grep -Fx "TeamIdentifier=$AEON_DEVELOPER_ID_TEAM"
+          agent_version="$("release-source/dist/$ASSET_NAME" --version)"
+          if [ "$agent_version" != "paimos-agentd $VERSION" ]; then
+            echo "::error::darwin agent version does not match the release coordinate"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agentd-darwin-${{ matrix.arch }}
+          path: release-source/dist/paimos-agentd-darwin-${{ matrix.arch }}
+          if-no-files-found: error
+
+  pin:
+    needs: [prepare]
+    runs-on: ubuntu-24.04
+    environment: release-pinning
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Reverify index before pin proposal
+        run: node scripts/release-completion.mjs prepare
+      # Optional proposal: failures remain visible without blocking agent assets.
+      # --write is an explicit coordinator opt-in; otherwise produce a dry run.
+      - name: Propose verified nixcfg deployment pin
+        id: pin
+        continue-on-error: true
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          DIGEST: ${{ needs.prepare.outputs.digest }}
+          AEON_PIN_BOT_ENABLED: ${{ vars.AEON_PIN_BOT_ENABLED }}
+          AEON_PIN_APP_ID: ${{ secrets.AEON_PIN_APP_ID }}
+          AEON_PIN_APP_KEY: ${{ secrets.AEON_PIN_APP_KEY }}
+          INDEX_PUSHED_AT: ${{ inputs.index-pushed-at }}
+        run: |
+          set -euo pipefail
+          args=(scripts/release-pin-pr.mjs)
+          if [ "$AEON_PIN_BOT_ENABLED" = true ]; then
+            args+=(--write)
+          fi
+          if ! node "${args[@]}"; then
+            echo '::warning::Deployment pin proposal failed; release assets will still be built.'
+            echo 'Deployment pin proposal failed; release assets will still be built.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  assets:
+    needs: [prepare, agentd-darwin]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          path: release-source
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: agentd-darwin-*
+          path: release-source/dist
+          merge-multiple: true
+      - name: Build linux paimos-agentd and aeon-cli from tagged source
+        working-directory: release-source
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release.mjs --release
+          node scripts/check-own-release-notes.mjs
+          bash scripts/build-release-binaries.sh linux-agentd
+          bash scripts/build-release-binaries.sh cli
+          bash scripts/build-release-binaries.sh verify-darwin
+      - name: Complete draft with missing signed assets only
+        run: node scripts/release-completion.mjs complete release-source/dist --write
