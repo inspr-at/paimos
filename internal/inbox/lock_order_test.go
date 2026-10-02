@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
@@ -34,7 +35,7 @@ func TestSendDoesNotWaitForTargetWriterAfterEvent(t *testing.T) {
 				if writer == "disable" {
 					first <- newModule(pool).disableTarget(ctx, w.recipient, target.ID)
 				} else {
-					_, err := NewWorker(pool, WorkerOptions{}).claim(ctx, w.recipient.TenantID)
+					_, err := NewWorker(pool, WorkerOptions{}).claim(db.NoProjects(ctx, "inbox wake worker"), w.recipient.TenantID)
 					first <- err
 				}
 			}()
@@ -58,7 +59,7 @@ func TestSendDoesNotWaitForTargetWriterAfterEvent(t *testing.T) {
 				t.Fatalf("send acquired event counter then waited on target writer (%s)", lock)
 			}
 			if writer == "disable" {
-				wakes, err := NewWorker(w.db.App, WorkerOptions{}).claim(ctx, w.recipient.TenantID)
+				wakes, err := NewWorker(w.db.App, WorkerOptions{}).claim(db.NoProjects(ctx, "inbox wake worker"), w.recipient.TenantID)
 				if err != nil || len(wakes) != 0 {
 					t.Fatalf("disabled target claimed: %v %v", wakes, err)
 				}

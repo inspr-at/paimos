@@ -55,7 +55,13 @@ func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 			go func() {
 				m := http.NewServeMux()
 				nodes.New(f.db.App, nil).Mount(m)
-				r := httptest.NewRequest("PATCH", "/api/nodes/"+e.ID, strings.NewReader(`{"title":"Concurrent"}`)).WithContext(tenant.WithPrincipal(ctx, f.a))
+				id := e.ID
+				if action == "undo-delete" {
+					// Generic PATCH rejects deleted rows during authorization;
+					// another live row still shares the tenant's tree fence.
+					id = f.ticket
+				}
+				r := httptest.NewRequest("PATCH", "/api/nodes/"+id, strings.NewReader(`{"title":"Concurrent"}`)).WithContext(tenant.WithPrincipal(ctx, f.a))
 				w := httptest.NewRecorder()
 				m.ServeHTTP(w, r)
 				second <- w
@@ -66,7 +72,11 @@ func TestKnowledgeTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 			if lock != "advisory" {
 				t.Errorf("generic PATCH waited for %q instead of tree", lock)
 			}
-			expect(t, dbtest.Await(t, ctx, first), 200)
+			firstStatus := 201
+			if action == "delete" {
+				firstStatus = 200
+			}
+			expect(t, dbtest.Await(t, ctx, first), firstStatus)
 			w := dbtest.Await(t, ctx, second)
 			want := 404
 			if action == "undo-delete" || action == "undo-update" {
@@ -127,6 +137,6 @@ func TestKnowledgeLockedEligibilityAfterConcurrentDelete(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("deletion events=%d, want 1", count)
 	}
-	expect(t, call(t, f, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", eventID), nil), 200)
+	expect(t, call(t, f, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", eventID), nil), 201)
 	expect(t, call(t, f, f.a, "GET", "/api/knowledge/"+e.ID, nil), 200)
 }
