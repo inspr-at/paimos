@@ -3,10 +3,12 @@ package agentruns
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -15,7 +17,7 @@ import (
 // QueueReview is the narrow cross-principal dispatch path. It requires an
 // immutable review binding and an already selected, approved account. Public
 // RunCreate continues to restrict agents to their own ordinary runs.
-func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorders.Order, agentID, profileID, accountID string) (Run, error) {
+func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorders.Order, agentID, profileID, accountID string, personID *string, residency string, trace json.RawMessage) (Run, error) {
 	if o.Kind != "review" || o.Review == nil || o.Review.ProfileID == nil || *o.Review.ProfileID != profileID || o.Assignee == nil || *o.Assignee != agentID || o.Review.ReviewerFamily == nil || *o.Review.ReviewerFamily == o.Review.AuthorFamily || !reviewgate.ValidFamily(o.Review.AuthorFamily) {
 		return Run{}, workorders.Fail(409, "independent review binding required")
 	}
@@ -32,8 +34,8 @@ func QueueReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, o workorder
 	if !harnesslaunch.FamilyMatches(harness, model, family) {
 		return Run{}, workorders.Fail(409, "review profile family does not match its provider")
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id)
-        VALUES($1,$2,$3,$4,$5,$6) RETURNING `+columns, p.TenantID, o.NodeID, agentID, profileID, model, accountID))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,residency,prefs_person_id,trace)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, o.NodeID, agentID, profileID, model, accountID, modelprefs.Stamp(residency), personID, trace))
 	if err != nil {
 		return v, err
 	}

@@ -358,7 +358,7 @@ func TestQueueReviewRejectsLegacyProfileFamily(t *testing.T) {
 		family := "xai"
 		o.Kind, o.Status = "review", "ready"
 		o.Review = &reviewgate.Binding{ProfileID: &profile, ReviewerFamily: &family, AuthorFamily: "anthropic"}
-		if _, err := agentruns.QueueReview(t.Context(), tx, f.person, o, f.agent.ID, profile, f.account); err == nil {
+		if _, err := agentruns.QueueReview(t.Context(), tx, f.person, o, f.agent.ID, profile, f.account, nil, "any", nil); err == nil {
 			t.Error("QueueReview trusted a legacy family label")
 		}
 		return nil

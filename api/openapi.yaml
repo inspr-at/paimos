@@ -6517,6 +6517,7 @@ paths:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
+        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -12690,6 +12691,7 @@ components:
             gate_open: {type: boolean}
             gate_reason: {type: string}
             result: {$ref: '#/components/schemas/ReviewResult'}
+            trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
             ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
             cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
             duration_seconds: {type: [integer, 'null'], format: int64}
@@ -12718,7 +12720,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -13762,6 +13764,7 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
         queue_node_id: {type: [string, 'null'], format: uuid}
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
         queue_routed_at: {type: [string, 'null'], format: date-time}
@@ -13932,6 +13935,40 @@ components:
         command_template: {type: string}
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+    ModelPreferenceTrace:
+      type: object
+      description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
+      properties:
+        person_id: {type: [string, 'null'], format: uuid}
+        residency:
+          type: object
+          required: [value, set_by, loosened_lock]
+          properties:
+            value: {type: string, enum: [any, eu, local]}
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            lock_value: {type: string, enum: [any, eu, local]}
+            loosened_lock: {type: boolean}
+            loosened_locks:
+              type: array
+              items: {type: object, required: [level, value], properties: {level: {type: string, enum: [default, person]}, value: {type: string, enum: [any, eu, local]}}}
+        kind: {type: string}
+        kind_source: {type: string}
+        complexity: {type: string}
+        complexity_source: {type: string}
+        bucket: {type: string, enum: [normal, complex]}
+        set_by: {type: string}
+        locked_by: {type: string}
+        mode: {type: string, enum: [auto, latest, pinned]}
+        prefs_revision: {type: integer, format: int64}
+        qualifying_account_ids: {type: array, items: {type: string, format: uuid}}
+        preferred_candidates: {type: array, items: {type: object, properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: string}
+        blocked: {type: string}
+        prefs: {type: string}
+        hard: {type: array, items: {type: string}}
     CapacityEvidence:
       type: object
       additionalProperties: false
