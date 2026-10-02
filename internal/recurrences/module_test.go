@@ -804,11 +804,11 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 			// the later good row, and the second must not duplicate its receipt.
 			for pass := 0; pass < 2; pass++ {
 				err := f.m.RunTenant(t.Context(), f.p.TenantID)
-				if err == nil || !strings.Contains(err.Error(), bad.ID) {
-					t.Fatalf("pass %d did not report bad row: %v", pass, err)
-				}
 				if got := f.receipts(good.ID); len(got) != 1 || got[0].Outcome != "created" {
 					t.Fatalf("pass %d starved good row: %+v", pass, got)
+				}
+				if err == nil || !strings.Contains(err.Error(), bad.ID) {
+					t.Fatalf("pass %d did not report bad row: %v", pass, err)
 				}
 				if len(f.receipts(bad.ID)) != 0 || f.get(bad.ID).OccurrenceCount != 0 {
 					t.Fatal("failure left a partial occurrence")
