@@ -21,7 +21,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const controls = {
       actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
       stamps: page.getByTestId('desk-stamps'), selector: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'),
-      ...(width === 390 ? { frame: page.getByTestId('desk-frame') } : {}),
+      frame: page.getByTestId('desk-frame'),
     }
     await expectStableControls({ controls, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'select another answer', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },

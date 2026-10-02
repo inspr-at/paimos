@@ -15,6 +15,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; recorded: [item: DeskItem] }>()
 const dialog = ref<HTMLDialogElement>(), memo = ref<HTMLElement>(), decideButton = ref<HTMLButtonElement>(), pagerButton = ref<HTMLButtonElement>()
+const frame = ref<HTMLElement>(), body = ref<HTMLElement>(), scrollingHeight = ref<number>()
 const index = ref(Math.max(0, props.round.indexOf(props.start))), pager = ref(false), jumpIndex = ref(0), busy = ref(false), status = ref(''), error = ref(''), editing = ref(''), slam = ref(false)
 const drafts = ref<Record<string, DeskDraft>>({}), skipped = ref(new Set<string>()), context = ref<DeskContext>({ attachments: [], related: [], outcomes: [], warnings: [] }), contextLoading = ref(false)
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>(), viewing = ref(false), brokenThumbs = ref(new Set<string>())
@@ -26,6 +27,19 @@ const outcomes: DeskOutcome[] = ['once', 'always', 'requirement', 'doctrine']
 const outcomeKeys = ['O', 'A', 'R', 'D']
 const expired = ref(false)
 let contextGeneration = 0, live = true, expiryTimer: ReturnType<typeof setTimeout> | undefined, opener: HTMLElement | null = null
+let sizeObserver: ResizeObserver | undefined
+watch(frame, element => {
+  sizeObserver?.disconnect()
+  if (!element) return
+  // Pattern A grows downward until the body needs scrolling. From that point
+  // the series is pattern B and keeps its frame, even for a later short memo.
+  sizeObserver = new ResizeObserver(() => {
+    if (scrollingHeight.value || window.matchMedia('(max-width: 720px)').matches || !body.value) return
+    if (body.value.scrollHeight > body.value.clientHeight + 1) scrollingHeight.value = element.getBoundingClientRect().height
+  })
+  sizeObserver.observe(element)
+  if (body.value) sizeObserver.observe(body.value)
+})
 const blocked = computed(() => !item.value || !props.allowed(item.value) || !!item.value.unavailable || expired.value || busy.value)
 const canEdit = computed(() => !!item.value && (!item.value.decided || item.value.kind === 'question' || item.value.kind === 'handover'))
 const primary = computed(() => item.value?.decided && !draft.value?.dirty ? 'Next' : item.value?.decided ? 'Replace & next' : 'Decide & next')
@@ -134,12 +148,12 @@ watch(dialog, element => {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   element.showModal(); void nextTick(() => memo.value?.focus({ preventScroll: true }))
 })
-onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTimer); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
+onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTimer); sizeObserver?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
 
 <template>
   <dialog ref="dialog" class="desk-dialog" aria-label="Decision Desk memo" @keydown="keys" @cancel.prevent="close">
-    <div class="desk-frame" data-testid="desk-frame">
+    <div ref="frame" class="desk-frame" :style="scrollingHeight ? { height: `${scrollingHeight}px` } : undefined" data-testid="desk-frame">
       <div class="desk-toolbar" data-testid="desk-actions">
         <button ref="pagerButton" class="desk-pager" type="button" aria-haspopup="listbox" :aria-expanded="pager" :disabled="busy" data-testid="desk-pager" @click="openPager">
           <svg class="folder-outline" viewBox="0 0 270 46" preserveAspectRatio="none" aria-hidden="true"><path d="M.5 45.5V12 Q.5 .5 12 .5H208 Q220 .5 224 13L231 32Q235 45.5 249 45.5" /></svg>
@@ -172,7 +186,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
             <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd v-if="!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
           <div class="memo-status" role="status" aria-live="polite" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : outcomeUnavailable(item, draft.outcome) || item.delivery || item.suggestion) }}</div>
-          <div class="memo-body" data-testid="desk-body">
+          <div ref="body" class="memo-body" data-testid="desk-body">
             <section class="answer-column" aria-label="Your answer">
               <h3>Your answer</h3>
               <div class="choices" role="radiogroup" aria-label="Answer choices" data-testid="desk-choices">
