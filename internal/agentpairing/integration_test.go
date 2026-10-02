@@ -152,13 +152,21 @@ func newFixture(t *testing.T) *fixture {
 	decodeResult(t, login, &me)
 	f.person = me.Principal.ID
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
-		for _, h := range []string{"codex", "cursor", "claude", "grok", "pi"} {
+		// Catalogs validate provider identity. Native harnesses pin their family;
+		// multi-provider harnesses need a model namespace that identifies it.
+		for _, p := range []struct{ harness, family, model string }{
+			{"codex", "openai", "test-model"},
+			{"cursor", "openai", "gpt-test"},
+			{"claude", "anthropic", "test-model"},
+			{"grok", "xai", "test-model"},
+			{"pi", "openai", "openai/test-model"},
+		} {
 			var profile string
-			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,'openai','test-model','low','fast') RETURNING id::text`, id, h).Scan(&profile)
+			err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1',$2,$3,$4,'low','fast') RETURNING id::text`, id, p.harness, p.family, p.model).Scan(&profile)
 			if err != nil {
 				return err
 			}
-			f.profiles[h] = profile
+			f.profiles[p.harness] = profile
 		}
 		return nil
 	})
