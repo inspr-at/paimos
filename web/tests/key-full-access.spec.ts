@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, DEPLOYER, REGISTRY } from './access-fixtures'
 import { encodeScopeCode } from '../src/lib/scopeCode'
+import { expectStableControls } from './helpers/stable'
 
 const row = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
 async function open(page: Page, role: 'admin' | 'member' = 'admin', custom = false) {
@@ -106,6 +107,42 @@ for (const mode of ['new', 'rotate'] as const) {
       expect(body.rotate_key_id).toBe('k2')
       expect(world.keys.find(k => k.id === 'k2')!.revoked_at).not.toBeNull()
     }
+  })
+}
+
+for (const width of [390, 1440]) {
+  test(`Edit scopes names the built-in Admin exclusion without moving controls at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const world = await open(page)
+    expect(world.roles.find(r => r.key === 'admin')!.permissions).toContain('recurrences.manage')
+    const sheet = await edit(page)
+    const search = sheet.getByRole('searchbox', { name: 'Find a scope' })
+    await search.fill('recurrences.manage')
+    const recurrence = sheet.getByRole('checkbox', { name: /recurrences\.manage/ })
+    await expect(recurrence).toBeDisabled()
+    await expect(recurrence).not.toBeChecked()
+    await expect(recurrence.locator('..')).toContainText("Not in this agent's role (Admin)")
+    await expect(recurrence.locator('..')).not.toContainText("Not in the key creator's current permissions")
+    await expectStableControls({
+      controls: {
+        cancel: sheet.getByRole('button', { name: 'Cancel', exact: true }),
+        save: sheet.getByRole('button', { name: 'Save scopes', exact: true }),
+        search,
+        lifetime: sheet.getByRole('radiogroup'),
+        never: sheet.getByRole('radio', { name: 'Never', exact: true }),
+        presets: sheet.locator('.preset-actions'),
+        fullAccess: sheet.getByRole('button', { name: 'Apply Full access' }),
+      },
+      scrollAreas: { sheet, body: sheet.locator('.sheet-body') },
+      interactions: [{ name: 'Select Full access while the excluded scope is visible', run: async () => {
+        await sheet.getByRole('button', { name: 'Apply Full access' }).click()
+        await expect(recurrence).not.toBeChecked()
+        await expect(recurrence).toBeDisabled()
+        await expect(recurrence.locator('..')).toContainText("Not in this agent's role (Admin)")
+        await expect(sheet.getByRole('button', { name: 'Save scopes', exact: true })).toBeEnabled()
+      } }],
+    })
+    expect(patches(world)).toHaveLength(0)
   })
 }
 

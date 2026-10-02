@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, type Agent, type Role } from '../../lib/access'
+import { AccessError, agentRolePermissions, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import type { AgentKey } from '../../lib/settings'
 import { useAccess } from '../../stores/access'
@@ -79,7 +79,7 @@ function selectGroup(keys: string[], all: boolean) {
 function unavailableReason(key: string) {
   if (!access.registry.some(p => p.key === key && p.agent_grantable)) return 'Unavailable to agent keys'
   if (!myPermissions().has(key)) return 'Not in your permissions'
-  if (agentRole.value && !agentRole.value.permissions.includes(key)) return `Not in this agent's role (${agentRole.value.name})`
+  if (agentRole.value && !agentRolePermissions(agentRole.value).includes(key)) return `Not in this agent's role (${agentRole.value.name})`
   if (!agentRole.value) return "Not in this agent's project roles"
   return "Not in the key creator's current permissions"
 }
