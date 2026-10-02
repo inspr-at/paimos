@@ -440,7 +440,8 @@ func cmdTest(args []string) error {
 }
 
 func runPlan(root string, shard int, plan shardPlan) int {
-	args, err := plan.commandArgs()
+	fresh, cached := cachePlan(root, plan, os.Getenv("AEON_GO_TEST_LANE") == "impacted")
+	args, err := fresh.commandArgs()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -456,8 +457,22 @@ func runPlan(root string, shard int, plan shardPlan) int {
 		fmt.Fprintf(os.Stderr, "shard %d: %d whole packages\n", shard, len(plan.whole))
 	}
 	var cmds []*exec.Cmd
-	for _, sp := range args {
+	cachedArgs, err := cached.commandArgs()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	freshCount := len(args)
+	args = append(args, cachedArgs...)
+	for i, sp := range args {
 		cmd := exec.Command("go", sp...)
+		// Explicit command flags preserve freshness even if the environment is
+		// changed. Only the pinned pure packages opt into Go's result cache.
+		if i < freshCount {
+			cmd.Args = append(cmd.Args, "-count=1")
+		} else {
+			cmd.Env = append(withoutCacheCount(os.Environ()), "GOFLAGS="+strings.Join(withoutCountFields(os.Getenv("GOFLAGS")), " "))
+		}
 		cmd.Dir = root
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -476,6 +491,26 @@ func runPlan(root string, shard int, plan shardPlan) int {
 		}
 	}
 	return status
+}
+
+func withoutCacheCount(values []string) []string {
+	var result []string
+	for _, value := range values {
+		if !strings.HasPrefix(value, "GOFLAGS=") {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func withoutCountFields(flags string) []string {
+	var result []string
+	for _, flag := range strings.Fields(flags) {
+		if !strings.HasPrefix(flag, "-count=") {
+			result = append(result, flag)
+		}
+	}
+	return result
 }
 
 func stopCmds(cmds []*exec.Cmd) {

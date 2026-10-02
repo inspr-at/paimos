@@ -196,6 +196,69 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+### CI lanes and release hold (AEON-427)
+
+PRs, main pushes and manual CI retain the full existing suite. Main pushes and
+main dispatches additionally run the complete UI config with zero retries. `CI_IMPACTED_TESTS=on`
+enables the merge-queue fallback after AEON-423's verified tree reuse. Go keeps
+its platform/toolchain/dependency/shard-scoped build cache; only byte-pinned,
+runtime-free `runkind` and `ticketbenefits` audits reuse test results. Database,
+script, runtime-fixture and changed/unknown package tests stay fresh. The hosted
+timing and static jobs always run fresh. This conservative starting scope does
+not claim the planned 2–3 minute queue target.
+
+The queue uses Playwright `--only-changed=<immutable merge_group.base_sha>` for
+spec-only changes, keeping every required job/check. Shared application, API,
+backend, helper, configuration or deleted inputs widen to full browser coverage.
+This wrapper applies only to queue runs; AEON-421 owns PR selection. Main never
+uses impacted selection. `ci-lane-<lane>-<sha>-<attempt>` artifacts and summaries
+record each CI run. Release artifacts `release-lane-<sha>-<attempt>` bind the
+release to its exact successful queue/main run and identify `full`, `impacted`,
+or AEON-423 `tree` reuse. Missing, expired or squash-mismatched evidence is
+`unknown`; metrics never authorize a release.
+
+`release-hold.yml` runs trusted default-branch code on main CI completion and
+reconciles again every five minutes. Its single non-cancelling writer compares
+commit ancestry, re-fetches completion metadata and verifies all green main jobs
+and shards. A red main sets `RELEASE_HOLD=<sha>` before opening the GitHub issue
+**Release hold: main CI**. A successful full main run at that SHA or a descendant
+clears it. Older greens, cancellation (including AEON-585 superseded main runs),
+malformed provenance and failed reads never count as recovery. The hold does not
+cancel an already running rollout or undo an activation.
+
+The coordinator provisions **AEON_RELEASE_HOLD_TOKEN**, a fine-grained token
+restricted to **inspr-at/paimos** with repository **Variables: write**,
+**Issues: write**, **Actions: read**, **Contents: read** and implicit Metadata:
+read. Only the trusted hold workflow receives this writer; it has no contents,
+packages, deployment or pull-request write scope. `GITHUB_TOKEN` has no Actions
+workflow permission key granting Variables write; do not substitute the pin App.
+Readers use separate **AEON_RELEASE_HOLD_READ_TOKEN** with **Variables: read**
+and implicit Metadata: read only. These permissions follow the
+[GitHub variables REST contract](https://docs.github.com/en/rest/actions/variables).
+No workflow here provisions credentials or changes repository settings.
+
+The tag helper, tag workflow (including a recheck immediately before image and
+release publication) and deployment-pin proposal query the live variable rather
+than a queued `vars` snapshot. Missing reader credentials, failed API reads,
+malformed or incomplete responses refuse the operation. The portable read-only
+activation adapter is `bash scripts/check-release-hold.sh` (Bash, curl and jq).
+NIX-597 owns packaging it and invoking it under the rollout lock immediately
+before **every** activation path; that change is proposed on its PPM ticket,
+not applied from this repo. Keep `CI_IMPACTED_TESTS` absent/off until both tokens,
+the hold writer and that external hook are provisioned and verified. Coordinate
+AEON-421's sealed launcher/selection protections before activating its PR policy
+and this queue policy together; this change does not reimplement that harness. Clearing a
+variable manually is not recovery evidence and the reconciler can re-engage it.
+
+The acceptance target is a persisted hold within six minutes of a completed red
+main run. Observations record `engage_after_red_s` and `six_minute_target_met`
+using the actual API run timestamp and confirmed variable readback. The worker
+request budget is two minutes and the job timeout five minutes; GitHub queue and
+schedule delays can exceed the target. A draft PR can prove fixtures and workflow
+wiring; live latency requires coordinator measurement after merge. Run the
+workflow, hold/rollout and cache regression packages with the approved
+`remote-test.sh` (which runs `nix develop -c go test` on mbp2606).
+
 The ordinary activity tests check exact pagination through 240 same-ticket
 imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
 imported events, plus the node index definition. They impose no latency budget.

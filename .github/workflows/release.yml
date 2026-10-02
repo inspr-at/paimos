@@ -44,6 +44,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
+      - name: Require release hold clear
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Require exact-SHA release rehearsal
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -157,6 +161,10 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Require release hold clear
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Validate inspr-calendar-v2 tag
         id: version
         run: node scripts/release-tag.mjs
@@ -278,6 +286,10 @@ jobs:
 
       # Export by digest only. Neither worker can publish the release tag.
       # Separate cache refs prevent parallel architectures overwriting each other.
+      - name: Recheck release hold before publication
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Build and push
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -346,6 +358,7 @@ jobs:
     # Its App proposes pins on nixcfg only; the coordinator reviews and deploys.
     environment: release-pinning
     permissions:
+      actions: read
       contents: write
       packages: write
       attestations: write
@@ -361,6 +374,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
+      - name: Require release hold clear
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Validate inspr-calendar-v2 tag
         id: version
         run: node scripts/release-tag.mjs
@@ -402,6 +419,10 @@ jobs:
             exit 1
           fi
 
+      - name: Recheck release hold before publication
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Publish multi-arch index
         id: push
         env:
@@ -442,6 +463,17 @@ jobs:
             --source-digest "$GITHUB_SHA" \
             --deny-self-hosted-runners
 
+      - name: Record release CI lane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-lane.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-lane-${{ github.sha }}-${{ github.run_attempt }}
+          path: release-lane.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Record pushed digest
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -461,6 +493,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
           AEON_PIN_BOT_ENABLED: ${{ vars.AEON_PIN_BOT_ENABLED }}
           AEON_PIN_APP_ID: ${{ secrets.AEON_PIN_APP_ID }}
           AEON_PIN_APP_KEY: ${{ secrets.AEON_PIN_APP_KEY }}
@@ -489,6 +522,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
+      - name: Require release hold clear
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
@@ -538,6 +575,10 @@ jobs:
           fi
 
       # Publication is an explicit post-deploy step; see docs/RELEASE.md.
+      - name: Recheck release hold before publication
+        env:
+          AEON_RELEASE_HOLD_READ_TOKEN: ${{ secrets.AEON_RELEASE_HOLD_READ_TOKEN }}
+        run: node scripts/release-hold.mjs check
       - name: Create draft GitHub release with signed assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

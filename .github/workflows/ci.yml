@@ -20,14 +20,41 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Enable only after the hold writer and external rollout guard are provisioned.
+  CI_IMPACTED_TESTS: ${{ vars.CI_IMPACTED_TESTS }}
+
 jobs:
+  ci-lane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      lane: ${{ steps.lane.outputs.lane }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+      - name: Record CI lane
+        id: lane
+        run: node scripts/ci-lane.mjs record
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-lane-${{ steps.lane.outputs.lane }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ci-lane.json
+          if-no-files-found: error
+          retention-days: 30
+
   runner-route:
     uses: ./.github/workflows/test-runner-route.yml
     with:
       required-idle-runners: 4
 
   go-test:
-    needs: runner-route
+    needs: [runner-route, ci-lane]
     strategy:
       fail-fast: false
       matrix:
@@ -94,13 +121,14 @@ jobs:
           # Applies to every go test child, including PR and merge-group runs.
           # External scripts and database images are outside Go's test cache id.
           GOFLAGS: -count=1
+          AEON_GO_TEST_LANE: ${{ needs.ci-lane.outputs.lane }}
         run: |
           set -euo pipefail
           go run ./scripts/ci-go-shards test -count "$AEON_GO_SHARD_COUNT" -shard "${{ matrix.shard }}" 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           cached=$(grep -cE '^ok[[:space:]].*\(cached\)$' "$RUNNER_TEMP/go-test.log" || true)
           packages=$(grep -cE '^ok[[:space:]]' "$RUNNER_TEMP/go-test.log" || true)
           printf 'Go shard %s/%s: %s successful package invocations, %s cached\n' "${{ matrix.shard }}" "$AEON_GO_SHARD_COUNT" "$packages" "$cached" >> "$GITHUB_STEP_SUMMARY"
-          test "$cached" -eq 0
+          if [ "$AEON_GO_TEST_LANE" != impacted ]; then test "$cached" -eq 0; fi
       - name: Record successful test evidence
         run: |
           case "$RUNNER_ENVIRONMENT" in
@@ -201,9 +229,13 @@ jobs:
           test "${GO_TIMING}" = success
 
   web:
+    needs: ci-lane
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -229,6 +261,7 @@ jobs:
       - working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Capture the round-6 release list for comparison
+        if: github.event_name != 'merge_group' || vars.CI_IMPACTED_TESTS != 'on'
         id: release-list-before
         working-directory: web
         env:
@@ -241,11 +274,11 @@ jobs:
           trap 'git show HEAD:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue; git show HEAD:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue' EXIT
           git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/ReleaseName.vue > src/components/ReleaseName.vue
           git show 900c24ebef0d6188f300e13b56d1e5f53b7ac54d:web/src/components/releases/ReleasesSheet.vue > src/components/releases/ReleasesSheet.vue
-          npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
+          node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/release-codenames.spec.ts --workers=1 -g 'release list screenshot'
       - working-directory: web
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1
       - name: Upload release list comparison screenshots
         if: always() && steps.release-list-before.outcome != 'skipped'
         uses: actions/upload-artifact@v7
@@ -268,7 +301,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Access dialog regressions (hosted only)
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
       - name: Preserve failed access dialog traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -282,7 +315,7 @@ jobs:
         run: npm run test:unit
       - name: Planning columns regression and theme screenshots
         working-directory: web
-        run: npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2
       - name: Planning screenshot evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -294,7 +327,7 @@ jobs:
 
       - name: Work queue regressions and theme screenshots
         working-directory: web
-        run: npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1
       - name: Work queue screenshot evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -305,7 +338,7 @@ jobs:
           if-no-files-found: ignore
       - name: Ticket dispatch, panel and worker regressions
         working-directory: web
-        run: npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2
 
       - name: Session linking unit checks
         working-directory: web
@@ -326,7 +359,7 @@ jobs:
       - name: Controls stay put and affected dialog regressions (AEON-541)
         working-directory: web
         run: >-
-          npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure
+          node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure
           tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
           tests/accounts-computers.spec.ts tests/agents-top.spec.ts
           tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
@@ -335,7 +368,7 @@ jobs:
         env:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
+        run: node ../scripts/ci-lane.mjs playwright -- npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
       - name: Preserve account linking screenshots and failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -345,18 +378,27 @@ jobs:
           retention-days: 7
       - name: Scope proposals and key management regressions
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2
 
       - name: Morning briefing regressions
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/morning-briefing.spec.ts --workers=1
+
+      - name: Complete UI suite on main
+        if: contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main'
+        working-directory: web
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts --workers=2 --retries=0
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
+    needs: ci-lane
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -376,34 +418,34 @@ jobs:
         env:
           AEON_SCREENSHOTS_DIR: test-results/footer-release-pill
         run: >-
-          npx playwright test -c playwright.ui.config.ts --workers=2
+          node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts --workers=2
           tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts
           tests/release-codenames.spec.ts tests/version-reveal.spec.ts
           tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts
           tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts
       - name: Desktop light screenshot
-        if: always()
+        if: always() && (github.event_name != 'merge_group' || vars.CI_IMPACTED_TESTS != 'on')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: footer-desktop-light
           path: web/test-results/footer-release-pill/desktop-light.png
           if-no-files-found: error
       - name: Desktop dark screenshot
-        if: always()
+        if: always() && (github.event_name != 'merge_group' || vars.CI_IMPACTED_TESTS != 'on')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: footer-desktop-dark
           path: web/test-results/footer-release-pill/desktop-dark.png
           if-no-files-found: error
       - name: Phone light screenshot
-        if: always()
+        if: always() && (github.event_name != 'merge_group' || vars.CI_IMPACTED_TESTS != 'on')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: footer-phone-light
           path: web/test-results/footer-release-pill/phone-light.png
           if-no-files-found: error
       - name: Phone dark screenshot
-        if: always()
+        if: always() && (github.event_name != 'merge_group' || vars.CI_IMPACTED_TESTS != 'on')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: footer-phone-dark
@@ -411,9 +453,13 @@ jobs:
           if-no-files-found: error
 
   status-help-ui:
+    needs: ci-lane
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -433,7 +479,7 @@ jobs:
         working-directory: web
         env:
           AEON_521A_SHOTS: ${{ runner.temp }}/aeon-521a-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -460,7 +506,7 @@ jobs:
           node scripts/check-own-release-notes.mjs
       - run: node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
-      - run: node --test scripts/release-pin-pr.test.mjs
+      - run: node --test scripts/release-pin-pr.test.mjs scripts/release-hold.test.mjs scripts/ci-lane.test.mjs scripts/release-lane.test.mjs
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -475,6 +521,7 @@ jobs:
           go run ./scripts/ci-runner-guard
 
   e2e:
+    needs: ci-lane
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -496,6 +543,9 @@ jobs:
       BASE_URL: http://127.0.0.1:8080
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
@@ -539,15 +589,19 @@ jobs:
             cat "$RUNNER_TEMP/aeon.log" >&2 || true
             exit 1
           fi
-          npm run e2e --prefix web
+          (cd web && node ../scripts/ci-lane.mjs playwright -- npm run e2e)
       - name: Test workspace model provider controls
         working-directory: web
-        run: npm test -- tests/model-provider.spec.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npm test -- tests/model-provider.spec.ts --workers=1
 
   status-autopilot-ui:
+    needs: ci-lane
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -563,7 +617,7 @@ jobs:
         env:
           STATUS_AUTOPILOT_SHOTS: ${{ runner.temp }}/status-autopilot-shots
           AGENT_ACTIVITY_SHOTS: ${{ runner.temp }}/status-autopilot-shots/activity
-        run: npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
+        run: node ../scripts/ci-lane.mjs playwright -- npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1
       - uses: actions/upload-artifact@v7
         if: always()
         with:

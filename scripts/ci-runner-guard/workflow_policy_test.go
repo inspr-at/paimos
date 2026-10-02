@@ -132,6 +132,27 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("smoke-route/"+name, "test-runner-smoke.yml", want, func(w map[string]any) { edit(mapping(mapping(w["jobs"])["smoke"])) })
 	}
 
+	for name, edit := range map[string]func(map[string]any){
+		"untrusted-ref": func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["reconcile"])["steps"].([]any)[0])["with"] = map[string]any{"ref": "${{ github.event.workflow_run.head_sha }}", "persist-credentials": false}
+		},
+		"skip-write": func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["reconcile"])["steps"].([]any)[2])["continue-on-error"] = true
+		},
+		"foreign-completion": func(w map[string]any) { mapping(mapping(w["on"])["workflow_run"])["branches"] = []any{"**"} },
+		"missing-lock":       func(w map[string]any) { delete(w, "concurrency") },
+		"cancel-writer":      func(w map[string]any) { mapping(w["concurrency"])["cancel-in-progress"] = true },
+		"wrong-token": func(w map[string]any) {
+			mapping(mapping(mapping(w["jobs"])["reconcile"])["steps"].([]any)[2])["env"] = map[string]any{"AEON_RELEASE_HOLD_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+		},
+	} {
+		want := "release hold"
+		if name == "missing-lock" || name == "cancel-writer" {
+			want = "reviewed concurrency policy"
+		}
+		add("hold-writer/"+name, "release-hold.yml", want, edit)
+	}
+
 	// The original review's CI trigger, gate, dependency and runner mutations.
 	for name, push := range map[string]any{
 		"unfiltered-push": nil,
