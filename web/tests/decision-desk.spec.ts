@@ -18,6 +18,9 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const world = await mockDecisionDesk(page, { long: true, theme })
     await openFirst(page)
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    const captureDir = process.env.AEON_DESK_SHOTS || testInfo.outputPath('desk-shots')
+    await mkdir(captureDir, { recursive: true })
+    await page.screenshot({ path: join(captureDir, `memo-${width}-${theme}-start.png`) })
     const controls = {
       actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager'),
       stamps: page.getByTestId('desk-stamps'), selector: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0'),
@@ -28,7 +31,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       { name: 'write custom answer', run: async () => { await page.getByTestId('choice-2').click(); await page.getByRole('textbox', { name: 'Something else' }).fill('Keep the query scoped to this tenant.'); await page.getByRole('textbox', { name: 'Something else' }).press('Enter'); await expect(page.getByTestId('desk-status')).toContainText('answer is set') } },
       { name: 'unavailable stamp stays neutral', run: async () => { await expect(page.getByTestId('stamp-always')).toBeDisabled(); await page.getByTestId('desk-paper').press('a'); await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-pressed', 'true') } },
       { name: 'type and finish P.S.', run: async () => { await page.getByRole('textbox', { name: 'P.S. for the agent' }).fill('Keep the acceptance criteria.'); await page.getByRole('textbox', { name: 'P.S. for the agent' }).press('Enter') } },
-      { name: 'skip to next', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+      { name: 'skip to next', run: async () => { await page.getByTestId('desk-skip').click(); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-announcement')).toContainText('Skipped for this round') } },
       { name: 'page back', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('1 of') } },
       { name: 'decide and advance', run: async () => { await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('2 of'); await expect(page.getByTestId('desk-decide')).toBeFocused() } },
       { name: 'revisit decision', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-decide')).toContainText('Next') } },
@@ -152,4 +155,29 @@ test('tier ownership races retain the request without reporting success', async 
   await expect(page.getByTestId('desk-status')).toContainText('ownership changed')
   await expect(page.getByTestId('desk-announcement')).toContainText('not confirmed')
   expect(world.tier.requests[0]!.state).toBe('pending')
+})
+
+test('HTML attachments use the existing separate-origin sandbox and restore memo focus', async ({ page }) => {
+  await mockDecisionDesk(page, { html: true })
+  await page.context().route('https://preview.example.org/preview/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><button onclick="this.textContent=\'Changed\'">Live fragment</button>' }))
+  await openFirst(page)
+  const attachment = page.getByRole('button', { name: 'Open Index plan' })
+  await attachment.click()
+  const iframe = page.locator('iframe.html-preview')
+  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
+  await expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer')
+  await expect(iframe).toHaveAttribute('src', /^https:\/\/preview\.example\.org\//)
+  await page.frameLocator('iframe.html-preview').getByRole('button', { name: 'Live fragment' }).click()
+  await expect(page.frameLocator('iframe.html-preview').getByRole('button', { name: 'Changed' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close viewer' }).click(); await expect(attachment).toBeFocused()
+})
+
+test('short memos stay short before a round requires a scrolling body', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 })
+  await mockDecisionDesk(page, { short: true })
+  await openFirst(page)
+  const before = await page.getByTestId('desk-frame').boundingBox()
+  expect(before!.height).toBeLessThan(900)
+  expect(await page.getByTestId('desk-body').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+  await expectStableControls({ controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-0') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'select without growing a short memo', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } }] })
 })

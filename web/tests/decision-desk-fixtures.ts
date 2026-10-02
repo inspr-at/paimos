@@ -13,7 +13,7 @@ export function sampleQuestion(id = 'question-1', input: Partial<Question['input
     askers: [{ id: 'asker-1', principal_id: 'agent-1', reply_root_id: 'root-1', comment_node_id: 'n-a1', input: { request_id: id, question: 'Which index?', options: [], meanwhile: 'parked' } }], pending: [],
   }
 }
-export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean } = {}) {
+export async function mockDecisionDesk(page: Page, options: { denied?: boolean; long?: boolean; short?: boolean; theme?: 'light' | 'dark'; tier?: boolean; phone?: boolean; html?: boolean } = {}) {
   const data = fixtures()
   data.projects.find(project => project.id === 'p-aeon')!.title = 'Paimos Aeon'
   if (options.theme) data.preferences.theme = { choice: options.theme }
@@ -22,12 +22,13 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
   ticket.fields.pr_url = 'https://github.com/inspr-at/paimos/pull/181'
   await mockWork(page, data)
   const q = sampleQuestion()
+  if (options.short) { q.input.ticket_id = undefined; q.input.findings = ''; q.input.context = 'The existing migration can carry this index.' }
   if (options.long) q.input.context = Array(70).fill('Long background: the agent compared the index with the existing tenant-scoped query.').join('\n')
   const questions = [q, sampleQuestion('question-2', { question: 'Should the successor continue the review?', source_handover_id: 'handover-1' })]
   const future = new Date(Date.now() + 3600_000).toISOString()
   const approval = { id: 'approval-1', agent_principal_id: 'agent-1', agent_name: 'Codex', scope: 'nodes.read', resource_kind: 'node', resource_id: 'n-a1', rationale: 'Read the ticket to continue the review.', expires_at: future, proposed_at: '2026-10-02T08:01:00Z', decision: null, risk: 'low' }
   const action = { id: 'action-1', sender_principal_id: 'agent-1', recipient_principal_id: 'person', to: 'person', body: 'The reviewer needs guidance before trying again.', sender_session_id: 'original-generation', sent_event_id: 1, is_action_request: true, expects_reply: true, delivery_level: 'simple', status: 'held', reply_obligation: 'open', created_at: '2026-10-02T08:02:00Z' }
-  const rule = { id: 'rule-1', label: 'Keep mutation checks in the transaction', why: 'The earlier permission check can become stale.', proposed: 'Authorize inside the mutation transaction.', base: 'Authorize before the write.', created_at: '2026-10-02T08:03:00Z', ticket: 'n-a1', state: 'pending' }
+  const rule = { id: 'rule-1', label: 'Keep mutation checks in the transaction', why: 'The earlier permission check can become stale.', proposed: 'Authorize inside the mutation transaction.', base: 'Authorize before the write.', created_at: '2026-10-02T08:03:00Z', ticket: 'AEON-1', state: 'pending' }
   const ownership = { daemon_id: 'daemon-1', generation: 'generation-1', process_id: 'process-1', root_pid: 1234, group_id: 1234, started_at: '2026-10-02T08:00:00Z' }
   const tierRequest = { id: 'tier-request-1', session_id: 'tier-session', tier: 'default', reason: 'Return this run to the default tier.', state: 'pending', created_at: '2026-10-02T08:04:00Z' }
   const tier = { session_id: 'tier-session', revision: 2, read_only: false, active_tier: 'default', pending: null, reports: [], requests: [tierRequest] }
@@ -79,7 +80,8 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
     if (path.endsWith('/messages') && method === 'GET') return route.fulfill({ json: { items: path.includes('/p-aeon/') ? [action] : [], next_after: 1 } })
     if (path.endsWith('/message-targets')) return route.fulfill({ json: [{ id: 'target-1', principal_id: 'agent-1', address: 'agent:reviewer', enabled: true }] })
     if ((path.endsWith('/messages') || path.endsWith('/resolution')) && method === 'POST') { calls.push({ path, body: request.postDataJSON() }); return route.fulfill({ json: { ...action, status: 'accepted' } }) }
-    if (path === '/api/nodes/n-a1/attachments') return route.fulfill({ status: control.denyContext ? 403 : 200, json: { items: [{ id: 'image-1', node_id: 'n-a1', name: 'index-plan.png', content_type: 'image/png', size: 70, sha256: 'test', width: 1, height: 1, caption: 'Index plan', position: 0, created_by: { id: 'person', name: 'Markus Barta' }, created_at: '2026-10-02T08:00:00Z' }] } })
+    if (path === '/api/nodes/n-a1/attachments') return route.fulfill({ status: control.denyContext ? 403 : 200, json: { items: [{ id: 'image-1', node_id: 'n-a1', name: options.html ? 'fragment.html' : 'index-plan.png', content_type: options.html ? 'text/html; charset=utf-8' : 'image/png', size: 70, sha256: 'test', width: options.html ? null : 1, height: options.html ? null : 1, thumbnail_kind: options.html ? 'html-text' : undefined, caption: 'Index plan', position: 0, created_by: { id: 'person', name: 'Markus Barta' }, created_at: '2026-10-02T08:00:00Z' }] } })
+    if (path === '/api/attachments/image-1/preview') return route.fulfill({ json: { available: true, url: 'https://preview.example.org/preview/' + 'A'.repeat(43), expires_at: new Date(Date.now() + 60_000).toISOString() } })
     if (path === '/api/attachments/image-1/content') return route.fulfill({ contentType: 'image/png', body: PNG })
     if (control.denyContext && path === '/api/nodes/n-a1') return route.fulfill({ status: 403, json: { error: 'Forbidden' } })
     return route.fallback()

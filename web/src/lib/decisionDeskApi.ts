@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
-import { api, APIError, getNode, getProjects, getRelations, type WorkNode } from './api'
+import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
 import { listApprovals, decideApproval, revokeApproval, listMessages, listTargets, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
 import { canDecideApproval } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
@@ -83,7 +83,7 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
   return { ...base(`r:${rule.id}`, 'rule', rule.label, rule.why ?? '', [
     { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change' },
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
-  ]), createdAt: rule.created_at, findings: rule.proposed ?? '', ticketId: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+  ]), createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
 export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem> }
 export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map() })
@@ -231,7 +231,15 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
   return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the native workflow.' }
 }
 export interface DeskContext { ticket?: WorkNode; attachments: Attachment[]; related: WorkNode[]; outcomes: OutcomeEvent[]; warnings: string[] }
-export async function loadDeskContext(ticketId: string): Promise<DeskContext> {
+export async function loadDeskContext(ticketId: string, ticketKey?: string): Promise<DeskContext> {
+  if (ticketKey) {
+    try {
+      const lookup = await lookupNodeKeys([ticketKey])
+      const node = lookup.items.find(node => node.key === ticketKey || node.requested_key === ticketKey)
+      if (!node) throw new Error('Ticket not found')
+      ticketId = node.id
+    } catch { return { attachments: [], related: [], outcomes: [], warnings: ['Ticket context is unavailable or inaccessible.'] } }
+  }
   const [ticket, attachments, relations, outcomes] = await Promise.allSettled([getNode(ticketId), listAttachments(ticketId), getRelations(ticketId), loadTicketOutcomes(ticketId)])
   const warnings: string[] = []
   if (ticket.status === 'rejected') warnings.push('Ticket context is unavailable or inaccessible.')

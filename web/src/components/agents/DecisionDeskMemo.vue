@@ -52,9 +52,9 @@ watch(item, async current => {
   clearTimeout(expiryTimer)
   expired.value = !!current?.expiresAt && Date.parse(current.expiresAt) <= Date.now()
   if (current?.expiresAt && !expired.value) expiryTimer = setTimeout(() => { expired.value = true; status.value = 'This request expired. No permission was granted.' }, Math.min(2_147_483_647, Math.max(0, Date.parse(current.expiresAt) - Date.now())))
-  if (current?.ticketId) {
+  if (current?.ticketId || current?.ticketKey) {
     contextLoading.value = true
-    const result = await loadDeskContext(current.ticketId)
+    const result = await loadDeskContext(current.ticketId ?? '', current.ticketKey)
     if (live && turn === contextGeneration && item.value?.id === current.id) { context.value = result; contextLoading.value = false }
   }
 }, { immediate: true })
@@ -78,13 +78,15 @@ function stamp(outcome: DeskOutcome) {
   if (blocked.value || !canEdit.value || !item.value || !draft.value || outcomeUnavailable(item.value, outcome)) return
   draft.value.outcome = outcome; touch()
 }
-function navigate(delta: number) {
+function navigate(delta: number, notice = '') {
   if (busy.value || props.round.length < 2) return
   index.value = (index.value + delta + props.round.length) % props.round.length
+  const next = props.items.find(item => item.id === props.round[index.value])
+  announcement.value = `${notice ? notice + ' ' : ''}Memo ${index.value + 1} of ${props.round.length}. ${next?.title ?? 'Unavailable item'}`
 }
 function skip() {
   if (!item.value || busy.value) return
-  skipped.value = new Set([...skipped.value, item.value.id]); navigate(1)
+  skipped.value = new Set([...skipped.value, item.value.id]); navigate(1, 'Skipped for this round. The request stays open.')
   status.value = 'Skipped for this round. The request stays open.'
 }
 async function submit() {
@@ -106,13 +108,13 @@ async function submit() {
     emit('recorded', result); slam.value = false; announcement.value = `Decision recorded for ${current.title}. ${result.delivery || ''}`
     status.value = result.delivery || 'Decision recorded.'
     await nextTick()
-    if (live) { busy.value = false; navigate(1); await nextTick(); decideButton.value?.focus({ preventScroll: true }) }
+    if (live) { busy.value = false; navigate(1, `Decision recorded for ${current.title}. ${result.delivery || ''}`); await nextTick(); decideButton.value?.focus({ preventScroll: true }) }
   } catch (cause) {
     if (live && item.value?.id === capturedId) { error.value = cause instanceof Error ? cause.message : 'The decision failed. Your answer is kept.'; status.value = 'The decision was not confirmed.'; announcement.value = `Decision not confirmed. ${error.value}` }
   } finally { if (live) busy.value = false }
 }
 function openPager() { if (busy.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
-function pickJump(at: number) { index.value = at; pager.value = false; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
+function pickJump(at: number) { index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
 function close() { if (viewing.value) return; dialog.value?.close(); emit('close') }
 function keys(event: KeyboardEvent) {
   if (viewing.value || event.isComposing || event.defaultPrevented || (event.repeat && event.key === 'Enter')) return
@@ -206,7 +208,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
               <section><h3>Background</h3><p>{{ item.context || 'No background supplied by the source.' }}</p></section>
               <section v-if="item.findings"><h3>Findings</h3><p>{{ item.findings }}</p></section>
               <section><h3>Where the answer goes</h3><p>{{ item.destination }}</p><p v-if="item.delivery">{{ item.delivery }}</p></section>
-              <section v-if="item.ticketId"><h3>From the ticket</h3><p v-if="contextLoading" role="status">Reading ticket context…</p><template v-if="context.ticket"><RouterLink :to="`/work/${context.ticket.id}`">{{ context.ticket.key }} · {{ context.ticket.title }} <AppIcon name="external" :size="12" /></RouterLink><dl><div><dt>Status</dt><dd>{{ context.ticket.state }}</dd></div><div><dt>Priority</dt><dd>{{ plainText(context.ticket.fields.priority) }}</dd></div><div><dt>Acceptance</dt><dd>{{ plainText(context.ticket.fields.acceptance_criteria) }}</dd></div><div><dt>PR / checks</dt><dd>{{ plainText(context.ticket.fields.pr_url) }} · {{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').slice(0, 3).map(outcome => outcomeLine(outcome).full).join(' · ') || 'No check evidence supplied' }}</dd></div></dl></template><p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p></section>
+              <section v-if="item.ticketId || item.ticketKey"><h3>From the ticket</h3><p v-if="contextLoading" role="status">Reading ticket context…</p><template v-if="context.ticket"><RouterLink :to="`/work/${context.ticket.id}`">{{ context.ticket.key }} · {{ context.ticket.title }} <AppIcon name="external" :size="12" /></RouterLink><dl><div><dt>Status</dt><dd>{{ context.ticket.state }}</dd></div><div><dt>Priority</dt><dd>{{ plainText(context.ticket.fields.priority) }}</dd></div><div><dt>Acceptance</dt><dd>{{ plainText(context.ticket.fields.acceptance_criteria) }}</dd></div><div><dt>PR / checks</dt><dd>{{ plainText(context.ticket.fields.pr_url) }} · {{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').slice(0, 3).map(outcome => outcomeLine(outcome).full).join(' · ') || 'No check evidence supplied' }}</dd></div></dl></template><p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p></section>
               <section v-if="context.related.length"><h3>Related records</h3><RouterLink v-for="related in context.related" :key="related.id" class="related-link" :to="`/work/${related.id}`">{{ related.key }} · {{ related.title }}</RouterLink></section>
               <section v-if="context.attachments.length"><h3>Attachments</h3><div class="attachments"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="attachment" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else>{{ fileKind(attachment) }}</span><small>{{ attachment.caption || attachment.name }}</small></button></div></section>
             </aside>

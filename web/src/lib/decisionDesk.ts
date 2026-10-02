@@ -6,7 +6,7 @@ export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' 
 export const CUSTOM_ANSWER = '@custom'
 export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean }
 export interface DeskItem {
-  id: string; kind: DeskKind; projectId: string; projectName: string; ticketId?: string
+  id: string; kind: DeskKind; projectId: string; projectName: string; ticketId?: string; ticketKey?: string
   title: string; context: string; findings: string; meanwhile: string; destination: string
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
