@@ -78,6 +78,7 @@ var ProjectFilteredRoutes = map[string]bool{
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/recurrences":                          true,
+	"POST /api/recurrences/preview":                  true,
 	"POST /api/queue":                                true,
 	"POST /api/queue/reset":                          true,
 	"POST /api/queue/next":                           true,

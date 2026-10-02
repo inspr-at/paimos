@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +45,12 @@ func TestUIReadOnlyDraftHistoryAndRetirement(t *testing.T) {
 		t.Fatalf("overview %+v", got)
 	}
 	reader := viewer(f)
+	readContext := authz.BindPool(tenant.WithPrincipal(t.Context(), reader), f.d.App)
+	for _, pattern := range []string{"GET /api/recurrences", "GET /api/recurrences/{recurrenceId}", "GET /api/recurrences/{recurrenceId}/preview", "GET /api/recurrences/{recurrenceId}/history", "GET /api/recurrences/{recurrenceId}/releases"} {
+		if err := authz.RequirePattern(readContext, pattern, authz.Scope{}); err != nil {
+			t.Fatalf("viewer blocked at production boundary %s: %v", pattern, err)
+		}
+	}
 	for _, path := range []string{"/api/recurrences?project_id=" + f.project, "/api/recurrences/" + r.ID, "/api/recurrences/" + r.ID + "/preview", "/api/recurrences/" + r.ID + "/history", "/api/recurrences/" + r.ID + "/releases"} {
 		f.call(reader, "GET", path, nil, 200)
 	}
@@ -82,6 +89,30 @@ func TestUIReadOnlyDraftHistoryAndRetirement(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestUIDraftPreviewAdmitsProjectOnlyManager(t *testing.T) {
+	f := setup(t)
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.p.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.p.TenantID, f.p.ID, f.project)
+		return err
+	})
+	ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), f.p), f.d.App)
+	const pattern = "POST /api/recurrences/preview"
+	if err := authz.RequirePattern(ctx, pattern, authz.Scope{}); err == nil {
+		t.Fatal("project-only grant reached workspace boundary")
+	}
+	scope, ok, err := authz.ResolveRouteScope(ctx, f.d.App, pattern, "/api/recurrences/preview")
+	if err != nil || !ok || !scope.AnyProject {
+		t.Fatalf("draft scope %+v %v %v", scope, ok, err)
+	}
+	if err = authz.RequirePattern(ctx, pattern, scope); err != nil {
+		t.Fatal(err)
+	}
+	f.call(f.p, "POST", "/api/recurrences/preview", f.input(), 200)
 }
 
 func TestUIReleasePickerForceOverlapAndSchedulerDeduplication(t *testing.T) {
