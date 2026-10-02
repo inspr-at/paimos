@@ -19,13 +19,13 @@ import (
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
-const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}`
+const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
 // These exact mappings are the sole authority for workflow concurrency. Jobs
 // never own concurrency, and reusable workflows cannot enter a caller's group.
 var workflowConcurrency = map[string]map[string]any{
 	"ci.yml": {
-		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' }}`,
+		"group": ciConcurrencyGroup, "cancel-in-progress": `${{ github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main' }}`,
 	},
 	"release.yml": {
 		"group": `release-${{ github.ref }}`, "cancel-in-progress": false,
