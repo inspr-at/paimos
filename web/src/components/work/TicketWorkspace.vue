@@ -91,6 +91,19 @@ const ticket = useTicket(item, {
   live: { busy: liveBusy, me: () => props.me?.id ?? null },
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
+// Draft callbacks retain the record that supplied them, even if a caller holds
+// a callback past a render or a confirmation. Mismatched saves are refused.
+const record = computed(() => {
+  const id = item.value?.id ?? null
+  const setField = (name: string, value: string) => ticket.patch({ fields: { [name]: value || undefined } }, undefined, id)
+  return {
+    setTitle: (title: string) => ticket.patch({ title }, undefined, id),
+    setBody: (body: string) => ticket.patch({ body }, undefined, id),
+    setAcceptance: (value: string) => setField('acceptance_criteria', value),
+    setNotes: (value: string) => setField('notes', value),
+    addComment: (body: string) => activity.add(body, id ?? null),
+  }
+})
 const convertOpen = ref(false)
 const header = ref<{ focusMore: () => void } | null>(null)
 function finishConvert() {
@@ -267,7 +280,8 @@ async function saveEdit() {
   const person = draft.assignee !== base.assignee ? assigneeOptions.value.find(o => o.value === draft.assignee && o.value) : undefined
   if (person) { props.names.set(person.value, person.label); rowStore.learnName(person.value, person.label) }
   saving.value = true
-  const result = await ticket.patch(patch)
+  const result = await ticket.patch(patch, undefined, target.id)
+  if (item.value?.id !== target.id) return
   saving.value = false
   if (result === 'ok') {
     editing.value = false
@@ -311,7 +325,7 @@ function editKeys(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveEdit() }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelEdit() }
 }
-watch(() => props.item?.id, () => { editing.value = false })
+watch(() => props.item?.id, () => { editing.value = false; saving.value = false }, { flush: 'sync' })
 watch(editing, value => { if (!value) { editMenu.value = null; benefitNotice.value = ''; benefitInvalidKey.value = '' } })
 
 // ---------- Attachments: drop anywhere on the ticket, paste a screenshot ----------
@@ -349,6 +363,7 @@ const descSection = ref<InstanceType<typeof MarkdownSection>>()
 const acSection = ref<InstanceType<typeof MarkdownSection>>()
 const notesSection = ref<InstanceType<typeof MarkdownSection>>()
 const sections = computed(() => [descSection.value, acSection.value, notesSection.value].filter(section => !!section))
+const commentDraft = ref('')
 const composer = ref<InstanceType<typeof CommentComposer>>()
 const timeline = ref<InstanceType<typeof ActivityTimeline>>()
 watchEffect(() => { liveBusy.value = convertOpen.value || editing.value || saving.value || !!title.value?.editing || sections.value.some(section => section.editing) })
@@ -485,7 +500,7 @@ async function remove() {
     body: `“${target.title}” leaves the project list. ${target.children_count ? 'Its children must be moved or deleted first.' : 'The history stays in the audit log.'}`,
     confirmLabel: `Delete ${kindLabel(target.kind_slug).toLowerCase()}`, danger: true,
   })
-  if (ok) await ticket.remove()
+  if (ok) await ticket.remove(target)
 }
 async function addSection(kind: 'acceptance' | 'notes') {
   if (kind === 'acceptance') showAcceptance.value = true; else showNotes.value = true
@@ -496,6 +511,12 @@ async function addSection(kind: 'acceptance' | 'notes') {
 function isDirty() {
   return editDirty.value || !!title.value?.isDirty() || sections.value.some(section => section.isDirty()) || !!composer.value?.isDirty() || !!timeline.value?.isDirty()
 }
+function discard() {
+  editing.value = false; saving.value = false; commentDraft.value = ''
+  title.value?.discard(); sections.value.forEach(section => section.discard())
+  composer.value?.discard(); timeline.value?.discard()
+  ticket.release()
+}
 function focus() { root.value?.focus({ preventScroll: true }) }
 function queueKey(event: KeyboardEvent) {
   if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !queueAction.value || document.querySelector('.floating')) return
@@ -504,7 +525,7 @@ function queueKey(event: KeyboardEvent) {
   event.preventDefault(); event.stopPropagation(); void queueAction.value.toggle()
 }
 defineExpose({
-  el: root, focus, isDirty,
+  el: root, focus, isDirty, discard,
   // An editor or a save is open: a live list waits with its structural updates.
   busy: () => liveBusy.value,
   editTitle: () => title.value?.start(),
@@ -602,7 +623,7 @@ defineExpose({
       <div v-else class="ws-grid">
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
-          <InlineTitle ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
+          <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
             :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :queue-editable="canQueue" :queue-entry="queueEntry"
@@ -638,10 +659,10 @@ defineExpose({
           <div class="divider" />
 
           <div class="sections">
-            <MarkdownSection ref="descSection" :class="{ 'live-tint': liveTint.body }" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
+            <MarkdownSection :record-id="item.id" ref="descSection" :class="{ 'live-tint': liveTint.body }" title="Description" :value="item.body" :editable="editable" :save="record.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
             <TicketExtensions :project-id="project.id" :node-id="item.id" />
-            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" :class="{ 'live-tint': liveTint.acceptance }" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" :class="{ 'live-tint': liveTint.notes }" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection :record-id="item.id" v-if="acceptance.trim() || showAcceptance" ref="acSection" :class="{ 'live-tint': liveTint.acceptance }" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="record.setAcceptance" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection :record-id="item.id" v-if="notes.trim() || showNotes" ref="notesSection" :class="{ 'live-tint': liveTint.notes }" title="Notes" :value="notes" :editable="editable" :save="record.setNotes" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
@@ -660,12 +681,12 @@ defineExpose({
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->
           <template v-if="!contextColumn && ticket.relationsReady.value">
             <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" :editable="linkable" :removable="unlinkable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" />
-            <ActivityTimeline
+            <ActivityTimeline :record-id="item.id"
               ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
               :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="commentable" :can-delete="commentDeletable"
               :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
             />
-            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
+            <CommentComposer v-model="commentDraft" :record-id="item?.id" v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="record.addComment" :disabled="!commentable" />
           </template>
         </div>
 
@@ -679,12 +700,12 @@ defineExpose({
           />
           <template v-if="ticket.relationsReady.value">
           <RelationList v-if="mode === 'panel' || ticket.related.value.length || linkable" class="ctx-block" :related="ticket.related.value" :editable="linkable" :removable="unlinkable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" />
-          <ActivityTimeline
+          <ActivityTimeline :record-id="item.id"
             ref="timeline" class="ctx-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
             :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="commentable" :can-delete="commentDeletable"
             :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
           />
-          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
+          <CommentComposer v-model="commentDraft" :record-id="item?.id" v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="record.addComment" :disabled="!commentable" />
           </template>
         </aside>
 
@@ -703,7 +724,7 @@ defineExpose({
     </div>
 
     <footer v-if="mode === 'panel' && item && !ticket.gone.value && !editing" class="ws-composer">
-      <CommentComposer ref="composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
+      <CommentComposer v-model="commentDraft" :record-id="item?.id" ref="composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="record.addComment" :disabled="!commentable" />
     </footer>
 
     <div v-if="dropping" class="drop-overlay" aria-hidden="true">
