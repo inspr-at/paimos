@@ -155,6 +155,20 @@ dc start aeon
 Check every command's exit status, and record the current image digest and configuration with the backup.
 Periodically restore into a separate recovery host to verify the backup.
 
+Personal-data access and erasure requests go through the installation's
+operator/workspace owner, who verifies identity and handles the request manually.
+The offline `aeon admin dsar export --tenant SLUG --actor-principal-id OWNER_UUID
+--person UUID_OR_EMAIL` produces a JSON review packet; free text, files and
+third-party information need manual review and supplementation before delivery.
+`aeon admin dsar erase` with the same scope and `--dry-run` lists review targets
+and hold assessments. Collection uses a read-only snapshot. Before releasing
+either packet, a separate transaction records one tenant audit event with the
+owner, subject principal reference, operation and counts, without personal
+content. Audit failure releases no packet; the event records collection, not
+successful delivery. There is no self-service erasure or automatic retention.
+Use `--output PATH` for a new mode-0600 file in
+a private directory, and include retained copies and backups in the assessment.
+
 Before upgrading, read the target release notes, take a verified backup, and
 record the old pinned image. Update `AEON_IMAGE` to the new explicit version or
 digest, then run `dc pull aeon` and `dc up -d --no-deps --wait --wait-timeout 180
