@@ -183,13 +183,15 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	}
 	// Match the blocking backend rather than SQL text: PostgreSQL truncates
 	// query text and the session column list grows as the API evolves.
+	// PostgreSQL may queue the second waiter behind the first, so follow the
+	// blocking chain instead of requiring both to name the root directly.
 	var blockerPID int
 	if err = blocker.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
 		t.Fatal(err)
 	}
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))`, blockerPID).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `WITH RECURSIVE blocked(pid) AS (SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) UNION SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()) SELECT count(*) FROM blocked`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}

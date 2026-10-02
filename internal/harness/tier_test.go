@@ -158,7 +158,7 @@ func TestTierIsolationRevocationAndReportFreeze(t *testing.T) {
 	expect(t, f.call(f.foreign, "GET", path+"/tier", nil, ""), 404)
 	otherProject := uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'TIER-OTHER',kind_id,'Other project' FROM nodes WHERE id=$3`, f.person.TenantID, otherProject, f.project)
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'TIER-11',kind_id,'Other project' FROM nodes WHERE id=$3`, f.person.TenantID, otherProject, f.project)
 		return err
 	})
 	expect(t, f.call(f.person, "GET", strings.Replace(path, f.project, otherProject, 1)+"/tier", nil, ""), 404)
@@ -197,5 +197,31 @@ func TestTierIsolationRevocationAndReportFreeze(t *testing.T) {
 	expect(t, w, 200)
 	if decode(t, w)["active_tier"] != "default" {
 		t.Fatal("rejection changed active tier")
+	}
+}
+
+func TestTierUsagePersistsFrozenCostAcrossChanges(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	expect(t, f.call(f.person, "POST", "/api/model-prices", map[string]any{"model": "fixture-model", "version": 1, "input_usd_per_million": "1", "output_usd_per_million": "1", "cached_input_usd_per_million": "1"}, ""), 201)
+	for i, tc := range []struct{ tier, cost string }{{"default", "0.000100000000"}, {"fast", "0.000300000000"}, {"default", "0.000400000000"}} {
+		if i > 0 {
+			w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, tc.tier, identity), "")
+			expect(t, w, 201)
+			id := decode(t, w)["pending"].(map[string]any)["id"].(string)
+			expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+			expect(t, f.call(f.agent, "POST", path+"/controls/"+id+"/complete", map[string]any{"outcome": "applied", "reason": "tier_applied_safe_point"}, lease), 200)
+		}
+		payload := usagePayload()
+		payload["model"], payload["sequence"], payload["input_tokens"] = "fixture-model", i+1, 100*(i+1)
+		payload["output_tokens"], payload["cached_input_tokens"], payload["billing_mode"] = 0, 0, "api"
+		// A session reporter may omit the field: the confirmed active tier is used.
+		out, _ := usageResult(t, f.call(f.agent, "POST", path+"/usage", payload, lease))
+		if out.ServiceTier == nil || *out.ServiceTier != tc.tier || out.EstimatedCostUSD == nil || *out.EstimatedCostUSD != tc.cost {
+			t.Fatalf("tier/cost not persisted: %+v", out)
+		}
+		if i > 0 && len(out.TierSegments) != 2 {
+			t.Fatal("usage did not retain both frozen multipliers")
+		}
 	}
 }
