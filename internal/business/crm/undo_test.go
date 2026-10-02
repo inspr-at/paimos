@@ -54,8 +54,8 @@ func TestCRMUndoUsesCurrentAuthority(t *testing.T) {
 		owner       bool
 		want        int
 	}{
-		{"revoked stale admin", []string{"events.read", "events.undo"}, []string{"admin"}, false, 403},
-		{"events only custom role", []string{"events.read", "events.undo", "events.undo_other"}, []string{"admin"}, false, 403},
+		{"revoked stale admin", []string{"nodes.read", "events.read", "events.undo"}, []string{"admin"}, false, 403},
+		{"events only custom role", []string{"nodes.read", "events.read", "events.undo", "events.undo_other"}, []string{"admin"}, false, 403},
 		{"owner without legacy admin", nil, []string{}, true, 201},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

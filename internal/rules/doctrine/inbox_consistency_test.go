@@ -35,6 +35,8 @@ func TestInboxReplayComparesCompleteOriginalRequest(t *testing.T) {
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
+			f := f
+			f.t = t
 			changed := in
 			change(&changed)
 			if body := f.call(owner, "POST", path, changed, 409); !strings.Contains(string(body), "request_conflict") {
@@ -44,6 +46,8 @@ func TestInboxReplayComparesCompleteOriginalRequest(t *testing.T) {
 	}
 	for name, change := range map[string]func(*InboxInput){"tldr": changes["tldr"], "why": changes["why"], "ticket": changes["ticket"]} {
 		t.Run("new UUID "+name, func(t *testing.T) {
+			f := f
+			f.t = t
 			changed := in
 			changed.RequestID = "44400000-0000-4000-8000-000000000092"
 			change(&changed)
