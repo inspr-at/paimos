@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.5",
-    "sha256": "7891fbdac074aaab0434c40d04acdba50132eb561bc396a2e385c12f6c9255d2",
+    "version": "harness-session/2.6",
+    "sha256": "da031929b5e8199fa22d2b79cf5246038ef4b236a109fe1b47b63e940d884a7c",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1764,6 +1764,18 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "service_tier_revision": {
             "minimum": 0,
@@ -2967,6 +2979,18 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "service_tier_request": {
+            "enum": [
+              "default",
+              "fast",
+              "fastest",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "service_tier_revision": {
             "minimum": 0,

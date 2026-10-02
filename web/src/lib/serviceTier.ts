@@ -24,6 +24,7 @@ export interface TierRequest {
 }
 export interface TierState {
   session_id: string; revision: number; active_tier: ServiceTier | null; pending: TierControl | null
+  last_change?: TierControl | null
   read_only: boolean; read_only_reason?: string; reports: readonly TierReport[]; requests: TierRequest[]
 }
 export interface TierChange { request_id: string; tier: ServiceTier; expected_revision: number; expected_ownership: ProcessOwnership }
@@ -40,8 +41,8 @@ export const adjacentTier = (active: ServiceTier | null, report: TierReport | un
   const offered = offeredTiers(report), index = offered.findIndex(t => t.tier === active)
   return index < 0 ? undefined : offered[index + direction]
 }
-export const tierPrice = (t?: TierCapability) => !offeredTier(t) ? 'price unknown' : t.price_multiplier === 1 ? 'list price' : `×${t.price_multiplier} price`
-export const tierSpeed = (t?: TierCapability) => !t?.speed_factor ? 'speed not published' : t.speed_factor === 1 ? 'Standard speed' : `~${t.speed_factor}× faster output`
+export const tierPrice = (t?: TierCapability) => !offeredTier(t) ? 'price unknown' : t.price_multiplier === 1 ? 'list price' : `${t.price_multiplier} times list price`
+export const tierSpeed = (t?: TierCapability) => !t?.speed_factor ? 'speed not published' : t.speed_factor === 1 ? 'Standard speed' : `~${t.speed_factor} times faster output`
 export function tierUnavailable(s: HarnessSession, grant: ControlGrant, now: number, state?: TierState): string {
   if (!controlPermitted(s, grant)) return 'Only a person with permission to control this session can change its tier.'
   if (s.phase === 'stopped' || s.phase === 'stopping' || s.stopped_at || s.archived_at) return `This session ran at ${s.service_tier ? TIER_NAME[s.service_tier] : 'an unreported tier'}.`

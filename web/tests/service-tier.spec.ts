@@ -22,7 +22,7 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   data.sessions.splice(3)
   const reports = [{ ...report, tiers: report.tiers.map(t => options.unpriced && t.tier !== 'default' ? { ...t, offered: false, price_multiplier: null, speed_factor: null, reason: 'not offered: no published price' } : t) }]
   const active = options.active ?? 'default'
-  Object.assign(data.sessions[0]!, { harness: 'codex', display_label: 'Tier fixture', model: report.model, service_tier: active, service_tier_revision: 1, service_tier_reports: reports, advertised_capabilities: ['inbox', 'status', 'stop', 'service_tier_v1'], agent_principal_id: options.agent ? me.id : data.sessions[0]!.agent_principal_id, process_ownership: ownership, process_observed_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), ...(options.unmanaged ? { management_mode: 'unmanaged' } : {}), ...(options.ended ? { phase: 'stopped', stopped_at: new Date().toISOString() } : {}) })
+  Object.assign(data.sessions[0]!, { harness: 'codex', display_label: 'Tier fixture', model: report.model, service_tier: active, service_tier_revision: 1, service_tier_reports: reports, service_tier_request: options.request ? 'fast' : null, advertised_capabilities: ['inbox', 'status', 'stop', 'service_tier_v1'], agent_principal_id: options.agent ? me.id : data.sessions[0]!.agent_principal_id, process_ownership: ownership, process_observed_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), ...(options.unmanaged ? { management_mode: 'unmanaged' } : {}), ...(options.ended ? { phase: 'stopped', stopped_at: new Date().toISOString() } : {}) })
   for (let i = 1; i < data.sessions.length; i++) Object.assign(data.sessions[i]!, { harness: 'codex', model: report.model, service_tier: 'default', service_tier_reports: [{ ...report, tiers: report.tiers.map((t, j) => ({ ...t, offered: j <= i - 1 })) }], service_tier_revision: 1 })
   await mockAgents(page, data)
   if (options.denied) await page.route('**/api/me/permissions*', async route => {
@@ -33,8 +33,9 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   })
   let state: TierState = { session_id: id, revision: 1, active_tier: active, pending: null, read_only: !!(options.unmanaged || options.ended), read_only_reason: options.unmanaged ? 'Reported by fixture-cli; change it in its terminal.' : options.ended ? 'This session has ended' : '', reports, requests: options.request ? [{ id: 'request-fixture', session_id: id, tier: 'fast', reason: 'QA waits on this screen', state: 'pending', requested_by_principal_id: String(data.sessions[0]!.agent_principal_id), created_at: new Date().toISOString() }] : [] }
   const writes: Record<string, unknown>[] = []
+  let reads = 0
   await page.route('**/api/projects/*/harness-sessions/*/tier**', async route => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: state })
+    if (route.request().method() === 'GET') { reads++; return route.fulfill({ json: state }) }
     const body = route.request().postDataJSON(); writes.push(body)
     if (options.fail) return route.fulfill({ status: 409, json: { error: 'process ownership changed; refresh' } })
     if (route.request().url().endsWith('/ask')) {
@@ -45,14 +46,68 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
     if (body.decision === 'decline') state = { ...state, requests: state.requests.map(q => ({ ...q, state: 'declined' })) }
     else if (state.pending && body.tier === state.active_tier) state = { ...state, revision: state.revision + 1, pending: null, requests: state.requests.map(q => ({ ...q, state: 'pending' })) }
     else state = { ...state, revision: state.revision + 1, pending: { id: body.request_id, session_id: id, kind: 'tier', value: body.tier, state: 'pending', outcome: null, reason: null }, requests: state.requests.map(q => ({ ...q, state: q.tier === body.tier ? 'approved' : q.state })) }
-    Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision })
+    Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision, service_tier_request: state.requests.find(q => q.state === 'pending')?.tier ?? null })
     await route.fulfill({ status: 201, json: state })
   })
-  return { data, writes, confirm: () => { state = { ...state, active_tier: state.pending!.value, pending: null, revision: state.revision + 1 }; Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision }) }, getState: () => state }
+  return { data, writes, getReads: () => reads, reject: () => { state = { ...state, pending: null, last_change: { ...state.pending!, state: 'completed', outcome: 'rejected', reason: 'vendor_rejected' } } }, confirm: () => { state = { ...state, active_tier: state.pending!.value, pending: null, revision: state.revision + 1 }; Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision }) }, getState: () => state }
 }
 const row = (page: Page) => page.locator(`[data-row="s:${id}"]`)
 const glyph = (page: Page) => row(page).locator('.c-tier [data-tier]')
 const picker = (page: Page) => page.getByRole('dialog', { name: 'Change tier', exact: true })
+
+for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Host and overflow controls`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  const { data } = await setup(page)
+  Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
+  await page.goto(`/agents/${id}`)
+  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
+  await expect(row(page)).toBeVisible()
+  const list = page.locator('.sessions'), actions = row(page).locator('.more'), host = row(page).locator('.host-badge')
+  await row(page).hover()
+  await expect(actions).toBeVisible(); await expect(host).toBeVisible()
+  const measure = async () => {
+    const dimensions = await list.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
+    const listBox = (await list.boundingBox())!, actionBox = (await actions.boundingBox())!, hostBox = (await host.boundingBox())!
+    expect(actionBox.width).toBeGreaterThan(0); expect(hostBox.width).toBeGreaterThan(0)
+    for (const box of [actionBox, hostBox]) {
+      expect(box.x).toBeGreaterThanOrEqual(listBox.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(listBox.x + listBox.width)
+    }
+    expect(await actions.evaluate(el => { const r = el.getBoundingClientRect(); return !!document.elementFromPoint(r.right - 1, r.y + r.height / 2)?.closest('.more') })).toBe(true)
+  }
+  await measure()
+  await expectStableControls({ controls: { actions, host, row: row(page) }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
+  await measure()
+})
+test('an unopened row shows its pending agent tier request', async ({ page }) => {
+  await setup(page, { request: true }); await page.goto('/agents')
+  await expect(row(page)).toContainText('asks for Fast')
+  await expect(page.getByRole('region', { name: 'Service tier', exact: true })).toHaveCount(0)
+})
+test('daemon rejection clears the switch toast and shows the actual outcome', async ({ page }) => {
+  const { reject, writes } = await setup(page)
+  await page.goto('/agents'); await glyph(page).focus(); await glyph(page).press('ArrowRight')
+  await expect(page.locator('.tier-toast')).toBeVisible()
+  reject()
+  await expect(page.getByText('Change to Fast was not applied. vendor rejected', { exact: true })).toBeVisible()
+  await expect(page.locator('.tier-toast')).toHaveCount(0)
+  expect(writes).toHaveLength(1)
+})
+test('heartbeat-only list refreshes do not reload the tier panel', async ({ page }) => {
+  await page.clock.install()
+  const { data, getReads } = await setup(page)
+  await page.goto(`/agents/${id}`)
+  await expect(page.locator('.service-tier .source')).toContainText('fixture-adapter')
+  const initial = getReads(); expect(initial).toBeGreaterThan(0)
+  Object.assign(data.sessions[0]!, { heartbeat_at: new Date(Date.now() + 20_000).toISOString(), display_label: 'Heartbeat refreshed fixture' })
+  await page.clock.runFor(20_000)
+  await expect(row(page)).toContainText('Heartbeat refreshed fixture')
+  // A render-frame barrier lets the watcher and its network dispatch complete.
+  await page.clock.resume()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  expect(getReads()).toBe(initial)
+})
 
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: options, actions and phone frame hold still`, async ({ page }) => {

@@ -17,7 +17,7 @@ const tip = computed(() => {
   if (s.stopped_at || s.archived_at || s.phase === 'stopped') return `${first}\nThis session ran at ${current ? TIER_NAME[current] : 'an unreported tier'}.`
   if (s.management_mode === 'unmanaged') return `${first}\nReported by ${report.value?.harness_version || s.harness} — ${report.value?.change_instructions || 'change it in its terminal'}.`
   if (state.value.pending) return `${first}\nSwitching to ${TIER_NAME[state.value.pending.value]} · waiting for the daemon.`
-  return `${first}\n${canOpen.value ? (tiers.canAsk(s) ? 'Ask for another tier' : 'Change… · ← → one step') : tiers.unavailable(s)}`
+  return `${first}\n${canOpen.value ? (tiers.canAsk(s) ? 'Ask for another tier' : 'Change… · Left/Right arrow: one step') : tiers.unavailable(s)}`
 })
 const neighbour = (direction: -1 | 1) => adjacentTier(state.value.active_tier, report.value, direction)
 function open(event: MouseEvent) { tiers.open(props.session, props.name, event.currentTarget as HTMLElement) }
@@ -37,7 +37,7 @@ function keys(event: KeyboardEvent) {
          blocks activation without dropping focus or changing its box. -->
     <component :is="canOpen || state.pending || tiers.busy[session.id] ? 'button' : 'span'" class="tier-mark" :type="canOpen || state.pending ? 'button' : undefined" :role="canOpen || state.pending ? undefined : 'img'" :aria-label="tip" :aria-disabled="!canOpen || undefined" :aria-haspopup="canOpen ? 'dialog' : undefined" :aria-expanded="tiers.dialog?.anchor?.dataset.tier === session.id || undefined" :data-tier="session.id" :data-tip="tip" @click="canOpen && open($event)" @keydown="keys">
       <TierGlyph :active="state.active_tier" :report="report" :pending="state.pending?.value" />
-      <span v-if="phone && state.active_tier && state.active_tier !== 'default'" class="price">{{ active?.price_multiplier ? `×${active.price_multiplier}` : 'price unknown' }}</span>
+      <span v-if="phone && state.active_tier && state.active_tier !== 'default'" class="price">{{ active?.price_multiplier ? `${active.price_multiplier}x` : 'price unknown' }}</span>
     </component>
   </span>
 </template>

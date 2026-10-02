@@ -33,7 +33,7 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
-  service_tier?: ServiceTier | null; service_tier_revision?: number; service_tier_reports?: TierReport[]
+  service_tier?: ServiceTier | null; service_tier_revision?: number; service_tier_reports?: TierReport[]; service_tier_request?: ServiceTier | null
   agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
   current_activity?: CurrentAgentActivity | null
   current_activity_history?: CurrentAgentActivity[]

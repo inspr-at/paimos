@@ -46,6 +46,7 @@ type TierState struct {
 	Revision       int64                `json:"revision"`
 	Active         *string              `json:"active_tier"`
 	Pending        *Control             `json:"pending"`
+	LastChange     *Control             `json:"last_change"`
 	ReadOnly       bool                 `json:"read_only"`
 	ReadOnlyReason string               `json:"read_only_reason,omitempty"`
 	Reports        []servicetier.Report `json:"reports"`
@@ -113,6 +114,12 @@ func (m *Module) tierState(r *http.Request, tx pgx.Tx, p tenant.Principal, s Ses
 	c, err := scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state<>'completed' ORDER BY sequence LIMIT 1`, s.ID))
 	if err == nil {
 		out.Pending = &c
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	c, err = scanControl(tx.QueryRow(r.Context(), `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state='completed' ORDER BY sequence DESC LIMIT 1`, s.ID))
+	if err == nil {
+		out.LastChange = &c
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}

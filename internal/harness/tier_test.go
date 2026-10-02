@@ -252,6 +252,56 @@ func TestTierUsagePersistsFrozenCostAcrossChanges(t *testing.T) {
 	}
 }
 
+func TestTierLastChangeExposesRejectedOutcome(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, "fast", identity), "")
+	expect(t, w, 201)
+	control := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease), 200)
+	expect(t, f.call(f.agent, "POST", path+"/controls/"+control+"/complete", map[string]any{"outcome": "rejected", "reason": "vendor_rejected"}, lease), 200)
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	out := decode(t, w)
+	last, ok := out["last_change"].(map[string]any)
+	if !ok || last["id"] != control || last["state"] != "completed" || last["outcome"] != "rejected" || last["reason"] != "vendor_rejected" || out["active_tier"] != "default" || out["pending"] != nil {
+		t.Fatalf("missing honest rejected outcome: %s", w.Body.String())
+	}
+	expect(t, f.call(f.foreign, "GET", path+"/tier", nil, ""), 404)
+}
+
+func TestTierRequestVisibleOnUnopenedListRow(t *testing.T) {
+	f := fixture(t)
+	path, _, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	w := f.call(f.agent, "POST", path+"/tier/ask", map[string]any{"request_id": uid(), "tier": "fast", "reason": "QA waits"}, "")
+	expect(t, w, 201)
+	request := decode(t, w)["id"].(string)
+	id := path[strings.LastIndex(path, "/")+1:]
+	check := func(want any) {
+		t.Helper()
+		w := f.call(f.person, "GET", "/api/harness-sessions?project="+f.project, nil, "")
+		expect(t, w, 200)
+		for _, raw := range decode(t, w)["items"].([]any) {
+			row := raw.(map[string]any)
+			if row["id"] == id {
+				value, present := row["service_tier_request"]
+				if !present || value != want {
+					t.Fatalf("unopened list request = %v (present %v), want %v", value, present, want)
+				}
+				return
+			}
+		}
+		t.Fatal("requested session missing from list")
+	}
+	check("fast")
+	body := tierChangeBody(t, f, path, "fast", identity)
+	body["decision"] = "decline"
+	expect(t, f.call(f.person, "POST", path+"/tier/requests/"+request+"/decision", body, ""), 201)
+	check(nil)
+}
+
 func TestTierReportRejectsUnpinnedFactorsAtomically(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)

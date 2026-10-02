@@ -211,7 +211,7 @@ function pickTier() {
   menu.value = null
   serviceTiers.open(selected.view.session, selected.view.name, selected.anchor)
 }
-const tierRequestLabel = (view: SessionView) => { const q = serviceTiers.state(view.session).requests.find(q => q.state === 'pending'); return q ? `asks for ${TIER_NAME[q.tier]}` : '' }
+const tierRequestLabel = (view: SessionView) => view.session.service_tier_request ? `asks for ${TIER_NAME[view.session.service_tier_request]}` : ''
 const agents = useAgents()
 const moving = ref(false)
 const dragged = ref<SessionView | null>(null)
@@ -362,7 +362,7 @@ function rowClick(event: MouseEvent, id: string) {
             <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
           </button>
         </span>
-        <span v-if="column.key === 'execution'" role="columnheader" class="c-tier"><span tabindex="0" data-tip="Service tier: vendor serving speed and price. One chevron per offered tier. Click to change; ← → step.">Tier</span></span>
+        <span v-if="column.key === 'execution'" role="columnheader" class="c-tier"><span tabindex="0" data-tip="Service tier: vendor serving speed and price. One chevron per offered tier. Click to change; Left/Right arrow: one step.">Tier</span></span>
         </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
@@ -674,20 +674,20 @@ function rowClick(event: MouseEvent, id: string) {
 .table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 76px; }
 @container sessions (max-width: 980px) {
   .sort-bar { display: flex; }
-  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 80px 132px 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(max(104px, calc((100% - var(--state-width) - 148px) * .42 / 2.52)), .42fr) minmax(116px, .75fr) 80px 132px 72px 76px; }
+  .table { --state-width: 132px; grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(68px, .42fr) minmax(108px, .75fr) 80px 132px 64px 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(104px, .42fr) minmax(108px, .75fr) 80px 132px 64px 68px; }
   .c-elapsed { display: none; }
 }
-@container sessions (max-width: 760px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 80px 68px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 80px 68px; }
-  .c-beat, .c-elapsed, .c-host { display: none; }
+@container sessions (max-width: 800px) {
+  .table { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(68px, .42fr) minmax(108px, .7fr) 80px 132px 68px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(104px, .42fr) minmax(108px, .7fr) 80px 132px 68px; }
+  .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }
 /* The menu floats outside the list container: size its targets by viewport. */
 @media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
 /* Phones: identity, execution and state stack; actions stay in the overflow menu. */
-@container sessions (max-width: 560px) {
+@container sessions (max-width: 760px) {
   /* One text column beside the avatar column: title (two lines at most) with
      the heartbeat inline under it, one execution line, one state line, then a
      lead's worker toggles. The avatar column stays free for the tree lines. */
@@ -741,7 +741,7 @@ function rowClick(event: MouseEvent, id: string) {
   .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
 }
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
-@container sessions (max-width: 560px) {
+@container sessions (max-width: 760px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
   /* With Default order showing, the tools take their own line rather than clip. */
   .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }

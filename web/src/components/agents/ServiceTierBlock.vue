@@ -3,14 +3,13 @@
 import { computed, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
 import { useServiceTiers } from '../../stores/serviceTiers'
-import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 import { TIER_NAME, tierOptions, tierPrice, tierSpeed, offeredTier } from '../../lib/serviceTier'
 import TierGlyph from './TierGlyph.vue'
 import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ session: HarnessSession; name: string }>()
-const tiers = useServiceTiers(), agents = useAgents(), auth = useSession()
+const tiers = useServiceTiers(), auth = useSession()
 const state = computed(() => tiers.state(props.session)), report = computed(() => tiers.report(props.session))
 const options = computed(() => tierOptions(report.value))
 const active = computed(() => options.value.find(t => t.tier === state.value.active_tier))
@@ -26,7 +25,7 @@ const explanation = computed(() => {
 })
 const source = computed(() => { try { const url = new URL(report.value?.source || ''); return ['https:', 'http:'].includes(url.protocol) ? url.href : null } catch { return null } })
 let epoch = 0
-watch(() => [props.session.id, props.session.service_tier_revision, props.session.heartbeat_at, agents.eventPulseFor(props.session.id)], async () => {
+watch([() => props.session.id, () => props.session.service_tier_revision, () => props.session.service_tier_request], async () => {
   const own = ++epoch, s = props.session
   try { await tiers.load(s); if (own === epoch && props.session.id === s.id) tiers.follow(s) }
   catch (error) { if (own === epoch && props.session.id === s.id) tiers.errors[s.id] = error instanceof Error ? error.message : 'Tier information unavailable.' }
@@ -73,7 +72,7 @@ async function decide(decision: 'approve' | 'decline') {
     </div>
     <p class="basis">Same model and effort. Speed estimates apply only to model time; tools, tests and waits keep their time. Last-run comparisons need frozen price and model-time data, which this session has not reported.</p>
     <p v-if="report" class="source">{{ report.model }} · {{ report.harness }} {{ report.harness_version }} · adapter {{ report.adapter_version }} · checked <time :datetime="report.checked_at">{{ report.checked_at }}</time>.<br><a v-if="source" :href="source" target="_blank" rel="noopener noreferrer">Vendor source</a><span v-else>{{ report.source }}</span></p>
-    <p v-if="tiers.errors[session.id]" class="tier-error" role="alert">{{ tiers.errors[session.id] }} <button type="button" class="btn sm ghost" @click="checkResult">Check result</button></p>
+    <p v-if="tiers.errors[session.id] || state.last_change?.outcome === 'rejected'" class="tier-error" role="alert">{{ tiers.errors[session.id] || `The last tier change was rejected: ${state.last_change?.reason || 'reason unavailable'}.` }} <button type="button" class="btn sm ghost" @click="checkResult">Check result</button></p>
     <p v-if="tiers.unavailable(session) && session.management_mode === 'managed' && !session.stopped_at" class="rights">{{ tiers.unavailable(session) }}</p>
   </section>
 </template>

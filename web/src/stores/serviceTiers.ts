@@ -6,7 +6,7 @@ import { useAgents } from './agents'
 import { can } from '../lib/authz'
 import type { HarnessSession, ProcessOwnership } from '../lib/agents'
 import { askServiceTier, changeServiceTier, decideServiceTier, readServiceTier } from '../lib/agentRows'
-import { sameOwnership, tierPrice, tierReport, tierUnavailable, undoTierAllowed, type ServiceTier, type TierChange, type TierRequest, type TierState } from '../lib/serviceTier'
+import { TIER_NAME, sameOwnership, tierPrice, tierReport, tierUnavailable, undoTierAllowed, type ServiceTier, type TierChange, type TierRequest, type TierState } from '../lib/serviceTier'
 import { toast } from '../lib/toast'
 
 export const useServiceTiers = defineStore('service-tiers', () => {
@@ -20,13 +20,16 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   const viewer = computed(() => auth.identity ? `${auth.identity.tenant.id}.${auth.identity.principal.id}` : '')
   const grant = computed(() => ({ person: auth.identity?.principal.kind === 'person', can }))
   let epoch = 0
-  const reads = new Map<string, number>(), timers = new Map<string, ReturnType<typeof setTimeout>>()
+  const reads = new Map<string, Promise<TierState | undefined>>(), timers = new Map<string, ReturnType<typeof setTimeout>>()
+  const following = new Map<string, { session: HarnessSession; control: string; delay: number; deadline: number }>()
+  let watchers = 0
+  const visible = () => watchers > 0 && (typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  function stopTimers() { for (const timer of timers.values()) clearTimeout(timer); timers.clear() }
   watch(viewer, () => {
     epoch++; reads.clear(); states.value = {}; busy.value = {}; errors.value = {}; uncertain.value = {}; dialog.value = null; undo.value = null
-    for (const timer of timers.values()) clearTimeout(timer)
-    timers.clear()
+    stopTimers(); following.clear()
   }, { flush: 'sync' })
-  onScopeDispose(() => { for (const timer of timers.values()) clearTimeout(timer); timers.clear(); epoch++ })
+  onScopeDispose(() => { stopTimers(); following.clear(); epoch++; if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility) })
   function state(s: HarnessSession): TierState {
     const saved = states.value[s.id]
     if (saved && saved.revision >= (s.service_tier_revision ?? 0)) return saved
@@ -36,36 +39,111 @@ export const useServiceTiers = defineStore('service-tiers', () => {
   const unavailable = (s: HarnessSession) => uncertain.value[s.id] ? 'The previous tier outcome is unknown. Check its result before changing again.' : tierUnavailable(s, grant.value, Date.now(), state(s))
   const canAsk = (s: HarnessSession) => auth.identity?.principal.kind === 'agent' && auth.identity.principal.id === s.agent_principal_id &&
     s.management_mode === 'managed' && !s.stopped_at && !s.archived_at && !s.watch && s.phase !== 'stopped' && s.phase !== 'stopping' && s.advertised_capabilities.includes('service_tier_v1') && !state(s).read_only
-  function adopt(s: HarnessSession, answer: TierState) {
+  function adopt(s: HarnessSession, answer: TierState, cancelling = false) {
     if (answer.session_id !== s.id) throw new Error('The tier response belongs to another session.')
-    if (!states.value[s.id] || answer.revision >= states.value[s.id]!.revision) states.value[s.id] = answer
+    const previous = states.value[s.id]
+    if (previous && answer.revision < previous.revision) return
+    states.value[s.id] = answer
+    if (previous?.pending && previous.pending.id !== answer.pending?.id) {
+      following.delete(s.id); clearTimeout(timers.get(s.id)); timers.delete(s.id)
+      if (!cancelling && answer.active_tier !== previous.pending.value) {
+        const reason = answer.last_change?.id === previous.pending.id ? answer.last_change.reason?.replaceAll('_', ' ') : null
+        const message = `Change to ${TIER_NAME[previous.pending.value]} was not applied. ${reason || 'It was rejected, expired, or superseded.'}`
+        errors.value[s.id] = message
+        if (undo.value?.control === previous.pending.id) undo.value = null
+        toast(message, { tone: 'error' })
+      } else errors.value[s.id] = ''
+    }
   }
   async function load(s: HarnessSession) {
-    const generation = epoch, read = (reads.get(s.id) ?? 0) + 1
-    reads.set(s.id, read)
-    const answer = await readServiceTier(s.project_id, s.id)
-    if (generation !== epoch || reads.get(s.id) !== read) return
-    adopt(s, answer)
-    uncertain.value[s.id] = false
-    return answer
+    const current = reads.get(s.id)
+    if (current) return current
+    const generation = epoch
+    const flight: Promise<TierState | undefined> = readServiceTier(s.project_id, s.id).then(answer => {
+      if (generation !== epoch) return
+      // Writes invalidate an older read. Its callers receive the newer flight
+      // or accepted state instead of a spurious "session changed" error.
+      if (reads.get(s.id) !== flight) return reads.get(s.id) ?? states.value[s.id]
+      adopt(s, answer)
+      uncertain.value[s.id] = false
+      return states.value[s.id]
+    }).finally(() => { if (reads.get(s.id) === flight) reads.delete(s.id) })
+    reads.set(s.id, flight)
+    return flight
   }
   function follow(s: HarnessSession) {
-    clearTimeout(timers.get(s.id)); timers.delete(s.id)
-    if (!state(s).pending || !viewer.value) return
+    const pending = states.value[s.id]?.pending
+    if (!pending || !viewer.value) { following.delete(s.id); return }
+    let progress = following.get(s.id)
+    if (progress?.control !== pending.id) {
+      progress = { session: s, control: pending.id, delay: 1200, deadline: Date.now() + 120_000 }
+      following.set(s.id, progress)
+    }
+    if (!visible() || timers.has(s.id)) return
+    if (Date.now() + progress.delay > progress.deadline) {
+      errors.value[s.id] = 'Confirmation is still pending. Live updates or Check result will confirm it.'
+      return
+    }
+    const delay = progress.delay
+    progress.delay = Math.min(delay * 2, 30_000)
     const generation = epoch
     timers.set(s.id, setTimeout(async () => {
       timers.delete(s.id)
-      if (generation !== epoch) return
+      if (generation !== epoch || !visible()) return
       try {
-        await load(s)
-        if (generation !== epoch) return
-        if (state(s).pending) follow(s)
+        await load(agents.sessionById(s.id) ?? s)
+        if (generation !== epoch || !visible()) return
+        if (states.value[s.id]?.pending) follow(s)
         else void agents.refreshSessions()
       } catch (error) {
         if (generation === epoch) errors.value[s.id] = `Confirmation unavailable. ${error instanceof Error ? error.message : 'Refresh and check the result.'}`
       }
-    }, 1200))
+    }, delay))
   }
+  function visibility() {
+    stopTimers()
+    if (!visible()) return
+    reconcile()
+  }
+  function reconcile() {
+    if (!visible()) return
+    const generation = epoch
+    for (const progress of following.values()) {
+      const s = agents.sessionById(progress.session.id) ?? progress.session
+      void load(s).then(() => { if (generation === epoch && visible()) follow(s) }).catch(error => {
+        if (generation === epoch) errors.value[s.id] = error instanceof Error ? error.message : 'Tier information unavailable.'
+      })
+    }
+  }
+  // The /agents view owns this lease. A global Pinia store must not keep
+  // polling after navigation or in a hidden tab.
+  function watchPage() {
+    if (++watchers === 1) {
+      if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibility)
+      visibility()
+    }
+    let stopped = false
+    return () => {
+      if (stopped) return
+      stopped = true
+      if (--watchers) return
+      stopTimers()
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility)
+      close(); undo.value = null
+    }
+  }
+  // Session revisions arrive via the existing live stream/list refresh. Only
+  // tier changes trigger reads; ordinary heartbeat ticks do not.
+  watch(() => agents.sessions.map(s => [s.id, s.service_tier_revision] as const), rows => {
+    if (!visible()) return
+    const generation = epoch
+    for (const [id, revision] of rows) {
+      const saved = states.value[id], s = agents.sessionById(id)
+      if (saved && s && (revision ?? 0) > saved.revision) {
+        void load(s).then(() => { if (generation === epoch && visible()) follow(s) }).catch(error => { if (generation === epoch) errors.value[id] = error instanceof Error ? error.message : 'Tier information unavailable.' })
+      }
+    }
+  })
   function open(s: HarnessSession, name: string, anchor: HTMLElement) {
     if (dialog.value?.anchor === anchor) { close(true); return }
     if (busy.value[s.id] || state(s).pending || (unavailable(s) && !canAsk(s))) return
@@ -84,13 +162,13 @@ export const useServiceTiers = defineStore('service-tiers', () => {
     const before = options.snapshot ?? state(s), generation = epoch, actor = viewer.value
     const body = changeBody(s, to, before)
     busy.value[s.id] = true; errors.value[s.id] = ''
-    reads.set(s.id, (reads.get(s.id) ?? 0) + 1)
+    reads.delete(s.id)
     try {
       const answer = options.request
         ? await decideServiceTier(s.project_id, s.id, options.request.id, { ...body, decision: options.decision ?? 'approve' })
         : await changeServiceTier(s.project_id, s.id, body)
       if (generation !== epoch) return false
-      adopt(s, answer)
+      adopt(s, answer, !!before.pending && to === before.active_tier && !answer.pending)
       if (options.withUndo && before.active_tier && answer.pending?.id === body.request_id) {
         undo.value = { session: s.id, project: s.project_id, name, from: before.active_tier, to, revision: answer.revision, control: answer.pending.id, price: tierPrice(before.reports.find(r => r.harness === s.harness && r.model === s.model)?.tiers.find(t => t.tier === to)), ownership: body.expected_ownership, actor }
       }
@@ -134,5 +212,5 @@ export const useServiceTiers = defineStore('service-tiers', () => {
       if (await change(s, receipt.name, receipt.from, { snapshot: current })) undo.value = null
     } catch (error) { toast(error instanceof Error ? error.message : 'Undo failed.', { tone: 'error' }) }
   }
-  return { states, busy, errors, dialog, undo, state, report, unavailable, canAsk, load, follow, open, close, change, ask, undoChange }
+  return { states, busy, errors, dialog, undo, state, report, unavailable, canAsk, load, follow, watchPage, reconcile, open, close, change, ask, undoChange }
 })

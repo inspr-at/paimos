@@ -273,12 +273,20 @@ let stop: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), capacity.load()]), 20_000, { invalidate: () => { agents.invalidatePolls(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
-function changed() {
+let tierCatchUp = false
+function changed(event?: string) {
+  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
-  debounce = setTimeout(() => { debounce = undefined; void agents.loadAll() }, 400)
+  debounce = setTimeout(() => {
+    debounce = undefined
+    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
+    void agents.loadAll()
+  }, 400)
 }
+let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  stopTierWatch = serviceTiers.watchPage()
   void agents.loadAll()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
@@ -287,6 +295,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
+  stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
 })
