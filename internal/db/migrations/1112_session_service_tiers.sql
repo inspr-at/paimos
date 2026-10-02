@@ -5,16 +5,16 @@ ALTER TABLE harness_sessions
   ADD COLUMN service_tier_revision bigint NOT NULL DEFAULT 0 CHECK (service_tier_revision >= 0),
   ADD COLUMN service_tier_reports jsonb NOT NULL DEFAULT '[]' CHECK (jsonb_typeof(service_tier_reports)='array');
 
-ALTER TABLE harness_controls DROP CONSTRAINT harness_controls_kind_check;
-ALTER TABLE harness_controls ADD CONSTRAINT harness_controls_kind_check CHECK (kind IN
+ALTER TABLE harness_controls ADD CONSTRAINT harness_controls_kind_tiers CHECK (kind IN
   ('interrupt','stop','force_stop','steer','rename','model','effort','rename_request','model_request','tier'));
-ALTER TABLE harness_controls DROP CONSTRAINT harness_settings_value;
-ALTER TABLE harness_controls ADD CONSTRAINT harness_settings_value CHECK (
+ALTER TABLE harness_controls DROP CONSTRAINT harness_controls_kind_check;
+ALTER TABLE harness_controls ADD CONSTRAINT harness_settings_value_tiers CHECK (
  CASE WHEN kind IN ('rename','model','effort','tier') THEN
   value IS NOT NULL AND char_length(value) BETWEEN 1 AND 128
   AND value=btrim(value) AND value !~ '[[:cntrl:]]'
   AND expected_ownership IS NOT NULL AND request_digest IS NOT NULL AND expires_at IS NOT NULL
  ELSE value IS NULL END);
+ALTER TABLE harness_controls DROP CONSTRAINT harness_settings_value;
 ALTER TABLE harness_controls ADD CONSTRAINT harness_tier_value CHECK (kind<>'tier' OR value IN ('default','fast','fastest'));
 
 CREATE TABLE harness_tier_requests (

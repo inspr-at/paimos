@@ -12475,7 +12475,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort, service_tier_v1]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -12501,7 +12501,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort]}
+        kind: {type: string, enum: [steer, interrupt, stop, rename, model, effort, tier]}
         value: {type: string, description: Public setting value; absent for steering and process controls}
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
@@ -12524,7 +12524,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
-        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
+        kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, tier, force_stop, rename_request or model_request.'}
         value: {type: string, description: Public setting value. Absent for steering and process controls.}
         text: {type: string, description: 'Steer text for this claim only. It is not stored and is omitted for every other kind.'}
         state: {type: string, enum: [claimed]}

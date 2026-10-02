@@ -538,6 +538,16 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
 }
 
+// Register the tier routes separately to keep this additive change from
+// reformatting the shared route table.
+func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision"] = "harness.control"
+}
+
 func PermissionForPattern(pattern string) (string, bool) {
 	permission, ok := RoutePermissions[pattern]
 	return permission, ok

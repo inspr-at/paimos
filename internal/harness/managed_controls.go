@@ -78,6 +78,10 @@ func (q *controlRelay) take(key string) string {
 }
 
 func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return m.queueManagedControl(r, tx, p, false)
+}
+
+func (m *Module) queueManagedControl(r *http.Request, tx pgx.Tx, p tenant.Principal, allowTier bool) (any, error) {
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "only a person may control a managed session")
 	}
@@ -97,6 +101,9 @@ func (m *Module) managedControl(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	r.Body = http.MaxBytesReader(nil, r.Body, 16384)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
+	}
+	if in.Kind == "tier" && !allowTier {
+		return nil, workorders.Fail(400, "use the service tier endpoint with an expected revision")
 	}
 	if !workorders.UUID(in.RequestID) || (in.Kind != "steer" && in.Kind != "interrupt" && in.Kind != "stop" && !settingKind(in.Kind)) || !validSetting(in.Kind, in.Value) || len(in.Text) > 8192 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) || (in.Kind == "steer" && strings.TrimSpace(in.Text) == "") || (in.Kind != "steer" && in.Text != "") {
 		return nil, workorders.Fail(400, "request id, typed operation and bounded text or setting value required")

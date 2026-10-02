@@ -181,10 +181,15 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	for _, request := range []harness.RulesReceiptWrite{in, other} {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
-	// pg_stat_activity sees separate connections blocked by the row lock.
+	// Match the blocking backend rather than SQL text: PostgreSQL truncates
+	// query text and the session column list grows as the API evolves.
+	var blockerPID int
+	if err = blocker.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM harness_sessions%FOR UPDATE%'`).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}

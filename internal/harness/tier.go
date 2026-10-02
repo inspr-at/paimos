@@ -173,6 +173,13 @@ func (m *Module) reportTiers(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if s.Management == "managed" && in.Active != nil && !(s.ServiceTier == nil && *in.Active == "default") {
 		return nil, workorders.Fail(409, "managed tiers require a person control and daemon confirmation")
 	}
+	var pending bool
+	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
+		return nil, err
+	}
+	if pending {
+		return nil, workorders.Fail(409, "tier report is frozen while a person change is pending")
+	}
 	encoded, err := json.Marshal(in.Reports)
 	if err != nil {
 		return nil, err
@@ -216,7 +223,7 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 	}
 	// Idempotent replay is bound to the actor and the entire original change.
 	raw, _ := json.Marshal(in)
-	dg := digest("tier-change:"+p.ID, string(raw))
+	dg := digest("tier-change:"+p.ID+":"+requestID, string(raw))
 	var prior []byte
 	err = tx.QueryRow(r.Context(), `SELECT request_digest FROM harness_controls WHERE session_id=$1 AND id=$2 AND kind='tier'`, s.ID, in.RequestID).Scan(&prior)
 	if err == nil {
@@ -260,6 +267,11 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		if _, err = tx.Exec(r.Context(), `UPDATE harness_tier_requests SET state='pending',decided_at=NULL,decided_by_principal_id=NULL,control_id=NULL WHERE session_id=$1 AND control_id=$2`, s.ID, c.ID); err != nil {
 			return nil, err
 		}
+		// Persist the undo operation too, so a lost response can be replayed.
+		identity, _ := json.Marshal(in.Ownership)
+		if _, err = tx.Exec(r.Context(), `INSERT INTO harness_controls(tenant_id,id,session_id,kind,sequence,requested_by_principal_id,expected_ownership,request_digest,expires_at,value,state,outcome,reason,claimed_at,completed_at) SELECT $1,$2,$3,'tier',coalesce(max(sequence),0)+1,$4,$5::jsonb,$6,clock_timestamp(),$7,'completed','applied','tier_cancelled_pending',clock_timestamp(),clock_timestamp() FROM harness_controls WHERE session_id=$3`, p.TenantID, in.RequestID, s.ID, p.ID, string(identity), dg, in.Tier); err != nil {
+			return nil, err
+		}
 		if err = record(r.Context(), tx, p, s, "tier_cancelled", c, map[string]any{"control_id": c.ID}); err != nil {
 			return nil, err
 		}
@@ -272,7 +284,7 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		body, _ := json.Marshal(map[string]any{"request_id": in.RequestID, "kind": "tier", "value": in.Tier, "expected_ownership": in.Ownership})
 		controlRequest := r.Clone(r.Context())
 		controlRequest.Body = io.NopCloser(bytes.NewReader(body))
-		result, err := m.managedControl(controlRequest, tx, p)
+		result, err := m.queueManagedControl(controlRequest, tx, p, true)
 		if err != nil {
 			return nil, err
 		}
@@ -326,6 +338,9 @@ func (m *Module) askTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err = validateTier(r.Context(), tx, s, in.Tier); err != nil {
 		return nil, err
 	}
+	if s.ServiceTier != nil && *s.ServiceTier == in.Tier {
+		return nil, workorders.Fail(409, "this tier is already active")
+	}
 	var pending bool
 	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_tier_requests WHERE session_id=$1 AND state='pending') OR EXISTS(SELECT 1 FROM harness_controls WHERE session_id=$1 AND kind='tier' AND state<>'completed')`, s.ID).Scan(&pending); err != nil {
 		return nil, err
@@ -363,6 +378,12 @@ func (m *Module) decideTier(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 		return nil, err
 	}
 	if q.State != "pending" {
+		if in.Decision == "approve" && q.State == "approved" && q.ControlID != nil && *q.ControlID == in.RequestID {
+			return m.changeTier(r, tx, p, in, id)
+		}
+		if in.Decision == "decline" && q.State == "declined" && q.DecidedBy != nil && *q.DecidedBy == p.ID && q.Tier == in.Tier {
+			return m.tierState(r, tx, p, s)
+		}
 		return nil, workorders.Fail(409, "request already decided")
 	}
 	if q.Tier != in.Tier {

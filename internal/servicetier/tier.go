@@ -74,6 +74,27 @@ func Advertised(harness, model, version string) Report {
 	return r
 }
 
+// Reports includes the selected model and each model with pinned vendor facts.
+// This keeps a later confirmed model change from inheriting another model's price.
+func Reports(harness, model, version string) []Report {
+	models := []string{model}
+	switch harness {
+	case "codex":
+		models = append(models, "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
+	case "claude":
+		models = append(models, "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8")
+	}
+	reports := []Report{}
+	seen := map[string]bool{}
+	for _, name := range models {
+		if !seen[name] {
+			reports = append(reports, Advertised(harness, name, version))
+			seen[name] = true
+		}
+	}
+	return reports
+}
+
 func atLeast(version string, major, minor, patch int) bool {
 	fields := strings.Fields(version)
 	if len(fields) == 0 {
@@ -93,10 +114,6 @@ func atLeast(version string, major, minor, patch int) bool {
 		parsed[i] = n
 	}
 	for i := range v {
-		n, err := strconv.Atoi(v[i])
-		if err != nil || n < 0 {
-			return false
-		}
 		if parsed[i] != want[i] {
 			return parsed[i] > want[i]
 		}

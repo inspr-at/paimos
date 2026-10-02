@@ -203,6 +203,7 @@ let stopping = false;
 let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
+let effectiveServiceTier = "default";
 let effectiveModel = "";
 let effectiveEffort = start.effort || "";
 let modelEvidenceStatus = "";
@@ -483,9 +484,25 @@ const handleControlLine = (line) => {
       } else if (request.op === "tier") {
         failureReason = "setting_rejected";
         if (!sessionStarted || turnActive || !["default", "fast"].includes(request.value) ||
-            !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel) ||
-            typeof queryHandle.applyFlagSettings !== "function") throw new Error("unavailable");
-        await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+            (request.value === "fast" && !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel)) ||
+            typeof queryHandle.applyFlagSettings !== "function" ||
+            typeof queryHandle.reinitialize !== "function") throw new Error("unavailable");
+        try {
+          await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+          // A setter acknowledgement can hide a cooldown or account block.
+          const confirmed = await queryHandle.reinitialize();
+          if (confirmed?.fast_mode_state !== (request.value === "fast" ? "on" : "off")) throw new Error("tier unconfirmed");
+        } catch {
+          // Restore the last confirmed tier before any next turn. An uncertain
+          // rollback closes the Query instead of running with an unknown price.
+          try {
+            await queryHandle.applyFlagSettings({ fastMode: effectiveServiceTier === "fast" });
+            const restored = await queryHandle.reinitialize();
+            if (restored?.fast_mode_state !== (effectiveServiceTier === "fast" ? "on" : "off")) throw new Error("restore unconfirmed");
+          } catch { fatal = true; }
+          throw new Error("tier rejected");
+        }
+        effectiveServiceTier = request.value;
         emit({ kind: "settings_changed", service_tier: request.value });
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "model" || request.op === "effort") {

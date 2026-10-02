@@ -104,9 +104,11 @@ func TestTierAskApproveDeclineCancelAndAuthorization(t *testing.T) {
 	if decode(t, w)["requests"].([]any)[0].(map[string]any)["state"] != "approved" {
 		t.Fatal(w.Body.String())
 	}
+	expect(t, f.call(f.person, "POST", path+"/tier/requests/"+request+"/decision", body, ""), 201)
 	undo := tierChangeBody(t, f, path, "default", identity)
 	w = f.call(f.person, "POST", path+"/tier", undo, "")
 	expect(t, w, 201)
+	expect(t, f.call(f.person, "POST", path+"/tier", undo, ""), 201)
 	if decode(t, w)["pending"] != nil || decode(t, w)["requests"].([]any)[0].(map[string]any)["state"] != "pending" {
 		t.Fatal("cancel did not restore the request")
 	}
@@ -139,5 +141,53 @@ func TestTierUnmanagedEndedAndOwnershipFence(t *testing.T) {
 	expect(t, w, 200)
 	if decode(t, w)["read_only"] != true {
 		t.Fatal(w.Body.String())
+	}
+}
+
+func TestTierIsolationRevocationAndReportFreeze(t *testing.T) {
+	f := fixture(t)
+	path, lease, identity := tierSession(t, f)
+	expect(t, f.call(f.foreign, "GET", path+"/tier", nil, ""), 404)
+	otherProject := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'TIER-OTHER',kind_id,'Other project' FROM nodes WHERE id=$3`, f.person.TenantID, otherProject, f.project)
+		return err
+	})
+	expect(t, f.call(f.person, "GET", strings.Replace(path, f.project, otherProject, 1)+"/tier", nil, ""), 404)
+	report := map[string]any{"reports": servicetier.Reports("codex", "fixture-model", "0.159.2")}
+	expect(t, f.call(f.person, "POST", path+"/tier/report", report, lease), 403)
+	expect(t, f.call(f.agent, "POST", path+"/tier/report", report, "wrong-lease-00000000000000000000000"), 403)
+	ask := map[string]any{"request_id": uid(), "tier": "fast", "reason": "QA"}
+	expect(t, f.call(f.agent, "POST", path+"/tier/ask", ask, ""), 201)
+	f.tx(t, f.foreign, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_tier_requests`).Scan(&count)
+		if count != 0 {
+			t.Fatal("requests escaped tenant RLS")
+		}
+		return err
+	})
+	body := tierChangeBody(t, f, path, "fast", identity)
+	expect(t, f.call(f.person, "POST", path+"/managed-controls", map[string]any{"request_id": uid(), "kind": "tier", "value": "fast", "expected_ownership": identity}, ""), 400)
+	w := f.call(f.person, "POST", path+"/tier", body, "")
+	expect(t, w, 201)
+	control := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	expect(t, f.call(f.agent, "POST", path+"/tier/report", report, lease), 409)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
+	expect(t, w, 200)
+	if len(decode(t, w)["controls"].([]any)) != 0 {
+		t.Fatal("revoked person control was claimed by daemon")
+	}
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	w = f.call(f.person, "GET", path+"/controls/"+control, nil, "")
+	expect(t, w, 200)
+	if decode(t, w)["reason"] != "authorization_revoked" {
+		t.Fatal(w.Body.String())
+	}
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	if decode(t, w)["active_tier"] != "default" {
+		t.Fatal("rejection changed active tier")
 	}
 }

@@ -171,3 +171,77 @@ func TestManagedSettingRejectionCompletionRetry(t *testing.T) {
 		t.Fatalf("calls=%d completions=%v", rejecting.calls, a.harnessCompletions)
 	}
 }
+
+func TestClaudeTierConfirmsFreshVendorState(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridgePath, sdkPath := filepath.Join(root, "bridge.mjs"), filepath.Join(root, "sdk.mjs")
+	if err = os.WriteFile(bridgePath, bridge, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sdk := `export function query({options}){
+ if(JSON.parse(options.extraArgs.settings).fastMode!==false)throw Error('inherited paid tier');
+ let close,mode='off',count=0;const closed=new Promise(r=>close=r);
+ return {close,streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),
+ applyFlagSettings:async settings=>{mode=settings.fastMode?'on':'off';count++},
+ reinitialize:async()=>({fast_mode_state:count===3?'cooldown':mode}),
+ async *[Symbol.asyncIterator](){yield {type:'system',subtype:'init',session_id:'fixture',model:'claude-opus-5-5',capabilities:['interrupt_receipt_v1']};await closed;}}
+ }`
+	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+	in, _ := cmd.StdinPipe()
+	out, _ := cmd.StdoutPipe()
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close(); _ = cmd.Wait() }()
+	enc, scan := json.NewEncoder(in), bufio.NewScanner(out)
+	_ = enc.Encode(map[string]any{"op": "start", "prompt": "fixture", "model": "claude-opus-5-5", "effort": "high"})
+	started := false
+	for scan.Scan() {
+		if strings.Contains(scan.Text(), `"kind":"session_started"`) {
+			started = true
+			break
+		}
+	}
+	if !started {
+		t.Fatal("bridge did not initialize")
+	}
+	for i, tc := range []struct{ tier, outcome string }{{"fast", "control_applied"}, {"default", "control_applied"}, {"fast", "control_failed"}} {
+		id := string(rune('a' + i))
+		_ = enc.Encode(map[string]string{"op": "tier", "value": tc.tier, "correlation_id": id})
+		changed, found := false, false
+		for scan.Scan() {
+			var frame map[string]any
+			_ = json.Unmarshal(scan.Bytes(), &frame)
+			if frame["kind"] == "settings_changed" {
+				changed = frame["service_tier"] == tc.tier
+			}
+			if frame["correlation_id"] == id {
+				if frame["kind"] != tc.outcome {
+					t.Fatal(scan.Text())
+				}
+				found = true
+				break
+			}
+		}
+		if !found || changed != (tc.outcome == "control_applied") {
+			t.Fatalf("vendor state not enforced for %s", tc.tier)
+		}
+	}
+	_ = enc.Encode(map[string]string{"op": "stop", "correlation_id": "stop"})
+}

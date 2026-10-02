@@ -988,7 +988,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}
 		active := "default"
-		if err = api.ReportServiceTiers(ctx, entry.harness, []servicetier.Report{report}, &active); err != nil {
+		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
 			return err
 		}
 		entry.harness.ServiceTier = active
@@ -1867,7 +1867,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if inbox || (entry.managedPolicy && fromRecoveryQueue) {
+		if inbox || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}

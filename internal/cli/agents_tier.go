@@ -31,7 +31,7 @@ func (rt *runtime) cmdAgentsTier() *Command {
 func (rt *runtime) agentTierAction(action string) *Command {
 	var project, session, tier, reason, request, decisionRequest string
 	return &Command{Name: action, Short: action + " service tier", Use: "agents tier " + action + " --project KEY --session UUID [--tier default|fast|fastest]", addFlags: func(fs *flagSet) {
-		fs.string(&project, "project", 'p', "project key or id")
+		fs.string(&project, "project", 'p', "project key")
 		fs.string(&session, "session", 0, "session UUID")
 		fs.string(&tier, "tier", 0, "Default, Fast or Fastest")
 		fs.string(&reason, "reason", 0, "why the agent asks")
@@ -94,9 +94,6 @@ func (rt *runtime) agentTierAction(action string) *Command {
 		}
 		if err = rt.harnessDo(http.MethodPost, path, "", body, &out); err != nil {
 			return err
-		}
-		if rt.jsonOut {
-			return rt.printJSON(out)
 		}
 		return rt.printJSON(out)
 	}}
