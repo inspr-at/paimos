@@ -422,6 +422,7 @@ func TestAllowanceProvisionalWithoutMeasuredUnit(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"local","harness":"codex","daemon_id":"daemon","label":"Codex"}`, http.StatusCreated, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
 	start, end := time.Now().Add(-time.Minute).UTC(), time.Now().Add(time.Hour).UTC()
 	for _, unit := range []string{"requests", "cost_micros"} {

@@ -5,7 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-"strings"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"

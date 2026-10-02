@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountprivacy"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -236,7 +237,7 @@ func TestReadinessPrivacyAcrossHTTPRolesAndSharing(t *testing.T) {
 	f.report(t, 41, now, now.Add(24*time.Hour))
 	teammate := addPrincipal(t, f.admin.TenantID, "person", "Other admin", []string{"admin"})
 	nonownerAgent := addPrincipal(t, f.admin.TenantID, "agent", "Other agent", []string{"admin"})
-	for _, path := range []string{"/api/agent-accounts", "/api/agent-accounts/capacity", "/api/agent-accounts/" + f.account.ID + "/readings", "/api/agent-accounts/capacity/next?harness=codex", "/api/agent-accounts/readiness"} {
+	for _, path := range []string{"/api/agent-accounts", "/api/agent-accounts/capacity", "/api/agent-accounts/" + f.account.ID + "/readings", "/api/agent-accounts/capacity/next?harness=codex", "/api/agent-accounts/readiness", "/api/agent-accounts/catalog", "/api/agent-accounts/use?harness=codex&account_id=" + f.account.ID} {
 		t.Run(path, func(t *testing.T) {
 			code, body := call(t, f.mod, &teammate, "", "GET", path, "")
 			if code != 200 {
@@ -252,6 +253,11 @@ func TestReadinessPrivacyAcrossHTTPRolesAndSharing(t *testing.T) {
 			}
 		})
 	}
+	code, preview := call(t, f.mod, &teammate, "", "POST", "/api/agent-accounts/capacity/preview", encoded(t, map[string]any{"schedule": capacity.DefaultSchedule("Europe/Vienna")}))
+	if code != 200 || strings.Contains(string(preview), `"used_percent"`) || strings.Contains(string(preview), `"resets_at"`) {
+		t.Fatalf("preview privacy: %d %s", code, preview)
+	}
+
 	ownStatus, ownBody := call(t, f.mod, &f.runner, f.token, "GET", "/api/agent-accounts/"+f.account.ID+"/readings", "")
 	if ownStatus != 200 || !strings.Contains(string(ownBody), `"used_percent":41`) {
 		t.Fatalf("scoped enrolling daemon lost readings: %s", ownBody)
@@ -358,7 +364,8 @@ func TestReadinessWaitSnapshotAndNewWaitReset(t *testing.T) {
 func TestReadinessDaemonPollScopesAndResourcePrivacy(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	f := readinessWorld(t, "readiness-poll", now)
-	token := issueKey(t, f.runner, []string{"account.read", "account.probe"})
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	token := issueKey(t, f.runner, f.runner.Scopes)
 	var check AccountCheck
 	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("poll", 0), 202, &check)
 	var accounts []Account
@@ -366,12 +373,14 @@ func TestReadinessDaemonPollScopesAndResourcePrivacy(t *testing.T) {
 	if len(accounts) != 1 || accounts[0].PendingCheck == nil || accounts[0].PendingCheck.ID != check.ID || len(accounts[0].ReadinessResources) != 1 {
 		t.Fatalf("scoped poll: %+v", accounts)
 	}
+	accounts = nil
 	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
 	if accounts[0].PendingCheck != nil || len(accounts[0].ReadinessResources) != 0 {
 		t.Fatal("person received daemon-only poll fields")
 	}
 	callStatus(t, f.mod, &f.runner, issueKey(t, f.runner, []string{"account.read"}), "GET", "/api/agent-accounts?include_checks=true", "", 403, nil)
 	other := addPrincipal(t, f.admin.TenantID, "agent", "Other daemon", []string{"admin"})
+	other.Scopes = []string{"account.read", "account.probe"}
 	callStatus(t, f.mod, &other, issueKey(t, other, []string{"account.read", "account.probe"}), "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
 	if len(accounts) != 0 {
 		t.Fatal("another daemon received the check")
@@ -409,4 +418,38 @@ func TestReadinessDaemonPollScopesAndResourcePrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 403, nil)
+}
+
+func TestReadinessPairingRevocationInvalidatesPending(t *testing.T) {
+	for _, scope := range []string{"consent", "computer"} {
+		t.Run(scope, func(t *testing.T) {
+			now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+			f := readinessWorld(t, "readiness-revoke-"+scope, now)
+			if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET harness='claude' WHERE id=$1`, f.account.ID); err != nil {
+				t.Fatal(err)
+			}
+			f.account.Harness = "claude"
+			pairClaudeAccount(t, f.admin, f.runner, f.account)
+			if _, err := adminPool.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET ongoing_approved_at=$2 WHERE account_id=$1`, f.account.ID, now); err != nil {
+				t.Fatal(err)
+			}
+			path := "/api/agent-accounts/" + f.account.ID
+			var c AccountCheck
+			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("paired", 0), 202, &c)
+			query := `UPDATE agent_pairing_enrollments SET ongoing_approved_at=NULL WHERE account_id=$1`
+			status := 409
+			if scope == "computer" {
+				query = `UPDATE agent_pairing_computers SET state='revoked' WHERE id=(SELECT computer_id FROM agent_pairing_enrollments WHERE account_id=$1)`
+				status = 410
+			}
+			if _, err := adminPool.Exec(t.Context(), query, f.account.ID); err != nil {
+				t.Fatal(err)
+			}
+			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, c.ID) != 1 {
+				t.Fatal("revoked pairing retained pending check")
+			}
+			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("paired-retry", 0), status, nil)
+			callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}}), status, nil)
+		})
+	}
 }
