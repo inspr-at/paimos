@@ -30,6 +30,7 @@ type TierCostSegment struct {
 	Multiplier float64 `json:"price_multiplier"`
 }
 type TierRunCost struct {
+	Model       string            `json:"model"`
 	RunID       string            `json:"run_id"`
 	Cost        string            `json:"cost_usd"`
 	DefaultCost string            `json:"default_cost_usd"`
@@ -99,7 +100,7 @@ func tierRunCost(u SessionModelUsage, price ModelPrice, runID string) *TierRunCo
 	if base == nil {
 		return nil
 	}
-	out := &TierRunCost{RunID: runID, Cost: *u.EstimatedCostUSD, DefaultCost: *base, Segments: []TierCostSegment{}, Provisional: u.Provisional}
+	out := &TierRunCost{Model: u.Model, RunID: runID, Cost: *u.EstimatedCostUSD, DefaultCost: *base, Segments: []TierCostSegment{}, Provisional: u.Provisional}
 	for _, seg := range u.TierSegments {
 		if seg.Tier == nil || !positiveFactor(seg.PriceMultiplier) {
 			return nil

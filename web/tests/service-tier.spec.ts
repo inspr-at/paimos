@@ -33,7 +33,7 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   })
   let state: TierState = { session_id: id, revision: 1, active_tier: active, pending: null, read_only: !!(options.unmanaged || options.ended), read_only_reason: options.unmanaged ? 'Reported by fixture-cli; change it in its terminal.' : options.ended ? 'This session has ended' : '', reports, requests: options.request ? [{ id: 'request-fixture', session_id: id, tier: 'fast', reason: 'QA waits on this screen', state: 'pending', requested_by_principal_id: String(data.sessions[0]!.agent_principal_id), created_at: new Date().toISOString() }] : [] }
   if (options.evidence) {
-    state.run_cost = { run_id: String(data.sessions[0]!.run_id), cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast', price_multiplier: 2 }] }
+    state.run_cost = { model: report.model, run_id: String(data.sessions[0]!.run_id), cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast', price_multiplier: 2 }] }
     state.estimates = report.tiers.map(t => ({ tier: t.tier, n: 1, basis: 'Last completed matching run · 1 run · frozen price version 7. Only model time scales; tools and waits keep their time.', run_id: 'last-run-fixture', cost_usd: String(2.4 * t.price_multiplier!), duration_ms: 300000 + 600000 / t.speed_factor! }))
     state.history = [
       { id: 4, action: 'changed', from_tier: 'default', to_tier: 'fast', actor_id: me.id, actor_name: 'Markus', asked_by_name: 'fixture-agent', at: '2026-10-02T10:00:00Z' },

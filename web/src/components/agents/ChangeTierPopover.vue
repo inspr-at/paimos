@@ -147,5 +147,5 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.tp-est-header{flex:none;white-space:nowrap;font-size:9px;color:var(--ink-3);text-transform:uppercase}.tp-head>span{flex:1;min-width:0}.tp-estimate{display:grid;gap:2px;text-align:right;font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}.tp-estimate small{font-size:9.5px;color:var(--ink-3)}
+.tp-est-header{flex:none;white-space:nowrap;font-size:9px;color:var(--ink-3);text-transform:uppercase}.tp-head>span{flex:1;min-width:0}.tp-estimate{display:grid;gap:2px;text-align:right;font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}.tp-estimate small{font-size:9.5px;color:var(--ink-3);white-space:normal;line-height:1.2}
 </style>

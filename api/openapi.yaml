@@ -13245,8 +13245,9 @@ components:
         at: {type: string, format: date-time}
     ServiceTierRunCost:
       type: object
-      required: [run_id, cost_usd, default_cost_usd, segments, provisional]
+      required: [model, run_id, cost_usd, default_cost_usd, segments, provisional]
       properties:
+        model: {type: string}
         run_id: {type: string, format: uuid}
         cost_usd: {type: string, description: Frozen token-price estimate; never billed cost.}
         default_cost_usd: {type: string}

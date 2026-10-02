@@ -76,7 +76,7 @@ export interface TierHistory {
   from_tier: ServiceTier | null; to_tier: ServiceTier; actor_id: string; actor_name: string; asked_by_name: string | null; at: string
 }
 export interface TierRunCost {
-  run_id: string; cost_usd: string; default_cost_usd: string; provisional: boolean
+  model: string; run_id: string; cost_usd: string; default_cost_usd: string; provisional: boolean
   segments: { tier: ServiceTier; price_multiplier: number }[]
 }
 export interface TierEstimate { tier: ServiceTier; n: number; basis: string; run_id: string | null; cost_usd: string | null; duration_ms: number | null }

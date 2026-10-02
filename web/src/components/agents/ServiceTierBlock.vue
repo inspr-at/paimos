@@ -26,7 +26,7 @@ const explanation = computed(() => {
 })
 const source = computed(() => { try { const url = new URL(report.value?.source || ''); return ['https:', 'http:'].includes(url.protocol) ? url.href : null } catch { return null } })
 let epoch = 0
-watch([() => props.session.id, () => props.session.service_tier_revision, () => props.session.service_tier_request], async () => {
+watch([() => props.session.id, () => props.session.model, () => props.session.harness, () => props.session.reasoning_effort, () => props.session.service_tier_revision, () => props.session.service_tier_request], async () => {
   const own = ++epoch, s = props.session
   try { await tiers.load(s); if (own === epoch && props.session.id === s.id) tiers.follow(s) }
   catch (error) { if (own === epoch && props.session.id === s.id) tiers.errors[s.id] = error instanceof Error ? error.message : 'Tier information unavailable.' }

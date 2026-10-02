@@ -100,7 +100,10 @@ const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? 
 }))
 const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
 const tierState = computed(() => s.value ? serviceTiers.state(s.value) : undefined)
-const runCost = computed(() => tierState.value?.run_cost?.run_id === run.value?.id ? tierState.value.run_cost : undefined)
+const runCost = computed(() => {
+  const cost = tierState.value?.run_cost
+  return cost && run.value && cost.run_id === run.value.id && cost.model === s.value?.model ? cost : undefined
+})
 const metadataHistory = computed(() => [
   ...metadataChanges(s.value?.metadata_history).map((item, i) => ({ id: `metadata-${i}`, at: item.at, text: metadataChangeText(item) })),
   ...(tierState.value?.history ?? []).map(item => ({ id: `tier-${item.id}`, at: item.at, text: tierHistoryText(item) })),

@@ -37,7 +37,7 @@ test('Undo belongs to the accepted control and exactly its confirming revision',
 
 test('run cost names its frozen multiplier and Default cost, independently of the catalog', async () => {
   const { tierRunCostLabel } = await import('../src/lib/serviceTier.ts')
-  const frozen = { run_id: 'run', cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast' as const, price_multiplier: 2 }] }
+  const frozen = { model: 'fixture-model', run_id: 'run', cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast' as const, price_multiplier: 2 }] }
   assert.equal(tierRunCostLabel(frozen), 'Fast ×2 · $2.40 at Default')
   assert.equal(tierRunCostLabel({ ...frozen, segments: [{ tier: 'default', price_multiplier: 1 }, ...frozen.segments] }), 'Default ×1 + Fast ×2 · $2.40 at Default')
   assert.equal(tierRunCostLabel(undefined), 'Tier cost unavailable')
