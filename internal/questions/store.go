@@ -529,8 +529,8 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, question, answer string) ([]events.Change, error) {
 	var id string
 	var before, after json.RawMessage
-	err := tx.QueryRow(ctx, `SELECT n.id::text,to_jsonb(n) FROM nodes n JOIN desk_decisions d ON d.tenant_id=n.tenant_id AND d.question_id=$2 AND d.effect_ref=n.id::text
- WHERE n.tenant_id=$1 AND d.state='active' AND n.fields->'metadata'->>'question_id'=$2 AND n.deleted_at IS NULL FOR NO KEY UPDATE OF n`, p.TenantID, question).Scan(&id, &before)
+	err := tx.QueryRow(ctx, `SELECT n.id::text,to_jsonb(n) FROM nodes n JOIN desk_decisions d ON d.tenant_id=n.tenant_id AND d.question_id=$2::uuid AND d.effect_ref=n.id::text
+ WHERE n.tenant_id=$1 AND d.state='active' AND n.fields->'metadata'->>'question_id'=$2::uuid::text AND n.deleted_at IS NULL FOR NO KEY UPDATE OF n`, p.TenantID, question).Scan(&id, &before)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
