@@ -231,6 +231,16 @@ func scalar(t *testing.T, p tenant.Principal, query string, args ...any) int64 {
 	return n
 }
 
+// Quota-detail fixtures explicitly own their account; administrator status
+// alone no longer grants another person's usage after decision 8.
+func ownFixtureAccount(t *testing.T, owner tenant.Principal, a *Account) {
+	t.Helper()
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, a.ID, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.OwnerPersonID = &owner.ID
+}
+
 func accountsMod() httpapi.Module { return New(appPool) }
 
 func windowBody(start, end time.Time, unit string, allowance int64, pace string) string {

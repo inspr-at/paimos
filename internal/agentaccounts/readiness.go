@@ -27,6 +27,7 @@ type AccountReadiness struct {
 	CheckedAt       *time.Time      `json:"checked_at"`
 	NextAttemptAt   *time.Time      `json:"next_attempt_at"`
 	MeasuredUsage   []ReadinessFact `json:"measured_usage"`
+	CheckResult     string          `json:"check_result,omitempty"`
 	DetailsRedacted bool            `json:"details_redacted"`
 }
 
@@ -49,7 +50,18 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 	for _, r := range in.HardReasons {
 		reasons[r] = true
 	}
+	var checkedAt *time.Time
 	for _, f := range in.Facts {
+		if f.WindowKey == "check" && (checkedAt == nil || f.ObservedAt.After(*checkedAt)) {
+			t := f.ObservedAt
+			checkedAt = &t
+			out.CheckedAt = &t
+			out.CheckResult = f.ReadingError
+			if out.CheckResult == "" {
+				out.CheckResult = "success"
+			}
+		}
+
 		if f.ReadingError == "identity_mismatch" {
 			reasons["identity_mismatch"] = true
 		}
@@ -160,7 +172,7 @@ func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Ti
 }
 
 func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slots int) (AccountReadiness, error) {
-	in := ReadinessInput{AccountID: a.ID, Now: now, CheckedAt: a.LastProbeAt}
+	in := ReadinessInput{AccountID: a.ID, Now: now}
 	if a.OwnerPersonID == nil {
 		in.HardReasons = append(in.HardReasons, "owner_required")
 	}
@@ -204,6 +216,12 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 		return AccountReadiness{}, err
 	}
 	in.Facts = append(facts, legacy...)
+	for _, fact := range in.Facts {
+		if fact.ReadingAt != nil && (in.CheckedAt == nil || fact.ReadingAt.After(*in.CheckedAt)) {
+			t := *fact.ReadingAt
+			in.CheckedAt = &t
+		}
+	}
 	if c := a.OpenRouterCredits; c != nil {
 		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: a.ID, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.Remaining, StopKind: "none"}}
 		if c.Remaining != nil && *c.Remaining == 0 {

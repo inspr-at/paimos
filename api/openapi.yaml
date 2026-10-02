@@ -14351,6 +14351,7 @@ components:
         probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
         limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
         awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
+        details_redacted: {type: boolean, description: True when the owner has not shared quota detail; ignore the placeholder schedule.}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
         group_id: {type: string, format: uuid}
@@ -14494,6 +14495,7 @@ components:
         display_reason: {type: string}
         checked_at: {type: [string, 'null'], format: date-time}
         next_attempt_at: {type: [string, 'null'], format: date-time}
+        check_result: {$ref: "#/components/schemas/ReadinessCheckResult"}
         measured_usage: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFact'}}
         details_redacted: {type: boolean}
     AccountCheckWrite:
@@ -14572,6 +14574,8 @@ components:
             next_attempt_at: {type: [string, 'null'], format: date-time}
             wait_id: {type: [string, 'null'], format: uuid}
             early_recovery_used: {type: boolean}
+            failure_count: {type: integer, minimum: 0}
+            check_next_attempt_at: {type: [string, "null"], format: date-time}
     AccountSignals:
       type: object
       additionalProperties: false
