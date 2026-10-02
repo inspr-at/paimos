@@ -2,7 +2,7 @@
 // Hours: the week grid, fast entry, people and agents, period review and approval.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
+import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -19,6 +19,53 @@ async function openWeek(page: Page, path = '/business/hours') {
 }
 const grid = (page: Page) => page.getByRole('table', { name: 'Hours per ticket and day' })
 const form = (page: Page) => page.getByRole('form', { name: 'Log time' })
+
+test('an older week shows existing hours and logs into its existing period', async ({ page }) => {
+  const { data, calls } = await setup(page)
+  const period = addHistoricalPeriod(data)
+  await openWeek(page, '/business/hours?week=2024-09-16')
+  await expect(grid(page).locator('tfoot td').last()).toHaveText('6:15')
+  await expect(page.getByRole('region', { name: 'Entries' }).getByText('Provisioning spike')).toBeVisible()
+  const read = calls.find(c => c.path === '/api/time-periods' && c.query.get('principal_id') === me.id)!
+  expect(read.query.get('since')).toBe(period.starts_at)
+  expect(read.query.get('until')).toBe(period.ends_at)
+  await form(page).getByRole('combobox', { name: 'Cost unit' }).selectOption({ label: 'Development' })
+  await form(page).getByRole('button', { name: /^Ticket:/ }).click()
+  await page.getByRole('combobox', { name: 'Ticket' }).fill('PHAROS-11')
+  await expect(page.getByRole('option', { name: /PHAROS-11/ })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await form(page).getByRole('radio', { name: 'Tue 17' }).click()
+  await form(page).getByRole('textbox', { name: 'Duration' }).fill('15m')
+  await form(page).getByRole('textbox', { name: 'Duration' }).press('Enter')
+  await expect(page.getByText('Logged 15m on PHAROS-11.')).toBeVisible()
+  await expect(grid(page).locator('tfoot td').last()).toHaveText('6:30')
+  expect(calls.filter(c => c.path === '/api/time-periods' && c.method === 'POST')).toEqual([])
+  expect(calls.find(c => c.path === '/api/time-entries' && c.method === 'POST')?.body).toMatchObject({ period_id: period.id })
+  expect(data.entries.filter(e => e.period_id === period.id)).toHaveLength(3)
+})
+
+test('open periods older than a year appear on a direct approvals load', async ({ page }) => {
+  const { data } = await setup(page)
+  addHistoricalPeriod(data)
+  await page.goto('/business/hours?view=approvals')
+  const waiting = page.getByRole('region', { name: 'Waiting for approval' })
+  await expect(waiting.getByRole('button')).toHaveCount(2)
+  await expect(waiting.getByRole('button').first()).toContainText('16–22 Sep 2024')
+  await expect(waiting.getByRole('button').first()).toContainText('6h 15m')
+})
+
+test('open periods older than a year appear in the home waiting count and week badge', async ({ page }) => {
+  const { data } = await setup(page)
+  addHistoricalPeriod(data)
+  await page.goto('/business')
+  await expect(page.getByText('8h 30m logged this week · 2 periods to approve · 3 rates in force')).toBeVisible()
+  const queue = page.getByRole('list', { name: 'Periods waiting for approval' })
+  await expect(queue.getByRole('link')).toHaveCount(2)
+  await expect(queue.getByRole('link').first()).toContainText('16–22 Sep 2024')
+  await expect(queue.getByRole('link').first()).toContainText('6h 15m')
+  await openWeek(page)
+  await expect(page.getByRole('radio', { name: /Approvals/ })).toContainText('2')
+})
 
 test('the week grid sums per ticket and day with exact amounts', async ({ page }) => {
   const errors = watchErrors(page)

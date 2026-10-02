@@ -151,7 +151,13 @@ export const bindContact = (contactId: string, principalId: string) => call<Bind
 export const listPrincipals = () => call<Principal[]>('/business/principals').then(items => { learnPictures(items); return items })
 
 // ---------- Hours ----------
-export const listPeriods = async (principalId?: string) => (await listAll<TimePeriod>(`/time-periods${principalId ? `?principal_id=${id(principalId)}` : ''}`)).map(period)
+// Approvals need the complete history: valid period intervals start in year 1.
+// Omitting since uses the server's one-year window instead.
+export const PERIOD_HISTORY_START = '0001-01-01T00:00:00Z'
+export const listPeriods = async (principalId?: string, bounds: { since?: string; until?: string } = {}) => {
+  const params = new URLSearchParams({ ...(principalId ? { principal_id: principalId } : {}), ...bounds }).toString()
+  return (await listAll<TimePeriod>(`/time-periods${params ? `?${params}` : ''}`)).map(period)
+}
 // The entries digest travels in a header; approval must send it back unchanged.
 export async function getPeriod(periodId: string): Promise<{ period: TimePeriod; digest: string }> {
   const { data, response } = await send<TimePeriod>(`/time-periods/${id(periodId)}`)

@@ -228,6 +228,9 @@ jobs:
         run: npm run test:unit
       - working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Business week and approval history regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/hours.spec.ts tests/hours-edit.spec.ts tests/business.spec.ts --workers=1
       - name: Capture the round-6 release list for comparison
         id: release-list-before
         working-directory: web
