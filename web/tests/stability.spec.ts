@@ -228,6 +228,8 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     mock.data.mode = 'loaded'; mock.data.count = 2
     await tab('keys').click(); await loaded()
     await tab('ladders').click(); await loaded()
+    // Review gate supplies the long qualification detail for the scroll check.
+    await role('review-gate').click(); await loaded()
     await expectStableControls({ controls: { ...common, 'policies-row-link': detail }, scrollAreas: { policies: panel }, interactions: [
       { name: 'open and close detail', run: async () => { await detail.click(); await expect(panel.getByRole('dialog')).toBeVisible(); await panel.getByTestId('policies-sheet-close').click(); await expect(panel.getByRole('dialog')).not.toBeVisible(); await expect(detail).toBeFocused() } },
     ] })
