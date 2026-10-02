@@ -34,7 +34,7 @@ func TestAttachAttemptAdmissionUsesSharedWindow(t *testing.T) {
 	}
 	lookup := map[string]string{"user_code": "000000000"}
 	f.call("POST", "/api/agent-pairing/attach/lookup", lookup, true, "", 429)
-	_, err = f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_limits SET starts_at=clock_timestamp()-($2 * interval '1 second') WHERE tenant_id=$1 AND bucket='lookup'`, f.tenantID, int((attachwatch.AttemptWindow+time.Minute)/time.Second))
+	_, err = f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_limits SET starts_at=clock_timestamp()-($2::integer * interval '1 second') WHERE tenant_id=$1 AND bucket='lookup'`, f.tenantID, int((attachwatch.AttemptWindow+time.Minute)/time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

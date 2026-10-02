@@ -109,8 +109,8 @@ func (m *Module) attachLimit(ctx context.Context, tenantID, bucket string, max i
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO harness_attach_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
  ON CONFLICT(tenant_id,bucket) DO UPDATE SET
- attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3 * interval '1 second') THEN 1 ELSE harness_attach_limits.attempts+1 END,
- starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3 * interval '1 second') THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket, int(attachwatch.AttemptWindow/time.Second)).Scan(&n)
+ attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN 1 ELSE harness_attach_limits.attempts+1 END,
+ starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket, int(attachwatch.AttemptWindow/time.Second)).Scan(&n)
 	})
 	if err != nil {
 		return err
