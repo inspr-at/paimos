@@ -95,7 +95,7 @@ func TestPairedAttachMarksOnlyRemoteExchangeFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixture store unavailable")
 	}
-	snapshot := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": server.URL, "request": map[string]string{"computer_name": "fixture", "workspace_path": root}, "view": agentsetup.View{TenantID: tenantID, ComputerID: computerID, PrincipalID: principalID}, "lifecycle_secret": strings.Repeat("a", 64)}
+	snapshot := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": server.URL, "request": map[string]string{"request_id": "44444444-4444-4444-8444-444444444444", "computer_name": "fixture", "workspace_path": root}, "view": agentsetup.View{TenantID: tenantID, ComputerID: computerID, PrincipalID: principalID}, "device_secret": strings.Repeat("a", 64), "runtime_secret": strings.Repeat("b", 64), "lifecycle_secret": strings.Repeat("c", 64)}
 	raw, _ := json.Marshal(snapshot)
 	if err = store.Write("pairing.json", raw, true); err != nil {
 		t.Fatal("fixture pairing not saved")
