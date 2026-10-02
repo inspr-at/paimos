@@ -349,6 +349,9 @@ back a savepoint and leave work starts usable with history unavailable, with
 one diagnostic per shared planner containing SQLSTATE and request context,
 never raw SQL or error text. Workers must belong to the outcome project: a
 cross-project worker is excluded before the distinct-source aggregation guard.
+The candidate bound precedes the per-cell newest-30 window, so a large history
+can continue to truncate. A future window-first bound must push project
+visibility into SQL first so hidden samples cannot crowd out visible history.
 
 The read-only
 `GET /api/usage/model-estimates?profile_id=…&kind=…&bucket=normal|complex`

@@ -13662,7 +13662,7 @@ components:
               required: [basis, tickets, tokens_per_hour]
               properties:
                 basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
-                basis_text: {type: string, description: Backoff level and sample count; uncalibrated for the documented default.}
+                basis_text: {type: string, description: Backoff level and sample count; uncalibrated for the documented default. A history truncation or availability issue may accompany an independently calibrated legacy route.}
                 level: {type: string, enum: [cell, line, profile, route, default]}
                 tickets: {type: integer, minimum: 0}
                 tokens_per_hour: {type: integer, minimum: 0}
