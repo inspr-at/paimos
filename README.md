@@ -196,6 +196,25 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+The ordinary activity tests check exact pagination through 240 same-ticket
+imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
+imported events, plus the node index definition. They impose no latency budget.
+For a controlled performance check, use an idle dedicated test runner with local
+Postgres and run without the race detector:
+
+```sh
+AEON_TEST_DATABASE_URL="postgres://aeon:aeon@127.0.0.1:55432/aeon?sslmode=disable" \
+AEON_ACTIVITY_IMPORT_SCALE_PROBE=1 \
+go test -count=1 -run '^TestTimelineAtImportScaleLatency$' -v ./internal/activity
+```
+
+This opt-in probe uses the same synthetic fixture, excludes setup, warms up five
+first-page requests, and samples 30 sequential requests with a page size of 20.
+It measures the handler and JSON decoding; the nearest-rank p95 must be below
+100 ms. Median and maximum are logged for diagnosis. It does not measure full
+history traversal or guarantee production latency. Shared or loaded runners
+are unsuitable for interpreting this budget.
+
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
 `go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
