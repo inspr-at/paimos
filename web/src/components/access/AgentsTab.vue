@@ -70,7 +70,7 @@ async function revoke(key: AgentKey) {
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
 const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
-async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key scopes updated') }
+async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key updated') }
 const newKey = ref<Agent | null>(null)
 const rotateKey = ref<AgentKey | undefined>()
 function showKeySheet(agent: Agent, key?: AgentKey) { firstKey.value = agent.key_count === 0; firstKeyPreset.value = ''; rotateKey.value = key; newKey.value = agent }
@@ -234,9 +234,9 @@ onMounted(loadKeys)
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
       :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
-    <EditKeyScopesSheet v-if="editing" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
+    <EditKeyScopesSheet v-if="editing" :key="editing.key.id" :agent="editing.agent" :agent-key="editing.key" @close="editing = null" @saved="scopesSaved" />
     <NewAgentSheet v-if="creatingAgent" @close="closeAgent" @created="agentCreated" />
-    <NewKeySheet v-if="newKey" :first-key="firstKey" :preferred-preset="firstKeyPreset" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
+    <NewKeySheet v-if="newKey" :key="rotateKey?.id ?? newKey.principal_id" :first-key="firstKey" :preferred-preset="firstKeyPreset" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
   </div>
 </template>
 
