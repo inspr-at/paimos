@@ -28,8 +28,9 @@ import (
 const scopeInboxSend = "inbox.send"
 
 type module struct {
-	pool      *pgxpool.Pool
-	heartbeat time.Duration
+	pool       *pgxpool.Pool
+	heartbeat  time.Duration
+	waitNotify func(context.Context, *pgx.Conn, string, time.Time) error
 }
 
 // New returns the inbox HTTP module. See the package doc for coordinator wiring.
@@ -38,7 +39,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 }
 
 func newModule(pool *pgxpool.Pool) *module {
-	return &module{pool: pool, heartbeat: 15 * time.Second}
+	return &module{pool: pool, heartbeat: 15 * time.Second, waitNotify: waitTenantNotify}
 }
 
 func (m *module) Mount(mux *http.ServeMux) {

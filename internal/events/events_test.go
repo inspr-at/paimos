@@ -140,6 +140,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	written := make(chan Event, 1)
+	firstPID := make(chan int, 1)
 	release := make(chan struct{})
 	defer func() {
 		select {
@@ -151,6 +152,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		firstDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			firstPID <- int(tx.Conn().PgConn().PID())
 			e, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"sensitive_content": "snapshot"}})
 			if err != nil {
 				return err
@@ -175,16 +177,24 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	secondDone := make(chan error, 1)
+	secondPID := make(chan int, 1)
 	go func() {
 		secondDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			secondPID <- int(tx.Conn().PgConn().PID())
 			_, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"x": "second"}})
 			return err
 		})
 	}()
+	var waiter int
 	select {
+	case waiter = <-secondPID:
 	case err := <-secondDone:
-		t.Fatalf("second append passed uncommitted first: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("second transaction failed before append: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := dbtest.WaitForBlocked(ctx, d.Admin, waiter, <-firstPID, "INSERT INTO events"); err != nil {
+		t.Fatal(err)
 	}
 	waitCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
 	_, err = conn.WaitForNotification(waitCtx)

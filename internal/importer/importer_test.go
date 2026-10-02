@@ -4,8 +4,10 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -251,26 +253,40 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 }
 
+// Hold two actual requests before releasing any: saturation is an observed
+// interleaving, rather than a guess based on server sleeps or arrival gaps.
 func TestSourceRequestCapAndDelay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	var active, peak atomic.Int32
-	var mu sync.Mutex
-	var starts []time.Time
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := active.Add(1)
+		defer active.Add(-1)
 		for {
 			old := peak.Load()
 			if n <= old || peak.CompareAndSwap(old, n) {
 				break
 			}
 		}
-		mu.Lock()
-		starts = append(starts, time.Now())
-		mu.Unlock()
-		time.Sleep(25 * time.Millisecond)
-		active.Add(-1)
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
 		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
+	// Release held handlers before Server.Close, including on a failed barrier.
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
 	file := filepath.Join(t.TempDir(), "key")
 	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
 		t.Fatal(err)
@@ -279,7 +295,7 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := source.Configure(2, 15*time.Millisecond); err != nil {
+	if err := source.Configure(2, 0); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -288,21 +304,73 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var rows []Record
-			if err := source.get(context.Background(), "/probe", &rows); err != nil {
+			if err := source.get(ctx, "/probe", &rows); err != nil {
 				t.Error(err)
 			}
 		}()
 	}
-	wg.Wait()
-	if peak.Load() > 2 || peak.Load() < 2 {
-		t.Fatalf("peak requests = %d", peak.Load())
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	for n := 0; n < 2; n++ {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("request cap never admitted two held requests")
+		}
 	}
-	if len(starts) != 8 {
-		t.Fatalf("request starts = %d", len(starts))
+	close(release)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("source requests never finished")
 	}
-	for n := 1; n < len(starts); n++ {
-		if gap := starts[n].Sub(starts[n-1]); gap < 10*time.Millisecond {
-			t.Fatalf("request spacing = %s", gap)
+	if got := peak.Load(); got > 2 {
+		t.Fatalf("request cap exceeded: %d", got)
+	}
+	if len(entered) != 6 {
+		t.Fatalf("completed request count = %d, want 8", len(entered)+2)
+	}
+}
+
+type sourceRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f sourceRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSourceDispatchDelayUsesInjectedClock(t *testing.T) {
+	origin := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := origin
+	var starts []time.Time
+	var waits []time.Duration
+	base, _ := url.Parse("https://source.example.test")
+	source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		starts = append(starts, now)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+	})}, now: func() time.Time { return now }, wait: func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		now = now.Add(d)
+		return nil
+	}}
+	const delay = 15 * time.Millisecond
+	if err := source.Configure(2, delay); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 8; n++ {
+		var rows []Record
+		if err := source.get(t.Context(), "/probe", &rows); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(starts) != 8 || len(waits) != 7 {
+		t.Fatalf("starts=%d waits=%d", len(starts), len(waits))
+	}
+	for n, at := range starts {
+		if want := origin.Add(time.Duration(n) * delay); !at.Equal(want) {
+			t.Fatalf("dispatch %d=%s, want %s", n, at, want)
+		}
+	}
+	for _, wait := range waits {
+		if wait != delay {
+			t.Fatalf("requested wait=%s, want %s", wait, delay)
 		}
 	}
 }

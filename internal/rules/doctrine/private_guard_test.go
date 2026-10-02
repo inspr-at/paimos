@@ -382,7 +382,36 @@ func TestUnchangedFixtureRulesAreNotPrivateQuotes(t *testing.T) {
 	}
 }
 
+// The security regression always runs on value-free, in-source fixtures.
+func TestControlledDoctrineGuardCounts(t *testing.T) {
+	pubDocs := fixtureFiles()
+	privDocs := map[string]string{
+		"docs/AGENTS-KERNEL-PRIVATE.md": "# Private\n\n- " + guardRule + "\n",
+		"docs/AGENTS-PROFILE-MARKUS.md": "# Profile\n\n- The copper notebook belongs inside the cedar drawer beside the north stair.\n",
+		"commands/secrets.md":           "# Command\n\n- Keep the silver spare key behind the violet ledger in the south cupboard.\n",
+	}
+	for path, text := range pubDocs {
+		if _, exists := privDocs[path]; !exists {
+			privDocs[path] = text
+		}
+	}
+	views := Render(publicRepository, fixtureCommit, false, indexedDoctrineFiles(pubDocs))
+	count := 0
+	for _, view := range views {
+		count += len(view.Rules)
+	}
+	if count != 5 {
+		t.Fatalf("controlled public rules=%d, want 5", count)
+	}
+	checkDoctrineGuard(t, pubDocs, privDocs)
+}
+
+// Survey a developer's mutable checkouts only when explicitly requested.
+// Counts are observations, never historical acceptance thresholds.
 func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
+	if os.Getenv("AEON_TEST_DOCTRINE_CHECKOUTS") != "1" {
+		t.Skip("set AEON_TEST_DOCTRINE_CHECKOUTS=1 for the checkout survey")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -397,6 +426,11 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 	}
 	pubDocs := gitTexts(t, modules)
 	privDocs := gitTexts(t, private)
+	checkDoctrineGuard(t, pubDocs, privDocs)
+}
+
+func checkDoctrineGuard(t *testing.T, pubDocs, privDocs map[string]string) {
+	t.Helper()
 	public := indexedDoctrineFiles(pubDocs)
 	views := Render(publicRepository, fixtureCommit, false, public)
 	corpus := corpusFrom(testGuardMaster(), privDocs)
@@ -486,9 +520,6 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 	if refused != 0 || privateOnlyAllowed != 0 {
 		t.Fatalf("guard counts public_refused=%d private_only_allowed=%d", refused, privateOnlyAllowed)
 	}
-	if checked != 381 {
-		t.Fatalf("public rules=%d, want 381", checked)
-	}
 	identity, nonLatin := 0, 0
 	for _, view := range views {
 		for _, rule := range view.Rules {
@@ -511,8 +542,9 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 			}
 		}
 	}
-	if identity != 6 || nonLatin != 0 {
-		t.Fatalf("public guardPublic identity=%d non_latin=%d, want 6 and 0", identity, nonLatin)
+	t.Logf("public guardPublic identity=%d non_latin=%d", identity, nonLatin)
+	if nonLatin != 0 {
+		t.Fatalf("public guardPublic non_latin=%d, want 0", nonLatin)
 	}
 	var privateFiles []File
 	for path, text := range privDocs {
@@ -570,7 +602,7 @@ func TestCheckedOutDoctrineGuardCounts(t *testing.T) {
 			}
 		}
 		t.Logf("latin %s rules=%d passed=%d", attack.name, n, pass)
-		if n < 412 || pass != 0 {
+		if n == 0 || pass != 0 {
 			t.Fatalf("latin lookalike %s passed %d of %d", attack.name, pass, n)
 		}
 	}
