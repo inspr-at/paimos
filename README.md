@@ -2355,8 +2355,8 @@ The Decided view follows these cursors; “Load 100 more” resumes the saved cu
 with one page request. Refresh rechecks its loaded pages from the newest decision,
 so a fresh answer stays available for correction. Continuation keeps questions
 before protected requests, hides action requests projected into questions, and
-preserves decisions recorded in the desk while that page is loading. Decisions committed during
-pagination may require a refresh from the first page. Default and
+preserves decisions recorded in the desk while that page is loading. Decisions
+committed during pagination may require a refresh from the first page. Default and
 Open reads keep oldest-first creation order. `questions.ask` and `questions.read`
 are explicit agent key scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
 three, viewer receives read, guest/customer receive none. Existing keys gain no
