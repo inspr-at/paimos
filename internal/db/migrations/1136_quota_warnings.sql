@@ -11,6 +11,7 @@ CREATE TABLE account_quota_warnings (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     resource_id uuid NOT NULL,
+    quota_key text NOT NULL CHECK (length(quota_key) BETWEEN 1 AND 128),
     window_key text NOT NULL CHECK (length(window_key) BETWEEN 1 AND 128),
     reset_key text NOT NULL CHECK (length(reset_key) BETWEEN 1 AND 64),
     threshold_percent integer NOT NULL CHECK (threshold_percent BETWEEN 1 AND 50),
@@ -21,10 +22,10 @@ CREATE TABLE account_quota_warnings (
     resets_at timestamptz,
     recovered_at timestamptz,
     PRIMARY KEY (tenant_id,id),
-    UNIQUE (tenant_id,resource_id,window_key,reset_key,threshold_percent),
+    UNIQUE (tenant_id,quota_key,window_key,reset_key,threshold_percent),
     FOREIGN KEY (tenant_id,resource_id) REFERENCES account_readiness_resources(tenant_id,id)
 );
-CREATE INDEX account_quota_warnings_active ON account_quota_warnings(tenant_id,resource_id,window_key)
+CREATE INDEX account_quota_warnings_active ON account_quota_warnings(tenant_id,quota_key,window_key)
     WHERE recovered_at IS NULL AND NOT suppressed;
 ALTER TABLE quota_warning_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quota_warning_settings FORCE ROW LEVEL SECURITY;

@@ -104,22 +104,35 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 	if err != nil {
 		return nil, err
 	}
-	// Legacy confirmed login pools share the canonical existing local resource.
-	// Never use an unconfirmed daemon fingerprint to join warning identities.
-	if a.QuotaPoolFingerprint != "" {
-		var canonical string
-		err = tx.QueryRow(ctx, `SELECT m.resource_id::text FROM agent_accounts peer JOIN account_readiness_memberships m ON m.tenant_id=peer.tenant_id AND m.account_id=peer.id AND m.binding_revision=peer.link_revision JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE peer.id IN (`+quotaAccounts+`) AND r.identity_kind='account' ORDER BY peer.id,m.resource_id LIMIT 1`, a.ID).Scan(&canonical)
-		if err != nil {
+	// Local resources for a person-confirmed login pool use a stable quota
+	// key. Adding or removing a computer cannot replace its warning identity.
+	// Explicit shared resources keep A's resource identity; unconfirmed
+	// fingerprints never establish sharing.
+	resources, err := ReadinessResources(ctx, tx, a)
+	if err != nil {
+		return nil, err
+	}
+	quotaKeys := map[string]string{}
+	for _, r := range resources {
+		if r.Kind == "endpoint_concurrency" {
+			continue
+		}
+		quotaKeys[r.ID] = r.ID
+		var identityKind string
+		if err := tx.QueryRow(ctx, `SELECT identity_kind FROM account_readiness_resources WHERE id=$1`, r.ID).Scan(&identityKind); err != nil {
 			return nil, err
 		}
-		for i := range legacy {
-			legacy[i].ResourceID = canonical
+		if a.QuotaPoolFingerprint != "" && identityKind == "account" && (r.Kind == "subscription_quota" || r.Kind == "key_cap") {
+			quotaKeys[r.ID] = "pool:" + a.Harness + ":" + a.QuotaPoolFingerprint
 		}
 	}
 	// The winning timestamp for each resource/window is the sole authority.
 	latest := map[string]ReadinessFact{}
 	for _, f := range append(facts, legacy...) {
-		key := f.ResourceID + "/" + f.WindowKey
+		if _, applies := quotaKeys[f.ResourceID]; !applies {
+			continue
+		}
+		key := quotaKeys[f.ResourceID] + "/" + f.WindowKey
 		old, ok := latest[key]
 		if !ok || f.ReadingAt != nil && (old.ReadingAt == nil || f.ReadingAt.After(*old.ReadingAt)) {
 			latest[key] = f
@@ -133,6 +146,7 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 	notices := []quotaNotice{}
 	for _, key := range keys {
 		f := latest[key]
+		quotaKey := quotaKeys[f.ResourceID]
 		level, remaining, fresh := quotaWarningLevel(f, settings, now)
 		if !fresh {
 			continue
@@ -143,10 +157,10 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		}
 		// A newer observation of recovery or a new measured reset clears the
 		// old episode. Clock passage, missing data and delayed samples cannot.
-		if _, err := tx.Exec(ctx, `UPDATE account_quota_warnings SET recovered_at=$4 WHERE resource_id=$1 AND window_key=$2 AND recovered_at IS NULL AND reading_at<$4 AND ($5 OR reset_key<>$3)`, f.ResourceID, f.WindowKey, reset, *f.ReadingAt, level == ""); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE account_quota_warnings SET recovered_at=$4 WHERE quota_key=$1 AND window_key=$2 AND recovered_at IS NULL AND reading_at<$4 AND ($5 OR reset_key<>$3)`, quotaKey, f.WindowKey, reset, *f.ReadingAt, level == ""); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE account_quota_warnings SET reading_at=$4,remaining_percent=$5 WHERE resource_id=$1 AND window_key=$2 AND reset_key=$3 AND recovered_at IS NULL AND reading_at<$4`, f.ResourceID, f.WindowKey, reset, *f.ReadingAt, remaining); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE account_quota_warnings SET reading_at=$4,remaining_percent=$5 WHERE quota_key=$1 AND window_key=$2 AND reset_key=$3 AND recovered_at IS NULL AND reading_at<$4`, quotaKey, f.WindowKey, reset, *f.ReadingAt, remaining); err != nil {
 			return nil, err
 		}
 		if level == "" {
@@ -157,12 +171,12 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 			threshold = settings.UrgentPercent
 		}
 		if level == "urgent" {
-			if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warnings(tenant_id,resource_id,window_key,reset_key,threshold_percent,severity,suppressed,reading_at,remaining_percent,resets_at) VALUES($1,$2,$3,$4,$5,'early',true,$6,$7,$8) ON CONFLICT(tenant_id,resource_id,window_key,reset_key,threshold_percent) DO UPDATE SET recovered_at=coalesce(account_quota_warnings.recovered_at,EXCLUDED.reading_at) WHERE account_quota_warnings.reading_at<=EXCLUDED.reading_at`, p.TenantID, f.ResourceID, f.WindowKey, reset, settings.EarlyPercent, *f.ReadingAt, remaining, f.ResetsAt); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warnings(tenant_id,resource_id,window_key,reset_key,threshold_percent,severity,suppressed,reading_at,remaining_percent,resets_at,quota_key) VALUES($1,$2,$3,$4,$5,'early',true,$6,$7,$8,$9) ON CONFLICT(tenant_id,quota_key,window_key,reset_key,threshold_percent) DO UPDATE SET recovered_at=coalesce(account_quota_warnings.recovered_at,EXCLUDED.reading_at) WHERE account_quota_warnings.reading_at<=EXCLUDED.reading_at`, p.TenantID, f.ResourceID, f.WindowKey, reset, settings.EarlyPercent, *f.ReadingAt, remaining, f.ResetsAt, quotaKey); err != nil {
 				return nil, err
 			}
 		}
 		var warning string
-		err = tx.QueryRow(ctx, `INSERT INTO account_quota_warnings(tenant_id,resource_id,window_key,reset_key,threshold_percent,severity,reading_at,remaining_percent,resets_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(tenant_id,resource_id,window_key,reset_key,threshold_percent) DO UPDATE SET reading_at=EXCLUDED.reading_at,remaining_percent=EXCLUDED.remaining_percent,recovered_at=NULL WHERE account_quota_warnings.reading_at<=EXCLUDED.reading_at AND NOT account_quota_warnings.suppressed RETURNING id::text`, p.TenantID, f.ResourceID, f.WindowKey, reset, threshold, level, *f.ReadingAt, remaining, f.ResetsAt).Scan(&warning)
+		err = tx.QueryRow(ctx, `INSERT INTO account_quota_warnings(tenant_id,resource_id,window_key,reset_key,threshold_percent,severity,reading_at,remaining_percent,resets_at,quota_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,quota_key,window_key,reset_key,threshold_percent) DO UPDATE SET reading_at=EXCLUDED.reading_at,remaining_percent=EXCLUDED.remaining_percent,recovered_at=NULL WHERE account_quota_warnings.reading_at<=EXCLUDED.reading_at AND NOT account_quota_warnings.suppressed RETURNING id::text`, p.TenantID, f.ResourceID, f.WindowKey, reset, threshold, level, *f.ReadingAt, remaining, f.ResetsAt, quotaKey).Scan(&warning)
 		if isNoRows(err) {
 			continue
 		}
@@ -172,8 +186,8 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		rows, err := tx.Query(ctx, `SELECT lead.project_id::text,lead.agent_principal_id::text,lead.id::text,left(coalesce(nullif(child.display_label,''),child.id::text),160)
           FROM harness_sessions child JOIN agent_runs run ON run.tenant_id=child.tenant_id AND run.id=child.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
           JOIN harness_sessions lead ON lead.tenant_id=child.tenant_id AND lead.project_id=child.project_id AND lead.id=child.parent_id AND lead.role='coordinator'
-          WHERE child.stopped_at IS NULL AND child.archived_at IS NULL AND lead.stopped_at IS NULL AND lead.archived_at IS NULL AND `+warningMembershipSQL+`
-          ORDER BY lead.project_id,lead.id,child.id LIMIT 201 FOR KEY SHARE OF lead`, f.ResourceID)
+          WHERE child.stopped_at IS NULL AND child.archived_at IS NULL AND lead.stopped_at IS NULL AND lead.archived_at IS NULL AND (`+warningMembershipSQL+`)
+          ORDER BY lead.project_id,lead.id,child.id LIMIT 201 FOR KEY SHARE OF lead`, f.ResourceID, quotaKey)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +240,7 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 }
 
 // a is the current target account; stale resource bindings never participate.
-const warningMembershipSQL = `EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=$1 AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))`
+const warningMembershipSQL = `($2=$1::uuid::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=$1 AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND $2='pool:'||a.harness||':'||a.quota_pool_fingerprint)`
 
 func flushQuotaNotices(ctx context.Context, tx pgx.Tx, p tenant.Principal, notices []quotaNotice) error {
 	// Create/lock the System actor during preparation, before event counters.
@@ -316,7 +330,7 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		// limits both sessions and runs to projects visible to the caller.
 		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(s.id) s.id::text,s.project_id::text,a.id::text,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN 'urgent' ELSE 'early' END,q.remaining_percent,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN coalesce((SELECT urgent_percent FROM quota_warning_settings),3) ELSE coalesce((SELECT early_percent FROM quota_warning_settings),10) END,q.window_key,q.resets_at
           FROM harness_sessions s JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
-          JOIN account_quota_warnings q ON q.tenant_id=a.tenant_id AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))
+          JOIN account_quota_warnings q ON q.tenant_id=a.tenant_id AND ((q.quota_key=q.resource_id::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND q.quota_key='pool:'||a.harness||':'||a.quota_pool_fingerprint))
           WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
           ORDER BY s.id,q.remaining_percent,q.id LIMIT $5`, nullableUUID(after), now, string(p.Kind), p.ID, limit+1)
 		if err != nil {

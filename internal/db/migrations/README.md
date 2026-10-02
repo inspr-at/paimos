@@ -207,7 +207,7 @@ checks uniqueness before reusing a valid unrecorded index.
 
 AEON-613 reserves **1136** for quota warning settings and durable receipts. The
 shared scratch ledger was read before reservation (highest reserved: 1135).
-The reservation is also recorded on AEON-613; the coordinator mirrors it to
+The reservation is also recorded on AEON-613; the coordinator must mirror it to
 the shared ledger because workers may author only inside their own repository.
 
 DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.

@@ -2,15 +2,19 @@
 package agentaccounts
 
 import (
+	"context"
 	"encoding/json"
 	"math"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestQuotaWarningThresholdFreshness(t *testing.T) {
@@ -260,5 +264,161 @@ func TestQuotaWarningsSharedComputersPrivacyAndProjectInbox(t *testing.T) {
 	if len(page.Items) != 0 {
 		t.Fatal("stale warning detail still shown")
 	}
-	_ = child
+	limited := addPrincipal(t, f.admin.TenantID, "person", "Limited reader", nil)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		var workspace, reader string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'quota_reader','Quota reader') RETURNING id::text`, f.admin.TenantID).Scan(&workspace); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='member'`).Scan(&reader); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.read')`, f.admin.TenantID, workspace); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'workspace',NULL),($1,$2,$4,'project',$5)`, f.admin.TenantID, limited.ID, workspace, reader, project)
+		return err
+	})
+	callStatus(t, f.mod, &limited, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
+	if len(page.Items) != 1 || page.Items[0]["session_id"] != child {
+		t.Fatalf("warning escaped project visibility: %+v", page)
+	}
+}
+
+func TestQuotaWarningsConfirmedPoolSurvivesComputerChanges(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "quota-pool-stable", now)
+	var sibling Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"second","harness":"codex","daemon_id":"daemon-b","label":"Second"}`, 201, &sibling)
+	fingerprint := strings.Repeat("a", 64)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	reset := now.Add(time.Hour)
+	f.report(t, 92, now, reset)
+	second := f
+	second.account = sibling
+	second.mod = fixedClockModule{Module: New(appPool), at: now.Add(time.Second)}
+	second.report(t, 98, now.Add(time.Second), reset)
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE NOT suppressed`); n != 2 {
+		t.Fatalf("early then urgent across computers: %d", n)
+	}
+	// Removing the original reporter does not replace the receipt identity.
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint='' WHERE id=$1`, f.account.ID); err != nil {
+		t.Fatal(err)
+	}
+	second.mod = fixedClockModule{Module: New(appPool), at: now.Add(2 * time.Second)}
+	second.report(t, 98, now.Add(2*time.Second), reset)
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings`); n != 2 {
+		t.Fatalf("computer change duplicated pool receipts: %d", n)
+	}
+}
+
+// The first report holds the actual tenant row lock. The second is observed
+// waiting for that backend in pg_blocking_pids before releasing the first.
+// The timeout guards against hangs; no sleep or elapsed-time assertion proves
+// concurrency.
+type quotaFenceTrace struct {
+	first             atomic.Bool
+	acquired, started chan uint32
+	release           chan struct{}
+}
+type quotaFenceContext struct{}
+
+func (q *quotaFenceTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE") {
+		q.started <- c.PgConn().PID()
+		return context.WithValue(ctx, quotaFenceContext{}, !q.first.Swap(true))
+	}
+	return ctx
+}
+func (q *quotaFenceTrace) TraceQueryEnd(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryEndData) {
+	hold, _ := ctx.Value(quotaFenceContext{}).(bool)
+	if hold && data.Err == nil {
+		q.acquired <- c.PgConn().PID()
+		select {
+		case <-q.release:
+		case <-ctx.Done():
+		}
+	}
+}
+func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "quota-concurrent", now)
+	var sibling Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"second","harness":"codex","daemon_id":"daemon-b","label":"Second"}`, 201, &sibling)
+	fact := quotaFact(t, f, 98, now, now.Add(time.Hour))
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision) VALUES($1,$2,$3,0)`, f.admin.TenantID, sibling.ID, fact.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	trace := &quotaFenceTrace{acquired: make(chan uint32, 1), started: make(chan uint32, 2), release: make(chan struct{})}
+	config := appPool.Config()
+	config.ConnConfig.Tracer = trace
+	config.MaxConns = 2
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	defer func() {
+		select {
+		case <-trace.release:
+		default:
+			close(trace.release)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	mod := fixedClockModule{Module: New(pool), at: now}
+	firstBody := encoded(t, probeWrite{DaemonID: f.account.DaemonID, DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}})
+	secondBody := encoded(t, probeWrite{DaemonID: sibling.DaemonID, DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}})
+	results := make(chan int, 2)
+	go func() {
+		code, _ := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", firstBody)
+		results <- code
+	}()
+	var firstPID uint32
+	select {
+	case firstPID = <-trace.acquired:
+	case <-ctx.Done():
+		t.Fatal("first report did not acquire tenant fence")
+	}
+	<-trace.started
+	go func() {
+		code, _ := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+sibling.ID+"/probe", secondBody)
+		results <- code
+	}()
+	var secondPID uint32
+	select {
+	case secondPID = <-trace.started:
+	case <-ctx.Done():
+		t.Fatal("second report did not reach tenant fence")
+	}
+	for {
+		var blocked bool
+		if err := adminPool.QueryRow(ctx, `SELECT $1::int=ANY(pg_blocking_pids($2::int))`, firstPID, secondPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		runtime.Gosched()
+	}
+	close(trace.release)
+	for range 2 {
+		select {
+		case code := <-results:
+			if code != 200 {
+				t.Fatalf("concurrent report status %d", code)
+			}
+		case <-ctx.Done():
+			t.Fatal("reports did not finish")
+		}
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE NOT suppressed`); n != 1 {
+		t.Fatalf("overlapping reports duplicated urgent warning: %d", n)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE suppressed`); n != 1 {
+		t.Fatalf("overlapping reports duplicated suppressed early receipt: %d", n)
+	}
 }
