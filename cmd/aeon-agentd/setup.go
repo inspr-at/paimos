@@ -547,11 +547,15 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		return err
 	}
 	if p.TouchIDConfirmation != "" {
-		if _, err := fmt.Fprintln(out, "Touch ID confirmation: "+p.TouchIDConfirmation); err != nil {
+		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation
+		if p.TouchIDUpgradeCommand != "" {
+			confirmation += ": " + p.TouchIDUpgradeCommand
+		}
+		if _, err := fmt.Fprintln(out, confirmation); err != nil {
 			return err
 		}
 		if p.TouchIDUpgradeCommand != "" {
-			if _, err := fmt.Fprintln(out, "Pairing upgrade (new, empty state folder; approve in Aeon): "+p.TouchIDUpgradeCommand+"\nKeep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
+			if _, err := fmt.Fprintln(out, "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
 				return err
 			}
 		}

@@ -249,7 +249,9 @@ func (e *Engine) progress(s *snapshot) Progress {
 		p.TouchIDConfirmation = "needs pairing upgrade"
 		if s.Request.Platform != "darwin" {
 			p.TouchIDConfirmation = "unsupported on this platform"
-		} else if s.LocalAuthKeyID != "" && attachwatch.LocalAuthPublicKey(s.Request.LocalAuthPublicKey) != nil {
+		} else if s.View.LocalAuthPinned == nil {
+			p.TouchIDConfirmation = "unknown (server pin not reported)"
+		} else if *s.View.LocalAuthPinned && s.LocalAuthKeyID != "" && attachwatch.LocalAuthPublicKey(s.Request.LocalAuthPublicKey) != nil {
 			p.TouchIDConfirmation = "ready (pairing key pinned)"
 		} else if e.Store != nil {
 			p.TouchIDUpgradeCommand = "aeon-agentd pair --url " + touchIDQuote(s.Origin) + " --state-root " + touchIDQuote(e.Store.Path()+"-touch-id") + " --workspace " + touchIDQuote(s.Request.Workspace)
