@@ -122,7 +122,12 @@ func (rt *runtime) printJSON(v any) error {
 }
 
 func (rt *runtime) fail(err error, secret string) error {
-	return &exitError{code: 1, msg: redact(err.Error(), secret)}
+	exit := &exitError{code: 1, msg: redact(err.Error(), secret)}
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		exit.apiStatus = status.Status
+	}
+	return exit
 }
 
 func redact(msg, secret string) string {

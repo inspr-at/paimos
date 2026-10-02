@@ -228,6 +228,84 @@ func TestExactAPIScopedSearchSkipsInvisibleAncestor(t *testing.T) {
 	}
 }
 
+func TestExactAPIScopedSearchRejectsOtherFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"forbidden", "api 403:"},
+		{"server", "api 500:"},
+		{"transport", "EOF"},
+		{"cancelled", "context canceled"},
+		{"cycle", "ancestry contains a cycle"},
+		{"depth", "ancestry depth exceeded"},
+		{"search-not-found", "api 404:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			lookups := 0
+			rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/kinds":
+					fmt.Fprint(w, `{"items":[{"id":"project-kind","slug":"project"},{"id":"ticket-kind","slug":"ticket"}]}`)
+				case "/api/nodes":
+					fmt.Fprintf(w, `{"items":[{"id":%q,"key":"PRJ-1","kind_id":"project-kind","fields":{"project_key":"AEON"}}]}`, transcriptProjectID)
+				case "/api/search":
+					if tc.name == "search-not-found" {
+						w.WriteHeader(http.StatusNotFound)
+						fmt.Fprint(w, `{"error":"not found"}`)
+						return
+					}
+					fmt.Fprintf(w, `{"items":[{"node":{"id":"first","key":"AEON-1","kind_id":"ticket-kind","parent_id":%q}},{"node":{"id":"other","key":"OTHER-1","kind_id":"ticket-kind","parent_id":"ancestor"}}]}`, transcriptProjectID)
+				default:
+					if !strings.HasPrefix(r.URL.Path, "/api/nodes/ancestor") {
+						t.Errorf("unexpected path %s", r.URL.Path)
+						http.NotFound(w, r)
+						return
+					}
+					lookups++
+					switch tc.name {
+					case "forbidden", "server":
+						status := http.StatusForbidden
+						if tc.name == "server" {
+							status = http.StatusInternalServerError
+						}
+						w.WriteHeader(status)
+						// The message must not override the actual HTTP status.
+						fmt.Fprint(w, `{"error":"api 404: not found"}`)
+					case "transport":
+						conn, _, err := w.(http.Hijacker).Hijack()
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						_ = conn.Close()
+					case "cancelled":
+						cancel()
+						<-r.Context().Done()
+					case "cycle":
+						fmt.Fprint(w, `{"id":"ancestor","parent_id":"ancestor"}`)
+					case "depth":
+						fmt.Fprintf(w, `{"id":%q,"parent_id":%q}`, strings.TrimPrefix(r.URL.Path, "/api/nodes/"), fmt.Sprintf("ancestor-%d", lookups))
+					}
+				}
+			})
+			rt.requestContext = ctx
+			rt.jsonOut = true
+			err := rt.searchIssues("target", "AEON", "", 2)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q failure, got %v", tc.want, err)
+			}
+			if rt.stdout.(*bytes.Buffer).Len() != 0 {
+				t.Fatal("failed search emitted a partial success")
+			}
+			if tc.name != "search-not-found" && lookups == 0 {
+				t.Fatal("fixture never reached the ancestor lookup")
+			}
+		})
+	}
+}
+
 func TestExactAPIScopedSearchHasMoreRequiresScopedMatch(t *testing.T) {
 	for _, extraMatch := range []bool{false, true} {
 		t.Run(fmt.Sprintf("extra-match-%t", extraMatch), func(t *testing.T) {

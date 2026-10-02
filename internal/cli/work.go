@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -1068,6 +1069,14 @@ func (rt *runtime) searchIssuesResult(query, project, typ string, limit int) (is
 			lookups++
 			var ancestor apiNode
 			if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(id), nil, &ancestor); err != nil {
+				var exit *exitError
+				if errors.As(err, &exit) && exit.apiStatus == http.StatusNotFound {
+					// Hidden ancestors are outside the visible descendant set.
+					for _, id := range path {
+						scope[id] = false
+					}
+					return false, nil
+				}
 				return false, err
 			}
 			n = ancestor
