@@ -2389,7 +2389,7 @@ remain authoritative. Dismissed and expired drafts are already retired. Publishe
 or person-edited proposals remain untouched and appear in `review_required`; the
 rest of the answer can apply, and the existing Doctrine path governs any manual
 correction. This review provenance carries across later answers; a Doctrine
-correction requiring that review creates no new draft until a person handles
+correction requiring that review creates no new draft; a person must handle
 the correction through the existing Doctrine path.
 CLI status reads the current proposal lifecycle, including dismissal and promotion.
 No rule is described as changed merely by proposing.
@@ -2400,8 +2400,7 @@ and quotation checks run when deciding and applying. Expensive inbox preparation
 runs before the tenant mutation fence, then rechecks authority and cache versions
 inside the write. Transient failures retry with current permissions, including
 `stale_source` preparation races and an expired `public_main_unavailable` cache.
-Permanent
-conflicts expose `retryable: false` and require a reviewed new decision; failed
+Permanent conflicts expose `retryable: false` and require a reviewed new decision; failed
 outcome writes never appear applied. Encoded Doctrine inputs exceeding the
 4096-byte persistence bound return 422 and are stored only for Doctrine.
 `source_handover_id` remains unavailable pending its verified ask-source adapter.

@@ -186,7 +186,7 @@ func fix3PublicTarget(t *testing.T, f *deliveryFixture, pool *pgxpool.Pool) (*Do
 	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'AGENTS.md',$4,$5)`, f.person.TenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
 		t.Fatal(err)
 	}
-	tree, _ := json.Marshal([]doctrine.Entry{{Path: "AGENTS.md", Type: "blob", SHA: doctrine.BlobSHA(content), Size: len(content)}})
+	tree, _ := json.Marshal([]doctrine.Entry{{Path: "AGENTS.md", SHA: doctrine.BlobSHA(content), Size: len(content)}})
 	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO doctrine_public_main_cache(tenant_id,source_id,pin_commit,main_commit,observed_at,tree) VALUES($1,$2,$3,$3,clock_timestamp(),$4)`, f.person.TenantID, source, commit, tree); err != nil {
 		t.Fatal(err)
 	}
