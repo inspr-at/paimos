@@ -93,7 +93,7 @@ func TestPooledSiblingLocalRecoveryThroughClaim(t *testing.T) {
 				if err := tx.QueryRow(t.Context(), `SELECT account_id::text FROM agent_runs WHERE id=$1`, run.ID).Scan(&account); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint,quota_pool_fingerprint) VALUES($1,$2,$2::text,'codex','sibling-daemon',$3,'Sibling',repeat('ab',32),repeat('ab',32))`, f.agent.TenantID, sibling, f.agent.ID); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,quota_fingerprint,quota_pool_fingerprint) VALUES($1,$2::uuid,$2::text,'codex','sibling-daemon',$3,'Sibling',repeat('ab',32),repeat('ab',32))`, f.agent.TenantID, sibling, f.agent.ID); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32),quota_pool_fingerprint=repeat('ab',32) WHERE id=$1`, account); err != nil {
