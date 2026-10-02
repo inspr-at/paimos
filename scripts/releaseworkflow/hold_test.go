@@ -95,8 +95,13 @@ func TestPortableRolloutHoldGuard(t *testing.T) {
 		ok             bool
 	}{
 		{"clear", `{"total_count":0,"variables":[]}`, 0, true},
+		{"empty", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD","value":""}]}`, 0, true},
 		{"held", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD","value":"` + strings.Repeat("a", 40) + `"}]}`, 0, false},
 		{"malformed", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD","value":"bad"}]}`, 0, false},
+		{"null-value", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD","value":null}]}`, 0, false},
+		{"missing-value", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD"}]}`, 0, false},
+		{"null-record", `{"total_count":1,"variables":[null]}`, 0, false},
+		{"numeric-value", `{"total_count":1,"variables":[{"name":"RELEASE_HOLD","value":0}]}`, 0, false},
 		{"partial", `{"total_count":1,"variables":[]}`, 0, false},
 		{"unavailable", `private upstream response`, 22, false},
 	} {

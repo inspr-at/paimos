@@ -23,11 +23,14 @@ fi
 if ! aeon_hold_value="$(printf '%s' "$aeon_hold_response" | jq -er '
   if (.total_count | type) != "number" or .total_count < 0 or .total_count > 30 or
      (.variables | type) != "array" or (.variables | length) != .total_count then error("incomplete") else
+    if all(.variables[]; type == "object" and (.name | type) == "string" and
+      (.name | length) > 0 and (.value | type) == "string") | not then error("malformed") else
     [.variables[] | select(.name == "RELEASE_HOLD")] as $holds |
     if ($holds | length) > 1 then error("ambiguous") else
-      ($holds[0].value // "") as $value |
+      (if ($holds | length) == 0 then "" else $holds[0].value end) as $value |
       if ($value | type) != "string" or ($value != "" and ($value | test("^[a-f0-9]{40}$") | not))
       then error("malformed") else "hold=" + $value end
+    end
     end
   end' 2>/dev/null)"; then
   echo 'Release hold check refused: incomplete or malformed observation' >&2

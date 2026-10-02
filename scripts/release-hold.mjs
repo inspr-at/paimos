@@ -51,9 +51,11 @@ export async function readHold(api) {
   const result = await get(api, 'actions/variables?per_page=30&page=1');
   requireValue(Number.isSafeInteger(result?.total_count) && result.total_count >= 0 && result.total_count <= 30 &&
     Array.isArray(result.variables) && result.variables.length === result.total_count, 'incomplete variable list');
+  requireValue(result.variables.every(item => item && !Array.isArray(item) &&
+    typeof item.name === 'string' && item.name.length > 0 && typeof item.value === 'string'), 'malformed variable record');
   const matches = result.variables.filter(item => item.name === 'RELEASE_HOLD');
   requireValue(matches.length <= 1, 'ambiguous variable');
-  const value = matches[0]?.value ?? '';
+  const value = matches.length === 0 ? '' : matches[0].value;
   requireValue(value === '' || oid(value), 'malformed hold');
   return { value, exists: matches.length === 1 };
 }

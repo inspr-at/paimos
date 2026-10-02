@@ -170,6 +170,16 @@ test('tag/rollout live guard rejects held, malformed, unavailable and incomplete
   await assert.rejects(readHold(async () => ({ status: 404, data: null })));
 });
 
+test('a malformed variable record never proves that the hold is clear', async () => {
+  for (const item of [null, {}, { name: 'RELEASE_HOLD' }, { name: 'RELEASE_HOLD', value: null },
+    { name: 'RELEASE_HOLD', value: false }, { name: 'RELEASE_HOLD', value: 0 }]) {
+    const api = async () => ({ status: 200, data: { total_count: 1, variables: [item] } });
+    await assert.rejects(assertReleaseAllowed(api), /malformed variable record/);
+  }
+  await assertReleaseAllowed(async () => ({ status: 200,
+    data: { total_count: 1, variables: [{ name: 'RELEASE_HOLD', value: '' }] } }));
+});
+
 test('bounded transport refuses redirects, oversized responses and redacts upstream errors', async () => {
   let observed;
   const api = github('fixture-only', { fetcher: async (_url, options) => { observed = options;
