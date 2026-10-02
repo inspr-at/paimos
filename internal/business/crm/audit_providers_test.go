@@ -154,6 +154,9 @@ func TestAEON587ExternalIdentityUniqueConflictIsSpecific(t *testing.T) {
 		if w.Code != want {
 			t.Fatalf("constraint %s returned %d", name, w.Code)
 		}
+		if want == 409 && !strings.Contains(w.Body.String(), "external_identity_conflict") {
+			t.Fatal("duplicate provider identity reported an unrelated conflict")
+		}
 	}
 }
 

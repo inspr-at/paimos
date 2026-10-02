@@ -514,7 +514,7 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 	remote, e := m.providers[id].Fetch(fetchCtx, ref, in.ExternalID)
 	fetchCancel()
 	if e != nil {
-		writeErr(w, errConflict)
+		writeBody(w, http.StatusConflict, "provider_unavailable", "customer provider is unavailable")
 		return
 	}
 	remote.Provider = id
@@ -544,7 +544,7 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		if exists {
-			return errConflict
+			return providerIdentityConflict()
 		}
 		fields, _ := json.Marshal(write.CustomerFields)
 		var nodeID string
@@ -635,7 +635,7 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 			writeBody(w, http.StatusServiceUnavailable, "sync_failure_unrecorded", "provider unavailable; failure status could not be recorded")
 			return
 		}
-		writeErr(w, errConflict)
+		writeBody(w, http.StatusConflict, "provider_unavailable", "customer provider is unavailable; failure status recorded")
 		return
 	}
 

@@ -7692,7 +7692,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [external_id], properties: {external_id: {type: string}}}}}}
       responses:
         '201': {description: Imported customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
-        '409': {description: External identity already imported; unrelated database errors are not masked.}
+        '409': {description: External identity already imported (external_identity_conflict) or provider unavailable (provider_unavailable); unrelated database errors are not masked.}
   /crm/organisations/{organisationId}/sync:
     post:
       operationId: syncCRMProviderCustomer
@@ -7700,7 +7700,7 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
-        '409': {description: Provider unavailable; failure status and audit event were persisted.}
+        '409': {description: Provider unavailable (provider_unavailable); failure status and audit event were persisted.}
         '503': {description: Provider unavailable and the authorized failure status could not be persisted.}
   /crm/organisations/{organisationId}/sync-status:
     get:

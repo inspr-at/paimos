@@ -322,7 +322,11 @@ func writeBody(w http.ResponseWriter, status int, code, message string) {
 func providerImportError(err error) error {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "crm_external_identity_unique" {
-		return errConflict
+		return providerIdentityConflict()
 	}
 	return err
+}
+
+func providerIdentityConflict() error {
+	return &httpError{status: http.StatusConflict, code: "external_identity_conflict", message: "customer already imported from this provider"}
 }
