@@ -217,7 +217,7 @@ func scanRecurrence(row pgx.Row) (Recurrence, error) {
 	return r, err
 }
 func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Recurrence, error) {
-	query := `SELECT ` + recurrenceColumns + ` FROM recurrences WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=recurrences.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=recurrences.id::text)`
+	query := `SELECT ` + recurrenceColumns + ` FROM recurrences WHERE id=$1 AND retired_at IS NULL`
 	if lock {
 		query += ` FOR UPDATE`
 	}

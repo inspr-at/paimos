@@ -40,9 +40,9 @@
     },
     {
       "file": "1122_recurrence_event_visibility.sql",
-      "sha256": "3b922f079bee4e27dce52a3f6cbf545fc02273c88b8cfd87dc99793a755815a4",
+      "sha256": "bcb1f9237f97973511b4f0c70da9fb48f1814b8e75c8de29ad9f816f5414a3a9",
       "ticket": "AEON-573",
-      "reason": "Expand-only recurrence event visibility for readers of the project node. Tenant isolation, referenced-node checks, own-event access and workspace-only domains remain intact. ALTER POLICY is conservatively outside the classifier allowlist. This exact-byte exception is exposed in draft PR #188 for coordinator review; project-scoped regressions cover history, retirement and hidden project/reference/workspace events. Previous-binary migration compatibility is measured in CI; this entry grants no merge or release authority."
+      "reason": "Additive recurrence retirement state, tenant-scoped tombstone backfill, and project event visibility. Complete snapshots stay unchanged; only validated workspace tags at template.tags are omitted from definition reference walks, with other references and event domains preserved. ALTER POLICY, trigger replacement and the one-time reference backfill follow the existing 0823 migration pattern and are conservatively outside the classifier allowlist. This owned, unpublished migration and exact-byte exception are exposed in draft PR #188 for coordinator review; regressions cover hidden deletion events, workspace-tag history, and project/reference/workspace boundaries. Previous-binary compatibility is measured in CI; no merge or release authority is granted."
     }
   ]
 }

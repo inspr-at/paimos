@@ -77,7 +77,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 	ctx = db.AllProjects(ctx, "recurrence scheduler")
 	var active bool
 	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrences r WHERE NOT paused AND NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=r.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=r.id::text))`).Scan(&active)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrences WHERE NOT paused AND retired_at IS NULL)`).Scan(&active)
 	}); err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			// The tenant/tree claim comes before node rows and recurrence rows. This
 			// single-row unit never takes a later resource lock after events.Append.
 			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND NOT (id=ANY($2::uuid[])) AND NOT (id=ANY($3::uuid[])) AND
-    NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=r.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=r.id::text) AND
+    retired_at IS NULL AND
     ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now, failedIDs, deferredIDs))
 			claimed = r
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -248,7 +248,7 @@ func (m *Module) syncPublications(ctx context.Context, actor tenant.Principal) e
 		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (r.project_node_id) r.project_node_id::text,r.release_node_id::text,n.title,coalesce(r.version,''),r.released_at
    FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL
    WHERE r.state IN ('released','superseded') AND r.released_at IS NOT NULL AND r.released_at<=$1
-   AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=r.project_node_id AND NOT c.paused AND c.trigger->>'kind'='event')
+   AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=r.project_node_id AND NOT c.paused AND c.retired_at IS NULL AND c.trigger->>'kind'='event')
    ORDER BY r.project_node_id,r.released_at DESC,r.release_node_id DESC`, now)
 		if err != nil {
 			return err
@@ -273,7 +273,7 @@ func (m *Module) syncPublications(ctx context.Context, actor tenant.Principal) e
 			}
 			var project string
 			err = tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.fields->>'project_key'=$1 AND k.slug='project' AND n.deleted_at IS NULL
- AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=n.id AND NOT c.paused AND c.trigger->>'kind'='event')`, p.ProjectKey).Scan(&project)
+ AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=n.id AND NOT c.paused AND c.retired_at IS NULL AND c.trigger->>'kind'='event')`, p.ProjectKey).Scan(&project)
 			if errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}

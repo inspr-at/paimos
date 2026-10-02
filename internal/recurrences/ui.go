@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Human-readable names live in the existing template JSON. Retirement is an
-// append-only event plus pause, retaining receipts and ticket provenance without
-// changing the physical schema or deleting audit data.
+// Retirement is row state plus an append-only audit event. Keeping the row
+// retains receipts and ticket provenance; event visibility never decides whether
+// the definition can be read, resumed or scheduled.
 func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -43,7 +43,11 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		if in.Revision < 1 || in.Revision != before.Revision {
 			return workorders.Fail(409, "recurrence revision changed")
 		}
-		out, err := scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET paused=true,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING `+recurrenceColumns, before.ID))
+		now, err := m.clock(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		out, err := scanRecurrence(tx.QueryRow(r.Context(), `UPDATE recurrences SET paused=true,retired_at=$2,revision=revision+1,updated_at=$2 WHERE id=$1 RETURNING `+recurrenceColumns, before.ID, now))
 		if err != nil {
 			return err
 		}

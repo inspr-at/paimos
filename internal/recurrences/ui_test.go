@@ -137,10 +137,58 @@ func TestUIRetiredSchedulerClaimIgnoresReactivatedRow(t *testing.T) {
 	}
 }
 
+func TestUIRetirementDoesNotDependOnEventVisibility(t *testing.T) {
+	f := setup(t)
+	in := f.input()
+	in.Template.Tags = []string{f.node("tag", nil, "Workspace health")}
+	// This UUID is a real hidden reference outside template.tags. Its audit
+	// event must stay hidden even though workspace tags alone are exempted.
+	in.Template.Description = f.node("project", nil, "Invisible project")
+	r := f.create(in)
+	reader := projectPrincipal(f, "viewer")
+	manager := projectPrincipal(f, "member")
+	f.call(f.p, "DELETE", "/api/recurrences/"+r.ID, map[string]int{"expected_revision": 1}, 204)
+	ctx := tenant.WithPrincipal(t.Context(), reader)
+	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
+		var deletedEvents int
+		var retiredAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='recurrence.deleted' AND after->>'id'=$1`, r.ID).Scan(&deletedEvents); err != nil {
+			return err
+		}
+		if deletedEvents != 0 {
+			t.Fatal("fixture must keep the deletion event hidden")
+		}
+		if err := tx.QueryRow(ctx, `SELECT retired_at FROM recurrences WHERE id=$1`, r.ID).Scan(&retiredAt); err != nil {
+			return err
+		}
+		if !retiredAt.Equal(f.now) {
+			t.Errorf("retirement timestamp %s, want injected clock %s", retiredAt, f.now)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Items []Recurrence `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(reader, "GET", "/api/recurrences?project_id="+f.project, nil, 200), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 0 {
+		t.Errorf("hidden deletion event exposed %d retired definitions", len(page.Items))
+	}
+	f.call(reader, "GET", "/api/recurrences/"+r.ID, nil, 404)
+	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]int{"expected_revision": 2}, 404)
+	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "hidden-retirement"}, 404)
+}
+
 func TestUIProjectRecurrenceEventsPreserveVisibilityBoundaries(t *testing.T) {
 	f := setup(t)
 	reader := projectPrincipal(f, "viewer")
 	other := f.node("project", nil, "Invisible project")
+	workspaceTag := f.node("tag", nil, "Workspace tag")
+	otherTag := f.node("tag", &other, "Other project tag")
+	tagged := map[string]any{"template": map[string]any{"tags": []string{workspaceTag}}}
 	ids := []int64{}
 	for _, change := range []events.Change{
 		{NodeID: &f.project, Type: "recurrence.updated", After: map[string]string{"name": "Visible"}},
@@ -148,6 +196,11 @@ func TestUIProjectRecurrenceEventsPreserveVisibilityBoundaries(t *testing.T) {
 		{NodeID: &f.project, Type: "recurrence.updated", After: map[string]string{"node_id": other}},
 		{NodeID: &f.project, Type: "run.started", After: map[string]string{"name": "Workspace telemetry"}},
 		{Type: "recurrence.updated", After: map[string]string{"name": "Workspace event"}},
+		{NodeID: &f.project, Type: "recurrence.updated", Before: tagged, After: tagged},
+		{NodeID: &f.project, Type: "recurrence.updated", Before: map[string]any{"template": map[string]any{"tags": []string{otherTag}}}, After: tagged},
+		{NodeID: &f.project, Type: "recurrence.updated", Before: tagged, After: map[string]any{"template": map[string]any{"tags": []string{workspaceTag}}, "node_id": other}},
+		{NodeID: &f.project, Type: "recurrence.updated", After: map[string]any{"template": map[string]any{"tags": []string{workspaceTag}, "description": workspaceTag}}},
+		{NodeID: &f.project, Type: "node.updated", After: tagged},
 	} {
 		f.tx(func(tx pgx.Tx) error {
 			event, err := events.Append(t.Context(), tx, f.p, change)
@@ -172,8 +225,8 @@ func TestUIProjectRecurrenceEventsPreserveVisibilityBoundaries(t *testing.T) {
 			}
 			seen = append(seen, id)
 		}
-		if len(seen) != 1 || seen[0] != ids[0] {
-			t.Errorf("project recurrence visibility %v, want only %d", seen, ids[0])
+		if len(seen) != 2 || seen[0] != ids[0] || seen[1] != ids[5] {
+			t.Errorf("project recurrence visibility %v, want only %d and %d", seen, ids[0], ids[5])
 		}
 		return rows.Err()
 	}); err != nil {

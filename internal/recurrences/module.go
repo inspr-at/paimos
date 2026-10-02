@@ -249,7 +249,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		workspace := check(permission, "")
-		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) AND NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=recurrences.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=recurrences.id::text) ORDER BY id LIMIT 101`, project, after, workspace, allowed)
+		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) AND retired_at IS NULL ORDER BY id LIMIT 101`, project, after, workspace, allowed)
 		if err != nil {
 			return err
 		}
