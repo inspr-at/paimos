@@ -37,6 +37,8 @@ func attachRefusal(err error) error {
 			code = "enrollment_unavailable"
 		case status.Status == http.StatusGone && status.AttachRefusal == attachwatch.RefusalExpired:
 			code = "code_expired"
+		case status.Status == http.StatusForbidden && (status.ReasonCode == "missing_key_scope" || status.ReasonCode == "missing_role_permission" || status.ReasonCode == "missing_project_access"):
+			code = "pairing_unavailable"
 		default:
 			code = legacyAttachRefusal(status)
 		}
@@ -50,7 +52,7 @@ func attachRefusal(err error) error {
 		"draining":               "This computer or harness enrollment is disconnecting. Let owned work finish, then reconnect the computer or add the harness again in Aeon and run attach again. A running process does not bypass disconnect.",
 		"enrollment_unavailable": "This harness has no connected enrollment on the paired computer. Check its enrollments in Aeon, add the harness again with aeon-agentd add-harness if needed, then run attach again.",
 		"registration_lost":      "Aeon no longer accepts this daemon's attach registration, for example after a server restart. When owned work permits, restart agentd, then run attach again and give fresh approval; re-pairing is not required.",
-		"pairing_unavailable":    "The paired computer or its owner authorization is unavailable. Check the computer, its enrollments and the owner's account permissions in Aeon, then restart agentd and run attach again.",
+		"pairing_unavailable":    "The paired computer or its authorization is unavailable. Check the computer, its enrollments, runtime key scope and owner's account permissions in Aeon, then restart agentd and run attach again.",
 		"scope_changed":          "The project, ticket or harness enrollment changed. Check the ticket's project, the owner's access and this computer's connected harness enrollments in Aeon, then run attach again.",
 		"computer_limit":         "This computer already has 8 pending, approved or active attaches. Stop an attached helper, decline a pending request in Aeon or let it expire, then run attach again.",
 		"attempt_limit":          "Too many attach attempts reached Aeon. Wait 10 minutes before running attach again.",
@@ -76,7 +78,7 @@ func legacyAttachRefusal(status *client.StatusError) string {
 		switch status.Message {
 		case "daemon poll key rejected", "fresh daemon poll key required":
 			return "registration_lost"
-		case "paired daemon required", "computer proof rejected", "owner delegation no longer valid", "agent key scope required", "outside this computer's runtime authority":
+		case "paired daemon required", "computer proof rejected", "owner delegation no longer valid", "agent key scope required", "outside this computer's runtime authority", "permission denied", "forbidden":
 			return "pairing_unavailable"
 		case "attach proof rejected", "attach approval binding changed":
 			return "snapshot_changed"

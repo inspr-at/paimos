@@ -40,7 +40,7 @@ func TestAttachRefusalInventory(t *testing.T) {
 		{429, "", "poll_limit", "Update paimos-agentd", []string{"poll at most once per second"}},
 		{429, "", "rate_limit", "Wait before retrying", []string{"unrecognized"}},
 		{403, "", "registration_lost", "restart agentd", []string{"daemon poll key rejected", "fresh daemon poll key required"}},
-		{403, "", "pairing_unavailable", "Check the computer", []string{"paired daemon required", "computer proof rejected", "owner delegation no longer valid", "agent key scope required", "outside this computer's runtime authority"}},
+		{403, "", "pairing_unavailable", "Check the computer", []string{"paired daemon required", "computer proof rejected", "owner delegation no longer valid", "agent key scope required", "outside this computer's runtime authority", "permission denied", "forbidden"}},
 		{403, "", "snapshot_changed", "Check the running process", []string{"attach proof rejected", "attach approval binding changed"}},
 		{403, "", "consent_required", "complete fresh browser approval", []string{"boolean local confirmation is refused; upgrade agentd and re-pair", "local confirmation challenge already consumed or unavailable", "signed local confirmation required", "signed local confirmation rejected"}},
 		{409, "", "version_mismatch", "Update Aeon", []string{"update agentd to attach protocol 2", "upgrade paimos-agentd to local consent proof v2", "update agentd to attach protocol 2; fresh approval required", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required"}},
@@ -87,6 +87,12 @@ func TestAttachRefusalInventory(t *testing.T) {
 		got := attachRefusal(err)
 		if !strings.HasPrefix(got.Error(), "attach_offline:") || strings.Contains(got.Error(), "private") {
 			t.Fatal("transport error leaked or lost its action", got)
+		}
+	}
+	for _, reason := range []string{"missing_key_scope", "missing_role_permission", "missing_project_access"} {
+		got := attachRefusal(&client.StatusError{Status: 403, ReasonCode: reason, Message: "private dynamic permission/scope description\x1b"})
+		if !strings.HasPrefix(got.Error(), "attach_pairing_unavailable:") || !strings.Contains(got.Error(), "runtime key scope") || strings.Contains(got.Error(), "private") {
+			t.Fatal("middleware refusal lost repair guidance or leaked text", got)
 		}
 	}
 	if got := attachRefusal(fmt.Errorf("wrapped: %w", ErrDraining)); !strings.HasPrefix(got.Error(), "attach_draining:") {
