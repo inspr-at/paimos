@@ -2527,6 +2527,44 @@ same-project/principal continuation receives the latest answer; an absent
 successor stays visibly `successor_pending`. Continuation briefs carry references
 whose private text is resolved through authorized `ask status`, preventing
 harness metadata readers from gaining question content. No old process is woken.
-Always/Requirement/Doctrine effects remain P4-owned and `source_handover_id`
-remains unavailable pending its separate verified ask-source adapter. P3 never
-publishes active Always records. Suggestions for all four outcomes are stored.
+Outcome effects (AEON-565) apply after the finalized grace revision. Once keeps
+an immutable Decided record. Always publishes a protected Knowledge entry of type
+`decision`, using the existing knowledge list/filter/resolve/graph surfaces and
+CLI taxonomy. A correction immediately withdraws and archives the earlier Always
+answer, independently of grace or failure of its replacement; lineage remains.
+Withdrawing an active Decision requires `knowledge.write` on its project,
+including when correcting to Once.
+Requirement appends one criterion with its exact answer marker, preserves the
+other ticket fields, and compares the captured ticket revision before writing.
+Concurrent edits leave a visible `ticket_revision_conflict`; decide again after
+reviewing the ticket. Requirement is unavailable for list or structured criteria.
+Corrections replace only the exact tracked criterion; edited or removed criteria
+remain untouched and appear in `effect_data.review_required` on the new effect.
+Missing, moved or otherwise non-editable prior tickets also require review;
+their criteria stay untouched while the rest of the correction applies.
+Carried reviews retain each distinct kind and reference. Refreshing a review's
+reason on a later correction preserves the reason on superseded effect revisions.
+Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
+tldr_de?}` on the question or person decision. It creates only a pending AEON-444
+inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
+remain authoritative. Dismissed and expired drafts are already retired. Published
+or person-edited proposals remain untouched and appear in `review_required`; the
+rest of the answer can apply, and the existing Doctrine path governs any manual
+correction. This review provenance carries across later answers; a Doctrine
+correction requiring that review creates no new draft; a person must handle
+the correction through the existing Doctrine path.
+CLI status reads the current proposal lifecycle, including dismissal and promotion.
+No rule is described as changed merely by proposing.
+Status exposes `outcomes` with availability and a why for disabled stamps, plus
+per-revision `effect_data` and safe failure explanations. Availability reads load
+permissions once and report a cheap Doctrine `mapping_present` hint; exact mapping
+and quotation checks run when deciding and applying. Expensive inbox preparation
+runs before the tenant mutation fence, then rechecks authority and cache versions
+inside the write. Transient failures retry with current permissions, including
+`stale_source` preparation races and an expired `public_main_unavailable` cache.
+Each transient failure schedules its next attempt 30 seconds later. A stale
+public-main cache keeps retrying until it is refreshed or the answer is replaced.
+Permanent conflicts expose `retryable: false` and require a reviewed new decision; failed
+outcome writes never appear applied. Encoded Doctrine inputs exceeding the
+4096-byte persistence bound return 422 and are stored only for Doctrine.
+`source_handover_id` remains unavailable pending its verified ask-source adapter.

@@ -58,7 +58,7 @@ const activeHeading = ref('')
 const moreAnchor = ref<HTMLElement | null>(null)
 const moreButton = ref<HTMLButtonElement>()
 const editing = ref(false)
-const writable = computed(() => props.canWrite && !readOnly.value)
+const writable = computed(() => props.canWrite && !readOnly.value && entry.value?.type !== 'decision')
 const meta = computed(() => typeMeta(entry.value?.type ?? props.type))
 let generation = 0
 
@@ -684,6 +684,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <AppIcon name="sparkle" :size="14" /><span class="note-text">Proposed{{ entry.author ? ` by ${entry.author.name}` : '' }}: a draft waiting for a person to confirm it.</span>
           <span v-if="writable" class="note-actions"><button type="button" class="inline-link" @click="startEdit('body')">Edit first</button><button type="button" class="btn sm" @click="confirmProposed"><AppIcon name="check" :size="13" />Confirm</button></span>
         </p>
+        <p v-if="entry.type === 'decision'" class="e-note" role="note"><AppIcon name="guideline" :size="14" /><span class="note-text">Always answer · {{ entry.metadata.decision_state === 'superseded' ? 'Superseded; kept for its history.' : 'Active; approved for reuse.' }} Correct this answer through the Decision Desk.<template v-if="entry.metadata.superseded_by"> Replacement: <code>{{ entry.metadata.superseded_by }}</code>.</template></span></p>
         <aside v-if="rule" class="e-rule" aria-label="The rule"><span class="rule-label">The rule</span><p>{{ rule }}</p></aside>
         <aside v-if="headline" class="e-rule e-where" :aria-label="entry.type === 'external-system' ? 'Where it lives' : 'The project'">
           <span class="rule-label">{{ entry.type === 'external-system' ? 'Where it lives' : 'The project' }}</span>
@@ -775,10 +776,10 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('link')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('slug')"><AppIcon name="copy" :size="14" />Copy slug</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('command')"><AppIcon name="terminal" :size="14" />Copy the agent command</button>
-        <template v-if="writable || canDelete">
+        <template v-if="writable || (canDelete && entry?.type !== 'decision')">
           <div class="menu-sep" role="separator" />
           <button v-if="writable" type="button" role="menuitem" class="menu-item" @click="pick('archive')"><AppIcon name="archive" :size="14" />{{ entry.status === 'archived' ? 'Make active again' : 'Archive' }}</button>
-          <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ meta.label.toLowerCase() }}…</button>
+          <button v-if="canDelete && entry?.type !== 'decision'" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ meta.label.toLowerCase() }}…</button>
         </template>
       </div>
     </FloatingPanel>

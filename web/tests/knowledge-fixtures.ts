@@ -9,7 +9,7 @@ import { me } from './work-fixtures'
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
 const now = Date.parse('2026-09-23T12:00:00Z')
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
-type Type = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project'
+type Type = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project' | 'decision'
 type Status = 'active' | 'proposed' | 'archived'
 const PROJECTS: Record<string, { id: string; key: string; title: string; prefix: string }> = {
   'p-pharos': { id: 'p-pharos', key: 'PRJ-17', title: 'Pharos', prefix: 'PHAROS' },

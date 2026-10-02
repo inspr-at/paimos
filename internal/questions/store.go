@@ -11,6 +11,8 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -134,7 +136,7 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 				return fail(409, "replay_conflict", "request_id already identifies different input")
 			}
 			replay = true
-			q, err = read(ctx, tx, p, id)
+			q, err = m.read(ctx, tx, p, id)
 			return err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -196,17 +198,24 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		if err := event(ctx, tx, p, id, "question.asked", 1); err != nil {
 			return err
 		}
-		q, err = read(ctx, tx, p, id)
+		q, err = m.read(ctx, tx, p, id)
 		return err
 	})
 	return q, replay, err
 }
 func (m *Module) get(ctx context.Context, p tenant.Principal, id string) (Question, error) {
 	var q Question
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; q, err = read(ctx, tx, p, id); return err })
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; q, err = m.read(ctx, tx, p, id); return err })
 	return q, err
 }
-func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Question, error) {
+func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Question, error) {
+	check, err := authz.ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return Question{}, err
+	}
+	return m.readWithCheck(ctx, tx, p, id, check)
+}
+func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, check authz.ProjectCheck) (Question, error) {
 	q := Question{Askers: []Asker{}, Pending: []Pending{}}
 	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,q.input,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
@@ -215,8 +224,8 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 	if err != nil {
 		return q, err
 	}
-	if err := permit(ctx, tx, p, q.ProjectID, "questions.read"); err != nil {
-		return q, err
+	if !check("questions.read", q.ProjectID) {
+		return q, missing()
 	}
 	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,input FROM desk_askers
  WHERE tenant_id=$1 AND question_id=$2 AND ($3 OR principal_id=$4) ORDER BY created_at,id`, p.TenantID, id, p.Kind == tenant.Person, p.ID)
@@ -250,21 +259,26 @@ func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Questi
 		}
 		q.Answer = a
 	}
-	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
- WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
+	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,e.error_message,e.effect_data,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,''),coalesce(proposal.data->>'state','') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
+ LEFT JOIN doctrine_proposals proposal ON proposal.tenant_id=e.tenant_id AND proposal.id=nullif(e.effect_data->>'doctrine_id','')::uuid
+ WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.kind='outcome' OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
 	}
 	for rows.Next() {
 		var e Pending
-		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID); err != nil {
+		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ErrorMessage, &e.EffectData, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID, &e.DoctrineState); err != nil {
 			rows.Close()
 			return q, err
 		}
 		q.Pending = append(q.Pending, e)
 	}
 	rows.Close()
-	return q, rows.Err()
+	if err := rows.Err(); err != nil {
+		return q, err
+	}
+	q.Outcomes, err = m.availability(ctx, tx, p, q, q.Input.Doctrine, check)
+	return q, err
 }
 func (m *Module) list(ctx context.Context, p tenant.Principal, project, state string, limit, offset int) (Page, error) {
 	out := Page{Items: []Question{}}
@@ -325,7 +339,7 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 			ids = ids[:limit]
 		}
 		for _, id := range ids {
-			q, err := read(ctx, tx, p, id)
+			q, err := m.readWithCheck(ctx, tx, p, id, check)
 			if err != nil {
 				return err
 			}
@@ -367,8 +381,11 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if err := permit(ctx, tx, p, project, "questions.decide"); err != nil {
 			return err
 		}
-		var err error
-		q, err = read(ctx, tx, p, id)
+		check, err := authz.ProjectsTx(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		q, err = m.readWithCheck(ctx, tx, p, id, check)
 		if err != nil {
 			return err
 		}
@@ -386,9 +403,6 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if q.Revision != in.ExpectedRevision {
 			return fail(409, "revision_conflict", "question revision changed")
 		}
-		if in.Outcome != "once" {
-			return fail(422, "outcome_unavailable", "this outcome requires its Decision Desk materialization adapter")
-		}
 		answer := in.Answer
 		if in.OptionID != "" {
 			found := false
@@ -402,6 +416,49 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 			}
 			if !found {
 				return fail(400, "invalid_request", "option_id must name a question option")
+			}
+		}
+		target := in.Doctrine
+		if target == nil {
+			target = q.Input.Doctrine
+		}
+		available, err := m.availability(ctx, tx, p, q, target, check)
+		if err != nil {
+			return err
+		}
+		for _, stamp := range available {
+			if stamp.Outcome == in.Outcome && !stamp.Available {
+				return fail(422, "outcome_unavailable", stamp.Why)
+			}
+		}
+		data := outcomeInput{}
+		if in.Outcome == "doctrine" {
+			data.Doctrine = target
+		}
+		if in.Outcome == "requirement" {
+			data.TicketID = q.Input.TicketID
+			if err := tx.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, p.TenantID, data.TicketID).Scan(&data.TicketRevision); err != nil {
+				return err
+			}
+			if in.TicketRevision != nil && !in.TicketRevision.Equal(data.TicketRevision) {
+				return fail(409, "ticket_revision_conflict", "The ticket changed; review its criteria before deciding.")
+			}
+		}
+		rawData, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		var encodedSize int
+		if err := tx.QueryRow(ctx, `SELECT octet_length($1::jsonb::text)`, rawData).Scan(&encodedSize); err != nil {
+			return err
+		}
+		if encodedSize > 4096 {
+			return fail(422, "outcome_data_too_large", "The encoded outcome mapping exceeds 4096 bytes; shorten the path or TL;DR.")
+		}
+		if in.Outcome == "doctrine" {
+			if err := m.doctrine.CheckDeskTargetTx(ctx, tx, p, doctrineInput(target)); err != nil {
+				_, why := doctrine.DeskFailure(err)
+				return fail(422, "outcome_unavailable", why)
 			}
 		}
 		var replaces string
@@ -420,12 +477,16 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after,replaces)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome, now.Add(10*time.Second), nullable(replaces))
+		_, err = tx.Exec(ctx, `INSERT INTO desk_answers(tenant_id,project_id,node_id,question_id,revision,request_id,request_digest,decided_by,option_id,answer,reason,outcome,deliver_after,replaces,outcome_data)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, p.TenantID, project, answerID, id, rev, in.RequestID, hash, p.ID, in.OptionID, answer, in.Reason, in.Outcome, now.Add(10*time.Second), nullable(replaces), rawData)
 		if err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE desk_pending SET state='replaced' WHERE tenant_id=$1 AND question_id=$2 AND state IN ('pending','failed')`, p.TenantID, id); err != nil {
+			return err
+		}
+		retired, err := retireDecisions(ctx, tx, p, project, id, answerID)
+		if err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE desk_decisions SET state='superseded',superseded_by=$3 WHERE tenant_id=$1 AND question_id=$2 AND state<>'superseded'`, p.TenantID, id, answerID); err != nil {
@@ -434,8 +495,8 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if _, err = tx.Exec(ctx, `INSERT INTO desk_decisions(tenant_id,project_id,question_id,revision) VALUES($1,$2,$3,$4)`, p.TenantID, project, id, rev); err != nil {
 			return err
 		}
-		// No external effects before P3/P4. Each durable effect has its own identity,
-		// revision and destination; a failed inbox cannot hide a successful comment.
+		// Each revision-bound effect applies after grace with its own identity and
+		// destination; a failed inbox cannot hide a successful comment or outcome.
 		if _, err = tx.Exec(ctx, `INSERT INTO desk_pending(tenant_id,project_id,question_id,revision,asker_id,kind,deliver_after)
  SELECT a.tenant_id,a.project_id,a.question_id,$3,a.id,k.kind,r.deliver_after FROM desk_askers a
  JOIN desk_answers r ON r.tenant_id=a.tenant_id AND r.question_id=a.question_id AND r.revision=$3
@@ -449,11 +510,44 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 		if err := settleHeld(ctx, tx, p, q, rev); err != nil {
 			return err
 		}
+		for _, change := range retired {
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
+				return err
+			}
+		}
 		if err := event(ctx, tx, p, id, "question.answered", rev); err != nil {
 			return err
 		}
-		q, err = read(ctx, tx, p, id)
+		q, err = m.readWithCheck(ctx, tx, p, id, check)
 		return err
 	}()
 	return q, err
+}
+
+// Reuse is withdrawn in the decision transaction, independently of the next
+// effect. Only the desk-owned active Knowledge record for this question changes.
+func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, question, answer string) ([]events.Change, error) {
+	var id string
+	var before, after json.RawMessage
+	err := tx.QueryRow(ctx, `SELECT n.id::text,to_jsonb(n) FROM nodes n JOIN desk_decisions d ON d.tenant_id=n.tenant_id AND d.question_id=$2::uuid AND d.effect_ref=n.id::text
+ WHERE n.tenant_id=$1 AND d.state='active' AND n.fields->'metadata'->>'question_id'=$2::uuid::text AND n.deleted_at IS NULL FOR NO KEY UPDATE OF n`, p.TenantID, question).Scan(&id, &before)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: project}); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return nil, fail(403, "knowledge_access_lost", "Withdrawing the active Decision requires knowledge.write permission.")
+		}
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE nodes SET state='cancelled',fields=jsonb_set(jsonb_set(fields,'{metadata,decision_state}','"superseded"'),'{metadata,superseded_by}',to_jsonb($3::text)),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2`, p.TenantID, id, answer); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, p.TenantID, id).Scan(&after); err != nil {
+		return nil, err
+	}
+	return []events.Change{{NodeID: &id, Type: "knowledge.updated", Before: before, After: after, Metadata: json.RawMessage(`{"reason":"Decision Desk supersession"}`)}}, nil
 }

@@ -8882,12 +8882,32 @@ components:
         meanwhile: {type: string, enum: [carries_on, parked, paused, stopped]}
         meanwhile_text: {type: string, maxLength: 2000}
         blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
         suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
         ticket_id: {type: string, format: uuid}
         session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
         source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}
         source_handover_id: {type: string, format: uuid, description: Reserved for a verified AEON-524 adapter; currently returns source_unavailable}
         anyway_reason: {type: string, minLength: 1, maxLength: 2000}
+    QuestionDoctrineTarget:
+      type: object
+      additionalProperties: false
+      required: [source_id, path, rule_key, rule_sha256]
+      properties:
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        tldr_en: {type: string, maxLength: 300}
+        tldr_de: {type: string, maxLength: 300}
+    QuestionOutcomeAvailability:
+      type: object
+      required: [outcome, available, why]
+      properties:
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        available: {type: boolean}
+        why: {type: string, description: Unavailable stamps have no shortcut; do not treat the stored suggestion as permission.}
+        mapping_present: {type: boolean, description: Cheap Doctrine mapping hint; the exact source and guard are validated only when deciding and applying.}
     QuestionDecisionInput:
       type: object
       additionalProperties: false
@@ -8899,6 +8919,8 @@ components:
         answer: {type: string, maxLength: 8000, description: Required for a custom answer; omit to use the option answer}
         reason: {type: string, maxLength: 2000}
         outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_revision: {type: string, format: date-time, description: Optional ticket updated_at from the screen; changes before commit conflict. The server also snapshots it for delayed application.}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
     QuestionAsker:
       type: object
       required: [id, principal_id, request_id, reply_root_id, comment_node_id, created_at, input]
@@ -8925,6 +8947,27 @@ components:
         created_at: {type: string, format: date-time}
         deliver_after: {type: string, format: date-time}
         replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
+    QuestionEffectData:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id: {type: string, format: uuid}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; person edits are preserved and flagged for review.}
+        knowledge_id: {type: string, format: uuid}
+        doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
+        supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
+        superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
+        retryable: {type: boolean, description: False means automatic retry is stopped; review the failure and decide a new revision.}
+        review_required:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required: [kind, ref, why]
+            properties:
+              kind: {type: string, enum: [criterion, doctrine]}
+              ref: {type: string}
+              why: {type: string}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -8937,9 +8980,12 @@ components:
         deliver_after: {type: string, format: date-time}
         effect_ref: {type: string}
         error_code: {type: string}
+        error_message: {type: string, description: Safe explanation of a failed effect; retryable effects recheck authority; final conflicts require a new decision.}
+        effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
         receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
         receipt_failure: {type: string}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
     Question:
       type: object
       required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
@@ -8954,6 +9000,7 @@ components:
         askers: {type: array, items: {$ref: '#/components/schemas/QuestionAsker'}}
         answer: {$ref: '#/components/schemas/QuestionAnswer'}
         pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
+        outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     QuestionPage:
@@ -14938,7 +14985,7 @@ components:
             properties:
               id: {type: string, format: uuid}
               key: {type: string}
-              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, ticket]}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, decision, ticket]}
               kind: {type: string, enum: [knowledge, ticket]}
               slug: {type: string}
               title: {type: string}
@@ -14958,7 +15005,7 @@ components:
               label: {type: string}
     KnowledgeType:
       type: string
-      enum: [runbook, guideline, memory, external-system, related-project]
+      enum: [runbook, guideline, memory, external-system, related-project, decision]
     KnowledgeStatus:
       type: string
       description: active is stored as backlog, archived as cancelled; any other stored state reads as active.

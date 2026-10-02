@@ -20,6 +20,10 @@ import (
 
 // Proposal holds references and workflow evidence, never proposed prose.
 type Proposal struct {
+	InboxDigest      string    `json:"inbox_digest,omitempty"`
+	DeskQuestionID   string    `json:"desk_question_id,omitempty"`
+	DeskAnswerID     string    `json:"desk_answer_id,omitempty"`
+	SupersededBy     string    `json:"superseded_by,omitempty"`
 	Draft            bool      `json:"draft,omitempty"`
 	Automatic        bool      `json:"automatic,omitempty"`
 	ID               string    `json:"id"`

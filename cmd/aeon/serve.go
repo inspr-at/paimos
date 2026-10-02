@@ -277,7 +277,6 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	go inbox.NewSweeper(pool).Run(ctx)
-	go questionsMod.Run(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
 	statusAuto := statusautopilot.New(pool)
@@ -321,6 +320,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
 		},
 	})
+	questionsMod.WithDoctrine(doctrineMod)
+	go questionsMod.Run(ctx)
 	go doctrineMod.EnsurePrivateGuards(ctx)
 	go doctrineMod.RunOutcomeAnalysis(ctx)
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
