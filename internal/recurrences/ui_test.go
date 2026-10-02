@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,154 @@ func viewer(f *fixture) tenant.Principal {
 	})
 	dbtest.BindRole(f.t, f.d, p.TenantID, p.ID, "viewer")
 	return p
+}
+
+func projectPrincipal(f *fixture, role string) tenant.Principal {
+	p := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Person}
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(f.t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Project reader') RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(f.t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key=$4`, p.TenantID, p.ID, f.project, role)
+		return err
+	})
+	return p
+}
+
+func TestUIProjectScopedRecurrenceHistoryAndRetirement(t *testing.T) {
+	f := setup(t)
+	r := f.create(f.input())
+	f.manual(r.ID, "first")
+	f.manual(r.ID, "skip")
+	reader := projectPrincipal(f, "viewer")
+	manager := projectPrincipal(f, "member")
+	var history struct {
+		Items []HistoryEntry `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(reader, "GET", "/api/recurrences/"+r.ID+"/history", nil, 200), &history); err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]bool{}
+	for _, item := range history.Items {
+		types[item.Type] = true
+	}
+	for _, typ := range []string{"recurrence.created", "recurrence.occurred", "recurrence.skipped"} {
+		if !types[typ] {
+			t.Errorf("project reader cannot see %s", typ)
+		}
+	}
+	f.call(f.p, "DELETE", "/api/recurrences/"+r.ID, map[string]int{"expected_revision": 1}, 204)
+	ctx := tenant.WithPrincipal(t.Context(), reader)
+	if err := db.InTenant(ctx, f.d.App, reader.TenantID, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='recurrence.deleted' AND after->>'id'=$1`, r.ID).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Errorf("project reader sees %d delete events, want 1", count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Items []Recurrence `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(reader, "GET", "/api/recurrences?project_id="+f.project, nil, 200), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 0 {
+		t.Errorf("retired project-scoped list contains %d definitions", len(page.Items))
+	}
+	f.call(reader, "GET", "/api/recurrences/"+r.ID, nil, 404)
+	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]int{"expected_revision": 2}, 404)
+	f.call(manager, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "retired"}, 404)
+}
+
+func TestUIRetiredSchedulerClaimIgnoresReactivatedRow(t *testing.T) {
+	f := setup(t)
+	r := f.create(f.input())
+	f.call(projectPrincipal(f, "member"), "DELETE", "/api/recurrences/"+r.ID, map[string]int{"expected_revision": 1}, 204)
+	// Simulate a row resumed by a pre-fix project-scoped client. Its tombstone
+	// must exclude it at claim time, before parsing or recording a failure.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET paused=false,trigger=trigger||'{"rrule":"FREQ=INVALID"}'::jsonb WHERE id=$1`, r.ID)
+		return err
+	})
+	good := f.create(f.input())
+	f.now = f.now.Add(7 * 24 * time.Hour)
+	f.run()
+	if len(f.receipts(r.ID)) != 0 || len(f.receipts(good.ID)) != 1 {
+		t.Fatal("retired row ran or prevented a healthy row from running")
+	}
+}
+
+func TestUIClosedWorkflowCategoriesMatchOverlapAndOpenPrevious(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, state, category string
+		closed                      bool
+	}{
+		{"configured done", "ticket", "resolved", "done", true},
+		{"configured cancelled", "ticket", "withdrawn", "cancelled", true},
+		{"configured archived", "task", "shelved", "archived", true},
+		{"normalized category", "task", " READY--TO SHIP ", " Done ", true},
+		{"fixed done overridden", "ticket", "done", "doing", false},
+		{"fixed archived overridden", "task", "archived", "open", false},
+		{"doing", "ticket", "testing", "in_progress", false},
+		{"unknown category falls back", "task", " DONE ", "legacy", true},
+		{"fixed canceled", "ticket", " Canceled ", "", true},
+		{"fixed accepted", "task", "accepted", "", true},
+		{"fixed delivered", "ticket", "delivered", "", true},
+		{"unknown state stays open", "task", "uncatalogued", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			in := f.input()
+			in.Template.Type = tc.kind
+			r := f.create(in)
+			first := f.manual(r.ID, "first")
+			f.tx(func(tx pgx.Tx) error {
+				catalog, err := json.Marshal([]map[string]string{{"state": tc.state, "category": tc.category}})
+				if err != nil {
+					return err
+				}
+				// Give the other kind the opposite category to detect a join that
+				// accidentally ignores the occurrence node's kind.
+				other := "task"
+				if tc.kind == "task" {
+					other = "ticket"
+				}
+				opposite := "done"
+				if tc.closed {
+					opposite = "open"
+				}
+				otherCatalog, err := json.Marshal([]map[string]string{{"state": tc.state, "category": opposite}})
+				if err != nil {
+					return err
+				}
+				if _, err = tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}',$2::jsonb) WHERE slug=$1`, other, otherCatalog); err != nil {
+					return err
+				}
+				if _, err = tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}',$2::jsonb) WHERE slug=$1`, tc.kind, catalog); err != nil {
+					return err
+				}
+				_, err = tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, first.NodeID, tc.state)
+				return err
+			})
+			got := f.get(r.ID)
+			if (got.OpenPrevious == nil) != tc.closed {
+				t.Errorf("open_previous=%+v, closed=%v", got.OpenPrevious, tc.closed)
+			}
+			second := f.manual(r.ID, "second")
+			want := "skipped"
+			if tc.closed {
+				want = "created"
+			}
+			if second.Outcome != want {
+				t.Errorf("overlap outcome %s, want %s", second.Outcome, want)
+			}
+		})
+	}
 }
 func TestUIReadOnlyDraftHistoryAndRetirement(t *testing.T) {
 	f := setup(t)

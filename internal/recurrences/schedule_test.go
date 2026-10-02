@@ -125,6 +125,27 @@ func TestMonthlyIntervalValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSixMonthSpringGapWalksPastOneYear(t *testing.T) {
+	trigger := Trigger{Kind: "time", RRULE: "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=31", StartDate: "2023-03-01", Timezone: "Europe/Vienna", TimeOfDay: "02:30"}
+	s, err := parseSchedule(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// September has no 31st, and March 31 2024 at 02:30 does not exist.
+	// The next real occurrence is two years after the prior one.
+	before := timestamp(t, "2023-03-31T00:30:00Z")
+	after := timestamp(t, "2025-03-31T00:30:00Z")
+	if next, err := s.next(before); err != nil || !next.Equal(after) {
+		t.Errorf("next %s, want %s: %v", next, after, err)
+	}
+	if latest, err := s.latest(after.Add(-time.Minute)); err != nil || !latest.Equal(before) {
+		t.Errorf("latest %s, want %s: %v", latest, before, err)
+	}
+	if preview, err := Preview(trigger, before, 1); err != nil || len(preview) != 1 || !preview[0].Equal(after) {
+		t.Errorf("preview %v, want [%s]: %v", preview, after, err)
+	}
+}
 func TestTemplateVariablesAndBounds(t *testing.T) {
 	for _, s := range []string{"{{unknown}}", "{{ occurrence }}", "{{date", "oops}}"} {
 		if validateVariables(s) == nil {
