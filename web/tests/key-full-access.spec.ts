@@ -8,7 +8,7 @@ import { encodeScopeCode } from '../src/lib/scopeCode'
 import { expectStableControls } from './helpers/stable'
 
 const row = (page: Page) => page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'pharos-deployer' })
-async function open(page: Page, role: 'admin' | 'member' = 'admin', custom = false) {
+async function open(page: Page, role: 'admin' | 'member' = 'admin', custom = false, mixed = false) {
   await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
   await mockWork(page, fixtures())
   const world = accessWorld()
@@ -16,6 +16,10 @@ async function open(page: Page, role: 'admin' | 'member' = 'admin', custom = fal
     world.roles.push({ ...world.roles.find(r => r.key === 'viewer')!, id: 'role-private', key: `agent_${DEPLOYER.replace(/-/g, '')}`, name: 'Agent private', builtin: false })
     world.agents.find(a => a.principal_id === DEPLOYER)!.workspace_role = 'role-private'
   } else world.agents.find(a => a.principal_id === DEPLOYER)!.workspace_role = `role-${role}`
+  if (mixed) {
+    world.roles.push({ ...world.roles.find(r => r.key === 'viewer')!, id: 'role-recurrence', key: 'recurrence-operator', name: 'Recurrence operator', builtin: false, permissions: ['recurrences.manage'] })
+    world.bindings.push({ principal_id: DEPLOYER, project_id: 'p-pharos', role_id: 'role-recurrence' })
+  }
   await mockAccess(page, world)
   await page.goto('/settings/access/agents')
   await row(page).getByRole('button', { name: /active key/ }).click()
@@ -110,10 +114,10 @@ for (const mode of ['new', 'rotate'] as const) {
   })
 }
 
-for (const width of [390, 1440]) {
-  test(`Edit scopes names the built-in Admin exclusion without moving controls at ${width}px`, async ({ page }) => {
+for (const width of [390, 1440]) for (const mixed of [false, true]) {
+  test(`Edit scopes names the ${mixed ? 'creator ceiling for mixed roles' : 'built-in Admin exclusion'} without moving controls at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
-    const world = await open(page)
+    const world = await open(page, 'admin', false, mixed)
     expect(world.roles.find(r => r.key === 'admin')!.permissions).toContain('recurrences.manage')
     const sheet = await edit(page)
     const search = sheet.getByRole('searchbox', { name: 'Find a scope' })
@@ -121,8 +125,10 @@ for (const width of [390, 1440]) {
     const recurrence = sheet.getByRole('checkbox', { name: /recurrences\.manage/ })
     await expect(recurrence).toBeDisabled()
     await expect(recurrence).not.toBeChecked()
-    await expect(recurrence.locator('..')).toContainText("Not in this agent's role (Admin)")
-    await expect(recurrence.locator('..')).not.toContainText("Not in the key creator's current permissions")
+    const reason = mixed ? "Not in the key creator's current permissions" : "Not in this agent's role (Admin)"
+    const otherReason = mixed ? "Not in this agent's role (Admin)" : "Not in the key creator's current permissions"
+    await expect(recurrence.locator('..')).toContainText(reason)
+    await expect(recurrence.locator('..')).not.toContainText(otherReason)
     await expectStableControls({
       controls: {
         cancel: sheet.getByRole('button', { name: 'Cancel', exact: true }),
@@ -138,7 +144,8 @@ for (const width of [390, 1440]) {
         await sheet.getByRole('button', { name: 'Apply Full access' }).click()
         await expect(recurrence).not.toBeChecked()
         await expect(recurrence).toBeDisabled()
-        await expect(recurrence.locator('..')).toContainText("Not in this agent's role (Admin)")
+        await expect(recurrence.locator('..')).toContainText(reason)
+        await expect(recurrence.locator('..')).not.toContainText(otherReason)
         await expect(sheet.getByRole('button', { name: 'Save scopes', exact: true })).toBeEnabled()
       } }],
     })
