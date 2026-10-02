@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -237,16 +238,22 @@ func TestQuotaWarningsSharedComputersPrivacyAndProjectInbox(t *testing.T) {
 		Items     []map[string]any `json:"items"`
 		NextAfter *string          `json:"next_after"`
 	}
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/quota-warnings?limit=1", "", 200, &page)
 	if len(page.Items) != 1 || page.NextAfter == nil || page.Items[0]["details_redacted"] != true || page.Items[0]["remaining_percent"] != nil || page.Items[0]["severity"] != nil {
 		t.Fatalf("shared sibling privacy or pagination: %+v", page)
 	}
 	ownFixtureAccount(t, f.admin, &sibling)
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
 	if len(page.Items) != 2 || page.NextAfter != nil || page.Items[0]["remaining_percent"] != float64(8) {
 		t.Fatalf("owner warning detail: %+v", page)
 	}
 	peer := addPrincipal(t, f.admin.TenantID, "person", "Peer", []string{"admin"})
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, f.mod, &peer, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
 	raw, _ := json.Marshal(page)
 	if strings.Contains(string(raw), "remaining_percent") || strings.Contains(string(raw), "threshold_percent") || strings.Contains(string(raw), "severity") {
@@ -255,11 +262,23 @@ func TestQuotaWarningsSharedComputersPrivacyAndProjectInbox(t *testing.T) {
 	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}); err != nil {
 		t.Fatal(err)
 	}
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, f.mod, &peer, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
 	if len(page.Items) != 2 || page.Items[0]["remaining_percent"] != float64(8) {
 		t.Fatal("explicit sharing failed")
 	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":5,"urgent_percent":1}`, 200, nil)
+	page.Items = nil
+	page.NextAfter = nil
+	callStatus(t, f.mod, &peer, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
+	if len(page.Items) != 0 {
+		t.Fatal("warning projection ignored current workspace thresholds")
+	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":10,"urgent_percent":3}`, 200, nil)
 	staleMod := fixedClockModule{Module: New(appPool), at: now.Add(11 * time.Minute)}
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, staleMod, &f.admin, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
 	if len(page.Items) != 0 {
 		t.Fatal("stale warning detail still shown")
@@ -279,6 +298,8 @@ func TestQuotaWarningsSharedComputersPrivacyAndProjectInbox(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'workspace',NULL),($1,$2,$4,'project',$5)`, f.admin.TenantID, limited.ID, workspace, reader, project)
 		return err
 	})
+	page.Items = nil
+	page.NextAfter = nil // A redacted decode must not retain fields from an earlier owner response.
 	callStatus(t, f.mod, &limited, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &page)
 	if len(page.Items) != 1 || page.Items[0]["session_id"] != child {
 		t.Fatalf("warning escaped project visibility: %+v", page)
@@ -291,7 +312,7 @@ func TestQuotaWarningsConfirmedPoolSurvivesComputerChanges(t *testing.T) {
 	var sibling Account
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"second","harness":"codex","daemon_id":"daemon-b","label":"Second"}`, 201, &sibling)
 	fingerprint := strings.Repeat("a", 64)
-	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}, fingerprint); err != nil {
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=$2,quota_fingerprint=$2 WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}, fingerprint); err != nil {
 		t.Fatal(err)
 	}
 	reset := now.Add(time.Hour)
@@ -311,6 +332,89 @@ func TestQuotaWarningsConfirmedPoolSurvivesComputerChanges(t *testing.T) {
 	second.report(t, 98, now.Add(2*time.Second), reset)
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings`); n != 2 {
 		t.Fatalf("computer change duplicated pool receipts: %d", n)
+	}
+}
+
+func TestQuotaWarningsReporterWithoutProjectAccess(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "quota-scoped-reporter", now)
+	project, run := insertProjectRun(t, f.admin, f.runner, f.profile, "Private project")
+	lead := quotaSession(t, f, project, "", nil, "Lead")
+	quotaSession(t, f, project, run, &lead, "Private worker")
+	leadPrincipal := addPrincipal(t, f.admin.TenantID, "agent", "Lead with access", []string{"admin"})
+	otherProject, otherRun := insertProjectRun(t, f.admin, f.runner, f.profile, "Revoked project")
+	revokedLead := quotaSession(t, f, otherProject, "", nil, "Revoked lead")
+	quotaSession(t, f, otherProject, otherRun, &revokedLead, "Revoked worker")
+	revokedPrincipal := addPrincipal(t, f.admin.TenantID, "agent", "Lead without access", nil)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET agent_principal_id=$2 WHERE id=$1`, lead, leadPrincipal.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET agent_principal_id=$2 WHERE id=$1`, revokedLead, revokedPrincipal.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.runner.ID); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'quota_reporter','Quota reporter') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.probe')`, f.admin.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.admin.TenantID, f.runner.ID, role)
+		return err
+	})
+	fact := quotaFact(t, f, 98, now, now.Add(time.Hour))
+	code, raw := call(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: f.account.DaemonID, DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}}))
+	if code != 200 || strings.Contains(string(raw), "Private worker") || strings.Contains(string(raw), "Private project") {
+		t.Fatalf("scoped reporter response status %d must exclude project details", code)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'quota-warning/%'`); n != 1 {
+		t.Fatalf("expected one authorized lead notice, got %d", n)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id='`+revokedLead+`'`); n != 0 {
+		t.Fatal("lead without current project access received a notice")
+	}
+	// Check the same transaction after both service steps, rather than starting
+	// a new transaction that would reset visibility and conceal a leak.
+	ctx := tenant.WithPrincipal(t.Context(), f.runner)
+	err := (&Module{pool: appPool}).inReadinessWrite(ctx, f.runner, func(tx pgx.Tx) error {
+		assertScoped := func() {
+			var count int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM harness_sessions`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatal("system notice step leaked project visibility to reporter")
+			}
+		}
+		assertScoped()
+		a, err := getAccount(ctx, tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		notices, err := prepareQuotaWarnings(ctx, tx, f.runner, a, now)
+		if err != nil {
+			return err
+		}
+		if len(notices) != 1 || notices[0].session != lead || !strings.Contains(notices[0].body, "Private worker") || strings.Contains(notices[0].body, "Revoked worker") {
+			t.Fatalf("internal notice targets: %+v", notices)
+		}
+		assertScoped()
+		system, err := quotaSystemActor(ctx, tx, f.admin.TenantID, true)
+		if err != nil {
+			return err
+		}
+		if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
+			return err
+		}
+		assertScoped()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

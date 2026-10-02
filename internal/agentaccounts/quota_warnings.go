@@ -183,22 +183,79 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		if err != nil {
 			return nil, err
 		}
+		pending, err := quotaNoticeRecipients(ctx, tx, warning, f.ResourceID, quotaKey)
+		if err != nil {
+			return nil, err
+		}
+		notices = append(notices, pending...)
+	}
+	err = withQuotaNoticeVisibility(ctx, tx, func() error {
+		// Pre-lock FK parents in sorted batches before any event counter.
+		for _, target := range []struct{ column, table string }{{"project", "nodes"}, {"recipient", "principals"}, {"session", "harness_sessions"}} {
+			ids := []string{}
+			seen := map[string]bool{}
+			for _, n := range notices {
+				id := n.project
+				if target.column == "recipient" {
+					id = n.recipient
+				} else if target.column == "session" {
+					id = n.session
+				}
+				if !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
+				}
+			}
+			sort.Strings(ids)
+			if len(ids) > 0 {
+				if _, err := tx.Exec(ctx, `SELECT id FROM `+target.table+` WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, ids); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	return notices, err
+}
+
+// Only the internal notice step sees all projects. The caller has already
+// passed account.probe under the tenant fence. No project data enters its
+// response, and its original visibility is restored before further work.
+func withQuotaNoticeVisibility(ctx context.Context, tx pgx.Tx, fn func() error) error {
+	var visible string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),'')`).Scan(&visible); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return err
+	}
+	if err := fn(); err != nil {
+		// The caller rolls the entire transaction back on any error.
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true)`, visible)
+	return err
+}
+
+func quotaNoticeRecipients(ctx context.Context, tx pgx.Tx, warning, resource, quotaKey string) ([]quotaNotice, error) {
+	pending := []quotaNotice{}
+	err := withQuotaNoticeVisibility(ctx, tx, func() error {
 		rows, err := tx.Query(ctx, `SELECT lead.project_id::text,lead.agent_principal_id::text,lead.id::text,left(coalesce(nullif(child.display_label,''),child.id::text),160)
           FROM harness_sessions child JOIN agent_runs run ON run.tenant_id=child.tenant_id AND run.id=child.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
           JOIN harness_sessions lead ON lead.tenant_id=child.tenant_id AND lead.project_id=child.project_id AND lead.id=child.parent_id AND lead.role='coordinator'
           WHERE child.stopped_at IS NULL AND child.archived_at IS NULL AND lead.stopped_at IS NULL AND lead.archived_at IS NULL AND (`+warningMembershipSQL+`)
-          ORDER BY lead.project_id,lead.id,child.id LIMIT 201 FOR KEY SHARE OF lead`, f.ResourceID, quotaKey)
+		  AND CASE aeon_principal_visibility(lead.tenant_id,lead.agent_principal_id) WHEN '*' THEN true WHEN '' THEN false ELSE lead.project_id=ANY(aeon_principal_visibility(lead.tenant_id,lead.agent_principal_id)::uuid[]) END
+          ORDER BY lead.project_id,lead.id,child.id LIMIT 201`, resource, quotaKey)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		pending := []quotaNotice{}
 		count := 0
 		for rows.Next() {
 			var n quotaNotice
 			var name string
 			if err := rows.Scan(&n.project, &n.recipient, &n.session, &name); err != nil {
 				rows.Close()
-				return nil, err
+				return err
 			}
 			count++
 			n.warning = warning
@@ -212,63 +269,54 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if count > 200 || len(pending) > 32 {
-			return nil, fail(503, "too many quota-warning recipients or sessions")
+			return fail(503, "too many quota-warning recipients or sessions")
 		}
 		for i := range pending {
 			pending[i].body = "Account availability is limited for sessions in this project: " + pending[i].body + ". See /agents for current availability and any quota details shared by the owner."
 		}
-		notices = append(notices, pending...)
-	}
-	ids := []string{}
-	seen := map[string]bool{}
-	for _, n := range notices {
-		if !seen[n.recipient] {
-			seen[n.recipient] = true
-			ids = append(ids, n.recipient)
-		}
-	}
-	sort.Strings(ids)
-	if len(ids) > 0 {
-		if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, ids); err != nil {
-			return nil, err
-		}
-	}
-	return notices, nil
+		return nil
+	})
+	return pending, err
 }
 
 // a is the current target account; stale resource bindings never participate.
 const warningMembershipSQL = `($2=$1::uuid::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=$1 AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND $2='pool:'||a.harness||':'||a.quota_pool_fingerprint)`
 
 func flushQuotaNotices(ctx context.Context, tx pgx.Tx, p tenant.Principal, notices []quotaNotice) error {
-	// Create/lock the System actor during preparation, before event counters.
-	// Notices deliberately carry no exact quota or threshold, so later sharing
-	// revocation cannot turn an immutable inbox body into a privacy leak.
-	for _, n := range notices {
-		digest := sha256.Sum256([]byte(n.warning + "/" + n.project + "/" + n.session))
-		key := "quota-warning/" + hex.EncodeToString(digest[:])
-		var present bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE sender_principal_id=$1 AND idempotency_key=$2)`, p.ID, key).Scan(&present); err != nil {
-			return err
-		}
-		if present {
-			continue
-		}
-		var id string
-		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-			return err
-		}
-		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &n.project, Type: "inbox.sent", After: map[string]any{"id": id, "sender_principal_id": p.ID, "recipient_principal_id": n.recipient}})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'System')`, p.TenantID, id, p.ID, n.recipient, ev.ID, n.body, key, n.session); err != nil {
-			return err
-		}
+	if len(notices) == 0 {
+		return nil
 	}
-	return nil
+	return withQuotaNoticeVisibility(ctx, tx, func() error {
+		// Create/lock the System actor during preparation, before event counters.
+		// Notices deliberately carry no exact quota or threshold, so later sharing
+		// revocation cannot turn an immutable inbox body into a privacy leak.
+		for _, n := range notices {
+			digest := sha256.Sum256([]byte(n.warning + "/" + n.project + "/" + n.session))
+			key := "quota-warning/" + hex.EncodeToString(digest[:])
+			var present bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages WHERE sender_principal_id=$1 AND idempotency_key=$2)`, p.ID, key).Scan(&present); err != nil {
+				return err
+			}
+			if present {
+				continue
+			}
+			var id string
+			if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+				return err
+			}
+			ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &n.project, Type: "inbox.sent", After: map[string]any{"id": id, "sender_principal_id": p.ID, "recipient_principal_id": n.recipient}})
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'System')`, p.TenantID, id, p.ID, n.recipient, ev.ID, n.body, key, n.session); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func quotaSystemActor(ctx context.Context, tx pgx.Tx, tenantID string, needed bool) (tenant.Principal, error) {
@@ -331,7 +379,7 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(s.id) s.id::text,s.project_id::text,a.id::text,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN 'urgent' ELSE 'early' END,q.remaining_percent,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN coalesce((SELECT urgent_percent FROM quota_warning_settings),3) ELSE coalesce((SELECT early_percent FROM quota_warning_settings),10) END,q.window_key,q.resets_at
           FROM harness_sessions s JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
           JOIN account_quota_warnings q ON q.tenant_id=a.tenant_id AND ((q.quota_key=q.resource_id::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND q.quota_key='pool:'||a.harness||':'||a.quota_pool_fingerprint))
-          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
+          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.remaining_percent<=coalesce((SELECT early_percent FROM quota_warning_settings),10) AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
           ORDER BY s.id,q.remaining_percent,q.id LIMIT $5`, nullableUUID(after), now, string(p.Kind), p.ID, limit+1)
 		if err != nil {
 			return err

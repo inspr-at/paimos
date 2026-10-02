@@ -723,6 +723,20 @@ every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
 
+Workspace **Low-quota warnings** settings default to an early notice at 10%
+remaining and an urgent notice at 3%. Both are whole percentages from 1–50,
+with urgent below early (`GET/PUT /api/settings/quota-warnings`,
+`settings.manage`; writes require a person). Only measured readings no more
+than ten minutes old, before their reset, qualify; a balance without a
+percentage denominator cannot produce a percentage warning. Receipts persist
+per resource or confirmed login pool, window, reset and threshold across
+computers and recovery. A simultaneous crossing produces only the urgent
+notice. A newer measured recovery clears the notice; clock passage alone
+withholds expired details without claiming recovery. `/agents` names affected
+active sessions with a recorded run/account binding. Their parent lead receives
+a durable project-specific inbox summary without quota figures. Exact figures
+on `/agents` follow current owner sharing, including every pooled sibling.
+
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor
 login. Only those confirmed accounts share readings, holds and parallel slots;
