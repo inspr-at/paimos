@@ -325,6 +325,41 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+## Agent start plan
+
+`aeon agents plan` shows the person's planned total, per-harness limits and
+running counts; `--json` returns the same snapshot as `GET /api/agents/plan`.
+The person reads their own plan. An agent key reads only its live person
+creator's plan and needs the explicit `agents.plan.read` scope and live role
+permission. There is no person or tenant selector. Existing coordinator keys
+must receive this scope through the person's normal key-scope controls.
+Plan reads, writes and running counts use the canonical person, including when
+the caller or key creator is a linked alias. The snapshot returns that canonical
+`principal_id`. With no canonical preference, a saved alias preference remains
+readable; conflicting effective plans across linked rows fail closed. An
+explicit person save updates the canonical row and reconciles existing alias
+copies. Other preferences remain private to the calling principal.
+
+The person saves the plan through `PUT /api/preferences/agents.working`:
+`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}}}`.
+Total and numeric limits range from 0 to 30. Missing limits mean No limit;
+numeric zero means at most zero, while `"off"` explicitly disables a harness.
+Limits may add up to more than the total. Legacy `cap` (1–12) maps to total;
+legacy area/model reservations are ignored, because reservations cannot become
+maximum limits. Legacy values keep their original shape for existing UI
+clients. No stored total defaults to 15, the existing launcher ceiling.
+
+Running counts include unended, unarchived sessions owned by the person across
+projects, including starting, waiting, idle, throttled and stopping sessions.
+Silence alone does not release a slot. Ownerless legacy sessions count only
+when their agent's key creators identify one person unambiguously. The API
+returns counts without session or project details. Malformed saved plans fail
+closed. `agentplan.CanStart` checks total and harness limits without changing
+running work; launchers must serialize starts and check account room separately.
+This backend change supplies the read path and helper; launcher integration
+and the revised control are separate AEON-540 parts. Lowering the plan never
+pauses or stops existing work.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open

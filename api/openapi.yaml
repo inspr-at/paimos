@@ -4928,21 +4928,64 @@ paths:
           $ref: '#/components/responses/View'
         '400':
           $ref: '#/components/responses/Error'
+  /agents/plan:
+    get:
+      operationId: getAgentsPlan
+      security: *auth
+      description: >-
+        Read the calling person's agents.working plan, or the plan of an agent
+        key's live person creator. Requires agents.plan.read in the key ceiling
+        and live role grants; no person or tenant selector is accepted.
+        Plan ownership and principal_id resolve to the canonical person, as do
+        running counts. A linked alias's saved plan is used when the canonical
+        row is absent. Conflicting effective plans across linked rows fail closed.
+        An unset plan defaults to total 15 and no harness limits. Legacy cap
+        maps to total; legacy area/model reservations are ignored.
+        Running counts include all unended, unarchived sessions owned by this
+        person across projects, including starting, waiting, idle, throttled and
+        stopping sessions. Silence alone never frees a slot. Legacy sessions
+        without an owner count only when a key creator unambiguously identifies
+        this person. Counts disclose no session or project details.
+        This is a snapshot, not a start reservation; launchers must serialize
+        starts and check account capacity separately. Lowering a plan never
+        pauses or stops existing work.
+      responses:
+        '200':
+          description: Personal plan and running counts
+          content: {application/json: {schema: {$ref: '#/components/schemas/AgentsPlanSnapshot'}}}
+        '401': {description: Authentication required}
+        '403': {description: 'Missing scope, live role permission or person creator'}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
   /preferences/{key}:
     parameters:
       - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_.:-]{0,127}$'}}
     get:
       operationId: getPreference
-      description: The calling person's own UI preference (for example list columns and widths). A key never written returns value null.
+      description: >-
+        The calling person's own UI preference (for example list columns and
+        widths). A key never written returns value null. For agents.working,
+        read the canonical person's row, falling back to a linked alias's row
+        when absent; invalid or conflicting effective plans fail closed.
       responses:
         '200':
           description: Preference
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
     put:
       operationId: putPreference
-      description: Replace the calling person's preference. The value is a JSON object of at most 16 KiB. Private to the principal; no event is appended.
+      description: >-
+        Replace the calling person's preference. The value is a JSON object of
+        at most 16 KiB. Private to the principal; no event is appended.
+        For agents.working, validate AgentsPlan or the legacy cap/view/area/model
+        shape (cap 1–12, optional). Preserve the legacy shape for existing UI
+        clients; its reservations do not become limits. Plan reads for enforcers
+        use GET /agents/plan. Agents cannot write this plan.
+        Plan writes belong to the active canonical person and reconcile existing
+        linked alias copies to the saved value; other preferences remain private
+        to the calling principal.
       requestBody:
         required: true
         content:
@@ -4959,6 +5002,7 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
         '400': {description: Invalid key or value}
         '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
         '413': {description: Value too large}
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
@@ -13006,6 +13050,31 @@ components:
               project_id: {type: string, format: uuid}
               group_id: {type: [string, 'null'], format: uuid}
         event_id: {type: [integer, 'null'], format: int64}
+    AgentsPlan:
+      type: object
+      additionalProperties: false
+      required: [total]
+      properties:
+        total: {type: integer, minimum: 0, maximum: 30, description: Planned maximum running agents; zero starts nothing new.}
+        limits:
+          type: object
+          propertyNames: {enum: [claude, codex, cursor, gemini, grok, opencode, pi]}
+          additionalProperties:
+            oneOf:
+              - {type: integer, minimum: 0, maximum: 30, description: At most this many; numeric zero allows no starts.}
+              - {type: string, enum: [no_limit, off]}
+          description: Missing harnesses have no limit. Off explicitly disables a harness. Limits may sum above total.
+    AgentsPlanSnapshot:
+      type: object
+      required: [total, limits, principal_id, running, running_total, source, updated_at]
+      properties:
+        total: {$ref: '#/components/schemas/AgentsPlan/properties/total'}
+        limits: {$ref: '#/components/schemas/AgentsPlan/properties/limits'}
+        principal_id: {type: string, format: uuid, description: Canonical person whose plan and running counts are read.}
+        running: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        running_total: {type: integer, minimum: 0}
+        source: {type: string, enum: [default, legacy, plan]}
+        updated_at: {type: [string, 'null'], format: date-time}
     Preference:
       type: object
       required: [key, value, updated_at]
