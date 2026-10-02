@@ -16,6 +16,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -123,6 +124,25 @@ func validRecipe(r Recipe) bool {
 	if r.Stage == "browser" && r.Reporter != "harness-json" {
 		return false
 	}
+	if r.Reporter == "go-json" {
+		fresh, jsonOutput, tests := false, false, false
+		for _, arg := range r.Argv[1:] {
+			if arg == "-count=1" {
+				fresh = true
+			}
+			if arg == "-json" {
+				jsonOutput = true
+			}
+		}
+		for _, id := range r.Expected {
+			if strings.HasPrefix(id, "test/") {
+				tests = true
+			}
+		}
+		if !fresh || !jsonOutput || !tests {
+			return false
+		}
+	}
 	if r.Reporter == "command" && (len(r.Expected) != 1 || r.Expected[0] != "command/"+r.ObligationID) {
 		return false
 	}
@@ -157,6 +177,11 @@ func admissionMessage(a Admission) []byte {
 }
 
 func VerifyAdmission(p Plan, profile VMProfile, a Admission, key ed25519.PublicKey, now time.Time) error {
+	for _, reason := range p.Reasons {
+		if strings.HasPrefix(reason, "candidate-policy-change:") {
+			return fmt.Errorf("candidate policy changes cannot enter the previous trust epoch")
+		}
+	}
 	start, e1 := time.Parse(time.RFC3339Nano, a.ApprovedAt)
 	end, e2 := time.Parse(time.RFC3339Nano, a.ExpiresAt)
 	if a.Schema != "aeon.ci.executable-admission.v1" || len(key) != ed25519.PublicKeySize || len(a.Signature) != ed25519.SignatureSize || !ed25519.Verify(key, admissionMessage(a), a.Signature) ||
@@ -248,6 +273,7 @@ type SupervisedObservation struct {
 	Stage           string     `json:"stage"`
 	AdmissionDigest string     `json:"admission_digest"`
 	Artifacts       []Artifact `json:"artifacts"`
+	Admission       Admission  `json:"admission"`
 	seal            []byte
 }
 
@@ -256,6 +282,8 @@ type Supervisor struct {
 	profile VMProfile
 	key     ed25519.PublicKey
 	sealKey []byte
+	mu      sync.RWMutex
+	revoked map[string]bool
 }
 
 func NewSupervisor(r *Repository, p VMProfile, key ed25519.PublicKey) (*Supervisor, error) {
@@ -274,7 +302,25 @@ func NewSupervisor(r *Repository, p VMProfile, key ed25519.PublicKey) (*Supervis
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("supervisor randomness unavailable")
 	}
-	return &Supervisor{repo: r, profile: frozen, key: bytes.Clone(key), sealKey: secret}, nil
+	return &Supervisor{repo: r, profile: frozen, key: bytes.Clone(key), sealKey: secret, revoked: map[string]bool{}}, nil
+}
+
+// RevokeAdmission is called only by trusted ingress, never by an execution
+// message. In-flight and previously observed runs remain closed after revocation.
+func (s *Supervisor) RevokeAdmission(reviewRecord string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revoked[reviewRecord] = true
+}
+
+func (s *Supervisor) admitted(p Plan, a Admission) error {
+	s.mu.RLock()
+	revoked := s.revoked[a.ReviewRecord]
+	s.mu.RUnlock()
+	if revoked {
+		return fmt.Errorf("executable admission revoked")
+	}
+	return VerifyAdmission(p, s.profile, a, s.key, time.Now())
 }
 
 func (s *Supervisor) task(p Plan, id, sourceDigest string) (VMTask, error) {
@@ -315,7 +361,7 @@ func (s *Supervisor) Run(ctx context.Context, p Plan, id string, a Admission, id
 	if err := VerifyPlan(ctx, s.repo, p); err != nil {
 		return SupervisedObservation{}, err
 	}
-	if err := VerifyAdmission(p, s.profile, a, s.key, time.Now()); err != nil {
+	if err := s.admitted(p, a); err != nil {
 		return SupervisedObservation{}, err
 	}
 	source, err := s.repo.sourceArchive(ctx, p.Candidate)
@@ -326,6 +372,9 @@ func (s *Supervisor) Run(ctx context.Context, p Plan, id string, a Admission, id
 	if err != nil {
 		return SupervisedObservation{}, err
 	}
+	if task.Stage == "browser" || task.Reporter == "harness-json" {
+		return SupervisedObservation{}, fmt.Errorf("approved browser/application VM boundary not provisioned")
+	}
 	start := time.Now()
 	raw, err := runVM(ctx, s.profile, task, source)
 	if err != nil {
@@ -333,6 +382,9 @@ func (s *Supervisor) Run(ctx context.Context, p Plan, id string, a Admission, id
 	}
 	result, err := decodeGuest(task, raw)
 	if err != nil {
+		return SupervisedObservation{}, err
+	}
+	if err := s.admitted(p, a); err != nil {
 		return SupervisedObservation{}, err
 	}
 	return s.observe(p, task, a, identity, result, start, time.Now())
@@ -368,13 +420,32 @@ func decodeGuest(task VMTask, raw []byte) (GuestResult, error) {
 	}
 	wantKind := "test"
 	if task.Reporter == "command" {
-		wantKind = "command"
+		wantKind = "non-test"
 	}
 	if r.Manifest.Kind != wantKind {
 		return GuestResult{}, fmt.Errorf("guest manifest kind mismatch")
 	}
 	if err := ValidateArtifacts(r.Artifacts); err != nil {
 		return GuestResult{}, err
+	}
+	wantArtifacts := []string{}
+	actualArtifacts := []string{}
+	for _, name := range task.ArtifactPaths {
+		wantArtifacts = append(wantArtifacts, path.Base(name))
+	}
+	if task.OutputArtifact != "" {
+		wantArtifacts = append(wantArtifacts, task.OutputArtifact)
+	}
+	for _, artifact := range r.Artifacts {
+		actualArtifacts = append(actualArtifacts, artifact.Name)
+		if artifact.Name == task.OutputArtifact && artifact.Digest != r.OutputDigest {
+			return GuestResult{}, fmt.Errorf("metadata output digest mismatch")
+		}
+	}
+	sort.Strings(wantArtifacts)
+	sort.Strings(actualArtifacts)
+	if strings.Join(wantArtifacts, "\x00") != strings.Join(actualArtifacts, "\x00") {
+		return GuestResult{}, fmt.Errorf("missing or unexpected guest artifact")
 	}
 	return r, nil
 }
@@ -393,7 +464,7 @@ func (s *Supervisor) observe(p Plan, task VMTask, a Admission, identity Executio
 	if err := ValidateReceipt(p, receipt); err != nil {
 		return SupervisedObservation{}, err
 	}
-	o := SupervisedObservation{Receipt: receipt, Stage: task.Stage, AdmissionDigest: digest("verified-admission", a), Artifacts: r.Artifacts}
+	o := SupervisedObservation{Receipt: receipt, Stage: task.Stage, AdmissionDigest: digest("verified-admission", a), Artifacts: r.Artifacts, Admission: a}
 	o.seal = s.seal(o)
 	return o, nil
 }
@@ -408,6 +479,12 @@ func (s *Supervisor) seal(o SupervisedObservation) []byte {
 func (s *Supervisor) Verify(p Plan, o SupervisedObservation) error {
 	if !hmac.Equal(o.seal, s.seal(o)) || o.Receipt.ExecutorDigest != ProfileDigest(s.profile) || !digestID.MatchString(o.AdmissionDigest) {
 		return fmt.Errorf("observation was not minted by this external supervisor")
+	}
+	if o.AdmissionDigest != digest("verified-admission", o.Admission) {
+		return fmt.Errorf("observation admission mismatch")
+	}
+	if err := s.admitted(p, o.Admission); err != nil {
+		return err
 	}
 	return ValidateReceipt(p, o.Receipt)
 }

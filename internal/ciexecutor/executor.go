@@ -38,6 +38,17 @@ func ExtractSource(raw []byte, root string) error {
 	if len(raw) > maxSource || !filepath.IsAbs(root) {
 		return fmt.Errorf("candidate source archive limit")
 	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("private source root unavailable")
+	}
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("private source root must be a directory")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		return fmt.Errorf("private source root must be fresh and empty")
+	}
 	r := tar.NewReader(bytes.NewReader(raw))
 	seen := map[string]bool{}
 	total := int64(0)
@@ -154,7 +165,7 @@ func Completion(task ciproof.VMTask, output []byte, exitCode int) (ciproof.Execu
 	}
 	kind := "test"
 	if task.Reporter == "command" {
-		kind = "command"
+		kind = "non-test"
 	}
 	return ciproof.ExecutionManifest{Kind: kind, Expected: append([]string(nil), task.Expected...), Executed: executed, Skipped: []string{}}, nil
 }

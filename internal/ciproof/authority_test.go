@@ -332,7 +332,7 @@ func TestSupervisorRejectsForgedReportsAndMutatedObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := admission(t, p, profile, priv)
-	r := GuestResult{Schema: GuestSchema, PlanID: p.ID, ObligationID: task.ObligationID, ExecutorDigest: task.ExecutorDigest, ExitCode: 0, Manifest: ExecutionManifest{Kind: "command", Expected: task.Expected, Executed: task.Expected, Skipped: []string{}}, OutputDigest: RawDigest(nil), Artifacts: []Artifact{}}
+	r := GuestResult{Schema: GuestSchema, PlanID: p.ID, ObligationID: task.ObligationID, ExecutorDigest: task.ExecutorDigest, ExitCode: 0, Manifest: ExecutionManifest{Kind: "non-test", Expected: task.Expected, Executed: task.Expected, Skipped: []string{}}, OutputDigest: RawDigest(nil), Artifacts: []Artifact{}}
 	raw, _ := json.Marshal(r)
 	if _, err := decodeGuest(task, raw); err != nil {
 		t.Fatal(err)
@@ -343,7 +343,7 @@ func TestSupervisorRejectsForgedReportsAndMutatedObservations(t *testing.T) {
 		}
 	}
 	bad := r
-	bad.Manifest = ExecutionManifest{Kind: "command", Expected: []string{"less"}, Executed: []string{"less"}}
+	bad.Manifest = ExecutionManifest{Kind: "non-test", Expected: []string{"less"}, Executed: []string{"less"}}
 	badRaw, _ := json.Marshal(bad)
 	if _, err := decodeGuest(task, badRaw); err == nil {
 		t.Fatal("candidate narrowing accepted")
@@ -385,6 +385,10 @@ func TestSupervisorRejectsForgedReportsAndMutatedObservations(t *testing.T) {
 	}
 	if _, err := a.Checks(context.Background(), e, p, s, []SupervisedObservation{o, o}); err == nil {
 		t.Fatal("duplicate observation accepted")
+	}
+	s.RevokeAdmission(grant.ReviewRecord)
+	if err := s.Verify(p, o); err == nil {
+		t.Fatal("revoked admission left a valid observation")
 	}
 	// Profile caller mutation cannot change the pinned launcher, environment or expected set.
 	profile.Recipes[0].Argv[0] = "/workspace/fake"

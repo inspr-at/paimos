@@ -4,8 +4,9 @@
 package main
 
 import (
-	"github.com/inspr-at/paimos/internal/ciexecutor"
 	"os"
+
+	"github.com/inspr-at/paimos/internal/ciexecutor"
 )
 
 func main() {
