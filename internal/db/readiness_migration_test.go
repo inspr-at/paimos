@@ -52,6 +52,13 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 		if used != 41 || reserved != 17 || sharing {
 			t.Fatalf("old ledgers or privacy default changed: %d %d %v", used, reserved, sharing)
 		}
+		var oldMembers int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM account_readiness_memberships WHERE account_id=$1 AND binding_revision=0`, accountID).Scan(&oldMembers); err != nil {
+			return err
+		}
+		if oldMembers != 1 {
+			t.Fatalf("existing account has no canonical membership: %d", oldMembers)
+		}
 		// Exact old probe statement and old registration column set still work.
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='old-g1' WHERE id=$1`, accountID); err != nil {
 			return err
