@@ -134,7 +134,10 @@ obligation's absolute `/opt/aeon/` command, stage, reporter and expected manifes
 plus raw SHA-256 pins for QEMU, firmware, kernel, initrd and a read-only ext4 root
 image. It also binds harness/toolchain/environment digests, security epoch,
 separate QEMU UID/GID, CPU/memory limits and timeout. The supervisor deep-copies
-these settings. Each metadata/build/test stage boots a new Linux/KVM VM with
+these settings and requires `infrastructure: hosted-disposable`; the provider
+must independently attest that placement. This backend supports Linux/amd64
+only and never routes candidates to the trusted main pool or production hosts.
+Each metadata/build/test stage boots a new Linux/KVM VM with
 read-only framed task/source disks, no network, no host mount and no monitor or
 control socket. The root guest init uses a read-only, `nosuid` executor image and
 an unprivileged candidate process in private tmpfs storage with a fixed offline
@@ -149,7 +152,9 @@ epoch, review target/record and a maximum 24-hour validity window. This admits
 the complete executable closure, including package initializers, JS helpers,
 dependency/config and lifecycle code. It cannot establish honest assertions in
 unreviewed code. Supervisor observations have an in-process private seal;
-serializing one loses that provenance. Durable signatures/revocation, source
+serializing one loses that provenance. Trusted ingress can revoke an admission;
+expiry and revocation are rechecked after execution and during reconciliation.
+Durable signatures/revocation, source
 run/job verification, full receipts and reuse remain E's responsibility. Partial
 reruns are refused. The browser/application VM connection and approved browser
 reporter remain D/H work and currently fail closed.
@@ -162,6 +167,11 @@ App provisioning, expected-App per-context ruleset probes, durable ingress and
 review revocation are later coordinator/OPS steps. No workflow, runner route,
 required check, version or execution selection changes here. Keep full existing
 CI and both optimization switches off until those prerequisites are proven.
+Build the guest init with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`; the approved
+kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
+rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
+tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
+this worker, and missing images, recipes or admission refuse execution.
 
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or

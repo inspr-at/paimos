@@ -9,6 +9,7 @@ import (
 )
 
 func TestAuthorityCLIHasNoPublicationOrActivationMode(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
 	for _, args := range [][]string{nil, {"publish"}, {"activate"}, {"shadow", "--write"}, {"shadow", "--admission", "/candidate/admission"}, {"observe", "--attempt", "2"}} {
 		if err := run(context.Background(), args, io.Discard); err == nil {
 			t.Fatalf("unsafe/incomplete CLI mode accepted %v", args)

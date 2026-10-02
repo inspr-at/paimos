@@ -257,7 +257,7 @@ func TestAuthorityRejectsActionsAndReviewAppIdentities(t *testing.T) {
 
 func profile(p Plan) VMProfile {
 	pin := func(name string) FilePin { return FilePin{Path: "/opt/aeon/" + name, Digest: RawDigest([]byte(name))} }
-	return VMProfile{Schema: "aeon.ci.vm-profile.v1", QEMU: pin("qemu"), Kernel: pin("kernel"), Initrd: pin("initrd"), RootFS: pin("rootfs"), Firmware: pin("firmware"), HarnessDigest: RawDigest([]byte("harness")), ToolchainDigest: RawDigest([]byte("toolchain")), EnvironmentDigest: p.EnvironmentDigest, SecurityEpoch: "epoch-1", UID: 1200, GID: 1200, MemoryMiB: 512, CPUs: 1, TimeoutSeconds: 30, Recipes: []Recipe{{ObligationID: "job/web", Stage: "build", Argv: []string{"/opt/aeon/bin/build"}, Reporter: "command", Expected: []string{"command/job/web"}}}}
+	return VMProfile{Schema: "aeon.ci.vm-profile.v1", Infrastructure: "hosted-disposable", QEMU: pin("qemu"), Kernel: pin("kernel"), Initrd: pin("initrd"), RootFS: pin("rootfs"), Firmware: pin("firmware"), HarnessDigest: RawDigest([]byte("harness")), ToolchainDigest: RawDigest([]byte("toolchain")), EnvironmentDigest: p.EnvironmentDigest, SecurityEpoch: "epoch-1", UID: 1200, GID: 1200, MemoryMiB: 512, CPUs: 1, TimeoutSeconds: 30, Recipes: []Recipe{{ObligationID: "job/web", Stage: "build", Argv: []string{"/opt/aeon/bin/build"}, Reporter: "command", Expected: []string{"command/job/web"}}}}
 }
 
 func admission(t *testing.T, p Plan, profile VMProfile, private ed25519.PrivateKey) Admission {
@@ -304,6 +304,9 @@ func TestAdmissionBindsEveryExecutableByteAndEpoch(t *testing.T) {
 				bad.ExpiresAt = time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
 			case "signature":
 				bad.Signature = nil
+			}
+			if field != "signature" {
+				bad.Signature = ed25519.Sign(priv, admissionMessage(bad))
 			}
 			if err := VerifyAdmission(p, profile, bad, pub, time.Now()); err == nil {
 				t.Fatal("unadmitted executable bytes accepted")
@@ -461,12 +464,17 @@ func TestVMArgumentsAndBoundaryRejectCandidateControls(t *testing.T) {
 		}
 	}
 	for _, bad := range []func(*VMProfile){func(p *VMProfile) { p.UID = 0 }, func(p *VMProfile) { p.RootFS.Path = "/tmp/image,readonly=off" }, func(p *VMProfile) { p.Recipes[0].Argv[0] = "/workspace/scripts/ci-web-tests.sh" }, func(p *VMProfile) { p.Recipes[0].Expected = nil }} {
-		copy := profile
-		copy.Recipes = append([]Recipe(nil), profile.Recipes...)
+		var copy VMProfile
+		raw, _ := json.Marshal(profile)
+		json.Unmarshal(raw, &copy)
 		bad(&copy)
 		if err := validateProfile(copy); err == nil {
 			t.Fatal("candidate controls accepted")
 		}
+	}
+	profile.Infrastructure = "self-hosted"
+	if err := validateProfile(profile); err == nil {
+		t.Fatal("trusted/production host profile admitted candidate execution")
 	}
 	s, err := NewSupervisor((&fixture{repo: nil}).repo, profile, make([]byte, 32))
 	if err == nil || s != nil {

@@ -50,6 +50,7 @@ type Recipe struct {
 // and absolute tool paths; candidate npm installs never supply the test image.
 type VMProfile struct {
 	Schema            string   `json:"schema"`
+	Infrastructure    string   `json:"infrastructure"`
 	QEMU              FilePin  `json:"qemu"`
 	Kernel            FilePin  `json:"kernel"`
 	Initrd            FilePin  `json:"initrd"`
@@ -70,7 +71,7 @@ type VMProfile struct {
 func ProfileDigest(p VMProfile) string { return digest("immutable-vm-profile", p) }
 
 func validateProfile(p VMProfile) error {
-	if p.Schema != "aeon.ci.vm-profile.v1" || p.UID < 1000 || p.GID == 0 || p.MemoryMiB < 128 || p.MemoryMiB > 4096 || p.CPUs < 1 || p.CPUs > 2 || p.TimeoutSeconds < 1 || p.TimeoutSeconds > 1800 || p.SecurityEpoch == "" || len(p.SecurityEpoch) > 128 || len(p.Recipes) == 0 ||
+	if p.Schema != "aeon.ci.vm-profile.v1" || p.Infrastructure != "hosted-disposable" || p.UID < 1000 || p.GID == 0 || p.MemoryMiB < 128 || p.MemoryMiB > 4096 || p.CPUs < 1 || p.CPUs > 2 || p.TimeoutSeconds < 1 || p.TimeoutSeconds > 1800 || p.SecurityEpoch == "" || len(p.SecurityEpoch) > 128 || len(p.Recipes) == 0 ||
 		!digestID.MatchString(p.HarnessDigest) || !digestID.MatchString(p.ToolchainDigest) || !digestID.MatchString(p.EnvironmentDigest) {
 		return fmt.Errorf("invalid immutable VM profile")
 	}

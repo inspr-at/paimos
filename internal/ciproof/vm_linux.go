@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -94,7 +95,7 @@ func (b *vmOutput) Write(p []byte) (int, error) {
 }
 
 func runVM(ctx context.Context, p VMProfile, task VMTask, source []byte) ([]byte, error) {
-	if os.Geteuid() != 0 || p.UID == 0 || p.GID == 0 || os.Getenv("GITHUB_ACTIONS") != "" {
+	if os.Geteuid() != 0 || runtime.GOARCH != "amd64" || p.UID == 0 || p.GID == 0 || os.Getenv("GITHUB_ACTIONS") != "" {
 		return nil, fmt.Errorf("external Linux supervisor with separate executor UID required; Actions execution refused")
 	}
 	if err := validateProfile(p); err != nil {
