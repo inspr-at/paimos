@@ -213,7 +213,13 @@ func (m *Module) resolveProposal(w http.ResponseWriter, r *http.Request) {
 		if _, err = tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status=$2 WHERE event_id=$1`, id, status); err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &nodeID, Type: "status_autopilot.proposal_" + status, After: map[string]any{"proposal_event_id": id, "action": in.Action}})
+		// Resolution is an autopilot audit event, not fresh work/activity evidence.
+		// In particular, Dismiss must not create a new Backlog inactivity anchor.
+		meta, err := json.Marshal(map[string]any{"job": Job, "rule": d.Rule, "reason": d.Reason})
+		if err != nil {
+			return err
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{NodeID: &nodeID, Type: "status_autopilot.proposal_" + status, After: map[string]any{"proposal_event_id": id, "action": in.Action}, Metadata: meta})
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

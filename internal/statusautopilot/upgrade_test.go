@@ -153,9 +153,10 @@ func TestProposalApplyDismissAndStaleGuards(t *testing.T) {
 	applyID := f.add("AUT-2", "ticket", "in_progress", 4, nil)
 	dismissID := f.add("AUT-3", "ticket", "in_progress", 4, nil)
 	staleID := f.add("AUT-4", "ticket", "delivered", 31, nil)
+	backlogID := f.add("AUT-5", "ticket", "backlog", 91, nil)
 	f.run(f.now)
 	items := f.proposals()
-	if len(items) != 3 {
+	if len(items) != 4 {
 		t.Fatalf("proposals %+v", items)
 	}
 	for _, item := range items {
@@ -164,7 +165,7 @@ func TestProposalApplyDismissAndStaleGuards(t *testing.T) {
 		case applyID:
 			f.call(f.p, "PUT", path, `{"action":"apply"}`, 200)
 			f.call(f.p, "PUT", path, `{"action":"apply"}`, 409)
-		case dismissID:
+		case dismissID, backlogID:
 			f.call(f.p, "PUT", path, `{"action":"dismiss"}`, 200)
 		case staleID:
 			f.tx(func(tx pgx.Tx) error {
@@ -187,6 +188,10 @@ func TestProposalApplyDismissAndStaleGuards(t *testing.T) {
 	}
 	if len(f.changes(applyID)) != 1 || !f.changes(applyID)[0].Undoable {
 		t.Fatal("Apply not audited/undoable")
+	}
+	f.run(f.now.Add(181 * 24 * time.Hour))
+	if f.state(backlogID).Marks["cancel_suggested"] {
+		t.Fatal("dismissal created a new Backlog inactivity anchor")
 	}
 }
 
