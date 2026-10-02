@@ -2199,3 +2199,36 @@ kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
 rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
+
+Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
+--option '["Title","Description","Answer"]' "Question"` stores a bounded,
+project-scoped question and returns immediately. Add `--ticket KEY`,
+`--context-file PATH`, `--recommend 1 --why "Reason"`, `--meanwhile parked`,
+`--meanwhile-text "Other work"`, `--keep once` or `--anyway "New evidence"`
+as needed. Retain the printed `--request-id UUID` and exact input for retries;
+`aeon ask status UUID` reads the durable question after the original session ends.
+`--session UUID` is a verified public harness generation, separate from the
+CLI's global attribution `--session-id`. Named project/ticket lookup uses the
+existing node read permissions; UUID addressing needs only the question scopes.
+The MCP `ask` tool accepts `{project, ticket?, input}` with the same typed HTTP
+input and mandatory request ID; `ask_status` accepts `{question_id}`.
+
+The additive API is documented in `api/openapi.yaml`: project question create/list,
+question get/status/person decision and a permission-filtered `/decision-desk`
+question projection. `questions.ask` and `questions.read` are explicit agent key
+scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
+three, viewer receives read, guest/customer receive none. Existing keys gain no
+new scopes. Agents read only questions they asked, with only their memberships.
+Generic node/knowledge CRUD cannot modify question/decision authority.
+
+Questions and immutable answer revisions use protected nodes plus tenant/project
+projections. Each asker retains input, principal, exact original session, source
+request, reply-root UUID and comment destination (ticket, or question node).
+The reply root is a reserved correlation identity, not yet a public inbox message:
+P3 must bind the answering person and materialize the inbox counterpart before
+using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
+P1 person answers support Once and record revision-bound pending inbox/comment/
+outcome effects with a database-clock ten-second deadline. They do not dispatch
+messages or claim successful delivery. Always/Requirement/Doctrine publication,
+verified handover sources and post-dispatch corrections require the later adapters;
+unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
