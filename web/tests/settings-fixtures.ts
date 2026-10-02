@@ -63,7 +63,7 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       if (method === 'PUT') { const body = request.postDataJSON(); Object.assign(autopilot, { enabled: body.enabled, rules: body.rules, revision: autopilot.revision + 1 }) }
       return route.fulfill({ json: autopilot })
     }
-    if (path === '/api/status-autopilot/changes') return route.fulfill({ json: { items: [] } })
+    if (path === '/api/status-autopilot/changes' || path === '/api/status-autopilot/proposals') return route.fulfill({ json: { items: [] } })
     const autopilotProject = /^\/api\/projects\/([^/]+)\/status-autopilot$/.exec(path)
     if (autopilotProject) {
       const override = autopilotProjects[autopilotProject[1]!] ??= { mode: 'inherit', effective_enabled: true, revision: 0 }

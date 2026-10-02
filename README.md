@@ -408,6 +408,24 @@ checks that have no stored completion. Check and Undo in the ticket use the exis
 preconditions. Part B's automation skips pending checks when moving tickets to
 Delivered or Accepted.
 
+Status autopilot starts new workspaces with automatic rules enabled. Workspaces
+present when migration 1108 runs enter Suggest mode for 24 hours, including
+release publication hooks. Settings → Workspace → Status autopilot → Changes
+lists proposed status moves and attention flags with Apply / Dismiss. Proposals
+leave tickets untouched; Apply checks the current ticket and rule, and Dismiss
+prevents that status episode from returning. An owner can explicitly select
+**Enable automatic changes** to end the upgrade review period early; ordinary
+settings saves and project On do not end it. The worker rescans when the review
+period expires or an owner confirms, including within the same UTC day.
+
+Operators can set `AEON_STATUS_AUTOPILOT=off|suggest|on` (default `on`) before
+starting the server. `off` pauses all unattended status rules, including release
+hooks and attention flags; `suggest` keeps proposals waiting for review without
+an expiry. These server modes cap every workspace and project setting. Explicit
+Apply is available in Suggest mode and forbidden in Off. Invalid values refuse
+startup. An explicitly authorized daemon work claim still starts its ticket;
+it does not become an unattended status proposal.
+
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger

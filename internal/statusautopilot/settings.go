@@ -13,8 +13,10 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -49,10 +51,33 @@ func (r *Rule) UnmarshalJSON(raw []byte) error {
 }
 
 type Settings struct {
-	Enabled  bool            `json:"enabled"`
-	Rules    map[string]Rule `json:"rules"`
-	Revision int64           `json:"revision"`
+	Enabled       bool            `json:"enabled"`
+	Rules         map[string]Rule `json:"rules"`
+	Revision      int64           `json:"revision"`
+	ServerMode    string          `json:"server_mode"`
+	EffectiveMode string          `json:"effective_mode"`
+	SuggestUntil  *time.Time      `json:"suggest_until"`
 }
+
+// ModeAt caps even an explicit project On. Workspace Off retains its existing
+// New/Backlog attention lists; deployment Off suppresses all automation.
+func (s Settings) ModeAt(now time.Time) string {
+	if s.ServerMode == "off" {
+		return "off"
+	}
+	if s.ServerMode == "suggest" || s.SuggestUntil != nil && now.Before(*s.SuggestUntil) {
+		return "suggest"
+	}
+	return "on"
+}
+
+func (s *Settings) describeMode(now time.Time) {
+	s.EffectiveMode = s.ModeAt(now)
+	if !s.Enabled {
+		s.EffectiveMode = "off"
+	}
+}
+
 type Override struct {
 	Mode      string `json:"mode"`
 	Effective bool   `json:"effective_enabled"`
@@ -78,16 +103,23 @@ func Load(ctx context.Context, tx pgx.Tx) (Settings, error) {
 	s := Defaults()
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT enabled,rules,revision FROM status_autopilot_settings WHERE tenant_id=current_setting('aeon.tenant_id')::uuid`).Scan(&s.Enabled, &raw, &s.Revision)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return s, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
-	err = json.Unmarshal(raw, &s.Rules)
 	if err == nil {
-		err = s.Validate()
+		if err = json.Unmarshal(raw, &s.Rules); err != nil {
+			return s, err
+		}
+		if err = s.Validate(); err != nil {
+			return s, err
+		}
 	}
+	err = tx.QueryRow(ctx, `SELECT suggest_until FROM status_autopilot_upgrade WHERE confirmed_at IS NULL`).Scan(&s.SuggestUntil)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return s, err
+	}
+	s.ServerMode, err = config.StatusAutopilotMode()
+	s.describeMode(time.Now().UTC())
 	return s, err
 }
 func Project(ctx context.Context, tx pgx.Tx, project string, workspace bool) (Override, error) {
@@ -117,6 +149,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/status-autopilot", m.project)
 	mux.HandleFunc("PUT /api/projects/{projectId}/status-autopilot", m.project)
 	mux.HandleFunc("GET /api/status-autopilot/changes", m.changes)
+	mux.HandleFunc("GET /api/status-autopilot/proposals", m.proposals)
+	mux.HandleFunc("PUT /api/status-autopilot/proposals/{eventId}", m.resolveProposal)
 }
 
 var uuid = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -167,9 +201,10 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Enabled  *bool           `json:"enabled"`
-		Rules    map[string]Rule `json:"rules"`
-		Expected *int64          `json:"expected_revision"`
+		Enabled        *bool           `json:"enabled"`
+		Rules          map[string]Rule `json:"rules"`
+		Expected       *int64          `json:"expected_revision"`
+		ConfirmUpgrade bool            `json:"confirm_upgrade"`
 	}
 	if r.Method == "PUT" {
 		if decode(w, r, &in) != nil || in.Enabled == nil || in.Expected == nil || *in.Expected < 0 {
@@ -200,9 +235,19 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			return events.ErrConflict
 		}
 		before := out
+		if in.ConfirmUpgrade {
+			if err := authz.RequireTx(r.Context(), tx, p, "ownership.transfer", authz.Scope{}); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(r.Context(), `UPDATE status_autopilot_upgrade SET confirmed_at=clock_timestamp() WHERE confirmed_at IS NULL`); err != nil {
+				return err
+			}
+			out.SuggestUntil = nil
+		}
 		out.Enabled = *in.Enabled
 		out.Rules = in.Rules
 		out.Revision++
+		out.describeMode(time.Now().UTC())
 		raw, err := json.Marshal(in.Rules)
 		if err != nil {
 			return err
