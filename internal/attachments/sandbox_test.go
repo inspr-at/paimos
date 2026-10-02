@@ -351,14 +351,19 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 	if _, _, err := m.previewAttachment(t.Context(), foreign, id); err == nil {
 		t.Fatal("second tenant read content")
 	}
-	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, project); err != nil {
-		t.Fatal(err)
+	// Follow the tree's child-first deletion invariant.
+	for _, deleted := range []string{node, project} {
+		if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, _, err := m.previewAttachment(t.Context(), p, id); err == nil {
 		t.Fatal("deleted project still readable")
 	}
-	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, project); err != nil {
-		t.Fatal(err)
+	for _, restored := range []string{project, node} {
+		if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, restored); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// A deterministic barrier revokes project access while redemption is
 	// paused in the session verifier. The subsequent RLS/authz read must deny.
