@@ -973,9 +973,13 @@ form admits superscripts, fractions and the information symbol while other
 scripts/digits stay refused. Unchanged file content is excluded.
 
 Regenerate the pinned Unicode table with
-`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+`python3 internal/unicodeguard/unicodegen/generate.py`, then `gofmt` the output.
 The generator verifies immutable input digests; builds and runtime are offline.
 Credential-shaped text is refused for either repository, including private.
+The shared publication detector checks raw text, compatibility forms without
+format controls, and case-preserving confusable forms from the same pinned table.
+Rule snapshots (single, batch and restore) use these checks too. Credential
+range offsets for knowledge confirmation still refer to the original text.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID
 and input when retrying a lost response. Short transactions authorize and reserve

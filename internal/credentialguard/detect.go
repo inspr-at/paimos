@@ -78,9 +78,18 @@ var (
 	fileSuffix = regexp.MustCompile(`^[A-Za-z0-9_./-]+\.[a-z][a-z0-9]{0,4}$`)
 )
 
-// Contains reports whether text appears to contain a credential.
+// Contains checks raw text and case-preserving Unicode forms for publication.
+// Ranges separately retains its original-text offsets for confirmation flows.
 func Contains(text string) bool {
-	return len(sensitiveSpans(text)) > 0
+	if len(sensitiveSpans(text)) > 0 {
+		return true
+	}
+	compatible := compatibleText(text)
+	if compatible != text && len(sensitiveSpans(compatible)) > 0 {
+		return true
+	}
+	confusable := confusableText(compatible)
+	return confusable != compatible && len(sensitiveSpans(confusable)) > 0
 }
 
 // Ranges lists the suspected credentials in one field.

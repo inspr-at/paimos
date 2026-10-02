@@ -27,6 +27,7 @@ func publicationCredentialForms() map[string]string {
 	return map[string]string{
 		"provider":          "sk-proj-" + strings.Repeat("Ab7q", 8),
 		"cloud":             "AK" + "IA" + strings.Repeat("AB12", 4),
+		"cloud-confusable":  "AK" + "IA" + strings.Repeat("A\ua7b412", 4),
 		"vendored-provider": "dop" + "_v1_" + h,
 		"github":            "gh" + "p_" + strings.Repeat("a1B2", 8),
 		"private-key":       "-----BEGIN RSA PRIVATE KEY-----\n" + "synthetic-only\n-----END RSA PRIVATE KEY-----",
@@ -57,6 +58,9 @@ func TestPublicationCredentialGuard(t *testing.T) {
 				requireCredentialRefusal(t, guardPublic(repo, text))
 				requireCredentialRefusal(t, guardPublic(repo, fullwidth(text)))
 				requireCredentialRefusal(t, guardPublic(repo, strings.Join(strings.Split(text, ""), "\u200b")))
+				// Latin capital beta survives the public Latin check and NFKC.
+				// Mapping it must preserve uppercase for cloud-key shapes.
+				requireCredentialRefusal(t, guardPublic(repo, strings.ReplaceAll(text, "B", "\ua7b4")))
 			})
 		}
 	}

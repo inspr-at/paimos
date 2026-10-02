@@ -94,20 +94,11 @@ func writableSource(s Source) bool {
 	return s.Repository == publicRepository && s.Visibility == "public" || s.Repository == privateRepository && s.Visibility == "private"
 }
 
-// Preserve case and token bytes through compatibility normalization: the
-// quotation skeleton folds case and even changes ASCII (1 -> l, m -> rn),
-// which can erase provider prefixes, entropy and Basic authorization values.
+// The shared detector preserves case and ASCII token bytes while checking
+// compatibility and confusable forms. Retain the legacy quotation-skeleton
+// checks as an additional defense for doctrine's existing refusal policy.
 func hasCredentials(text string) bool {
 	if credentialguard.Contains(text) {
-		return true
-	}
-	compatible := norm.NFKC.String(strings.Map(func(r rune) rune {
-		if isIgnoredFormat(r) {
-			return -1
-		}
-		return r
-	}, text))
-	if compatible != text && credentialguard.Contains(compatible) {
 		return true
 	}
 	normalized := normalizeProposalText(text)
