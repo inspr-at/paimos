@@ -287,7 +287,9 @@ func TestTierRequestVisibleOnUnopenedListRow(t *testing.T) {
 			row := raw.(map[string]any)
 			if row["id"] == id {
 				value, present := row["service_tier_request"]
-				if !present || value != want {
+				// With no pending request the optional field must be omitted,
+				// preserving the frozen no-request status/heartbeat bytes.
+				if present != (want != nil) || value != want {
 					t.Fatalf("unopened list request = %v (present %v), want %v", value, present, want)
 				}
 				return

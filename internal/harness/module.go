@@ -170,7 +170,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 type Session struct {
 	ServiceTier             *string                  `json:"service_tier,omitempty"`
 	ServiceTierRevision     int64                    `json:"service_tier_revision,omitempty"`
-	ServiceTierRequest      *string                  `json:"service_tier_request"`
+	ServiceTierRequest      *string                  `json:"service_tier_request,omitempty"`
 	ServiceTierReports      []servicetier.Report     `json:"service_tier_reports,omitempty"`
 	SupportedPauseLevels    []string                 `json:"supported_pause_levels,omitempty"`
 	PauseCanInterrupt       *bool                    `json:"pause_can_interrupt,omitempty"`
