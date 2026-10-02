@@ -608,6 +608,18 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = file.Close()
+		old := time.Now().Add(-8 * 24 * time.Hour)
+		if err := os.Chtimes(file.Name(), old, old); err != nil {
+			t.Fatal(err)
+		}
+		gc, err := attachments.GC(t.Context(), f.pool.App, f.store, f.tenantID, true)
+		if err != nil || gc.Candidates != 0 || gc.Removed != 0 {
+			t.Fatalf("live receipt GC %+v: %v", gc, err)
+		}
+		verified, err := attachments.Verify(t.Context(), f.pool.App, f.store, f.tenantID)
+		if err != nil || verified.Checked == 0 || len(verified.Issues) != 0 {
+			t.Fatalf("receipt inventory %+v: %v", verified, err)
+		}
 		status, body = f.call(nil, "GET", api+"/pdf", "")
 		if status != 200 || !strings.HasPrefix(body, "%PDF-") {
 			t.Fatalf("public accepted receipt download %d", status)

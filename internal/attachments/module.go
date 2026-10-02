@@ -150,7 +150,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 
 type pending struct {
 	name string
-	blob Prepared
+	blob *Staged
 }
 
 func cleanName(s string) string {
@@ -188,6 +188,11 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var files []pending
+	defer func() {
+		for _, f := range files {
+			_ = f.blob.Close()
+		}
+	}()
 	caption := ""
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if ct == "multipart/form-data" {
@@ -222,7 +227,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 				apierr(w, bad(400, "too many files"))
 				return
 			}
-			blob, err := m.Store.Put(r.Context(), p.TenantID, part)
+			blob, err := m.Store.Stage(r.Context(), p.TenantID, part)
 			if err != nil {
 				apierr(w, uploadError(err))
 				return
@@ -234,12 +239,13 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 			apierr(w, bad(415, "raw upload must be an image"))
 			return
 		}
-		blob, err := m.Store.Put(r.Context(), p.TenantID, r.Body)
+		blob, err := m.Store.Stage(r.Context(), p.TenantID, r.Body)
 		if err != nil {
 			apierr(w, uploadError(err))
 			return
 		}
 		if !blob.Image {
+			_ = blob.Close()
 			apierr(w, bad(415, "raw upload must be an image"))
 			return
 		}
@@ -257,6 +263,13 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 	out := make([]Attachment, 0, len(files))
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := liveNode(r.Context(), tx, p.TenantID, nodeID); err != nil {
+			return err
+		}
+		staged := make([]*Staged, 0, len(files))
+		for _, f := range files {
+			staged = append(staged, f.blob)
+		}
+		if err := Publish(r.Context(), tx, OwnerAttachment, staged...); err != nil {
 			return err
 		}
 		var pos int64

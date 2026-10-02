@@ -222,6 +222,12 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.WouldWrite++
 			continue
 		}
+		var staged []*attachments.Staged
+		closeStaged := func() {
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
+		}
 		if avatarPath != "" {
 			body, err := job.Source.avatar(ctx, avatarPath)
 			if err != nil {
@@ -248,17 +254,20 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			}
 			store := job.Store
 			store.MaxSize = 0
-			saved, err := store.Put(ctx, tenantID, bytes.NewReader(original))
+			saved, err := store.Stage(ctx, tenantID, bytes.NewReader(original))
 			if err != nil {
 				return report, err
 			}
+			staged = append(staged, saved)
 			after.AvatarOriginalHash = saved.SHA256
 			after.AvatarHashes = map[string]string{}
 			for size, b := range variants {
-				saved, err := store.Put(ctx, tenantID, bytes.NewReader(b))
+				saved, err := store.Stage(ctx, tenantID, bytes.NewReader(b))
 				if err != nil {
+					closeStaged()
 					return report, err
 				}
+				staged = append(staged, saved)
 				after.AvatarHashes[fmt.Sprint(size)] = saved.SHA256
 			}
 		}
@@ -278,6 +287,9 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				next.AvatarOriginalHash = after.AvatarOriginalHash
 				next.AvatarHashes = after.AvatarHashes
 			}
+			if err := attachments.Publish(ctx, tx, attachments.OwnerAvatar, staged...); err != nil {
+				return err
+			}
 			if same(current, next) {
 				return nil
 			}
@@ -287,6 +299,7 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.Written++
 			return nil
 		})
+		closeStaged()
 		if err != nil {
 			return report, err
 		}

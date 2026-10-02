@@ -277,7 +277,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 			if errors.Is(err, pgx.ErrNoRows) {
 				report.AssetsCreated++
 				if apply {
-					prepared, err := putProfileAsset(ctx, tenantID, a.raw, a.kind, filesDir)
+					prepared, err := putProfileAsset(ctx, tx, tenantID, a.raw, a.kind, filesDir)
 					if err != nil {
 						return fmt.Errorf("store asset %q: %w", p, err)
 					}
@@ -295,7 +295,7 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				}
 			} else if apply {
 				if file, err := (attachments.Store{FilesDir: filesDir}).Open(tenantID, a.hash, "original"); err != nil {
-					if _, err = putProfileAsset(ctx, tenantID, a.raw, a.kind, filesDir); err != nil {
+					if _, err = putProfileAsset(ctx, tx, tenantID, a.raw, a.kind, filesDir); err != nil {
 						return err
 					}
 				} else if err := file.Close(); err != nil {

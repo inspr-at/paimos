@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
+	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
@@ -169,27 +170,30 @@ func jpegOrientation(data []byte) int {
 	}
 	return 1
 }
-func (m *Module) storeAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) (string, map[string]string, error) {
+func (m *Module) stageAvatar(ctx *http.Request, tenantID string, data []byte, crop Crop) (staged []*attachments.Staged, err error) {
 	original, variants, err := ProcessAvatar(data, crop)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	store := m.Store
 	store.MaxSize = 0 // re-encoded PNG can exceed the upload limit
-	first, err := store.Put(ctx.Context(), tenantID, bytes.NewReader(original))
-	if err != nil {
-		return "", nil, err
-	}
-	hashes := map[string]string{}
-	for _, size := range []int{32, 64, 128, 256} {
-		v, err := store.Put(ctx.Context(), tenantID, bytes.NewReader(variants[size]))
+	defer func() {
 		if err != nil {
-			return "", nil, err
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
 		}
-		hashes[strconv.Itoa(size)] = v.SHA256
+	}()
+	for _, raw := range [][]byte{original, variants[32], variants[64], variants[128], variants[256]} {
+		blob, e := store.Stage(ctx.Context(), tenantID, bytes.NewReader(raw))
+		if e != nil {
+			return staged, e
+		}
+		staged = append(staged, blob)
 	}
-	return first.SHA256, hashes, nil
+	return staged, nil
 }
+
 func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	p, ok := actor(w, r)
 	if !ok {
@@ -237,7 +241,7 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid crop")
 		return
 	}
-	original, hashes, err := m.storeAvatar(r, p.TenantID, file, crop)
+	staged, err := m.stageAvatar(r, p.TenantID, file, crop)
 	if err != nil {
 		var invalid invalidInput
 		if errors.As(err, &invalid) {
@@ -247,6 +251,11 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	defer func() {
+		for _, blob := range staged {
+			_ = blob.Close()
+		}
+	}()
 	var out Profile
 	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		email, err := identityEmail(r.Context(), tx, p.TenantID, p.ID)
@@ -257,9 +266,15 @@ func (m *Module) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := attachments.Publish(r.Context(), tx, attachments.OwnerAvatar, staged...); err != nil {
+			return err
+		}
 		after := before
-		after.AvatarOriginalHash = original
-		after.AvatarHashes = hashes
+		after.AvatarOriginalHash = staged[0].SHA256
+		after.AvatarHashes = map[string]string{}
+		for i, size := range []int{32, 64, 128, 256} {
+			after.AvatarHashes[strconv.Itoa(size)] = staged[i+1].SHA256
+		}
 		if err := change(r.Context(), tx, p, before, exists, after); err != nil {
 			return err
 		}
