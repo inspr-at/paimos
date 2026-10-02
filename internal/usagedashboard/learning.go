@@ -3,6 +3,7 @@ package usagedashboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -53,54 +54,106 @@ type LearningSample struct {
 // identity are excluded rather than attributed to a guessed model. Wall time
 // and elapsed_seconds include waits and must never substitute for active_ms.
 // visible gates both the source project and the outcome project.
+// LoadLearningSamples preserves the sample-only API; callers displaying hints
+// use LoadLearningHistory to retain the explicit truncation state.
 func LoadLearningSamples(ctx context.Context, tx pgx.Tx, targets []LearningCell, project string, visible func(string) bool) ([]LearningSample, error) {
-	families := []string{}
+	samples, _, err := LoadLearningHistory(ctx, tx, targets, project, visible)
+	return samples, err
+}
+
+func LoadLearningHistory(ctx context.Context, tx pgx.Tx, targets []LearningCell, project string, visible func(string) bool) ([]LearningSample, bool, error) {
+	// Filter the registry before touching outcomes. Profile backoff spans kinds;
+	// same-line backoff only admits the requested effort/work placement.
+	if len(targets) == 0 {
+		return nil, false, nil
+	}
+	profileRows, err := tx.Query(ctx, `SELECT id::text,harness,family,model,effort FROM model_profiles
+ WHERE family=ANY($1::text[])`, learningFamilies(targets))
+	if err != nil {
+		return nil, false, err
+	}
+	profiles := []string{}
+	cells := []map[string]string{}
 	for _, c := range targets {
-		if !contains(families, c.Family) {
-			families = append(families, c.Family)
+		cells = append(cells, map[string]string{"profile": c.ProfileID, "kind": c.Kind, "bucket": c.Bucket, "effort": c.Effort})
+	}
+	for profileRows.Next() {
+		var p modelregistry.Profile
+		if err := profileRows.Scan(&p.ID, &p.Harness, &p.Family, &p.Model, &p.Effort); err != nil {
+			profileRows.Close()
+			return nil, false, err
+		}
+		for _, c := range targets {
+			if c.ProfileID == p.ID || (c.Family == p.Family && c.Line == CellFor(p, c.Kind, c.Bucket).Line && c.Effort == strings.ToLower(p.Effort)) {
+				profiles = append(profiles, p.ID)
+				break
+			}
 		}
 	}
-	if len(families) == 0 {
-		return nil, nil
-	}
-	// Resolve source permission before selecting windows, so hidden history
-	// cannot crowd visible samples out of the newest-30 window.
-	projectRows, err := tx.Query(ctx, `SELECT DISTINCT project_id::text FROM outcome_events
- WHERE kind='ticket_done' AND ($1::text='' OR project_id=NULLIF($1,'')::uuid) LIMIT 4097`, project)
+	err = profileRows.Err()
+	profileRows.Close()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	projects := []string{}
-	for projectRows.Next() {
-		var id string
-		if err := projectRows.Scan(&id); err != nil {
-			projectRows.Close()
-			return nil, err
-		}
-		projects = append(projects, id)
+	if len(profiles) == 0 {
+		return nil, false, nil
 	}
-	err = projectRows.Err()
-	projectRows.Close()
+	rawCells, err := json.Marshal(cells)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if len(projects) > 4096 {
-		return nil, workorders.Fail(http.StatusBadRequest, "too many history projects; narrow the project")
+	// A hard candidate bound is applied BEFORE session/usage aggregation. If
+	// reached, no biased subset is presented as calibrated history.
+	candidates, err := tx.Query(ctx, `SELECT o.ticket_node_id::text,o.project_id::text
+ FROM outcome_events o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.ticket_node_id
+ WHERE o.kind='ticket_done' AND o.session_id IS NOT NULL AND n.deleted_at IS NULL
+ AND ($1::text='' OR o.project_id=NULLIF($1,'')::uuid)
+ AND NOT EXISTS (SELECT 1 FROM outcome_events newer WHERE newer.tenant_id=o.tenant_id
+  AND newer.ticket_node_id=o.ticket_node_id AND newer.kind='ticket_done' AND newer.session_id IS NOT NULL
+  AND (newer.recorded_at,newer.id)>(o.recorded_at,o.id))
+ AND EXISTS (SELECT 1 FROM harness_sessions s
+  CROSS JOIN jsonb_to_recordset($3::jsonb) c(profile text,kind text,bucket text,effort text)
+  WHERE s.tenant_id=o.tenant_id AND s.ticket_node_id=o.ticket_node_id AND s.role='worker'
+   AND s.created_at<=o.recorded_at AND s.model_profile_id=ANY($2::uuid[])
+   AND (s.model_profile_id::text=c.profile OR
+    (s.work_placement->>'kind'=c.kind AND s.work_placement->>'bucket'=c.bucket AND lower(coalesce(s.reasoning_effort,''))=c.effort)))
+ ORDER BY o.recorded_at DESC,o.ticket_node_id LIMIT 12001`, project, profiles, string(rawCells))
+	if err != nil {
+		return nil, false, err
 	}
-	allowed := []string{}
-	for _, id := range projects {
-		if visible(id) {
-			allowed = append(allowed, id)
+	type candidateID struct{ ticket, project string }
+	pendingIDs := []candidateID{}
+	for candidates.Next() {
+		var c candidateID
+		if err := candidates.Scan(&c.ticket, &c.project); err != nil {
+			candidates.Close()
+			return nil, false, err
+		}
+		pendingIDs = append(pendingIDs, c)
+	}
+	err = candidates.Err()
+	candidates.Close()
+	if err != nil {
+		return nil, false, err
+	}
+	if len(pendingIDs) > maxLearningSamples {
+		return nil, true, nil
+	}
+	// Permission callbacks may query this transaction; close rows first.
+	ids := []string{}
+	for _, c := range pendingIDs {
+		if visible(c.project) {
+			ids = append(ids, c.ticket)
 		}
 	}
-	if len(allowed) == 0 {
-		return nil, nil
+	if len(ids) == 0 {
+		return nil, false, nil
 	}
 	rows, err := tx.Query(ctx, `WITH done AS (
  SELECT DISTINCT ON (o.ticket_node_id) o.ticket_node_id, o.project_id, o.recorded_at
  FROM outcome_events o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.ticket_node_id
  WHERE o.tenant_id=current_setting('aeon.tenant_id')::uuid AND o.kind='ticket_done'
- AND o.session_id IS NOT NULL AND n.deleted_at IS NULL AND o.project_id=ANY($3::uuid[])
+ AND o.session_id IS NOT NULL AND n.deleted_at IS NULL AND o.ticket_node_id=ANY($1::uuid[])
  AND ($2::text='' OR o.project_id=NULLIF($2,'')::uuid)
  ORDER BY o.ticket_node_id,o.recorded_at DESC,o.id DESC
 ), workers AS (
@@ -139,12 +192,12 @@ func LoadLearningSamples(ctx context.Context, tx pgx.Tx, targets []LearningCell,
  SELECT t.*,p.harness,p.family,p.model,p.effort AS profile_effort,
  row_number() OVER (PARTITION BY p.id,t.raw,t.effort,t.kind,t.bucket ORDER BY t.recorded_at DESC,t.ticket_node_id) AS rn
  FROM tickets t JOIN model_profiles p ON p.tenant_id=current_setting('aeon.tenant_id')::uuid AND p.id=t.profile_id::uuid
- WHERE p.family=ANY($1::text[])
+
 )
 SELECT project_id::text,source_project,profile_id,harness,family,model,profile_effort,raw,effort,kind,bucket,hours,tokens,estimate
-FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, families, project, allowed)
+FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, ids, project)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	type candidate struct {
@@ -157,13 +210,13 @@ FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, 
 	for rows.Next() {
 		count++
 		if count > maxLearningSamples {
-			return nil, workorders.Fail(http.StatusBadRequest, "too much model history; narrow the project")
+			return nil, true, nil
 		}
 		var p modelregistry.Profile
 		var sample LearningSample
 		var outcomeProject, sourceProject, raw, effort, kind, bucket string
 		if err := rows.Scan(&outcomeProject, &sourceProject, &p.ID, &p.Harness, &p.Family, &p.Model, &p.Effort, &raw, &effort, &kind, &bucket, &sample.Hours, &sample.Tokens, &sample.EstimateHours); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		// A conflicting reported effort is not the profile's effort.
@@ -187,7 +240,7 @@ FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, 
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	rows.Close()
 	// Permission callbacks may use this transaction; close the result first.
@@ -196,7 +249,17 @@ FROM ranked WHERE rn<=30 ORDER BY recorded_at DESC,ticket_node_id LIMIT 12001`, 
 			out = append(out, c.sample)
 		}
 	}
-	return out, nil
+	return out, false, nil
+}
+
+func learningFamilies(targets []LearningCell) []string {
+	out := []string{}
+	for _, c := range targets {
+		if !contains(out, c.Family) {
+			out = append(out, c.Family)
+		}
+	}
+	return out
 }
 
 func contains(ss []string, s string) bool {
@@ -320,9 +383,13 @@ func (m *Module) modelEstimates(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 		return nil, err
 	}
 	visible := func(project string) bool { return check("harness.read", project) }
-	samples, err := LoadLearningSamples(r.Context(), tx, []LearningCell{cell}, project, visible)
+	samples, truncated, err := LoadLearningHistory(r.Context(), tx, []LearningCell{cell}, project, visible)
 	if err != nil {
 		return nil, err
 	}
-	return History(samples, cell), nil
+	history := History(samples, cell)
+	if truncated {
+		history.Basis = "uncalibrated, history truncated (n=0)"
+	}
+	return history, nil
 }

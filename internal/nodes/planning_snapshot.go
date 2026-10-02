@@ -15,6 +15,7 @@ import (
 
 type estimateRateBasis struct {
 	planningCalibration
+	Speed              float64 `json:"speed,omitempty"`
 	TokensPerHourExact string  `json:"tokens_per_hour_exact"`
 	ListPerHour        *string `json:"list_per_hour,omitempty"`
 	PriceVersion       *int64  `json:"price_version,omitempty"`
@@ -74,14 +75,14 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 		return err
 	}
 	pl := &planner{routes: routes, samples: samples, billing: map[string]planBilling{}, calibrations: map[routeKey]calibration{}}
-	if err := pl.loadLearning(ctx, tx, func(p string) bool { return p == project }); err != nil {
+	if err := pl.loadLearning(ctx, tx, func(p string) bool { return p == project }, project); err != nil {
 		return err
 	}
 	row := rows[0]
 	route := pl.route(row)
 	cal := pl.calibration(route)
 	snap := planningSnapshot{ModelEstimate: pl.modelEstimate(row), Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,
-		RateBasis: estimateRateBasis{planningCalibration: planningCalibration{BasisText: cal.basisText, Level: cal.level, Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
+		RateBasis: estimateRateBasis{Speed: cal.speed, planningCalibration: planningCalibration{BasisText: cal.basisText, Level: cal.level, Basis: cal.basis, Tickets: cal.tickets, TokensPerHour: int64(math.Round(cal.tokensPerHour)), AnyRoute: route == nil}, TokensPerHourExact: strconv.FormatFloat(cal.tokensPerHour, 'f', -1, 64), CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
 	if route != nil {
 		snap.Route = route.view
 		if price := route.price; price != nil {

@@ -339,6 +339,10 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			evidence := actual["rate_basis"].(map[string]any)
 			delete(evidence, "basis_text")
 			delete(evidence, "level")
+			if evidence["speed"] != float64(1) {
+				t.Fatalf("legacy speed is not neutral: %v", evidence["speed"])
+			}
+			delete(evidence, "speed")
 			if !reflect.DeepEqual(a, b) {
 				t.Fatalf("%s snapshot changed: %s != %s", e.node.Key, raw, expectedRaw)
 			}

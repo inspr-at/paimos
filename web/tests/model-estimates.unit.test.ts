@@ -4,7 +4,7 @@ import { createSSRApp } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import ModelEstimateHint from '../src/components/settings/ModelEstimateHint.vue'
 import { modelEstimateHint, modelEstimateHistory, type ModelEstimateHistory } from '../src/lib/modelEstimates'
-import { modelCell, tokensCell, listCostCell, type PlanningRow } from '../src/lib/planning'
+import { modelCell, tokensCell, listCostCell, planningSortValue, type PlanningRow } from '../src/lib/planning'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn() }))
 
@@ -66,4 +66,36 @@ describe('honest planning estimates', () => {
     expect(modelCell(copy).tip).toContain('Model-adjusted hours: uncalibrated (n=4)')
     expect(modelCell(copy).tip).not.toContain('time factor')
   })
+  it('keeps frozen fallback comparisons with an uncalibrated label', () => {
+    const copy = structuredClone(row)
+    copy.state = 'in_progress'
+    copy.planning!.tokens.spent = 11_000_000
+    copy.planning!.cost!.list_spent = '11.000000'
+    copy.planning!.estimate_snapshot = { id: 's', started_at: '2026-10-02T10:00:00Z', source: 'session', estimate_hours: 2,
+      estimated_tokens: 10_000_000, estimated_cost_usd: '10.000000', route: copy.planning!.route,
+      rate_basis: { basis: 'default', tickets: 0, tokens_per_hour: 5_000_000 } }
+    for (const cell of [tokensCell(copy), listCostCell(copy)]) {
+      expect(cell.estimated).not.toBe('')
+      expect(cell.over).toBe(true)
+      expect(cell.tip).toContain('Uncalibrated')
+      expect(cell.tip).toContain('Estimate taken when work started')
+    }
+  })
+  it('sorts live fallback estimates as missing and preserves measured values', () => {
+    expect(planningSortValue(row, 'tokens')).toBeNull()
+    const copy = structuredClone(row)
+    copy.planning!.tokens.spent = 0
+    expect(planningSortValue(copy, 'tokens')).toBe(0)
+  })
+  it('labels epic sums partial when uncalibrated children are excluded', () => {
+    const copy = structuredClone(row)
+    copy.kind_slug = 'epic'
+    delete copy.planning!.tokens.calibration
+    copy.planning!.children = { total: 3, estimated: 1, uncalibrated: 2 }
+    for (const cell of [tokensCell(copy), listCostCell(copy)]) {
+      expect(cell.tip).toContain('partial: 2 uncalibrated children excluded')
+      expect(cell.tip).toContain('Sum of 1 of 3')
+    }
+  })
+
 })

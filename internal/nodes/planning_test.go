@@ -417,16 +417,16 @@ func TestListPlanningColumns(t *testing.T) {
 
 	// Epic: rolls up its open and done children, not the cancelled one.
 	e := views["PLN-1"]
-	if e == nil || e.Route != nil || e.Children == nil || e.Children.Total != 2 || e.Children.Estimated != 2 {
+	if e == nil || e.Route != nil || e.Children == nil || e.Children.Total != 2 || e.Children.Estimated != 0 || e.Children.Uncalibrated != 2 {
 		t.Fatalf("PLN-1 children: %#v", e)
 	}
 	if e.Tokens.Spent == nil || *e.Tokens.Spent != *b.Tokens.Spent || e.Tokens.Sessions != 3 {
 		t.Fatalf("PLN-1 spent: %#v", e.Tokens)
 	}
-	if e.Tokens.Estimated == nil || *e.Tokens.Estimated != 3*defaultTokensPerHour || e.Tokens.Calibration != nil {
+	if e.Tokens.Estimated != nil || e.Tokens.Calibration != nil {
 		t.Fatalf("PLN-1 estimate: %#v", e.Tokens)
 	}
-	if e.Cost == nil || *e.Cost.ListEstimated != "27.000000" || !e.Cost.ListUnpriced || *e.Cost.ListSpent != "4.480000" {
+	if e.Cost == nil || e.Cost.ListEstimated != nil || !e.Cost.ListUnpriced || *e.Cost.ListSpent != "4.480000" {
 		t.Fatalf("PLN-1 cost: %#v", e.Cost)
 	}
 

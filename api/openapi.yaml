@@ -13691,6 +13691,7 @@ components:
           properties:
             total: {type: integer, minimum: 0}
             estimated: {type: integer, minimum: 0}
+            uncalibrated: {type: integer, minimum: 0, description: Children with size estimates excluded from the sum because their rates are uncalibrated.}
     TicketEstimateSnapshot:
       type: object
       description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into the in-progress work bucket in a work episode. Kind state categories take precedence over fixed spellings, as in project work counts. Later estimates, QA, blocked and open transitions do not overwrite or close it. Only done, cancelled or archived work buckets close the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
@@ -13714,8 +13715,9 @@ components:
             any_route: {type: boolean}
             basis_text: {type: string}
             level: {type: string, enum: [cell, line, profile, route, default]}
-            tokens_per_hour_exact: {type: string, description: Unrounded tokens per hour used for the snapshot calculation.}
-            list_per_hour: {type: [string, 'null'], description: USD per hour frozen at start; omitted without harness.read.}
+            speed: {type: number, exclusiveMinimum: 0, description: Exact-cell speed factor frozen at start; defaults to 1 in older snapshots. Estimated tokens are rounded estimate_hours × tokens_per_hour_exact × speed.}
+            tokens_per_hour_exact: {type: string, description: Unrounded token rate before applying the frozen speed factor.}
+            list_per_hour: {type: [string, 'null'], description: Speed-scaled USD per size hour frozen at start; estimated cost is estimate_hours × list_per_hour. Omitted without harness.read.}
             price_version: {type: [integer, 'null']}
             input_usd_per_million: {type: [string, 'null']}
             output_usd_per_million: {type: [string, 'null']}

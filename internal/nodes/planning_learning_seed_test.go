@@ -17,7 +17,7 @@ import (
 )
 
 // All clocks are fixed; the active time deliberately differs from wall time.
-func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, provisional bool) {
+func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, provisional bool) nodeJSON {
 	t.Helper()
 	n := w.node(t, fmt.Sprintf("LEARN-%d", index), "ticket", w.root.ID, "done", nil)
 	order := w.node(t, fmt.Sprintf("LEARNORDER-%d", index), "work_order", w.root.ID, "open", nil)
@@ -51,6 +51,7 @@ func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, pr
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return n
 }
 
 func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
@@ -120,6 +121,9 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	view = planningOf(t, w.admin, path)[target.Key]
 	if view.Snapshot == nil || *view.Snapshot.Hours != 3 || *view.Snapshot.Tokens != 6_000_000 || *view.Snapshot.ModelEstimate.Hours != 6 {
 		t.Fatalf("snapshot lost size or speed: %+v", view.Snapshot)
+	}
+	if view.Snapshot.RateBasis.Speed != 2 || float64(*view.Snapshot.Tokens) != *view.Snapshot.Hours*float64(view.Snapshot.RateBasis.TokensPerHour)*view.Snapshot.RateBasis.Speed {
+		t.Fatalf("frozen rate cannot reproduce estimate: %+v", view.Snapshot)
 	}
 	code, raw := call(t, &w.admin, "PATCH", "/api/nodes/"+target.ID, `{"fields":{"estimate_hours":5}}`)
 	if code != 200 {

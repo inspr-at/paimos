@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (pl *planner) loadLearning(ctx context.Context, tx pgx.Tx, visible func(string) bool) error {
+func (pl *planner) loadLearning(ctx context.Context, tx pgx.Tx, visible func(string) bool, project ...string) error {
 	cells := []usagedashboard.LearningCell{}
 	seen := map[usagedashboard.LearningCell]bool{}
 	for _, route := range pl.routes {
@@ -18,9 +18,32 @@ func (pl *planner) loadLearning(ctx context.Context, tx pgx.Tx, visible func(str
 			seen[route.cell] = true
 		}
 	}
-	var err error
-	pl.learning, err = usagedashboard.LoadLearningSamples(ctx, tx, cells, "", visible)
-	return err
+	// A failed SQL hint must not poison the surrounding work-start transaction.
+	hintTx, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	scope := ""
+	if len(project) > 0 {
+		scope = project[0]
+	}
+	var truncated bool
+	pl.learning, truncated, err = usagedashboard.LoadLearningHistory(ctx, hintTx, cells, scope, visible)
+	if err != nil {
+		if rollbackErr := hintTx.Rollback(ctx); rollbackErr != nil {
+			return rollbackErr
+		}
+		pl.learning = nil
+		pl.learningIssue = "history unavailable"
+		return nil
+	}
+	if err := hintTx.Commit(ctx); err != nil {
+		return err
+	}
+	if truncated {
+		pl.learningIssue = "history truncated"
+	}
+	return nil
 }
 
 func scaledRate(rate *float64, speed float64) *float64 {
@@ -38,7 +61,18 @@ func (pl *planner) calibrateLearning(route *planRoute, key routeKey, mix *float6
 	out := calibrate(pl.samples, key, mix)
 	out.speed = 1
 	out.level = "route"
-	out.basisText = fmt.Sprintf("median of %d finished tickets on route %s %s %s (n=%d)", out.tickets, key.harness, key.model, key.effort, out.tickets)
+	on := "on any route"
+	if key.harness != "" {
+		on = fmt.Sprintf("on route %s %s %s", key.harness, key.model, key.effort)
+	}
+	out.basisText = fmt.Sprintf("median of finished tickets %s (n=%d)", on, out.tickets)
+	if pl.learningIssue != "" {
+		out = calibrate(nil, key, mix)
+		out.speed = 1
+		out.level = "default"
+		out.basisText = "uncalibrated, " + pl.learningIssue + " (n=0)"
+		return out
+	}
 	if route != nil {
 		cell := route.cell
 		history := usagedashboard.History(pl.learning, cell)
@@ -100,6 +134,9 @@ func (pl *planner) modelEstimate(row planRow) *usagedashboard.ModelEstimateHisto
 		return nil
 	}
 	history := usagedashboard.History(pl.learning, route.cell)
+	if pl.learningIssue != "" {
+		history.Basis = "uncalibrated, " + pl.learningIssue + " (n=0)"
+	}
 	// Typical historical hours are for the picker. Planning hours multiply
 	// this ticket's size only if its exact cell has a measured speed factor.
 	history.Hours = nil

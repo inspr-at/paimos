@@ -44,7 +44,7 @@ export interface PlanningSnapshot {
   model_estimate?: ModelEstimateHistory
   id: string; started_at: string; source: 'session' | 'status'; estimate_hours: number | null
   estimated_tokens: number | null; estimated_cost_usd?: string | null; route: PlanningRoute | null
-  rate_basis: PlanningCalibration & { list_per_hour?: string | null }
+  rate_basis: PlanningCalibration & { list_per_hour?: string | null; speed?: number }
 }
 export interface TicketPlanning {
   model_estimate?: ModelEstimateHistory
@@ -54,7 +54,7 @@ export interface TicketPlanning {
   route_gap?: 'area' | 'review_gate' | 'registry'
   tokens: PlanningTokens
   cost?: PlanningCost
-  children?: { total: number; estimated: number }
+  children?: { total: number; estimated: number; uncalibrated?: number }
 }
 // The part of a list row the planning cells read.
 export interface PlanningRow { kind_slug: string; fields: Record<string, unknown>; state?: string | null; eta?: { has_working_session?: boolean }; planning?: TicketPlanning }
@@ -199,11 +199,11 @@ function figure(row: PlanningRow, spent: number | null, est: number | null, form
 }
 function uncalibrated(row: PlanningRow): boolean {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
-  return cal?.basis === 'default'
+  return !row.planning?.estimate_snapshot && cal?.basis === 'default'
 }
 function uncalibratedLine(row: PlanningRow): string {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
-  return `Uncalibrated · insufficient model history (n=${cal?.tickets ?? 0})`
+  return cal?.basis_text?.includes("history truncated") || cal?.basis_text?.includes("history unavailable") ? `Uncalibrated · ${cal.basis_text}` : `Uncalibrated · insufficient model history (n=${cal?.tickets ?? 0})`
 }
 function modelDurationLine(row: PlanningRow): string {
   const history = row.planning?.estimate_snapshot?.model_estimate ?? row.planning?.model_estimate
@@ -216,7 +216,7 @@ function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const cal = snap?.rate_basis ?? tokens.calibration
   if (row.kind_slug === 'epic' && row.planning?.children) {
     const c = row.planning.children
-    return `Sum of ${c.estimated} of ${c.total} open and done children with an estimate`
+    return `Sum of ${c.estimated} of ${c.total} open and done children with an estimate${c.uncalibrated ? ` · partial: ${c.uncalibrated} uncalibrated ${c.uncalibrated === 1 ? "child excluded" : "children excluded"}` : ""}`
   }
   if (!cal) return ''
   if (cal.basis_text) return cal.basis_text
@@ -243,7 +243,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push([...comparison, ...(row.planning?.models?.length ? [row.planning.models.length === 1 ? row.planning.models[0]!.label : `${row.planning.models.length} models`] : [])].filter(Boolean).join(' · '))
     const sessions = live ? tokens!.running ?? tokens!.sessions : tokens!.sessions
     lines.push(`${sessions} session${sessions === 1 ? '' : 's'}${live ? ' running' : ''} · input ${grouped.format(tokens!.input)} (${grouped.format(tokens!.cached)} cached) · output ${grouped.format(tokens!.output)}`)
-    if (est !== null) lines.push(snapshotLine(row))
+    if (est !== null) { lines.push(snapshotLine(row)); if (snap?.rate_basis.basis === "default") lines.push(uncalibratedLine(row)) }
   } else if (est !== null) lines.push(`Estimated ~${formatTokenCount(est)} tokens · ${tokens?.sessions ? 'usage not reported yet' : 'no agent session yet'}`)
   else lines.push(uncalibrated(row) ? uncalibratedLine(row) : tokens?.sessions ? 'Usage not reported yet' : 'No agent session yet')
   if (spent === null && live) {
@@ -252,9 +252,11 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push(`${count} session${count === 1 ? '' : 's'} running${models.length === 1 ? ` on ${models[0]!.label}` : ''}`)
   }
   if (spent !== null && tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
-  if (tokens && est !== null && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
+  if (row.planning?.children?.uncalibrated) lines.push(basisLine(tokens!, row))
+  if (tokens && est !== null && !row.planning?.children?.uncalibrated && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
     const basis = basisLine(tokens, row); if (basis) lines.push(basis)
   }
+  if (spent === null && est !== null && snap?.rate_basis.basis === 'default') lines.push(uncalibratedLine(row), snapshotLine(row))
   return figure(row, spent, est, formatTokenCount, lines.join('\n'), ' tokens')
 }
 
@@ -279,16 +281,18 @@ export function listCostCell(row: PlanningRow): FigureCell {
       if (est !== null) lines.push(`Estimated ~${formatDollars(est)}${delta(spent, est, false)}`)
     }
     if (cost?.plans.length && subscription) lines.push(cost.plans.join(', '))
-    if (est !== null) lines.push(snapshotLine(row))
+    if (est !== null) { lines.push(snapshotLine(row)); if (snap?.rate_basis.basis === "default") lines.push(uncalibratedLine(row)) }
   } else if (est !== null) {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(uncalibrated(row) ? uncalibratedLine(row) : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
-  if (est !== null && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
+  if (row.planning?.children?.uncalibrated) lines.push(basisLine(row.planning.tokens, row))
+  if (est !== null && !row.planning?.children?.uncalibrated && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
     const basis = basisLine(row.planning.tokens, row); if (basis) lines.push(basis)
   }
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
+  if (spent === null && est !== null && snap?.rate_basis.basis === 'default') lines.push(uncalibratedLine(row), snapshotLine(row))
   return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)
 }
 
@@ -312,7 +316,7 @@ export function compareModelSort(a: PlanningRow, b: PlanningRow, desc: boolean):
 export function planningSortValue(row: PlanningRow, field: PlanningColumn): number | string | bigint | null {
   switch (field) {
     case 'model': return modelCell(row).fullName.toLowerCase() || null
-    case 'tokens': return row.planning?.tokens.spent ?? row.planning?.tokens.estimated ?? null
+    case 'tokens': return row.planning?.tokens.spent ?? (row.planning?.tokens.calibration?.basis === "default" ? null : row.planning?.tokens.estimated ?? null)
     case 'list_cost': return integerMicros(row.planning?.cost?.list_cost_micros)
     case 'paid': return integerMicros(row.planning?.cost?.paid_micros)
   }
