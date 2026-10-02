@@ -27,6 +27,8 @@ import (
 
 type StatusPublisher interface {
 	Configured(tenantID, repository string) bool
+	// "stale", nil confirms that error was posted on the reviewed SHA.
+	// "stale", err invalidates the local gate but requires another post attempt.
 	Publish(context.Context, string, Review, string) (string, error)
 }
 

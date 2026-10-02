@@ -115,7 +115,11 @@ func TestWebhookAuthenticationReplayAndFailedRevocation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			server.ServeHTTP(w, signedPullRequest(tc.body, tc.key))
+			request := signedPullRequest(tc.body, tc.key)
+			if tc.name == "unsigned" {
+				request.Header.Del("X-Hub-Signature-256")
+			}
+			server.ServeHTTP(w, request)
 			if w.Code != tc.code {
 				t.Fatalf("response %d, want %d", w.Code, tc.code)
 			}
@@ -155,6 +159,16 @@ func TestWebhookAuthenticationReplayAndFailedRevocation(t *testing.T) {
 	server.ServeHTTP(w, signedPullRequest(raw, secret))
 	if w.Code != 204 || len(s.posts) != 2 {
 		t.Fatal("replay changed an already revoked review")
+	}
+	conn, err := s.f.m.pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A reporter may have loaded this green snapshot before the webhook.
+	err = s.f.m.publishReview(t.Context(), conn, s.f.person.TenantID, v, nil)
+	conn.Release()
+	if err != nil || len(s.posts) != 2 {
+		t.Fatal("old in-flight snapshot revived a revoked status")
 	}
 	s.f.m.ConfigureWebhook(nil)
 	w = httptest.NewRecorder()
