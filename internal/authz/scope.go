@@ -36,6 +36,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/settings/status-autopilot":          true,
 	"GET /api/status-autopilot/changes":           true,
+	"GET /api/status-autopilot/proposals":         true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,

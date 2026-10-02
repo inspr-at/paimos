@@ -118,7 +118,7 @@ paths:
       security: [{session: []}, {agentKey: []}]
       responses:
         '200':
-          description: Default On; seven deterministic rules. Triage autopilot is separate.
+          description: Default On for new tenants; existing tenants suggest for 24 hours after upgrade or until owner confirmation. Server mode caps workspace and project policy. Triage autopilot is separate.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
@@ -137,6 +137,7 @@ paths:
                   required: [expected_revision]
                   properties:
                     expected_revision: {type: integer, minimum: 0}
+                    confirm_upgrade: {type: boolean, default: false, description: Explicit owner confirmation ends the upgrade suggestion period; requires ownership.transfer and never overrides server mode.}
       responses:
         '200':
           description: Saved settings and new revision
@@ -204,6 +205,44 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/StatusAutopilotChange'}
+  /status-autopilot/proposals:
+    get:
+      operationId: listStatusAutopilotProposals
+      summary: Pending status proposals without ticket mutations
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: All pending visible proposals, including stale proposals that can only be dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/StatusAutopilotProposal'}}
+  /status-autopilot/proposals/{eventId}:
+    parameters:
+      - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
+    put:
+      operationId: resolveStatusAutopilotProposal
+      summary: Apply or dismiss a proposal as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: {type: string, enum: [apply, dismiss]}
+      responses:
+        '200': {description: Applied or dismissed; returns an empty object}
+        '400': {description: Invalid proposal or action}
+        '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
+        '404': {description: Proposal not visible}
+        '409': {description: Proposal resolved or its ticket, rule or eligibility changed; reload}
   /from-classic/api/{legacyPath}:
     servers:
       - url: /
@@ -8277,6 +8316,9 @@ components:
       properties:
         enabled: {type: boolean, default: true}
         revision: {type: integer, minimum: 0, readOnly: true}
+        server_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        effective_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        suggest_until: {type: [string, 'null'], format: date-time, readOnly: true, description: Upgrade grace deadline; null for new or owner-confirmed tenants.}
         rules:
           type: object
           additionalProperties: false
@@ -8313,6 +8355,21 @@ components:
         undone: {type: boolean}
         changed_since: {type: boolean, description: A later ticket edit made the original change stale}
         undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
+    StatusAutopilotProposal:
+      type: object
+      required: [event_id, node_id, key, title, rule, reason, from, to, at, changed_since, applicable]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string, description: Proposed status or attention flag}
+        at: {type: string, format: date-time}
+        changed_since: {type: boolean}
+        applicable: {type: boolean, description: Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/systemactor"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,6 +18,10 @@ import (
 // remaining tickets are durably queued for the worker. A savepoint prevents an
 // automation failure from rolling back an otherwise valid release settlement.
 func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error {
+	mode, err := config.StatusAutopilotMode()
+	if err != nil || mode == "off" {
+		return err
+	}
 	batch, err := tx.Begin(ctx)
 	if err != nil {
 		return err
@@ -68,7 +72,7 @@ func queueReleaseTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) 
 
 func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string, now time.Time) (int, error) {
 	s, err := Load(ctx, tx)
-	if err != nil || !s.Rules["publish"].Enabled {
+	if err != nil || !s.Rules["publish"].Enabled || s.ModeAt(now) == "off" {
 		return 0, err
 	}
 	// Remove disappeared work without loading a missing release/ticket. These
@@ -120,13 +124,14 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 		if err != nil {
 			return 0, err
 		}
-		waiting := false
+		waiting, suggesting := false, false
 		c, _, err := loadCandidate(ctx, item, d.id, d.published)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
 		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !c.Since.After(d.published) {
 			waiting = pending(c.Node)
-			err = deliver(ctx, item, p, c, d.release, d.title, d.version)
+			suggesting = !waiting && s.ModeAt(now) == "suggest"
+			err = enact(ctx, item, p, c.Node, deliveryDecision(c.Node, d.release, d.title, d.version), s.ModeAt(now))
 		}
 		if err != nil {
 			if rollbackErr := item.Rollback(ctx); rollbackErr != nil {
@@ -135,7 +140,11 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 			slog.Error("status autopilot ticket deferred", "node_id", d.id, "err", err)
 			_, err = tx.Exec(ctx, `UPDATE status_autopilot_deliveries SET retry_after=$3 WHERE release_id=$1 AND node_id=$2`, d.release, d.id, now.Add(24*time.Hour))
 		} else {
-			if waiting {
+			if suggesting {
+				// Preserve publication work through the suggestion period. Deferring
+				// the row also makes a full proposal batch yield instead of spinning.
+				_, err = item.Exec(ctx, `UPDATE status_autopilot_deliveries SET retry_after=$3 WHERE release_id=$1 AND node_id=$2`, d.release, d.id, now.Add(time.Minute))
+			} else if waiting {
 				_, err = item.Exec(ctx, `UPDATE status_autopilot_deliveries SET checked=true WHERE release_id=$1 AND node_id=$2`, d.release, d.id)
 			} else {
 				_, err = item.Exec(ctx, `DELETE FROM status_autopilot_deliveries WHERE release_id=$1 AND node_id=$2`, d.release, d.id)
@@ -153,8 +162,7 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 	return max(len(work), int(cleaned.RowsAffected())), nil
 }
 
-func deliver(ctx context.Context, tx pgx.Tx, p tenant.Principal, c candidate, releaseID, title, version string) error {
-	n := c.Node
+func deliveryDecision(n node, releaseID, title, version string) decision {
 	d := decision{Rule: "publish", To: "delivered", Anchor: releaseID, Reason: fmt.Sprintf("Shipped in release %s (%s).", title, version)}
 	if pr := fieldString(n, "pr_url"); pr != "" {
 		d.Reason += " PR: " + pr + "."
@@ -168,5 +176,5 @@ func deliver(ctx context.Context, tx pgx.Tx, p tenant.Principal, c candidate, re
 		d.Anchor += "/human-check/" + *n.HumanCheck
 		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + title + " (" + version + ") was skipped."
 	}
-	return apply(ctx, tx, p, n, d)
+	return d
 }
