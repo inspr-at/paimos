@@ -4238,6 +4238,159 @@
           "group": "features"
         }
       ]
+    },
+    "261002171043.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 120,
+      "snapshot_sha256": "b1d59631cd1c4063d16b18ffe1e5613147f5344515868fdf4a782af93165a024",
+      "captured_at": "2026-10-02T17:10:54Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-432",
+          "pill_en": "Bigger rule budgets",
+          "pill_de": "Größere Regelbudgets",
+          "benefit_en": "You can give your agents up to 500 KB of rules, see what each one costs per session, and older clients simply receive what they can handle.",
+          "benefit_de": "Du kannst deinen Agenten bis zu 500 KB Regeln geben, siehst, was das pro Sitzung kostet, und ältere Clients bekommen einfach so viel, wie sie verarbeiten können.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-440",
+          "pill_en": "Easy attach approval",
+          "pill_de": "Einfache Anhänge-Freigabe",
+          "benefit_en": "When you attach to a session, Aeon shows you right away where to approve it, without searching.",
+          "benefit_de": "Wenn du dich an eine Sitzung anhängst, zeigt Aeon dir sofort, wo du freigibst, ohne Suchen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-454",
+          "pill_en": "Morning briefing",
+          "pill_de": "Briefing am Morgen",
+          "benefit_en": "Start the day knowing what your agents did overnight and what needs you, in two minutes.",
+          "benefit_de": "Starte den Tag in zwei Minuten mit dem Wissen, was deine Agenten über Nacht getan haben und was dich braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-460",
+          "pill_en": "Unforgeable Touch ID",
+          "pill_de": "Fälschungssichere Touch ID",
+          "benefit_en": "Only you, at your Mac, can approve an attach with Touch ID; no program on your computer can fake it.",
+          "benefit_de": "Nur du an deinem Mac kannst ein Andocken per Touch ID freigeben; kein Programm auf deinem Computer kann das fälschen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-502",
+          "pill_en": "Choose models per work",
+          "pill_de": "Modelle je Arbeit wählen",
+          "benefit_en": "You decide which models do which kind of work, for the company, for yourself or per project, and always see where a setting comes from.",
+          "benefit_de": "Sie legen fest, welche Modelle welche Arbeit erledigen – für das Unternehmen, für sich oder je Projekt – und sehen immer, woher eine Einstellung stammt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-511",
+          "pill_en": "Estimates versus real numbers",
+          "pill_de": "Schätzung oder echter Wert",
+          "benefit_en": "Every token, cost and model value in the ticket list shows whether it is an estimate or measured, and a hover shows the other value and how far the estimate was off.",
+          "benefit_de": "Jeder Token-, Kosten- und Modellwert in der Ticketliste zeigt, ob er geschätzt oder gemessen ist; beim Überfahren sehen Sie den anderen Wert und die Abweichung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-524",
+          "pill_en": "Pause and resume agents",
+          "pill_de": "Agenten pausieren und fortsetzen",
+          "benefit_en": "You can pause one or all agents before a restart or a break; each one stops at a clean handover point and picks up from there later.",
+          "benefit_de": "Sie können einzelne oder alle Agenten vor einem Neustart oder einer Pause anhalten; jeder stoppt an einem sauberen Übergabepunkt und macht später dort weiter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-541",
+          "pill_en": "Nothing jumps around",
+          "pill_de": "Nichts springt mehr",
+          "benefit_en": "Controls stay where they are while you choose, so you never have to chase a button with the mouse.",
+          "benefit_de": "Bedienelemente bleiben beim Auswählen an ihrem Platz, du musst keinem Knopf mit der Maus hinterherjagen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-542",
+          "pill_en": "Clear release badge",
+          "pill_de": "Klares Release-Abzeichen",
+          "benefit_en": "The release badge in the footer reads cleanly and says what it is at a glance.",
+          "benefit_de": "Das Release-Abzeichen in der Fußzeile ist sauber lesbar und sagt auf einen Blick, was es ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-543",
+          "pill_en": "Gemini and OpenCode ready",
+          "pill_de": "Gemini und OpenCode bereit",
+          "benefit_en": "Gemini CLI and OpenCode accounts can take work from the workspace like the other harnesses.",
+          "benefit_de": "Gemini-CLI- und OpenCode-Konten können Aufgaben aus dem Arbeitsbereich übernehmen wie die anderen Harnesses.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-556",
+          "pill_en": "Hide reserved versions",
+          "pill_de": "Reservierte ausblenden",
+          "benefit_en": "The release history shows only versions that were actually published; developers can still show reserved ones.",
+          "benefit_de": "Die Versionshistorie zeigt nur tatsächlich veröffentlichte Versionen; Entwickler können reservierte weiterhin einblenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-558",
+          "pill_en": "Safer access changes",
+          "pill_de": "Sicherere Rechteänderungen",
+          "benefit_en": "Access changes take effect immediately, also for invitations and uploads in flight.",
+          "benefit_de": "Rechteänderungen wirken sofort, auch für laufende Einladungen und Uploads.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-559",
+          "pill_en": "Robust image uploads",
+          "pill_de": "Robuste Bild-Uploads",
+          "benefit_en": "One oversized image can no longer tie up the server's memory.",
+          "benefit_de": "Ein übergroßes Bild kann den Arbeitsspeicher des Servers nicht mehr blockieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-561",
+          "pill_en": "No secrets in rules",
+          "pill_de": "Keine Geheimnisse in Regeln",
+          "benefit_en": "Published rules can no longer carry passwords or keys by mistake.",
+          "benefit_de": "Veröffentlichte Regeln können keine Passwörter oder Schlüssel mehr versehentlich enthalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-573",
+          "pill_en": "Recurring work",
+          "pill_de": "Wiederkehrende Arbeit",
+          "benefit_en": "Recurring tasks, like a weekly check or work after each release, now create their own tickets on time, without anyone having to remember them.",
+          "benefit_de": "Wiederkehrende Aufgaben wie eine wöchentliche Prüfung oder Arbeit nach jedem Release erstellen ihre Tickets jetzt selbst, ohne dass jemand daran denken muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-576",
+          "pill_en": "Tidier release list",
+          "pill_de": "Aufgeräumte Versionsliste",
+          "benefit_en": "Each release in the history reads on one line: name, badge and version side by side.",
+          "benefit_de": "Jede Version in der Historie steht in einer Zeile: Name, Kennzeichen und Versionsnummer nebeneinander.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-583",
+          "pill_en": "Reliable agent stops",
+          "pill_de": "Verlässliches Beenden von Agents",
+          "benefit_en": "Agent runs stop on time, even when a tool or child process hangs.",
+          "benefit_de": "Agent-Läufe enden pünktlich, auch wenn ein Werkzeug oder Kindprozess hängt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-586",
+          "pill_en": "Fewer deadlocks",
+          "pill_de": "Weniger Blockaden",
+          "benefit_en": "Concurrent edits no longer deadlock or silently overwrite each other.",
+          "benefit_de": "Gleichzeitige Änderungen blockieren sich nicht mehr und überschreiben sich nicht still.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
