@@ -2,6 +2,7 @@
 package releaseworkflow
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,6 +197,37 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 				if err != nil || string(b) != "image="+tc.response+"\n" {
 					t.Fatalf("resolver output %q, error %v", b, err)
 				}
+			}
+		})
+	}
+}
+
+func TestPublishedRuntimeMustMatchSmokedRuntime(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	pushIndex, _ := named(t, j, "Build and push")
+	identityIndex, identity := named(t, j, "Verify pushed runtime matches smoke")
+	attestIndex, _ := named(t, j, "Attest pushed image")
+	if !(pushIndex < identityIndex && identityIndex < attestIndex) || identity.If != "" || identity.ContinueOnError {
+		t.Fatal("runtime identity gate can be bypassed")
+	}
+	for _, different := range []bool{false, true} {
+		t.Run(fmt.Sprint(different), func(t *testing.T) {
+			dir := t.TempDir()
+			smoked := "sha256:" + strings.Repeat("a", 64)
+			published := smoked
+			if different {
+				published = "sha256:" + strings.Repeat("b", 64)
+			}
+			stub := "#!/bin/bash\nif [[ $1 == pull ]]; then exit 0; fi\nprintf '%s\\n' '" + published + "'\n"
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", identity.Run)
+			cmd.Dir = root(t)
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "SMOKED_IMAGE="+smoked, "DIGEST=sha256:"+strings.Repeat("c", 64))
+			output, err := cmd.CombinedOutput()
+			if (err != nil) != different {
+				t.Fatalf("identity gate error=%v output=%s", err, output)
 			}
 		})
 	}

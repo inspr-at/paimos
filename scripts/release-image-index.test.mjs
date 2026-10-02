@@ -4,9 +4,17 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { imageSources, verifyImageIndex } from './release-image-index.mjs';
+import { imageSources, verifyImageIndex, verifyRuntimeIdentity } from './release-image-index.mjs';
 
 const digest = character => `sha256:${character.repeat(64)}`;
+
+test('published runtime binds the exact smoked config and rootfs identity', () => {
+  verifyRuntimeIdentity(digest('a'), digest('a'));
+  for (const other of [digest('b'), '', 'latest', 'sha256:short', `${digest('a')}\n${digest('a')}`]) {
+    assert.throws(() => verifyRuntimeIdentity(digest('a'), other), /differs/);
+    assert.throws(() => verifyRuntimeIdentity(other, digest('a')), /differs/);
+  }
+});
 function fixture() {
   const descriptor = (character, platform, annotations) => ({
     mediaType: 'application/vnd.oci.image.manifest.v1+json', digest: digest(character), size: 100, platform, annotations,

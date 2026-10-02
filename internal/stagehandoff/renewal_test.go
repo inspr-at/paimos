@@ -112,6 +112,31 @@ func TestRenewalRequiresFreshPrepareDependency(t *testing.T) {
 	check("", true)
 	third := prepare(rev)
 	check(third.ID, false)
+	rev = recordGateRenewal(t, m, p, project, release, "permit")
+	check("", true)
+	fourth := prepare(rev)
+	check(fourth.ID, false)
+}
+
+func TestAccessRenewalFencesInflightReporterEvidence(t *testing.T) {
+	m, p, project, release, bearer := fixture(t)
+	var h Handoff
+	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		h, err = m.create(t.Context(), tx, p, RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "before-permit-renewal"}, "janus", []string{"authorization", "credential_handoff"}, "")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recordGateRenewal(t, m, p, project, release, "permit")
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	yes := true
+	e := EvidenceWrite{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now(), AuthorityEpoch: h.AuthorityEpoch, Authorized: &yes}
+	w := routedTestRequest(t, mux, p, bearer, "/api/stage-handoffs/"+h.ID+"/evidence", e)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "stale") {
+		t.Fatalf("stale Access reporter: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestRenewalClosesInflightHandoffAndUnconsumedAdmission(t *testing.T) {

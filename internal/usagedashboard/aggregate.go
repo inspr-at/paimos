@@ -278,6 +278,7 @@ func (m *Module) dashboard(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	out.Work = work
+	out.Truncated = out.Truncated || work.Truncated
 	return out, nil
 }
 

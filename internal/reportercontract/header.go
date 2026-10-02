@@ -19,7 +19,7 @@ const (
 	StageEvidence   = "stage-evidence/1.0"
 	StageResult     = "stage-result/1.0"
 	StageLaunch     = "stage-launch/1.0"
-	Journey         = "journey/1.3"
+	Journey         = "journey/1.4"
 	Me              = "me/1.2"
 	BaselineBatches = "baseline-batches/1.0"
 	Approvals       = "approvals/1.1"

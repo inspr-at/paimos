@@ -19,6 +19,15 @@ export function imageSources(directory) {
   return digests.map(digest => `ghcr.io/inspr-at/aeon@${digest}`);
 }
 
+// An image ID is the SHA256 of its config, which binds runtime settings and
+// the ordered uncompressed rootfs layer digests. Provenance changes the index,
+// not this identity. Require one exact ID from each Docker store lookup.
+export function verifyRuntimeIdentity(smoked, published) {
+  if (!digestPattern.test(smoked) || !digestPattern.test(published) || smoked !== published) {
+    throw new Error('Published runtime differs from the image that passed smoke');
+  }
+}
+
 export function verifyImageIndex(index) {
   if (index.schemaVersion !== 2 || index.mediaType !== 'application/vnd.oci.image.index.v1+json' || !Array.isArray(index.manifests)) {
     throw new Error('Expected an OCI image index');
@@ -48,10 +57,11 @@ export function verifyImageIndex(index) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
-    const [command, path] = process.argv.slice(2);
+    const [command, path, published] = process.argv.slice(2);
     if (command === 'sources' && path) console.log(imageSources(path).join('\n'));
+    else if (command === 'identity') verifyRuntimeIdentity(path, published);
     else if (command === 'verify' && path) verifyImageIndex(JSON.parse(readFileSync(path, 'utf8')));
-    else throw new Error('Usage: release-image-index.mjs sources <directory> | verify <index.json>');
+    else throw new Error('Usage: release-image-index.mjs sources <directory> | verify <index.json> | identity <smoked-image-id> <published-image-id>');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

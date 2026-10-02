@@ -111,7 +111,8 @@ func dependencySet(ctx context.Context, tx pgx.Tx, h Handoff, accessRequired boo
 		err := tx.QueryRow(ctx, `SELECT h.id::text,h.state,h.plan_digest,h.expires_at,
 			EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=h.tenant_id AND e.node_id=h.project_node_id
 			  AND e.after->>'current_release_id'=h.release_node_id::text
-			  AND e.type IN ('journey.candidate_renewed','journey.deploy_renewed')
+			  AND (e.type IN ('journey.candidate_renewed','journey.deploy_renewed')
+		       OR (e.type='journey.permit_renewed' AND h.stage='access'))
 			  AND (e.after->>'revision')::bigint>h.journey_revision)
 			FROM stage_handoffs h WHERE h.project_node_id=$4::uuid AND h.release_node_id=$1::uuid AND h.stage=$2 AND h.operation=$3
 			ORDER BY h.attempt DESC LIMIT 1`, h.ReleaseNodeID, req.stage, req.operation, h.ProjectNodeID).Scan(&id, &state, &dependencyPlan, &expires, &renewed)

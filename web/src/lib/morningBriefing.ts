@@ -96,7 +96,7 @@ export function sumBriefingUsage(dashboards: UsageDashboard[]): BriefingUsage {
   const state = dashboards.some(d => d.allowance.state === 'visible') ? 'visible' : dashboards.some(d => d.allowance.state === 'withheld') ? 'withheld' : 'none'
   return { totals, allowance: { state, windows }, truncated: dashboards.some(d => d.truncated) }
 }
-export const personJourneyActions = new Set(['continue_intake', 'confirm_brief', 'decide', 'reopen', 'approve_requirements', 'open_first_release', 'start_build', 'mark_candidate', 'approve_candidate', 'approve_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release', 'renew_candidate', 'renew_deploy'])
+export const personJourneyActions = new Set(['continue_intake', 'confirm_brief', 'decide', 'reopen', 'approve_requirements', 'open_first_release', 'start_build', 'mark_candidate', 'approve_candidate', 'approve_deploy', 'retry_deploy', 'approve_permit', 'plan_next_release', 'renew_candidate', 'renew_deploy', 'renew_permit'])
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function text(value: unknown): string { return typeof value === 'string' ? value : '' }
 export const ticketHref = (project: string, ticket: string) => `/p/${encodeURIComponent(project)}/${encodeURIComponent(ticket)}`

@@ -107,6 +107,7 @@ export interface WasteItem {
 }
 /** What agents got done and where the time went (AEON-301). */
 export interface UsageWork extends TokenParts {
+  truncated?: boolean
   basis: 'sessions_started_in_range'
   sessions: number
   worker_sessions: number

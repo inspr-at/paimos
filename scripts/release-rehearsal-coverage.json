@@ -283,6 +283,12 @@
       "step": "Build and push"
     },
     {
+      "counterpart": "TestPublishedRuntimeMustMatchSmokedRuntime",
+      "mode": "test",
+      "sha256": "12dfc2442e72779201759954058312829db388f038d1d29b5c958be9b2f00085",
+      "step": "Verify pushed runtime matches smoke"
+    },
+    {
       "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",
       "mode": "disabled",
       "sha256": "e636724e626643c5fb3c2962f2afb9242874ee62ba8f36841308f8cd7a9e3540",
