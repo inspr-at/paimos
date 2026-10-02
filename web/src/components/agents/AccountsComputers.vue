@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
-import { describeComputerStatus } from '../../lib/agentPairing'
+import { describeComputerStatus, touchIDConfirmation } from '../../lib/agentPairing'
 import {
   clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, when, whenFull, workStart,
   type AccountRow, type CapacitySchedule, type Override, type PoolView,
@@ -395,6 +395,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
             ><AppIcon name="more" :size="16" /></button>
           </div>
         </div>
+        <p v-if="card.computer" class="computer-confirmation">{{ touchIDConfirmation(card.computer) }}</p>
         <div v-if="card.notice" class="notice" role="status">
           <AppIcon name="alert" :size="16" class="n-icon" />
           <div class="n-text">
@@ -536,6 +537,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 </template>
 
 <style scoped>
+.computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--text-muted); font-size: 12px; }
 .ac { position: relative; display: grid; gap: 14px; min-width: 0; z-index: 3; container: ac / inline-size; }
 .ac-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
 .ac-title { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }
