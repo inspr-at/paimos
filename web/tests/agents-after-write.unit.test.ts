@@ -9,6 +9,8 @@ import { cancelRun, type AgentRunRow } from '../src/lib/agentRows'
 import { wired, wiredPage } from './wire-fixtures'
 import { disconnectComputer, removeComputer, type PairingView } from '../src/lib/agentPairing'
 import type { AccountCapacity, CapacitySchedule, ScheduleOverride } from '../src/lib/capacity'
+import { APIError } from '../src/lib/api'
+import { readDeskProjection } from '../src/lib/decisionDesk'
 import { clearPermissions } from '../src/lib/authz'
 import { resetPositions } from '../src/lib/position'
 import type { DeskProjection } from '../src/lib/decisionDesk'
@@ -34,7 +36,7 @@ vi.mock('../src/lib/agents', async importOriginal => ({
   listApprovals: async () => [], listModels: async () => [],
   listMessages: async () => ({ items: [] }), listTargets: async () => [],
 }))
-vi.mock('../src/lib/decisionDesk', () => ({ readDeskProjection: () => get(() => server.desk) }))
+vi.mock('../src/lib/decisionDesk', () => ({ readDeskProjection: vi.fn(() => get(() => server.desk)) }))
 vi.mock('../src/lib/agentRows', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agentRows')>(),
   listRuns: () => get(() => wiredPage(server.runs)),
@@ -61,6 +63,8 @@ const account = (id: string, state: AgentAccount['state'] = 'available') => ({ i
 const computer = (state: PairingView['computer_state']) => ({ computer_id: 'pc', request_id: 'req', computer_state: state, enrollments: [{ account_id: 'a', state: state === 'draining' ? 'draining' : 'active' }] }) as unknown as PairingView
 
 beforeEach(() => {
+  vi.mocked(readDeskProjection).mockReset()
+  vi.mocked(readDeskProjection).mockImplementation(() => get(() => server.desk))
   setActivePinia(createPinia())
   hold = false
   held.length = 0
@@ -181,35 +185,33 @@ it('a refresh after invalidate reads again instead of joining the dropped read',
   expect(read.data.value).toBe(2)
 })
 
-it('badge counts the current panel while the future desk adapter drops stale reads', async () => {
+it('badge counts the current panel until the complete desk cutover', async () => {
   const { agents } = await writeDuringReads(async ({ agents }) => {
-    server.desk = { ...server.desk, counts: { open: 6, held: 1, chores: 3 } }
     await agents.afterWrite()
   })
   expect(agents.pending).toHaveLength(0)
   expect(agents.needsCount).toBe(0)
   expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
-  expect(agents.deskProjection?.counts.open).toBe(6)
-  expect(agents.deskProjection?.counts.chores).toBe(3)
 })
 
-it.each([['access revocation', clearPermissions], ['person change', resetPositions]])('%s clears desk counts and prevents an old read reviving them', async (_label, reset) => {
+it.each(['loadAll', 'loadNeeds', 'afterWrite'] as const)('%s never polls the unconsumed projection or marks Agents stale on its failure', async action => {
+  const projection = vi.mocked(readDeskProjection)
+  projection.mockResolvedValueOnce(server.desk).mockRejectedValue(new APIError(500, 'projection unavailable'))
+  const agents = useAgents()
+  const refresh = () => action === 'loadNeeds' ? agents.loadNeeds(true) : agents[action]()
+  await refresh()
+  await refresh()
+  expect(agents.sessionsState).toBe('ready')
+  expect(agents.approvalsState).toBe('ready')
+  expect(agents.refreshStale).toBe(false)
+  expect(projection).not.toHaveBeenCalled()
+})
+
+it.each([['access revocation', clearPermissions], ['person change', resetPositions]])('%s does not restart unused desk polling', async (_label, reset) => {
   const agents = useAgents()
   await agents.loadNeeds(true)
-  expect(agents.deskProjection?.counts.open).toBe(8)
-  expect(agents.needsCount).toBe(0)
-  hold = true
-  const old = agents.loadNeeds(true)
-  expect(held).toHaveLength(1)
   reset()
-  expect(agents.needsCount).toBe(0)
-  expect(agents.deskState).toBe('idle')
-  for (const release of held.splice(0)) release()
-  await old
-  expect(agents.deskProjection).toBeNull()
-  hold = false
-  server.desk = { ...server.desk, counts: { open: 2, held: 0, chores: 0 } }
   await agents.loadNeeds(true)
-  expect(agents.deskProjection?.counts.open).toBe(2)
-  expect(agents.needsCount).toBe(0)
+  expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
+  expect(readDeskProjection).not.toHaveBeenCalled()
 })

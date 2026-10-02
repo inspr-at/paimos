@@ -26,7 +26,7 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}) {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}, setupPrelude = '') {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
   const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
@@ -90,7 +90,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
     '../components/work/PlanningCell.vue': { __esModule: true, default: { render: () => Vue.h('span') } },
   }
   const source = readFileSync(new URL('../src/views/MorningBriefingView.vue', import.meta.url), 'utf8')
-  const { descriptor } = parse(source)
+  const { descriptor } = parse(source.replace('<script setup lang="ts">', `<script setup lang="ts">\n${setupPrelude}`))
   const { content } = compileScript(descriptor, { id: 'briefing-test', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: Vue.Component } = {}
@@ -187,4 +187,11 @@ it('preserves held request body, project label and an app Source link', async ()
   const sources = flatten(root).filter(el => el.tag === 'a' && textOf(el) === 'Source')
   expect(sources.length).toBeGreaterThan(0)
   expect(sources.every(el => String(el.props.href).startsWith('/agents?needs='))).toBe(true)
+})
+
+// Positive control: the no-projection assertion must observe the export a view
+// would actually call, rather than passing because its mock uses another name.
+it('records calls to the real desk reader export in the briefing harness', async () => {
+  const { paths } = await mount({}, "import { readDeskProjection } from '../lib/decisionDesk'\nvoid readDeskProjection(100)\n")
+  expect(paths.filter(path => path.startsWith('/decision-desk/projection'))).toEqual(['/decision-desk/projection?limit=100'])
 })
