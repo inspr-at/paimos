@@ -1,11 +1,66 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { answerFor, arrivals, CUSTOM_ANSWER, draftFor, macPlatform, newRound, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
-import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type Question } from '../src/lib/decisionDeskApi'
+import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type DeskRead, type Question } from '../src/lib/decisionDeskApi'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
   input: { request_id: 'request', question: 'Which index?', options: [{ id: 'a', title: 'Partial', description: 'Smaller', answer: 'Use the partial index.' }], meanwhile: 'parked' }, askers: [], pending: [], created_at: '', updated_at: '' })
 afterEach(() => vi.unstubAllGlobals())
+function continuationRead(): DeskRead {
+  const q = question(), item = questionItem(q, 'Aeon'), sources = emptySources()
+  sources.questions.set(item.id, q)
+  return { items: [item], sources, warnings: [], hasMore: { open: true, answered: false },
+    questionPositions: { open: { pages: 1, cursors: [] }, answered: undefined }, projectNames: new Map([['project', 'Aeon']]) }
+}
+const heldRequest = (id: string) => ({ id, sender_principal_id: 'agent', recipient_principal_id: 'person', to: 'person', body: 'Please steer', sent_event_id: 1,
+  is_action_request: true, expects_reply: true, delivery_level: 'simple' as const, status: 'held' as const, reply_obligation: 'open' as const })
+it('removes projected action requests from both items and sources on continuation', async () => {
+  const first = continuationRead(), projected = heldRequest('projected'), unrelated = heldRequest('unrelated')
+  for (const message of [projected, unrelated]) {
+    const item = actionItem(message, 'project', 'Aeon')
+    first.sources.actions.set(item.id, message); first.items.push(item)
+  }
+  const q = { ...question(), id: 'next', input: { ...question().input, source_request_id: projected.id } }
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [q], has_more: false })))
+  const result = await loadMoreQuestions(first, 'open')
+  expect(result.items.some(item => item.id === 'm:projected')).toBe(false)
+  expect(result.items.map(item => item.id)).toEqual(['q:q1', 'q:next', 'm:unrelated'])
+  expect([...result.sources.actions.keys()]).toEqual(['m:unrelated'])
+  expect(result.sources.questions.get('q:next')!.input.source_request_id).toBe('projected')
+  expect(first.items.map(item => item.id)).toEqual(['q:q1', 'm:projected', 'm:unrelated'])
+  expect([...first.sources.actions.keys()]).toEqual(['m:projected', 'm:unrelated'])
+})
+it('merges continuation into the latest read after an in-flight decision', async () => {
+  const first = continuationRead()
+  let current = first
+  let release!: (response: Response) => void
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { release = resolve })))
+  const pending = loadMoreQuestions(first, 'open', () => current)
+  const decidedQuestion = { ...question(), revision: 2, state: 'answered' as const,
+    answer: { id: 'answer', revision: 2, answer: 'Use the partial index.', option_id: 'a', reason: 'Recorded while loading.', outcome: 'once' as const,
+      decided_by: 'person', created_at: '', deliver_after: '' } }
+  const decidedItem = questionItem(decidedQuestion, 'Aeon')
+  first.sources.questions.set(decidedItem.id, decidedQuestion)
+  current = { ...first, items: [decidedItem] }
+  release(Response.json({ items: [{ ...question(), id: 'next' }], has_more: false }))
+  const result = await pending
+  expect(result.items.find(item => item.id === decidedItem.id)).toEqual(decidedItem)
+  expect(result.sources.questions.get(decidedItem.id)).toEqual(decidedQuestion)
+  expect(result.items.map(item => item.id)).toEqual(['q:q1', 'q:next'])
+  expect(result.questionPositions.open!.pages).toBe(2)
+  expect(first.items[0]!.decided).toBe(false)
+})
+it('keeps continued questions and handovers before all protected items', async () => {
+  const first = continuationRead(), protectedItem = actionItem(heldRequest('held'), 'project', 'Aeon')
+  first.items.push(...(['approval', 'rule', 'action', 'tier'] as const).map(kind => ({ ...protectedItem, id: `${kind}:protected`, kind })))
+  const protectedItems = first.items.slice(1)
+  const q = { ...question(), id: 'next' }, handover = { ...question(), id: 'handover', input: { ...question().input, source_handover_id: 'handover' } }
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [q, handover], has_more: false })))
+  const result = await loadMoreQuestions(first, 'open')
+  expect(result.items.map(item => item.id)).toEqual(['q:q1', 'q:next', 'q:handover', ...protectedItems.map(item => item.id)])
+  expect(result.items.slice(3)).toEqual(protectedItems)
+  expect(result.items[2]!.kind).toBe('handover')
+})
 it('keeps Open offsets and answered cursors in separate request shapes', async () => {
   const fetch = vi.fn(async (_path: string) => Response.json({ items: [], has_more: false }))
   vi.stubGlobal('fetch', fetch)
