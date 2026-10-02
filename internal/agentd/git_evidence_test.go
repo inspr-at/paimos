@@ -70,6 +70,10 @@ func evidenceRepo(t *testing.T) (string, func(dir string, args ...string)) {
 	// maintenance can otherwise keep writing after CombinedOutput returns and
 	// race TempDir cleanup even when no collection is needed.
 	template := t.TempDir()
+	// Keep the usual metadata directory for attribute/graft attack fixtures.
+	if err := os.Mkdir(filepath.Join(template, "info"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	config := "[gc]\n\tauto = 0\n\tautoDetach = false\n[maintenance]\n\tauto = false\n\tautoDetach = false\n"
 	if err := os.WriteFile(filepath.Join(template, "config"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
