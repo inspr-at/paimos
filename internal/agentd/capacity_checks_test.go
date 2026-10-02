@@ -540,3 +540,21 @@ func TestCapacityCheckAuthenticationCauseSurvivesHealthProbe(t *testing.T) {
 		t.Fatal("unsupported capture cleared identity stop")
 	}
 }
+
+func TestCapacityCheckRestartKeepsIdentityFenceBeforeHealthPoll(t *testing.T) {
+	s, api, a, clock := checkFixture(t)
+	a.result = "identity_mismatch"
+	tickChecks(t, s, clock)
+	root, workspace, accounts := s.state.Path(), s.workspace, s.accounts
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: root, Workspace: workspace, DaemonID: "daemon", Accounts: accounts, Adapters: []Adapter{a}, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(t.Context())
+	if !restarted.blockedAccounts["account"] {
+		t.Fatal("restart briefly opened identity fence")
+	}
+}

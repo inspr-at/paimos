@@ -203,6 +203,9 @@ func (s *Supervisor) loadCapacityChecks() error {
 			s.capacityAccountID = id
 		}
 		s.capacityChecks[id] = v
+		if v.LastResult == "identity_mismatch" || v.LastResult == "authentication_failed" {
+			s.blockedAccounts[id] = true
+		}
 	}
 	return nil
 }
@@ -384,7 +387,9 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		}
 		saved.Failures = min(saved.Failures+1, 1000000)
 		saved.NextAttempt = now.Add(checkRetry(saved.Failures))
-		saved.LastResult = "timeout"
+		if !identityFailure {
+			saved.LastResult = "timeout"
+		}
 	}
 	s.mu.Lock()
 	s.capacityChecks[local.ID] = saved
