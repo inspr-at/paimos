@@ -147,7 +147,7 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 					t.Fatalf("outside-ceiling rotation status = %d for %s", w.Code, tc.scope)
 				}
 			}
-			rotationScopes := tc.Want
+			rotationScopes := key.Scopes
 			body := map[string]any{"rotate_key_id": key.ID}
 			if tc.RotationWant != nil {
 				rotationScopes = tc.RotationWant
