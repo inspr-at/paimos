@@ -219,7 +219,8 @@
 // Readiness evaluates the same non-mutating admission policy, including fresh
 // fact-only reserves, manual window pace and recovery eligibility, without
 // consuming the permit. Recovery uses the same current sibling/resource
-// authority at reservation and claim; withdrawn pools/revisions release holds.
+// authority at reservation and claim; withdrawn pools and stale membership
+// revisions release holds.
 // Manual allowances cap work but never make unknown vendor usage measured.
 // A restarted heartbeat survives rejection of an obsolete pending check. The
 // 409 response identifies the committed heartbeat; stale facts are discarded,

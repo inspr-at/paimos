@@ -80,7 +80,7 @@ func TestQueuedMeasuredReservationRecoversThroughClaim(t *testing.T) {
 }
 
 func TestPooledSiblingLocalRecoveryThroughClaim(t *testing.T) {
-	for _, change := range []string{"unchanged", "withdrawn", "revision"} {
+	for _, change := range []string{"unchanged", "withdrawn", "stale_revision"} {
 		t.Run(change, func(t *testing.T) {
 			f := setup(t)
 			agentaccounts.New(f.d.App).Mount(f.mux)
@@ -115,12 +115,20 @@ func TestPooledSiblingLocalRecoveryThroughClaim(t *testing.T) {
 			if change != "unchanged" {
 				f.tx(t, f.agent, func(tx pgx.Tx) error {
 					query := `UPDATE agent_accounts SET quota_pool_fingerprint='' WHERE id=$1`
-					if change == "revision" {
-						query = `UPDATE agent_accounts SET link_revision=link_revision+1 WHERE id=$1`
+					if change == "stale_revision" {
+						// Normal relinking renews local memberships via the DB
+						// trigger. Keep this membership at its obsolete revision
+						// to test the current-authority fence itself.
+						query = `UPDATE account_readiness_memberships SET binding_revision=binding_revision+1 WHERE account_id=$1 AND resource_id=$2`
+						_, err := tx.Exec(t.Context(), query, sibling, resource)
+						return err
 					}
 					_, err := tx.Exec(t.Context(), query, sibling)
 					return err
 				})
+				if change == "stale_revision" && f.count(t, f.person, `SELECT count(*) FROM account_readiness_memberships m JOIN agent_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND m.resource_id=$2 AND m.binding_revision<>a.link_revision`, sibling, resource) != 1 {
+					t.Fatal("fixture renewed the membership revision being fenced")
+				}
 				f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
 				if f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, run.ID) != 0 ||
 					f.count(t, f.person, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NOT NULL`, resource) != 0 {
