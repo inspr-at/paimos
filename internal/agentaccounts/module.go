@@ -128,7 +128,11 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 				for i := range items {
 					a := &items[i]
 					if err := agentpairing.AccountFence(r.Context(), tx, a.ID, false); err != nil {
-						continue
+						var fence *agentpairing.Error
+						if errors.As(err, &fence) {
+							continue
+						}
+						return err
 					}
 					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending'`, a.ID, a.LinkRevision))
 					if err != nil && !isNoRows(err) {

@@ -437,6 +437,7 @@ func TestReadinessPairingRevocationInvalidatesPending(t *testing.T) {
 			path := "/api/agent-accounts/" + f.account.ID
 			var c AccountCheck
 			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("paired", 0), 202, &c)
+			callStatus(t, f.mod, &f.admin, "", "PUT", path+"/sharing", `{"binding_revision":0,"share_usage":true}`, 204, nil)
 			query := `UPDATE agent_pairing_enrollments SET ongoing_approved_at=NULL WHERE account_id=$1`
 			status := 409
 			if scope == "computer" {
@@ -448,6 +449,11 @@ func TestReadinessPairingRevocationInvalidatesPending(t *testing.T) {
 			}
 			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, c.ID) != 1 {
 				t.Fatal("revoked pairing retained pending check")
+			}
+			// Privacy controls remain available when execution consent is revoked.
+			callStatus(t, f.mod, &f.admin, "", "PUT", path+"/sharing", `{"binding_revision":0,"share_usage":false}`, 204, nil)
+			if scalar(t, f.admin, `SELECT count(*) FROM agent_accounts WHERE id=$1 AND share_usage`, f.account.ID) != 0 {
+				t.Fatal("revoked computer prevented privacy withdrawal")
 			}
 			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("paired-retry", 0), status, nil)
 			callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: c.ID, BindingRevision: ptrRevision(0), Result: "success"}}), status, nil)

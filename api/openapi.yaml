@@ -6647,7 +6647,7 @@ paths:
     put:
       operationId: setAgentAccountUsageSharing
       summary: Owner opts quota details into workspace sharing
-      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
+      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Owners retain sharing control after computer or ongoing-use revocation; sharing never grants execution authority. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
       security: [{session: []}]
       parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody:

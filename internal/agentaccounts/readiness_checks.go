@@ -58,7 +58,7 @@ func (m *Module) inReadinessWrite(ctx context.Context, p tenant.Principal, fn fu
 	})
 }
 
-func requireCheckOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, revision int64) (Account, error) {
+func requireReadinessOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, revision int64) (Account, error) {
 	if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) != nil {
 		return Account{}, fail(403, "person account management required")
 	}
@@ -72,6 +72,15 @@ func requireCheckOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id st
 	if a.LinkRevision != revision {
 		return a, &httpError{status: 409, code: "stale_binding", msg: "account binding changed"}
 	}
+	return a, nil
+}
+
+func requireCheckOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, revision int64) (Account, error) {
+	a, err := requireReadinessOwner(ctx, tx, p, id, revision)
+	if err != nil {
+		return a, err
+	}
+
 	if err := agentpairing.AccountFence(ctx, tx, id, false); err != nil {
 		return a, err
 	}
@@ -179,6 +188,9 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 }
 
 func (m *Module) check(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -214,6 +226,9 @@ func (m *Module) check(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) sharing(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -237,7 +252,7 @@ func (m *Module) sharing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
-		if _, err := requireCheckOwner(r.Context(), tx, p, id, *in.BindingRevision); err != nil {
+		if _, err := requireReadinessOwner(r.Context(), tx, p, id, *in.BindingRevision); err != nil {
 			return err
 		}
 		tag, err := tx.Exec(r.Context(), `UPDATE agent_accounts SET share_usage=$2 WHERE id=$1 AND share_usage<>$2`, id, *in.ShareUsage)
