@@ -20,6 +20,10 @@ const roleDetail = computed(() => POLICY_ROLES.find(item => item.id === role.val
 const observedAt = ref(Date.now())
 const sheet = ref<HTMLDialogElement | null>(null), detailsButton = ref<HTMLButtonElement | null>(null)
 const ready = computed(() => tab.value === 'elsewhere' || permissionsKnown())
+const statusText = computed(() => state.value === 'loading' ? 'Loading the rules…' : state.value === 'denied' ? deniedPolicy(tab.value) : state.value === 'failed' ? 'The rules could not be loaded. Try opening this tab again; the other tabs still work.' : ladder.value?.truncated ? truncatedLadder() : '')
+const announcement = ref('')
+// Populate the already-mounted region, including the first loading message.
+watch(statusText, async () => { await nextTick(); announcement.value = statusText.value }, { immediate: true })
 function closeDetails() { sheet.value?.close(); detailsButton.value?.focus({ preventScroll: true }) }
 async function openDetails() { await nextTick(); sheet.value?.showModal() }
 function load() {
@@ -54,8 +58,12 @@ function tabKey(event: KeyboardEvent, index: number) {
         <span>{{ item.label }}</span><small>{{ item.note }}</small>
       </button>
     </div>
+    <p role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
+    <template v-for="panelTab in POLICY_TABS" :key="panelTab.id">
+      <div v-if="tab !== panelTab.id" :id="`policy-panel-${panelTab.id}`" role="tabpanel" :aria-labelledby="`policy-tab-${panelTab.id}`" hidden />
+    </template>
     <div :id="`policy-panel-${tab}`" role="tabpanel" :aria-labelledby="`policy-tab-${tab}`" class="policy-panel">
-      <div v-if="permitted && state !== 'denied'" class="policy-controls">
+      <div v-if="permitted" class="policy-controls">
         <p class="source-note">{{ tab === 'ladders' ? 'Configured ladder · owned by Model registry. CLI and dispatch use different checks.' : tab === 'keys' ? 'Permission registry · owned by Access. These permissions cannot be carried by agent keys.' : 'Existing owners · this page holds no policy values of its own.' }}</p>
         <button ref="detailsButton" class="detail-link" data-testid="policies-row-link" @click="openDetails">About these rules <AppIcon name="chevron-right" :size="14" /></button>
         <div v-if="tab === 'ladders'" class="role-block">
@@ -69,25 +77,27 @@ function tabKey(event: KeyboardEvent, index: number) {
         </nav>
       </div>
       <div class="policy-content" :aria-busy="state === 'loading'">
-        <p v-if="state === 'loading'" role="status" class="state-line">Loading the rules…</p>
-        <p v-else-if="state === 'denied'" role="status" class="state-line">{{ deniedPolicy(tab) }}</p>
-        <p v-else-if="state === 'failed'" role="status" class="state-line">The rules could not be loaded. Try opening this tab again; the other tabs still work.</p>
+        <p v-if="state === 'loading' || state === 'denied' || state === 'failed'" class="state-line">{{ statusText }}</p>
         <template v-else-if="tab === 'ladders' && ladder">
           <p v-if="!ladder.setup" class="state-line">The model registry is not set up yet.</p>
           <p v-else-if="!ladder.steps.length" class="state-line">No steps are configured for this role.</p>
-          <ol v-else class="ladder" aria-label="Configured ladder">
-            <li v-for="(step, index) in ladder.steps" :key="step.profile_id" class="policy-row">
-              <span class="step-number" aria-hidden="true">{{ String(index + 1).padStart(2, '0') }}</span>
-              <div><h3>{{ stepName(step) }}</h3><p>{{ step.profile.family }} · {{ step.profile.harness }} · {{ step.profile.effort }}</p><p class="step-state">{{ stepState(step, observedAt) }}{{ !step.profile.enabled ? ' · profile disabled' : '' }}</p></div>
-              <span class="rule-status">Enforced</span>
-            </li>
-          </ol>
-          <p v-if="ladder.truncated" class="truncation" role="status">{{ truncatedLadder() }}</p>
+          <template v-else>
+            <p class="list-status">Enforced</p>
+            <ol class="ladder" aria-label="Configured ladder">
+              <li v-for="(step, index) in ladder.steps" :key="step.profile_id" class="policy-row">
+                <span class="step-number" aria-hidden="true">{{ String(index + 1).padStart(2, '0') }}</span>
+                <div><h3>{{ stepName(step) }}</h3><p>{{ step.profile.family }} · {{ step.profile.harness }} · {{ step.profile.effort }}</p><p class="step-state">{{ stepState(step, observedAt) }}{{ !step.profile.enabled ? ' · profile disabled' : '' }}</p></div>
+              </li>
+            </ol>
+          </template>
+          <p v-if="ladder.truncated" class="truncation">{{ truncatedLadder() }}</p>
           <div class="routing-notes">
             <p><strong>CLI</strong> follows configured priority and harness health, without ticket context.</p>
-            <p><strong>Dispatch</strong> applies family order, review floors, platform capability, approved accounts and model preferences.</p>
-            <p>Built-in review family order: {{ ladder.dispatch_family_order.join(', then ') }}.</p>
-            <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
+            <p><strong>Dispatch</strong> qualifies profiles and accounts for the work, then applies model preferences.</p>
+            <template v-if="role === 'review-gate'">
+              <p>Built-in review family order: {{ ladder.dispatch_family_order.join(', then ') }}.</p>
+              <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
+            </template>
           </div>
         </template>
         <template v-else-if="tab === 'keys'">
@@ -111,13 +121,17 @@ function tabKey(event: KeyboardEvent, index: number) {
       <div class="sheet-body">
         <template v-if="tab === 'ladders' && ladder">
           <h3>Configured ladder · CLI</h3><p>The CLI walks the configured priority and harness health. It has no ticket context. A listed step is not a promise that dispatch can run it.</p>
-          <h3>Qualified routing · Dispatch</h3><p>Dispatch uses {{ ladder.dispatch_family_order.join(', ') }} as its built-in review family order, then applies further qualification and preferences.</p>
-          <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
+          <h3>Qualified routing · Dispatch</h3><p>Dispatch checks platform capability and approved accounts for the work, then applies model preferences.</p>
+          <template v-if="role === 'review-gate'">
+            <p>Dispatch uses {{ ladder.dispatch_family_order.join(', ') }} as its built-in review family order.</p>
+            <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
+          </template>
           <h3>Availability</h3><p>A suspended step records its reason and expiry. Once the suspension expires, it stops excluding that profile. The server decides availability when routing runs.</p>
           <p v-if="ladder.truncated">{{ truncatedLadder() }}</p>
         </template>
         <template v-else-if="tab === 'keys'"><h3>Permission registry · Access</h3><p>These permissions are marked as not grantable to agent keys in the live registry. Holding a role does not bypass a key’s scope ceiling.</p><p>This registry endpoint is available to person sessions with See roles. Bearer keys are refused by the middleware even when they hold See roles.</p></template>
-        <template v-else><h3>The existing owner decides</h3><p>This page reads existing rules. It stores no policy, grants no exception and changes no enforcement.</p><p>Enforced describes existing checks in this workspace. Advisory describes guidance or rules owned elsewhere, including GitHub repository controls.</p><p>Editors are linked only where an existing screen and your permissions allow it. Model preferences, ladder editing and lane coordination have no editor screen here.</p></template>
+        <template v-else-if="tab === 'elsewhere'"><h3>The existing owner decides</h3><p>This page reads existing rules. It stores no policy, grants no exception and changes no enforcement.</p><p>Enforced describes existing checks in this workspace. Advisory describes guidance or rules owned elsewhere, including GitHub repository controls.</p><p>Editors are linked only where an existing screen and your permissions allow it. Model preferences, ladder editing and lane coordination have no editor screen here.</p></template>
+        <p v-else>{{ statusText || 'Open this tab again to load its rules.' }}</p>
       </div>
       <footer><button class="btn" data-testid="policies-sheet-close" @click="closeDetails">Close <kbd>Esc</kbd></button></footer>
     </dialog>
@@ -133,7 +147,7 @@ function tabKey(event: KeyboardEvent, index: number) {
 .policy-tabs button { display: flex; flex-direction: column; justify-content: center; gap: 5px; height: 78px; text-align: left; padding: 10px 14px; background: transparent; color: var(--ink-2); border: 0; font-size: 13px; }
 .policy-tabs button[aria-selected="true"] { background: var(--row-selected); color: var(--ink); }
 .policy-tabs button span { font-weight: 650; }
-.policy-tabs small { font-size: 11px; line-height: 1.4; font-weight: 400; }
+.policy-tabs small { font-size: 12px; line-height: 1.4; font-weight: 400; }
 .policy-tabs button:focus-visible, .policy-roles button:focus-visible, .detail-link:focus-visible, .owner-links a:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .policy-controls { padding-top: 18px; }
 .source-note { min-height: 42px; margin: 0; }
@@ -142,17 +156,18 @@ function tabKey(event: KeyboardEvent, index: number) {
 .policy-roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .policy-roles button { height: 42px; padding: 6px; font-size: 12px; border: 1px solid var(--line-2); border-radius: 3px; background: transparent; color: var(--ink-2); }
 .policy-roles button[aria-pressed="true"] { background: var(--row-selected); color: var(--ink); font-weight: 650; }
-.role-detail { height: 42px; margin: 10px 0 0; font-size: 12px; }
+.role-detail { height: 42px; margin: 10px 0 0; }
 .owner-links { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0 18px; }
 .owner-links a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--teal-ink); min-height: 28px; }
 .policy-content { overflow-wrap: anywhere; }
 .state-line { margin: 0; padding: 20px 0; }
 .ladder { list-style: none; padding: 0; margin: 0; }
-.policy-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
+.policy-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
 .policy-row h3 { font-size: 14px; font-weight: 650; margin: 0 0 4px; }
 .policy-row p { margin: 0; }
 .step-number { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
 .rule-status { font-size: 11px; color: var(--ink-2); padding-top: 3px; }
+.list-status { font-size: 12px; color: var(--ink-2); margin: 0; padding: 8px 0; }
 .step-state { margin-top: 5px !important; }
 .key-row { grid-template-columns: minmax(0, 1fr) auto; }
 .policy-row code, .owner { display: block; margin-top: 6px; font-size: 11px; color: var(--ink-3); }
@@ -173,11 +188,12 @@ function tabKey(event: KeyboardEvent, index: number) {
 .policy-sheet kbd { font-size: 10px; color: var(--ink-2); }
 @media (max-width: 600px) {
   .policy-tabs button { padding: 8px; height: 100px; font-size: 12px; }
-  .policy-tabs small { font-size: 10px; }
   .source-note { min-height: 63px; }
-  .policy-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .policy-roles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .policy-roles button { grid-column: span 2; }
+  .policy-roles button:nth-last-child(-n+2) { grid-column: span 3; }
   .role-detail { height: 42px; }
-  .policy-row { gap: 8px; grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .policy-row { gap: 8px; grid-template-columns: 22px minmax(0, 1fr); }
   .key-row { grid-template-columns: minmax(0, 1fr) auto; }
   .policy-sheet { inset: 0; margin: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .policy-sheet header { padding: 22px 20px 16px; }

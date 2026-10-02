@@ -31,11 +31,12 @@ type routesRead struct {
 }
 
 func dispatchFamilyOrder() []string {
-	families := make([]string, 0, len(ReviewFamilyRank))
-	for family := range ReviewFamilyRank {
+	ranks := ReviewFamilyRank()
+	families := make([]string, 0, len(ranks))
+	for family := range ranks {
 		families = append(families, family)
 	}
-	sort.Slice(families, func(i, j int) bool { return ReviewFamilyRank[families[i]] < ReviewFamilyRank[families[j]] })
+	sort.Slice(families, func(i, j int) bool { return ranks[families[i]] < ranks[families[j]] })
 	return families
 }
 

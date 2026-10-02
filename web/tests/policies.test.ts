@@ -82,7 +82,7 @@ test('live registry exclusions group by risk, and owner links need actual destin
 test('truncation and suspension expiry are honest with an injected observation time', () => {
   const now = Date.parse('2026-10-02T18:00:00Z')
   const step = { state: 'unavailable', reason: 'out of credit', valid_until: '2026-10-02T19:30:00Z' } as PolicyStep
-  assert.match(stepState(step, now), /Unavailable · out of credit · until/)
+  assert.equal(stepState(step, now), 'Unavailable · out of credit · until 19:30 UTC (2 Oct 2026)')
   assert.equal(stepState(step, now + 7200000), 'Suspension expired · eligible again')
   assert.match(truncatedLadder(), /first 50 steps; the rest are applied by AEON but not listed here/)
 })

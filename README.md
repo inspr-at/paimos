@@ -24,6 +24,10 @@ ordered by priority and profile id, with at most 50 steps and an explicit
 profiles or events. The read applies a five-second statement timeout and returns
 503 with `Retry-After` if it expires. CLI priority and qualified review dispatch
 are labelled separately; this display endpoint does not resolve a dispatch.
+Review family ordering and qualification floors are shown only for Review gate.
+Suspension expiry includes an explicit UTC time and date. A late server refusal
+clears the private rows while keeping the existing selector and detail link in
+place; a person without the source permission sees only its permission sentence.
 
 ## Recurring work
 

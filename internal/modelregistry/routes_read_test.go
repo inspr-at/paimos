@@ -154,6 +154,41 @@ func TestPoliciesDispatchOrderAndContract(t *testing.T) {
 	}
 }
 
+func TestPoliciesFamilyRanksCannotMutateDispatch(t *testing.T) {
+	// Accept the old exported map too, so this regression can run against the
+	// pre-fix implementation and fail on the mutation rather than on compilation.
+	var readRanks func() map[string]int
+	switch source := any(ReviewFamilyRank).(type) {
+	case func() map[string]int:
+		readRanks = source
+	case map[string]int:
+		readRanks = func() map[string]int { return source }
+		original := map[string]int{}
+		for family, rank := range source {
+			original[family] = rank
+		}
+		t.Cleanup(func() {
+			clear(source)
+			for family, rank := range original {
+				source[family] = rank
+			}
+		})
+	default:
+		t.Fatal("unknown family rank source")
+	}
+	ranks := readRanks()
+	ranks["openai"] = 99
+	delete(ranks, "xai")
+	ranks["new-family"] = -1
+	want := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
+	if !reflect.DeepEqual(readRanks(), want) {
+		t.Fatal("caller changed dispatch family ranks")
+	}
+	if !reflect.DeepEqual(dispatchFamilyOrder(), []string{"openai", "xai", "anthropic", "cursor", "google", "local"}) {
+		t.Fatal("caller changed displayed family order")
+	}
+}
+
 func lockDisplayTable(t *testing.T) (pgx.Tx, int) {
 	t.Helper()
 	tx, err := adminPool.Begin(t.Context())
@@ -219,6 +254,8 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	}()
 	// PostgreSQL's lock wait is the barrier: the read must actually overlap the
 	// replacement transaction, rather than merely start in another goroutine.
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		var waiting bool
 		if err := adminPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks held JOIN pg_locks waiter ON waiter.locktype=held.locktype AND waiter.database=held.database AND waiter.relation=held.relation WHERE held.pid=$1 AND held.granted AND NOT waiter.granted)`, pid).Scan(&waiting); err != nil {
@@ -230,7 +267,9 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 		select {
 		case w := <-result:
 			t.Fatalf("read did not overlap write: %d", w.Code)
-		default:
+		case <-ctx.Done():
+			t.Fatal("read did not reach the lock barrier")
+		case <-poll.C:
 		}
 	}
 	if err := writer.Commit(ctx); err != nil {
@@ -253,11 +292,8 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 		t.Fatal("partial snapshot")
 	}
 	for _, step := range out.Steps {
-		if step.Reason != out.Steps[0].Reason || step.State != out.Steps[0].State {
-			t.Fatal("mixed pre/post replacement snapshot")
+		if step.Reason != "replacement" || step.State != "unavailable" {
+			t.Fatalf("read missed committed replacement: reason %q state %q", step.Reason, step.State)
 		}
-	}
-	if out.Steps[0].Reason != "" && out.Steps[0].Reason != "replacement" {
-		t.Fatal("unrelated snapshot")
 	}
 }

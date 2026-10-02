@@ -220,10 +220,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     mock.data.mode = 'denied'
     const denial = mock.holdNext()
     await role('build-hard').click(); await denial.started
-    // Once forbidden, the content is exactly the permission sentence. Its
-    // private selector/details disappear; the public tab controls stay put.
-    await expectStableControls({ controls: common, scrollAreas: { policies: panel }, interactions: [
-      { name: 'loading to cannot see', run: async () => { denial.release(); await expect(content).toHaveText("You can't see this: it needs See models."); await expect(detail).toHaveCount(0); await expect(panel.locator('.ladder')).toHaveCount(0) } },
+    // A late server refusal clears private rows but preserves the controls
+    // already on screen. Measure the whole top block across that transition.
+    await expectStableControls({ controls: roleControls, scrollAreas: { policies: panel }, interactions: [
+      { name: 'loading to cannot see', run: async () => { denial.release(); await expect(content).toHaveText("You can't see this: it needs See models."); await expect(detail).toBeVisible(); await expect(panel.locator('.ladder')).toHaveCount(0) } },
     ] })
     mock.data.mode = 'loaded'; mock.data.count = 2
     await tab('keys').click(); await loaded()
@@ -262,6 +262,8 @@ test('Policies settings-only reader sees permission sentences and static ownersh
   await page.goto('/settings/policies')
   const panel = page.locator('.policies')
   await expect(panel.locator('.policy-content')).toHaveText("You can't see this: it needs See models.")
+  await expect(panel.getByTestId('policies-role')).toHaveCount(0)
+  await expect(panel.getByTestId('policies-row-link')).toHaveCount(0)
   await panel.locator('#policy-tab-keys').click()
   await expect(panel.locator('.policy-content')).toHaveText("You can't see this: it needs See roles and a person session.")
   await panel.locator('#policy-tab-elsewhere').click()
@@ -283,4 +285,83 @@ test('Policies unseeded registry stays honest and lazy tab responses cannot over
   held.release()
   await expect(panel.getByText('Merge queue and repository ownership', { exact: true })).toBeVisible()
   await expect(panel.getByText(/could not be loaded/)).toHaveCount(0)
+})
+
+test('Policies review qualifications appear only for Review gate in the page and sheet', async ({ page }) => {
+  await mockPolicies(page, 'light')
+  await page.goto('/settings/policies')
+  const panel = page.locator('.policies'), notes = panel.locator('.routing-notes')
+  for (const role of POLICY_ROLES) {
+    await panel.getByTestId('policies-role').getByText(role.label, { exact: true }).click()
+    await expect(panel.locator('.policy-content')).toHaveAttribute('aria-busy', 'false')
+    const count = role.id === 'review-gate' ? 1 : 0
+    await expect(notes.getByText(/Built-in review family order/)).toHaveCount(count)
+    await expect(notes.getByText(/A reviewer must be from a different family/)).toHaveCount(count)
+    await expect(notes.getByText(/Review dispatch requires a frontier/)).toHaveCount(count)
+    await expect(panel.locator('.ladder')).not.toContainText('Enforced')
+    await expect(panel.locator('.ladder').locator('..').getByText('Enforced', { exact: true })).toHaveCount(1)
+    await panel.getByTestId('policies-row-link').click()
+    const sheet = panel.getByRole('dialog')
+    await expect(sheet.getByText(/built-in review family order/)).toHaveCount(count)
+    await expect(sheet.getByText(/A reviewer must be from a different family/)).toHaveCount(count)
+    await expect(sheet.getByText(/Review dispatch requires a frontier/)).toHaveCount(count)
+    await expect(sheet.getByText('Dispatch checks platform capability and approved accounts for the work, then applies model preferences.', { exact: true })).toHaveCount(1)
+    await panel.getByTestId('policies-sheet-close').click()
+  }
+})
+
+test('Policies tabs always reference an existing panel and phone selectors use two balanced rows', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockPolicies(page, 'light')
+  await page.goto('/settings/policies')
+  const panel = page.locator('.policies')
+  for (const item of POLICY_TABS) {
+    for (const target of POLICY_TABS) {
+      const button = panel.locator(`#policy-tab-${target.id}`)
+      await expect(button).toHaveAttribute('aria-controls', `policy-panel-${target.id}`)
+      await expect(panel.locator(`#policy-panel-${target.id}`)).toHaveCount(1)
+      await expect(panel.locator(`#policy-panel-${target.id}`)).toHaveAttribute('aria-labelledby', `policy-tab-${target.id}`)
+    }
+    await panel.locator(`#policy-tab-${item.id}`).click()
+    await expect(panel.getByRole('tabpanel')).toHaveCount(1)
+    await expect(panel.getByRole('tabpanel')).toHaveAttribute('id', `policy-panel-${item.id}`)
+  }
+  await panel.locator('#policy-tab-ladders').click()
+  const rows = await panel.getByTestId('policies-role').evaluateAll(elements => {
+    const counts = new Map<number, number>()
+    for (const element of elements) { const y = element.getBoundingClientRect().y; counts.set(y, (counts.get(y) ?? 0) + 1) }
+    return [...counts.values()]
+  })
+  expect(rows).toEqual([3, 2])
+  expect(await panel.locator('.policy-tabs small').evaluateAll(elements => elements.every(el => parseFloat(getComputedStyle(el).fontSize) >= 12))).toBe(true)
+  expect(await panel.locator('.role-detail').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13)
+})
+
+test('Policies announces state transitions through a persistent live region', async ({ page }) => {
+  const mock = await mockPolicies(page, 'light')
+  await page.goto('/settings/policies')
+  const panel = page.locator('.policies'), status = panel.getByRole('status')
+  await expect(panel.locator('.ladder')).toBeVisible()
+  await expect(status).toHaveCount(1)
+  const original = await status.elementHandle()
+  const initial = mock.holdNext()
+  await panel.getByTestId('policies-role').getByText('Build', { exact: true }).click(); await initial.started
+  await expect(status).toContainText('Loading the rules')
+  initial.release()
+  await expect(panel.locator('.ladder')).toBeVisible()
+  await expect(status).toHaveCount(1)
+  await expect(status).toHaveAttribute('aria-live', 'polite')
+  await expect(status).toHaveAttribute('aria-atomic', 'true')
+  expect(await status.evaluate((element, before) => element === before, original)).toBe(true)
+  mock.data.mode = 'denied'
+  const denial = mock.holdNext()
+  await panel.getByTestId('policies-role').getByText('Mechanical', { exact: true }).click(); await denial.started
+  await expect(status).toContainText('Loading the rules')
+  denial.release()
+  await expect(status).toHaveText("You can't see this: it needs See models.")
+  expect(await status.evaluate((element, before) => element === before, original)).toBe(true)
+  mock.data.mode = 'failed'
+  await panel.getByTestId('policies-role').getByText('Scout', { exact: true }).click()
+  await expect(status).toContainText('could not be loaded')
+  expect(await status.evaluate((element, before) => element === before, original)).toBe(true)
 })

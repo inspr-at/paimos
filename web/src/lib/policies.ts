@@ -56,7 +56,10 @@ export function stepState(step: PolicyStep, now: number) {
   if (step.state === 'available') return 'Available'
   if (step.valid_until && Date.parse(step.valid_until) <= now) return 'Suspension expired · eligible again'
   const state = ({ unavailable: 'Unavailable', conserved: 'Conserved', budget_limited: 'Budget limited' } as Record<string, string>)[step.state] ?? step.state
-  return `${state}${step.reason ? ` · ${step.reason}` : ''}${step.valid_until ? ` · until ${new Date(step.valid_until).toLocaleString()}` : ''}`
+  const expiry = step.valid_until ? new Date(step.valid_until) : null
+  const time = expiry && new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(expiry)
+  const date = expiry && new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }).format(expiry)
+  return `${state}${step.reason ? ` · ${step.reason}` : ''}${expiry ? ` · until ${time} UTC (${date})` : ''}`
 }
 
 type PolicyAnswer = PolicyLadder | Permission[]
