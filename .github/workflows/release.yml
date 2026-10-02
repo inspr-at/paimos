@@ -14,109 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  agentd-darwin:
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: amd64
-    runs-on: ${{ matrix.runner }}
-    # Apple signing secrets live only in this environment, which releases them
-    # to v* tag runs (synced from the markus-barta/apple-signing vault). PR and
-    # branch CI never reference it.
-    environment: release-signing
-    # Notarization waits on Apple; it usually takes a few minutes.
-    timeout-minutes: 45
-    env:
-      # Must match the signing identity; the daemon embeds it (expectedTeamID).
-      AEON_DEVELOPER_ID_TEAM: P66J39QV6V
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26"
-      - name: Build darwin paimos-agentd with LocalAuthentication
-        env:
-          AEON_DARWIN_ARCH: ${{ matrix.arch }}
-        run: bash scripts/build-release-binaries.sh darwin-agentd
-      # Before upload: SHA256SUMS in the assets job is computed over the signed
-      # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
-      - name: Sign and notarize paimos-agentd
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          set -euo pipefail
-          if [ "$APPLE_TEAM_ID" != "$AEON_DEVELOPER_ID_TEAM" ]; then
-            echo "::error::signing team does not match AEON_DEVELOPER_ID_TEAM; Mac confirmation would fail closed"
-            exit 1
-          fi
-          bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
-      # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
-      # notarization can skip: however the signing step ended, delete the
-      # temporary keychain (private key), drop it from the search list and
-      # remove every signing temp file (.p12, .p8, zip). Idempotent. Every
-      # operation is attempted; failures are collected and fail the step at
-      # the end.
-      - name: Remove signing keychain and temp files
-        if: always()
-        run: |
-          set +e +o pipefail
-          : "${RUNNER_TEMP:?RUNNER_TEMP is not set}"
-          rt="$(cd "$RUNNER_TEMP" 2>/dev/null && pwd -P)"
-          if [ -z "$rt" ] || [ "$rt" -ef / ]; then
-            echo "::error::RUNNER_TEMP is not a usable directory; refusing to clean up"
-            exit 1
-          fi
-          failed=0
-          for kc in "$rt"/sign.*/signing.keychain-db; do
-            [ -e "$kc" ] || continue
-            security delete-keychain "$kc" || { echo "::error::could not delete $kc"; failed=1; }
-          done
-          # Without a readable search list the restore is skipped rather than
-          # guessed; delete-keychain above already unlisted what it removed.
-          if current="$(security list-keychains -d user)"; then
-            kept=()
-            while IFS= read -r k; do
-              k="${k#"${k%%[![:space:]]*}"}"; k="${k#\"}"; k="${k%\"}"
-              case "$k" in ""|*/signing.keychain-db) ;; *) kept+=("$k") ;; esac
-            done <<<"$current"
-            [ ${#kept[@]} -gt 0 ] || kept=("$HOME/Library/Keychains/login.keychain-db")
-            security list-keychains -d user -s "${kept[@]}" || { echo "::error::could not restore the keychain search list"; failed=1; }
-          else
-            echo "::error::could not read the keychain search list"
-            failed=1
-          fi
-          rm -rf "$rt"/sign.* || failed=1
-          if compgen -G "$rt/sign.*" >/dev/null; then
-            echo "::error::signing temp files remain"
-            failed=1
-          fi
-          if list="$(security list-keychains -d user)"; then
-            case "$list" in *signing.keychain-db*) echo "::error::signing keychain is still on the search list"; failed=1 ;; esac
-          else
-            echo "::error::could not verify the keychain search list"
-            failed=1
-          fi
-          [ "$failed" = 0 ] || exit 1
-          echo "signing keychain and temp files removed"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: agentd-darwin-${{ matrix.arch }}
-          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
-          if-no-files-found: error
-
   # The server digest must never wait for signing/notarization or client builds.
   image-platform:
     strategy:
@@ -329,9 +226,6 @@ jobs:
     needs: [image-platform]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Coordinator-provisioned environment restricted to trusted v* releases.
-    # Its App proposes pins on nixcfg only; the coordinator reviews and deploys.
-    environment: release-pinning
     permissions:
       contents: write
       packages: write
@@ -340,7 +234,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       digest: ${{ steps.push.outputs.digest }}
-      pin_evidence: ${{ steps.pin.outputs.pin_evidence }}
+      pushed_at: ${{ steps.push.outputs.pushed_at }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -439,123 +333,13 @@ jobs:
             echo "ghcr.io/inspr-at/aeon@${DIGEST}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Optional proposal: failures remain visible without blocking agent assets.
-      # --write is an explicit coordinator opt-in; otherwise produce a dry run.
-      - name: Propose verified nixcfg deployment pin
-        id: pin
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-          DIGEST: ${{ steps.push.outputs.digest }}
-          AEON_PIN_BOT_ENABLED: ${{ vars.AEON_PIN_BOT_ENABLED }}
-          AEON_PIN_APP_ID: ${{ secrets.AEON_PIN_APP_ID }}
-          AEON_PIN_APP_KEY: ${{ secrets.AEON_PIN_APP_KEY }}
-          INDEX_PUSHED_AT: ${{ steps.push.outputs.pushed_at }}
-        run: |
-          set -euo pipefail
-          args=(scripts/release-pin-pr.mjs)
-          if [ "$AEON_PIN_BOT_ENABLED" = true ]; then
-            args+=(--write)
-          fi
-          if ! node "${args[@]}"; then
-            echo '::warning::Deployment pin proposal failed; release assets will still be built.'
-            echo 'Deployment pin proposal failed; release assets will still be built.' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-  assets:
-    needs: [agentd-darwin, image]
-    runs-on: ubuntu-latest
+  completion:
+    needs: [image]
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: "24"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26"
-
-      # Darwin paimos-agentd is built on the matching Mac with LocalAuthentication.
-      # Linux agentd and every CLI target stay static. -trimpath and the version
-      # -X match the server image (Dockerfile).
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: agentd-darwin-*
-          path: dist
-          merge-multiple: true
-      - name: Build linux paimos-agentd and aeon-cli
-        env:
-          VERSION: ${{ needs.image.outputs.version }}
-        run: |
-          set -euo pipefail
-          bash scripts/build-release-binaries.sh linux-agentd
-          bash scripts/build-release-binaries.sh cli
-          bash scripts/build-release-binaries.sh verify-darwin
-          (
-            cd dist
-            sha256sum \
-              paimos-agentd-darwin-arm64 \
-              paimos-agentd-darwin-amd64 \
-              paimos-agentd-linux-arm64 \
-              paimos-agentd-linux-amd64 \
-              aeon-cli-darwin-arm64 \
-              aeon-cli-darwin-amd64 \
-              aeon-cli-linux-amd64 \
-              aeon-cli-linux-arm64 \
-              > SHA256SUMS
-          )
-
-      # Include drafts: a rerun must never replace a reserved release or its assets.
-      - name: Reject an existing GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.image.outputs.version }}
-        run: |
-          set -euo pipefail
-          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[].tag_name')"
-          if printf '%s\n' "$tags" | grep -Fx -- "v${VERSION}" >/dev/null; then
-            echo "Release v${VERSION} already exists (draft or published); reserve a new coordinate" >&2
-            exit 1
-          fi
-
-      # Publication is an explicit post-deploy step; see docs/RELEASE.md.
-      - name: Create draft GitHub release with signed assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.image.outputs.version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
-          PIN_EVIDENCE: ${{ needs.image.outputs.pin_evidence }}
-        run: |
-          set -euo pipefail
-          tag="v${VERSION}"
-          notes="$(printf '%s\n' \
-            "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64, linux-arm64 and linux-amd64." \
-            "darwin paimos-agentd links LocalAuthentication (CGO enabled); linux is static." \
-            "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
-            "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
-            "Verify SHA256SUMS before installing." \
-            "" \
-            "Container: ghcr.io/inspr-at/aeon:${VERSION}" \
-            "Digest: ${DIGEST}" \
-            "" \
-            "$PIN_EVIDENCE")"
-          gh release create "$tag" \
-            dist/paimos-agentd-darwin-arm64 \
-            dist/paimos-agentd-darwin-amd64 \
-            dist/paimos-agentd-linux-arm64 \
-            dist/paimos-agentd-linux-amd64 \
-            dist/aeon-cli-darwin-arm64 \
-            dist/aeon-cli-darwin-amd64 \
-            dist/aeon-cli-linux-amd64 \
-            dist/aeon-cli-linux-arm64 \
-            dist/SHA256SUMS \
-            --draft \
-            --verify-tag \
-            --title "$tag" \
-            --notes "$notes"
+      packages: read
+    uses: ./.github/workflows/release-completion.yml
+    with:
+      tag: v${{ needs.image.outputs.version }}
+      digest: ${{ needs.image.outputs.digest }}
+      index-pushed-at: ${{ needs.image.outputs.pushed_at }}

@@ -13,6 +13,9 @@ on:
       - scripts/releaseworkflow/**
       - scripts/release-image-index*.mjs
       - scripts/release-pin-pr*.mjs
+      - .github/workflows/release-completion.yml
+      - scripts/release-completion*.mjs
+      - scripts/release-retry*.mjs
       - Dockerfile
 
 permissions:
@@ -53,6 +56,7 @@ jobs:
           go test ./scripts/releaseworkflow
           node --test scripts/release-image-index.test.mjs
           node --test scripts/release-pin-pr.test.mjs
+          node --test scripts/release-completion.test.mjs scripts/release-retry.test.mjs
       - name: Validate version and presentation bundle
         id: version
         run: |

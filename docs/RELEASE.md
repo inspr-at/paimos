@@ -499,9 +499,83 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
 6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
 
-The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. Once an index tag has been published, a later failure still requires a new coordinate; reruns cannot replace it. Real registry push/attestation and deployment verification remain coordinator release gates.
+The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. After index publication, **never rerun the publishing jobs or replace the index**. A late completion failure can use the existing coordinate only through the verified completion stage below. A failed index attestation, changed source or changed artifact set requires a new coordinate. Real registry push/attestation and deployment verification remain coordinator release gates.
 
-In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
+After the verified index job succeeds, `release.yml` calls `release-completion.yml`. Its hosted preparation job validates the existing annotated tag, the tag commit's ancestry on current main, tagged `version.json`, the current GHCR coordinate's exact index digest, both runtime/provenance descriptors and the original hosted `release.yml` attestation. Retired coordinates in current main's `unpublished_reservations` are refused. macOS runners then build darwin `paimos-agentd` from that exact source SHA with CGO enabled, sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in `release-signing` (docs/AGENT_INTEGRATION.md, Signed release daemon). They restore and verify an existing uploaded Darwin binary instead of signing it again. The `assets` job waits for both Darwin targets and preparation, builds Linux `paimos-agentd` and all `aeon-cli` targets from the same tagged source, and assembles the nine assets. Pin proposals run independently; their failure cannot block asset assembly.
+
+### Completion retry and unpublished reservation retry (AEON-532)
+
+For a late failure after an index was successfully attested, use the recorded
+index digest and existing tag. Dispatch **from main**; the workflow never pushes
+an image, retags, republishes, deploys or merges:
+
+```sh
+gh workflow run release-completion.yml --repo inspr-at/paimos --ref main \
+  -f tag="$tag" -f digest="$DIGEST"
+```
+
+The completion workflow and reconciliation tools come from the immutable
+workflow revision of the dispatch (current approved main); binary source,
+build scripts and signing scripts come from the original tag's resolved commit
+in `release-source/`. Each restore/upload operation rechecks source ancestry,
+the live coordinate's unchanged digest and the original attestation with exact
+source **and signer** SHA, workflow and tag, retaining
+`--deny-self-hosted-runners`. Record both tooling and build-source SHAs. Main's
+workflow fixes may supersede orchestration at the tag without rebuilding or
+reattesting the index; code fixes to the product require a new coordinate.
+
+`release-completion.mjs` defaults to read-only planning; workflow asset writes
+explicitly use `complete DIST --write`. It creates a draft if absent, or adds
+only missing draft assets. Existing metadata and uploaded bytes remain
+unchanged. It downloads original assets, verifies their API digest when
+available, then verifies all eight binaries against `SHA256SUMS`. Without an
+existing checksum file it computes one over the preserved original bytes plus
+new missing binaries. With a checksum file already uploaded, missing rebuilt
+bytes must match it exactly. Uploads never use
+[`--clobber`](https://cli.github.com/manual/gh_release_upload); an interrupted
+`starter` asset requires coordinator inspection, rather than automatic deletion.
+Publication during assembly, duplicate/unknown assets, lookup errors and digest
+or checksum conflicts fail closed. A complete published release can be verified
+without writes; an incomplete published release cannot be repaired here. Finish
+native hardware/ACL qualification and explicit publication as before. The tap
+remains publication-triggered: retry its failed job separately; completion never
+toggles release publication or modifies a published asset.
+
+**Coordinator activation:** retain the signing and pin environments' existing
+`v*` tag restrictions. Add only approved `main` dispatch access with required
+coordinator approval; never wildcard branch access or expose signing to PRs.
+These settings are not changed by this package. Until configured, manual
+completion holds at the environment gate. All jobs remain hosted; the mbp2606
+main-only runner admission rules are unchanged. Registry, signing, native
+qualification, partial-draft recovery and environment protection still need an
+authorized release run as live acceptance evidence; fixture tests are not that
+proof.
+
+For a reservation whose index and GitHub release **never existed**, reuse its
+frozen public capture and reserved sequence/name with a fresh UTC coordinate:
+
+```sh
+node scripts/release-retry.mjs "$NEW_VERSION" "$UTC_RESERVED_AT"
+node scripts/release-retry.mjs "$NEW_VERSION" "$UTC_RESERVED_AT" --write
+```
+
+The first command is a plan. Both commands perform complete paginated lookups
+including drafts and fail on lookup errors or an index/release at either old or
+new coordinate. The second updates only local `version.json` and the public
+notes bundle: it retires the old reservation, retains its capture unchanged,
+and clones that exact capture under the new key. It does not refetch ticket
+text, change the reviewed scope, create a tag or write remotely. An untagged
+by-digest platform export alone does not consume the coordinate. Preserve all
+other reservation metadata and apply AEON-530's prospective sequence allocation;
+already-published sequences are never reclaimed. This helper is for the current
+failed reservation, not an older abandoned attempt.
+
+Review that concrete diff on a new release PR. The coordinator's Grok notes
+review, all required checks, AEON-531's rehearsal and ordinary tag/qualification/
+publication/deployment approvals still apply. A changed scope needs a new
+capture. For an existing published index use completion, or the separately
+approved withdrawal policy; this helper cannot withdraw an index. Preserve all
+historical tags, release captures and published artifacts.
 
 Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
@@ -519,7 +593,7 @@ The attestation action uses the existing `packages`, `attestations` and OIDC wri
 
 ### Deployment pin proposals (AEON-413)
 
-Immediately after the multi-arch index attestation passes, the `image` job
+After completion re-verifies the multi-arch index, its independent `pin` job
 runs `scripts/release-pin-pr.mjs`. The only foreign-repository write path this
 bot may use is a **draft PR** against `markus-barta/nixcfg` `main`, changing
 exactly the Aeon image line in `hosts/csb1/docker/compose-spec.nix`. It preserves
@@ -530,11 +604,12 @@ PMA and other deploy repositories have no bot write path here; their owning
 coordinator receives a proposed diff and follows their own tracker and gates.
 
 Before target authentication or branch creation, the bot requires the exact
-repository/tag-push invocation, an annotated tag resolving directly to the
-workflow's source commit, and that commit's ancestry on current source main.
+repository and either a tag push or completion dispatch from main with an
+explicit original source SHA. It requires an annotated tag resolving directly
+to that source commit and its ancestry on current source main.
 It independently runs `gh attestation verify` for the index digest, binding
 `inspr-at/paimos/.github/workflows/release.yml`, the exact source tag and commit,
-the exact tag-scoped certificate identity and signer commit, and
+the exact signer commit, and
 `--deny-self-hosted-runners`. Missing attestations, lightweight/off-main
 tags and failed or ambiguous API reads fail closed before any target write.
 It rejects older versions and conflicting digests for an existing coordinate.
@@ -575,10 +650,9 @@ unmerged proposal branch; only its owner may clean it up after inspection.
 
 The PR records the source commit, digest and verification, exact base SHA/file
 (the immutable pre-change backup reference) and previous image pin for rollback.
-The same evidence goes to the image job summary and, when the independent assets
-job assembles it, the existing draft paimos release's notes. There is no GitHub
-release yet during the image job, so the bot does not race its creation or
-rewrite an existing release. Before any pin merge or rollout, the coordinator
+The same evidence goes to the completion pin job summary. Asset assembly is
+independent of this optional proposal and never rewrites existing release notes.
+The draft notes bind the immutable index and original source commit. Before any pin merge or rollout, the coordinator
 must complete the owning nixcfg checks/review and record the validated database
 backup required by the release procedure. Rollback remains a separately
 reviewed change to the recorded previous immutable image; the bot never performs
