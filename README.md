@@ -33,6 +33,15 @@ pickup atomically, move the ticket to In progress and remove its queue marker.
 Ticket API and CLI JSON include `queued: {position, by, at, …}` while waiting.
 Capacity hours are advice, not a reservation or a hard cap.
 
+The project queue and ticket drawer move work using the server's shared
+positions, including Move to top of the displayed project queue. Readiness
+accepts live blocker relations. A failed queue read exposes an error and Retry
+even before any queue snapshot exists. Suggested releases prefer the server's
+expected start; otherwise they use earlier visible work and parallel capacity.
+The hover labels this local estimate: other projects, current runs and blocker
+delays are not included. Unmeasured capacity or an unknown unblock time keeps
+the suggestion empty.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open

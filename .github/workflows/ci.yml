@@ -250,6 +250,21 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
+      - name: Work queue regressions and theme screenshots
+        working-directory: web
+        run: npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1
+      - name: Work queue screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: work-queue-${{ github.sha }}
+          path: .agent-shots/queue/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Ticket dispatch, panel and worker regressions
+        working-directory: web
+        run: npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2
+
       - name: Session linking unit checks
         working-directory: web
         run: node --experimental-strip-types --test tests/attach-copy.test.ts tests/attach-flow-scope.test.ts tests/attach-watch.test.ts
