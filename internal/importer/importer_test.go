@@ -260,6 +260,8 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var active, peak atomic.Int32
 		entered := make(chan struct{}, 8)
+		failures := make(chan error, 8)
+		var wg sync.WaitGroup
 		release := make(chan struct{})
 		defer func() {
 			select {
@@ -267,6 +269,7 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 			default:
 				close(release)
 			}
+			wg.Wait()
 		}()
 		base, _ := url.Parse("https://source.example.test")
 		source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -285,15 +288,13 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 		if err := source.Configure(2, 0); err != nil {
 			t.Fatal(err)
 		}
-		var wg sync.WaitGroup
+		ctx := t.Context()
 		for n := 0; n < 8; n++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				var rows []Record
-				if err := source.get(t.Context(), "/probe", &rows); err != nil {
-					t.Error(err)
-				}
+				failures <- source.get(ctx, "/probe", &rows)
 			}()
 		}
 		synctest.Wait()
@@ -305,6 +306,11 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 		}
 		close(release)
 		wg.Wait()
+		for n := 0; n < 8; n++ {
+			if err := <-failures; err != nil {
+				t.Fatal(err)
+			}
+		}
 		if got := peak.Load(); got > 2 {
 			t.Fatalf("request cap exceeded: %d", got)
 		}
