@@ -101,6 +101,12 @@ type Prepared struct {
 }
 
 func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared, error) {
+	return s.PutNamed(ctx, tenant, src, "")
+}
+
+// PutNamed accepts HTML fragments that sniff as plain text only when their
+// filename explicitly selects HTML. A supplied MIME header is never authority.
+func (s Store) PutNamed(ctx context.Context, tenant string, src io.Reader, name string) (Prepared, error) {
 	if !validTenant(tenant) {
 		return Prepared{}, errors.New("invalid tenant")
 	}
@@ -144,11 +150,15 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	}
 	if strings.HasPrefix(ct, "text/plain") {
 		ct = "text/plain; charset=utf-8"
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".html" || ext == ".htm" {
+			ct = "text/html; charset=utf-8"
+		}
 	}
 	// Unknown binaries (logs, exports, office files that don't sniff as zip)
 	// are stored too; they are only ever served as a download with nosniff
 	// and a sandboxing CSP, never inline.
-	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream"
+	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream" || isHTML(ct)
 	if !allowed {
 		return Prepared{}, fmt.Errorf("%w %s", ErrUnsupportedType, ct)
 	}
@@ -165,7 +175,7 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 			return Prepared{}, errors.New("image signature mismatch")
 		}
 		out.Width, out.Height, out.Image = cfg.Width, cfg.Height, true
-	} else if ct == "text/plain; charset=utf-8" {
+	} else if ct == "text/plain; charset=utf-8" || isHTML(ct) {
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return Prepared{}, err
 		}
@@ -180,6 +190,19 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	original, _ := s.path(tenant, out.SHA256, "original")
 	if err := writeFromFile(original, tmp); err != nil {
 		return Prepared{}, err
+	}
+	if isHTML(ct) {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return Prepared{}, err
+		}
+		thumb, err := htmlTextThumbnail(ctx, tmp)
+		if err != nil {
+			return Prepared{}, err
+		}
+		target, _ := s.path(tenant, out.SHA256, "thumb")
+		if err := writeAtomic(target, bytes.NewReader(thumb)); err != nil {
+			return Prepared{}, err
+		}
 	}
 	if out.Image {
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {

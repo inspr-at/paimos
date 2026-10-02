@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { contentUrl, fileKind, fileSize, isImage, markdownRef, type Attachment } from '../../lib/attachments'
+import { contentUrl, createHTMLPreview, fileKind, fileSize, hasThumbnail, isHTML, isImage, markdownRef, type Attachment } from '../../lib/attachments'
 import { absoluteTime } from '../../lib/work'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
@@ -31,6 +31,36 @@ const loaded = ref(false)
 const unreadable = ref(false)
 const brokenThumbs = reactive(new Set<string>())
 let opener: HTMLElement | null = null
+const htmlURL = ref('')
+const htmlState = ref<'loading' | 'ready' | 'unavailable' | 'expired'>('unavailable')
+let htmlRequest: AbortController | undefined
+let htmlExpiry: ReturnType<typeof setTimeout> | undefined
+let htmlGeneration = 0
+
+function clearHTML() {
+  htmlGeneration++
+  htmlRequest?.abort()
+  clearTimeout(htmlExpiry)
+  htmlURL.value = ''
+}
+async function loadHTML() {
+  clearHTML()
+  const item = current.value
+  if (!item || !isHTML(item) || !dialog.value?.open) return
+  const generation = htmlGeneration
+  htmlState.value = 'loading'
+  htmlRequest = new AbortController()
+  try {
+    const preview = await createHTMLPreview(item.id, htmlRequest.signal)
+    if (generation !== htmlGeneration) return
+    if (!preview.available || !preview.url || !preview.expires_at) { htmlState.value = 'unavailable'; return }
+    htmlURL.value = preview.url
+    htmlState.value = 'ready'
+    htmlExpiry = setTimeout(() => { clearHTML(); htmlState.value = 'expired' }, Math.max(0, Date.parse(preview.expires_at) - Date.now()))
+  } catch {
+    if (generation === htmlGeneration) htmlState.value = 'unavailable'
+  }
+}
 
 const current = computed(() => props.items[index.value])
 const other = computed(() => compare.value ? props.items[compare.value.with] : undefined)
@@ -50,14 +80,15 @@ function open(id: string, withId?: string) {
   void nextTick(() => stage.value?.focus({ preventScroll: true }))
   reset()
 }
-function close() { dialog.value?.close(); emit('close'); opener?.focus({ preventScroll: true }) }
+function close() { clearHTML(); dialog.value?.close(); emit('close'); opener?.focus({ preventScroll: true }) }
 function go(step: number) {
   if (!props.items.length) return
   index.value = (index.value + step + props.items.length) % props.items.length
+  if (current.value && !isImage(current.value)) compare.value = null
   if (compare.value && compare.value.with === index.value) compare.value.with = (index.value + 1) % props.items.length
   reset()
 }
-function reset() { mode.value = 'fit'; offset.value = { x: 0, y: 0 }; loaded.value = false; unreadable.value = false; caption.value = current.value?.caption ?? ''; void nextTick(fit) }
+function reset() { mode.value = 'fit'; offset.value = { x: 0, y: 0 }; loaded.value = false; unreadable.value = false; caption.value = current.value?.caption ?? ''; void loadHTML(); void nextTick(fit) }
 // Fit: the whole image in the stage with a margin; never enlarged past 100%.
 function fit() {
   const item = current.value, box = stage.value?.getBoundingClientRect()
@@ -87,6 +118,7 @@ const toFit = () => { mode.value = 'fit'; fit() }
 
 // Wheel: Ctrl/⌘ or a trackpad pinch zooms at the pointer; otherwise pans a zoomed image.
 function wheel(event: WheelEvent) {
+  if (!current.value || !isImage(current.value)) return
   event.preventDefault()
   if (event.ctrlKey || event.metaKey) setScale(scale.value * Math.exp(-event.deltaY * 0.01), { x: event.clientX, y: event.clientY })
   else if (mode.value === 'free') offset.value = { x: offset.value.x - event.deltaX, y: offset.value.y - event.deltaY }
@@ -96,6 +128,7 @@ const pointers = new Map<number, { x: number; y: number }>()
 let pan: { x: number; y: number; ox: number; oy: number } | null = null
 let pinch: { distance: number; scale: number } | null = null
 function down(event: PointerEvent) {
+  if (!current.value || !isImage(current.value)) return
   if ((event.target as HTMLElement).closest('button, input, .slider-handle')) return
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
@@ -135,13 +168,15 @@ function slideMove(event: PointerEvent) {
 }
 function slideEnd() { sliding = false }
 function toggleCompare() {
+  if (!current.value || !isImage(current.value)) return
   if (compare.value) { compare.value = null; void nextTick(fit); return }
   if (props.items.length < 2) return
   compare.value = { with: (index.value + 1) % props.items.length, view: 'slider' }
   toFit()
 }
 function pickStrip(i: number) {
-  if (compare.value && i !== index.value) { compare.value.with = i; return }
+  if (compare.value && i !== index.value && isImage(props.items[i])) { compare.value.with = i; return }
+  compare.value = null
   index.value = i; reset()
 }
 
@@ -172,7 +207,7 @@ async function saveCaption() {
 }
 const onResize = () => fit()
 window.addEventListener('resize', onResize)
-onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+onBeforeUnmount(() => { clearHTML(); window.removeEventListener('resize', onResize) })
 watch(() => props.items.length, length => { if (!length && dialog.value?.open) close(); else if (index.value >= length) index.value = Math.max(0, length - 1) })
 watch(() => compare.value?.view, () => void nextTick(fit))
 defineExpose({ open })
@@ -199,6 +234,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
         <button v-if="items.length > 1 && isImage(current)" type="button" class="pill-btn solo" :aria-pressed="!!compare" aria-keyshortcuts="c" data-tip="Compare two screens · c" @click="toggleCompare"><AppIcon name="compare" :size="14" />Compare</button>
         <button type="button" class="pill-btn solo details-btn" :aria-pressed="details" aria-label="Details" aria-keyshortcuts="d" data-tip="Details · d" @click="details = !details; $nextTick(fit)"><AppIcon name="info" :size="15" /><span class="label">Details</span></button>
         <a class="pill-btn round" :href="contentUrl(current.id, 'original')" :download="current.name" :aria-label="`Download ${current.name}`" data-tip="Download the original"><AppIcon name="download" :size="15" /></a>
+        <a v-if="isHTML(current)" class="pill-btn solo" :href="htmlURL || undefined" :aria-disabled="!htmlURL" :tabindex="htmlURL ? 0 : -1" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open preview in new tab</a>
         <button type="button" class="pill-btn round copy-link" aria-label="Copy link" data-tip="Copy link to the original" @click="copyLink"><AppIcon name="link" :size="15" /></button>
         <button type="button" class="pill-btn round" aria-label="Close viewer" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="close"><AppIcon name="close" :size="15" /></button>
       </header>
@@ -228,6 +264,13 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
             </div>
           </template>
           <!-- One attachment -->
+          <iframe v-else-if="isHTML(current) && htmlURL" :key="htmlURL" class="html-preview" :src="htmlURL" :title="`HTML preview: ${current.caption || current.name}`" sandbox="allow-scripts" referrerpolicy="no-referrer" />
+          <div v-else-if="isHTML(current)" class="file-stage" role="status">
+            <p class="file-name">{{ current.name }}</p>
+            <p class="file-meta">{{ htmlState === 'loading' ? 'Opening HTML preview…' : htmlState === 'expired' ? 'This preview has expired.' : 'Live preview is unavailable. The original can still be downloaded.' }}</p>
+            <button v-if="htmlState !== 'loading'" type="button" class="btn" @click="loadHTML">Reload preview</button>
+            <a class="btn primary" :href="contentUrl(current.id, 'original')" :download="current.name"><AppIcon name="download" :size="14" />Download</a>
+          </div>
           <img
             v-else-if="isImage(current) && !unreadable" :key="current.id" class="photo" :class="{ ready: loaded }" :src="contentUrl(current.id, variant)" :alt="current.caption || current.name"
             :width="current.width ?? undefined" :height="current.height ?? undefined" :style="{ transform }" draggable="false" @load="loaded = true" @error="unreadable = true"
@@ -273,7 +316,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
               type="button" class="thumb" :class="{ on: i === index, b: compare?.with === i }" :aria-current="i === index ? 'true' : undefined"
               :aria-label="`${compare && i !== index ? 'Compare with' : 'Show'} ${item.caption || item.name}`" @click="pickStrip(i)"
             >
-              <img v-if="isImage(item) && !brokenThumbs.has(item.id)" :src="contentUrl(item.id, 'thumb')" alt="" loading="lazy" @error="brokenThumbs.add(item.id)" />
+              <img v-if="hasThumbnail(item) && !brokenThumbs.has(item.id)" :src="contentUrl(item.id, 'thumb')" alt="" loading="lazy" @error="brokenThumbs.add(item.id)" />
               <span v-else class="thumb-file">{{ fileKind(item) }}</span>
               <span v-if="compare?.with === i" class="b-tag">B</span>
             </button>
@@ -316,6 +359,8 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .body.with-details { grid-template-columns: minmax(0, 1fr) 320px; }
 .stage { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; overflow: hidden; touch-action: none; user-select: none; outline: none; }
+.html-preview { width: calc(100% - 120px); height: calc(100% - 32px); border: 0; background: white; }
+@media (max-width: 600px) { .html-preview { width: calc(100% - 24px); height: calc(100% - 96px); } }
 /* The image and the compare frame keep their own size and sit on the stage centre;
    the transform (pan, then scale around the centre) does the rest. */
 .photo, .compare-frame { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
