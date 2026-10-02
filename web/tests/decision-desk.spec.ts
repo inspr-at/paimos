@@ -282,6 +282,24 @@ test('Load 100 more resumes the answered cursor without rereading loaded pages',
   expect(new URL(answeredReads()[beforeRefresh]!, 'https://test.invalid').searchParams.has('cursor')).toBe(false)
 })
 
+test('failed continuation retains loaded decisions and retries the same cursor', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  world.questions.push(...Array.from({ length: 105 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
+  await page.goto('/decision-desk'); await page.getByRole('button', { name: /^Decided/ }).click()
+  const rows = page.locator('.desk-list .desk-row'), load = page.getByRole('button', { name: 'Load 100 more' })
+  await expect(rows).toHaveCount(100)
+  world.failQuestions = true
+  await load.click()
+  await expect(page.locator('.source-warnings')).toContainText('More questions could not be read')
+  await expect(rows).toHaveCount(100)
+  await expect(load).toBeEnabled()
+  const failed = world.reads.at(-1)
+  world.failQuestions = false
+  await load.click(); await expect(rows).toHaveCount(105)
+  expect(world.reads.at(-1)).toBe(failed)
+  await expect(page.locator('.source-warnings')).toHaveCount(0)
+})
+
 test('loaded open and answered pages survive focus refresh with their memo still actionable', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.push(...Array.from({ length: 100 }, (_, at) => sampleQuestion(`open-${at}`)))

@@ -38,23 +38,31 @@ export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
 }
 export type QuestionState = 'open' | 'answered'
 export const MAX_QUESTION_PAGES = 10
-export const readQuestions = (offset = 0, state: QuestionState = 'open', cursor?: string) => deskRequest<QuestionPage>(state === 'answered'
-  ? `/decision-desk?state=answered&order=desc&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-  : `/decision-desk?state=open&limit=100&offset=${offset}`)
-async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPage> {
+export type QuestionQuery = { state: 'open'; offset?: number } | { state: 'answered'; cursor?: string }
+export const readQuestions = (query: QuestionQuery) => deskRequest<QuestionPage>(query.state === 'answered'
+  ? `/decision-desk?state=answered&order=desc&limit=100${query.cursor ? `&cursor=${encodeURIComponent(query.cursor)}` : ''}`
+  : `/decision-desk?state=open&limit=100&offset=${query.offset ?? 0}`)
+interface QuestionPosition { pages: number; nextCursor?: string; cursors: string[] }
+interface QuestionPages extends QuestionPage { position: QuestionPosition }
+function pagePosition(state: QuestionState, result: QuestionPage, previous: QuestionPosition): QuestionPosition {
+  if (result.items.length > 100) throw new Error('The question page exceeded its limit. Refresh before loading more.')
+  const cursors = [...previous.cursors]
+  if (state === 'answered' && result.has_more) {
+    if (!result.next_cursor || result.next_cursor.length > 512 || cursors.includes(result.next_cursor)) throw new Error('The answered page cursor is unavailable. Refresh before loading more.')
+    cursors.push(result.next_cursor)
+  }
+  return { pages: previous.pages + 1, nextCursor: state === 'answered' && result.has_more ? result.next_cursor : undefined, cursors }
+}
+async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPages> {
   const items = new Map<string, Question>()
-  let has_more = false, cursor: string | undefined
+  let has_more = false, position: QuestionPosition = { pages: 0, cursors: [] }
   for (let page = 0; page < Math.min(MAX_QUESTION_PAGES, Math.max(1, pages)); page++) {
-    const result = await readQuestions(page * 100, state, cursor)
-    if (result.items.length > 100) throw new Error('The question page exceeded its limit. Refresh before loading more.')
+    const result = await readQuestions(state === 'answered' ? { state, cursor: position.nextCursor } : { state, offset: page * 100 })
+    position = pagePosition(state, result, position)
     result.items.forEach(question => items.set(question.id, question)); has_more = result.has_more
     if (!has_more) break
-    if (state === 'answered') {
-      if (!result.next_cursor || result.next_cursor.length > 512 || result.next_cursor === cursor) throw new Error('The answered page cursor is unavailable. Refresh before loading more.')
-      cursor = result.next_cursor
-    }
   }
-  return { items: [...items.values()], has_more }
+  return { items: [...items.values()], has_more, position }
 }
 export function deliveryTime(value?: string): string {
   const timestamp = value ? Date.parse(value) : NaN
@@ -176,7 +184,25 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
   const result = await decidePhone(review, { decision, reason, request_hash: review.request_hash })
   if (result.pending || result.approval?.decision !== decision) throw new Error('The verified decision was not confirmed.')
 }
-export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean> }
+export interface DeskRead {
+  items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>
+  questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
+}
+/** Continue only the requested list. Refresh uses loadDesk to recheck all
+ * sources from the beginning; callers keep this snapshot bound to its owner. */
+export async function loadMoreQuestions(previous: DeskRead, state: QuestionState): Promise<DeskRead> {
+  const position = previous.questionPositions[state]
+  if (!previous.hasMore[state] || !position || position.pages >= MAX_QUESTION_PAGES) return previous
+  const result = await readQuestions(state === 'answered' ? { state, cursor: position.nextCursor } : { state, offset: position.pages * 100 })
+  const nextPosition = pagePosition(state, result, position)
+  const sources = { ...previous.sources, questions: new Map(previous.sources.questions) }, items = new Map(previous.items.map(item => [item.id, item]))
+  for (const question of result.items) {
+    const item = questionItem(question, previous.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    sources.questions.set(item.id, question); items.set(item.id, item)
+  }
+  return { ...previous, sources, items: [...items.values()], hasMore: { ...previous.hasMore, [state]: result.has_more },
+    questionPositions: { ...previous.questionPositions, [state]: nextPosition } }
+}
 export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
   const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox()])
@@ -222,7 +248,9 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
     catch { warnings.push('Tier requests could not be read.') }
   }
-  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more } }
+  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
+    questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
+    projectNames: new Map(projects.map(project => [project.id, project.title])) }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)

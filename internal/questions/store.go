@@ -326,11 +326,11 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, project, state st
 		args := []any{p.TenantID, projects, state, p.Kind == tenant.Person, p.ID, limit + 1, offset}
 		if order == "desc" {
 			query = `SELECT q.node_id::text,a.created_at FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
- JOIN desk_answers a ON a.tenant_id=q.tenant_id AND a.question_id=q.node_id AND a.revision=q.revision
- WHERE q.tenant_id=$1 AND q.project_id=ANY($2::uuid[]) AND n.deleted_at IS NULL AND q.state='answered'
+ JOIN desk_answers a ON a.tenant_id=q.tenant_id AND a.project_id=q.project_id AND a.question_id=q.node_id AND a.revision=q.revision
+ WHERE a.tenant_id=$1 AND a.project_id=ANY($2::uuid[]) AND n.deleted_at IS NULL AND q.state='answered'
  AND ($3 OR EXISTS(SELECT 1 FROM desk_askers asker WHERE asker.tenant_id=q.tenant_id AND asker.question_id=q.node_id AND asker.principal_id=$4))
- AND ($5::timestamptz IS NULL OR (a.created_at,q.node_id) < ($5::timestamptz,$6::uuid))
- ORDER BY a.created_at DESC,q.node_id DESC LIMIT $7`
+ AND ($5::timestamptz IS NULL OR (a.created_at,a.question_id) < ($5::timestamptz,$6::uuid))
+ ORDER BY a.created_at DESC,a.question_id DESC LIMIT $7`
 			var at any
 			if cursor != "" {
 				at = after.At

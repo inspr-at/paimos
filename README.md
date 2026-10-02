@@ -2351,8 +2351,10 @@ question projection. Answered lists accept `state=answered&order=desc` (AEON-611
 newest current answer first, with question ID as the tie-breaker. Follow the
 bounded `next_cursor` using `cursor`, with the same tenant, principal and project;
 permissions are checked again per page. Descending reads require offset zero.
-The Decided view follows these cursors and refreshes its loaded pages from the
-newest decision, so a fresh answer stays available for correction. Default and
+The Decided view follows these cursors; “Load 100 more” resumes the saved cursor
+with one page request. Refresh rechecks its loaded pages from the newest decision,
+so a fresh answer stays available for correction. A decision committed during
+pagination becomes visible after refreshing from the first page. Default and
 Open reads keep oldest-first creation order. `questions.ask` and `questions.read`
 are explicit agent key scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
 three, viewer receives read, guest/customer receive none. Existing keys gain no
