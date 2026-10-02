@@ -44,7 +44,7 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 		apierr(w, err)
 		return
 	}
-	if variant != "original" && !strings.HasPrefix(a.ContentType, "image/") {
+	if variant != "original" && !strings.HasPrefix(a.ContentType, "image/") && !(isHTML(a.ContentType) && variant == "thumb") {
 		apierr(w, bad(404, "variant not found"))
 		return
 	}
@@ -82,6 +82,9 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if isHTML(a.ContentType) {
+		w.Header().Set("Cache-Control", "no-store, private")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": a.Name}))

@@ -293,6 +293,9 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	if observed.ID == "" || observed.Enabled {
 		t.Fatal("observation was granted automatically")
 	}
+	if observed.FullName() != "Grok grok-next" || observed.Provider != "xai" || observed.EffortLevel == nil || *observed.EffortLevel != 4 {
+		t.Fatalf("disabled observation lost display or effort metadata: %+v", observed)
+	}
 	status := decode[struct {
 		Observations []struct {
 			Pending bool `json:"pending"`
@@ -309,6 +312,9 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	accepted := decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
 	if !accepted.Enabled || accepted.ID == observed.ID {
 		t.Fatal("person grant did not create a separate enabled pin")
+	}
+	if accepted.Display != observed.Display || accepted.Provider != observed.Provider || accepted.EffortLevel == nil || *accepted.EffortLevel != *observed.EffortLevel {
+		t.Fatalf("accepted successor lost display or effort metadata: %+v", accepted)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		var enabled bool

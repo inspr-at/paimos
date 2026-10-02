@@ -64,7 +64,7 @@ func upgradeCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		if conflict {
 			continue
 		}
-		profile, err := insertProfile(ctx, tx, p.TenantID, profileWrite{seed.Slug, seed.Version, seed.Harness, seed.Family, seed.Model, seed.Effort, seed.Tier})
+		profile, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: seed.Slug, Version: seed.Version, Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier})
 		if err != nil {
 			return err
 		}

@@ -194,7 +194,7 @@ func observedPin(o Observation) (profileWrite, bool) {
 		if model.Harness == o.Harness && model.ID == o.Model {
 			for _, e := range model.Efforts {
 				if e == o.Effort {
-					return profileWrite{catalogSlug(model, e), CatalogVersion, model.Harness, model.Family, model.ID, e, model.Tier}, true
+					return profileWrite{Slug: catalogSlug(model, e), Version: CatalogVersion, Harness: model.Harness, Family: model.Family, Model: model.ID, Effort: e, Tier: model.Tier}, true
 				}
 			}
 			return profileWrite{}, false
@@ -216,7 +216,7 @@ func observedPin(o Observation) (profileWrite, bool) {
 		return profileWrite{}, false
 	}
 	sum := sha256.Sum256([]byte(o.Harness + "/" + o.Model + "/" + o.Effort))
-	return profileWrite{"observed-" + o.Harness + "-" + hex.EncodeToString(sum[:12]), "observed-1", o.Harness, family, o.Model, o.Effort, "standard"}, true
+	return profileWrite{Slug: "observed-" + o.Harness + "-" + hex.EncodeToString(sum[:12]), Version: "observed-1", Harness: o.Harness, Family: family, Model: o.Model, Effort: o.Effort, Tier: "standard"}, true
 }
 
 // EvidenceID derives a stable id from public evidence.

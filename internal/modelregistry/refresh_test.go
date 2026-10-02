@@ -143,13 +143,13 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 						continue
 					}
 					s.Version = "2"
-					row, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{s.Slug, s.Version, s.Harness, s.Family, s.Model, s.Effort, s.Tier})
+					row, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: s.Slug, Version: s.Version, Harness: s.Harness, Family: s.Family, Model: s.Model, Effort: s.Effort, Tier: s.Tier})
 					if err != nil {
 						return err
 					}
 					ids[s.Slug] = row.ID
 				}
-				terra, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{"codex-terra-high", "2", "codex", "openai", "gpt-6-terra", "high", "standard"})
+				terra, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "codex-terra-high", Version: "2", Harness: "codex", Family: "openai", Model: "gpt-6-terra", Effort: "high", Tier: "standard"})
 				if err != nil {
 					return err
 				}
@@ -195,6 +195,10 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 				}
 				if steps[0].Profile.Model != "gpt-6.1-sol" {
 					t.Fatalf("build still selects %s", steps[0].Profile.Model)
+				}
+				profile := steps[0].Profile
+				if profile.FullName() != "Codex Sol 6.1" || profile.ShortName != "Sol" || profile.Provider != "openai" || profile.EffortLevel == nil || *profile.EffortLevel != 3 {
+					t.Fatalf("upgraded ladder lost display or effort metadata: %+v", profile)
 				}
 				after, err := listRoutes(t.Context(), tx)
 				if err != nil {

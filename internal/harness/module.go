@@ -98,6 +98,13 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
 		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
+		{"GET /api/me/agent-pause-settings", "harness.read", false, 200, m.getPauseSettings},
+		{"PUT /api/me/agent-pause-settings", "harness.read", false, 200, m.putPauseSettings},
+		{"GET /api/me/leaving-at", "harness.read", false, 200, m.getLeavingAt},
+		{"PUT /api/me/leaving-at", "harness.control", false, 200, m.putLeavingAt},
+		{"DELETE /api/me/leaving-at", "harness.control", false, 200, m.cancelLeavingAt},
+		{"POST /api/harness-sessions/pause", "harness.control", false, 200, m.pauseAll},
+		{"POST /api/harness-sessions/resume", "harness.control", false, 200, m.resumeAll},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
@@ -125,6 +132,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause", "harness.control", false, 200, m.requestPause},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause-plan", "harness.worker", true, 200, m.planPause},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume", "harness.control", false, 200, m.resumePause},
+		{"POST /api/projects/{projectId}/harness-sessions/pause", "harness.control", false, 200, m.pauseBatch},
+		{"POST /api/projects/{projectId}/harness-sessions/resume", "harness.control", false, 200, m.resumeBatch},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain", "harness.worker", true, 200, m.drain},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery", "harness.worker", true, 200, m.completeDelivery},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings", "harness.control", false, 200, m.managedSettings},
@@ -151,6 +163,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	SupportedPauseLevels    []string                 `json:"supported_pause_levels,omitempty"`
+	PauseCanInterrupt       *bool                    `json:"pause_can_interrupt,omitempty"`
+	PauseProgress           *PauseProgress           `json:"pause_progress,omitempty"`
+	Pause                   *Pause                   `json:"pause,omitempty"`
+	Continuation            *Continuation            `json:"continuation,omitempty"`
 	Generator               *string                  `json:"generator,omitempty"`
 	Command                 *string                  `json:"command,omitempty"`
 	AgentActivityMode       string                   `json:"agent_activity_mode,omitempty"`
@@ -343,13 +360,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp()`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress)
 	if err != nil {
 		return s, err
 	}
@@ -359,6 +376,9 @@ func scanSession(row pgx.Row) (Session, error) {
 	}
 	projectActivity(&s, activityNow)
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
+	s.SupportedPauseLevels = supportedPauseLevels(s)
+	canInterrupt := cooperativePause(s) && has(s, "interrupt")
+	s.PauseCanInterrupt = &canInterrupt
 	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -499,7 +519,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -613,6 +633,17 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
+	if in.SucceedsID != nil {
+		if !workorders.UUID(*in.SucceedsID) {
+			return nil, workorders.Fail(400, "valid predecessor required")
+		}
+		if err := lockHierarchy(ctx, tx, projectID); err != nil {
+			return nil, err
+		}
+		if err := inheritPauseRegistration(ctx, tx, projectID, &in); err != nil {
+			return nil, err
+		}
+	}
 	if !workorders.UUID(in.AgentPrincipalID) || !validHarness(in.Harness) || len(in.Host) < 1 || len(in.Host) > 128 || strings.TrimSpace(in.Host) != in.Host || len(in.SessionRef) < 16 || len(in.SessionRef) > 4096 || len(in.WorkerLease) < 32 || len(in.WorkerLease) > 256 || strings.ContainsAny(in.SessionRef+in.WorkerLease, "\r\n") || in.SessionRef == in.WorkerLease {
 		return nil, workorders.Fail(400, "invalid harness registration")
 	}
@@ -665,8 +696,8 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if in.Role != "worker" && in.Role != "coordinator" {
 		return nil, workorders.Fail(400, "invalid hierarchy role")
 	}
-	if in.SucceedsID != nil && (!workorders.UUID(*in.SucceedsID) || in.Role != "coordinator") {
-		return nil, workorders.Fail(400, "coordinator and valid predecessor required")
+	if in.SucceedsID != nil && !workorders.UUID(*in.SucceedsID) {
+		return nil, workorders.Fail(400, "valid predecessor required")
 	}
 	caps, err := normalizeCaps(in.Capabilities, in.Management)
 	if err != nil {
@@ -766,6 +797,20 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	if predecessor != nil && predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
+		if subtle.ConstantTimeCompare(predecessor.refDigest, ref) == 1 || subtle.ConstantTimeCompare(predecessor.leaseDigest, lease) == 1 {
+			return nil, workorders.Fail(409, "continuation requires fresh session reference and worker lease")
+		}
+		if p.Kind == tenant.Person {
+			owner, admin, parent, e := pauseController(r, tx, p, "")
+			if e != nil {
+				return nil, e
+			}
+			if !pauseAllowed(*predecessor, owner, admin, parent) {
+				return nil, workorders.Fail(403, "paused registration owner required")
+			}
+		}
+	}
 	// An archived worker generation cannot resurrect by replaying registration.
 	var revoked bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND archived_at IS NOT NULL AND (ref_digest=$3 OR lease_digest=$4))`, projectID, in.AgentPrincipalID, ref, lease).Scan(&revoked); err != nil {
@@ -817,7 +862,12 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, err
 	}
 	if predecessor != nil {
-		if err = adoptChildren(ctx, tx, p, *predecessor, s); err != nil {
+		if predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
+			s, err = completeResume(ctx, tx, p, *predecessor, s)
+		} else {
+			err = adoptChildren(ctx, tx, p, *predecessor, s)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -899,6 +949,9 @@ func (m *Module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(r.Context(), tx, p, s); err != nil {
 		return nil, err
 	}
 	s.Watch, err = readAttachStatus(r.Context(), tx, s.ID)
@@ -1089,6 +1142,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		ModelReports []modelregistry.Observation `json:"model_reports"`
+		pauseProgressReport
 		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
 		Phase            string                  `json:"phase"`
@@ -1241,6 +1295,16 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
+	s, err = reportPauseProgress(ctx, tx, s, in.pauseProgressReport)
+	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
+	if s, err = m.preparePauseStopHeartbeat(r, tx, p, s); err != nil {
+		return nil, err
+	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
@@ -1265,18 +1329,39 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 }
 func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Reason string `json:"reason"`
+		Reason   string    `json:"reason"`
+		Handover *Handover `json:"handover"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
 	switch in.Reason {
-	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted":
+	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted", "paused":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
+	if in.Reason == "paused" {
+		if err != nil && s.ArchivedAt == nil && s.Pause != nil && s.StopReason != nil && *s.StopReason == "paused" && leaseProof(s, r, p) {
+			if in.Handover == nil {
+				return s, nil
+			}
+			raw, _ := json.Marshal(in.Handover)
+			previous, _ := json.Marshal(s.Pause.Handover)
+			if string(raw) == string(previous) {
+				return s, nil
+			}
+			return nil, workorders.Fail(409, "divergent paused stop replay")
+		}
+		if err != nil {
+			return nil, err
+		}
+		return finishPause(ctx, tx, p, s, in.Handover)
+	}
+	if in.Handover != nil {
+		return nil, workorders.Fail(400, "handover requires stop reason paused")
+	}
 	if err != nil && lostContact(s) && leaseProof(s, r, p) {
 		// The server already closed this silent generation; the worker's own
 		// reason replaces "lost contact". Its obligations and leases are closed.
@@ -1293,8 +1378,21 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 }
 
 func closeGeneration(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, reason string) (Session, error) {
+	if reason != "paused" && reason != StopReasonHeartbeatLost && s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned") {
+		next := *s.Pause
+		next.State = "cancelled"
+		var err error
+		s, err = savePause(ctx, tx, p, s, next, "pause_cancelled")
+		if err != nil {
+			return s, err
+		}
+	}
 	before := s
-	rows, err := tx.Query(ctx, `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state<>'completed' ORDER BY sequence FOR UPDATE`, s.ID)
+	var preservedPause *string
+	if reason == StopReasonHeartbeatLost && s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned") {
+		preservedPause = &s.Pause.ControlID
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state<>'completed' AND ($2::uuid IS NULL OR id<>$2::uuid) ORDER BY sequence FOR UPDATE`, s.ID, preservedPause)
 	if err != nil {
 		return Session{}, err
 	}

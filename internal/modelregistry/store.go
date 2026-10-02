@@ -4,6 +4,7 @@ package modelregistry
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -22,8 +23,20 @@ const (
 	evRoutes  = "model.routes_replaced"
 )
 
+// Display is model identity for presentation; Version on Profile is the pin revision.
+type Display struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	ShortName    string `json:"short_name,omitempty"`
+	ModelVersion string `json:"model_version,omitempty"`
+}
+
+func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " " + d.ModelVersion) }
+
 // Profile is one immutable model pin.
 type Profile struct {
+	Display
+	EffortLevel *int      `json:"effort_level"`
+	Provider    string    `json:"provider"`
 	ID          string    `json:"id"`
 	Slug        string    `json:"slug"`
 	Version     string    `json:"version"`
@@ -31,7 +44,6 @@ type Profile struct {
 	Family      string    `json:"family"`
 	Model       string    `json:"model"`
 	Effort      string    `json:"effort"`
-	EffortLevel *int      `json:"effort_level,omitempty"`
 	Tier        string    `json:"tier"`
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -49,6 +61,7 @@ type Route struct {
 }
 
 type profileWrite struct {
+	Display
 	Slug    string `json:"slug"`
 	Version string `json:"version"`
 	Harness string `json:"harness"`
@@ -132,13 +145,32 @@ func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in p
 
 func insertProfileWithState(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite, enabled bool) (Profile, error) {
 	var out Profile
-	err := tx.QueryRow(ctx, `
+	overrides := map[string]string{}
+	if in.DisplayName != "" {
+		overrides["display_name"] = in.DisplayName
+	}
+	if in.ShortName != "" {
+		overrides["short_name"] = in.ShortName
+	}
+	if in.ModelVersion != "" {
+		overrides["model_version"] = in.ModelVersion
+	}
+	raw, err := json.Marshal(overrides)
+	if err != nil {
+		return out, err
+	}
+	err = tx.QueryRow(ctx, `
 		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
+			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled).
+		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, enabled, string(raw)).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, tenantID, out.ID).
+			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
+	}
 	if out.Harness == "gemini" {
 		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
 	}
@@ -163,9 +195,9 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, slug, version, harness, family, model, effort, tier, enabled, created_at
-		FROM model_profiles
-		ORDER BY slug, version, id`)
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		ORDER BY p.slug, p.version, p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +205,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider); err != nil {
 			return nil, err
 		}
 		if profile.Harness == "gemini" {
@@ -205,6 +237,18 @@ func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 }
 
 func validateProfile(in profileWrite) error {
+	for _, field := range []struct {
+		value string
+		max   int
+	}{{in.DisplayName, 128}, {in.ShortName, 128}, {in.ModelVersion, 64}} {
+		if len(field.value) > field.max || strings.ContainsAny(field.value, "\x00\r\n") {
+			return fail(http.StatusBadRequest, "invalid model display metadata")
+		}
+	}
+	if (in.DisplayName == "") != (in.ShortName == "") {
+		return fail(http.StatusBadRequest, "display_name and short_name must be supplied together")
+	}
+
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)

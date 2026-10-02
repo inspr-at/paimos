@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -157,6 +159,118 @@ func TestEnclaveConsentRejectsWrongKeyNonceReplayAndExpiredApproval(t *testing.T
 		t.Fatal(err)
 	}
 	f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 410)
+}
+
+func TestEnclaveConsentConcurrentReplayActivatesExactlyOnce(t *testing.T) {
+	for _, mode := range []string{"", attachwatch.ModeLease} {
+		t.Run(fmt.Sprintf("mode=%s", mode), func(t *testing.T) {
+			f, bearer, in, signer := upgradedWatchFixture(t)
+			in.Snapshot.Platform, in.Snapshot.Mode = "darwin", mode
+			if mode == attachwatch.ModeLease {
+				in.Snapshot.Transcript, in.Snapshot.FileID = "", ""
+			}
+			in.Digest = in.Snapshot.Digest()
+			v := requestWatch(t, f, bearer, in)
+			decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+			in.Operation, in.Sequence = "poll", 1
+			in.ConsentDigest, in.LocalAuthNonce = v.ConsentDigest, v.LocalAuthNonce
+			in.LocalAuthSignature = signWatchConsent(t, signer, in.ConsentDigest, in.LocalAuthNonce, in.Snapshot)
+
+			// Both callers possess the same valid proof. Only the transaction that
+			// consumes the challenge may acquire a session, even under contention.
+			start := make(chan struct{})
+			responses := make(chan *httptest.ResponseRecorder, 2)
+			for range 2 {
+				r := f.request("POST", "/api/agent-pairing/attach", in, false, bearer).WithContext(t.Context())
+				go func() {
+					<-start
+					w := httptest.NewRecorder()
+					f.h.ServeHTTP(w, r)
+					responses <- w
+				}()
+			}
+			close(start)
+			var active attachwatch.View
+			accepted, refused := 0, 0
+			for range 2 {
+				w := <-responses
+				switch w.Code {
+				case http.StatusOK:
+					accepted++
+					decodeResult(t, w, &active)
+				case http.StatusForbidden:
+					refused++
+					var failure struct{ Code string }
+					decodeResult(t, w, &failure)
+					if failure.Code != "local_auth_proof_rejected" {
+						t.Errorf("concurrent replay refusal code %q", failure.Code)
+					}
+				default:
+					t.Errorf("concurrent activation status %d", w.Code)
+				}
+			}
+			if accepted != 1 || refused != 1 || active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+				t.Fatal("one consent proof did not yield exactly one active session and one refusal")
+			}
+			var count int
+			var consumed, bound bool
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT local_auth_nonce IS NULL, state='active' AND session_id=$2 AND lease_until IS NOT NULL,
+ (SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$3))
+ FROM harness_attach_requests WHERE id=$1`, in.RequestID, *active.SessionID, in.ComputerID).Scan(&consumed, &bound, &count); err != nil || !consumed || !bound || count != 1 {
+				t.Fatal("concurrent activation did not consume the challenge with exactly one bound session", err)
+			}
+		})
+	}
+}
+
+func TestEnclaveConsentIncompleteProofAndFailedActivationPreserveChallenge(t *testing.T) {
+	f, bearer, in, signer := upgradedWatchFixture(t)
+	in.Snapshot.Platform = "darwin"
+	in.Digest = in.Snapshot.Digest()
+	v := requestWatch(t, f, bearer, in)
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200), &v)
+	in.Operation, in.Sequence, in.ConsentDigest = "poll", 1, v.ConsentDigest
+	proof := signWatchConsent(t, signer, v.ConsentDigest, v.LocalAuthNonce, in.Snapshot)
+	for _, tc := range []struct {
+		name, nonce, signature string
+		sequence               int64
+		status                 int
+	}{
+		{"no proof", "", "", 1, 200},
+		{"nonce without signature", v.LocalAuthNonce, "", 1, 403},
+		{"signature without nonce", "", proof, 1, 403},
+		{"invalid signature encoding", v.LocalAuthNonce, base64.StdEncoding.EncodeToString([]byte("invalid DER")), 1, 403},
+		// Sequence validation occurs after proof consumption and session insert.
+		// A failed transaction must restore the nonce and remove that session.
+		{"invalid activation sequence", v.LocalAuthNonce, proof, 0, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempt := in
+			attempt.LocalAuthNonce, attempt.LocalAuthSignature, attempt.Sequence = tc.nonce, tc.signature, tc.sequence
+			w := f.call("POST", "/api/agent-pairing/attach", attempt, false, bearer, tc.status)
+			if tc.status == 200 {
+				var waiting attachwatch.View
+				decodeResult(t, w, &waiting)
+				if waiting.State != "approved" || waiting.SessionID != nil || waiting.LeaseUntil != nil || waiting.LocalAuthNonce != v.LocalAuthNonce {
+					t.Fatal("missing proof acquired authority or changed the challenge")
+				}
+			}
+			var pending bool
+			var challenge string
+			var sessions int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT state='approved' AND session_id IS NULL AND lease_until IS NULL, coalesce(local_auth_nonce,''),
+ (SELECT count(*) FROM harness_sessions WHERE agent_principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$2))
+ FROM harness_attach_requests WHERE id=$1`, in.RequestID, in.ComputerID).Scan(&pending, &challenge, &sessions); err != nil || !pending || challenge != v.LocalAuthNonce || sessions != 0 {
+				t.Fatal("incomplete or failed activation consumed consent or left session authority", err)
+			}
+		})
+	}
+	in.LocalAuthNonce, in.LocalAuthSignature = v.LocalAuthNonce, proof
+	var active attachwatch.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, bearer, 200), &active)
+	if active.State != "active" || active.SessionID == nil || active.LocalAuthNonce != "" {
+		t.Fatal("valid retry could not consume the preserved consent challenge")
+	}
 }
 
 func TestLegacyPairingUsesAeonApprovalDespiteCapabilityReport(t *testing.T) {
