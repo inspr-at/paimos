@@ -36,10 +36,10 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE account_reservations SET reserved_units=1 WHERE run_id=$1`, run.ID); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO account_reservations(tenant_id,id,run_id,window_id,reserved_units)
- WITH w AS (INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,reserved,capacity_kind,capacity_bucket,capacity_read_at,capacity_source,capacity_allowed,capacity_refresh_run)
+				if _, err := tx.Exec(t.Context(), `WITH w AS (INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,reserved,capacity_kind,capacity_bucket,capacity_read_at,capacity_source,capacity_allowed,capacity_refresh_run)
  SELECT w.tenant_id,w.account_id,w.starts_at,w.ends_at,'percent',1,1,'blind','unknown:'||$3::text,w.capacity_read_at,'estimate',true,$3::uuid
  FROM account_allowance_windows w JOIN account_reservations r ON r.window_id=w.id WHERE r.run_id=$1 RETURNING tenant_id,id)
+ INSERT INTO account_reservations(tenant_id,id,run_id,window_id,reserved_units)
  SELECT tenant_id,$2::uuid,$3::uuid,id,1 FROM w`, run.ID, siblingReservation, sibling.ID); err != nil {
 					return err
 				}
