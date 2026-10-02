@@ -3411,7 +3411,7 @@ paths:
                   type: [array, "null"]
                   maxItems: 256
                   items: {type: string}
-                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. For shared roles, that ceiling combines workspace-role permissions with project-grantable and self-service permissions from the agent's project roles, restricted to agent_grantable permissions. Generated private workspace roles (non-builtin agent_<principal hex> roles) additionally cap rotation at their configured workspace permissions; project grants cannot restore scopes removed from that role. The coordinator rules.read exception remains derived from live project access. Project permissions remain confined to the agent's bound projects on requests. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -3486,8 +3486,8 @@ paths:
         '409': {description: Key is revoked or expired}
     patch:
       operationId: changeAgentKeyScopes
-      summary: Add or remove scopes without rotating the key
-      description: Requires a person with keys.manage. Applies add/remove atomically to the latest scopes; overlapping deltas are invalid. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after, any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      summary: Edit scopes and expiry without rotating the key
+      description: Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove or expires_at is required. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
       security: [{session: []}]
       requestBody:
         required: true
@@ -3497,9 +3497,14 @@ paths:
               type: object
               additionalProperties: false
               minProperties: 1
+              anyOf:
+                - {required: [add]}
+                - {required: [remove]}
+                - {required: [expires_at]}
               properties:
                 add: {type: array, maxItems: 256, items: {type: string}}
                 remove: {type: array, maxItems: 256, items: {type: string}}
+                expires_at: {type: [string, 'null'], format: date-time, description: 'Omit to preserve expiry; null means Never; a timestamp must be in the future.'}
                 role_extension:
                   type: object
                   additionalProperties: false
@@ -3513,7 +3518,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AgentKey'}
-        '400': {description: Invalid scopes}
+        '400': {description: Invalid scopes or expiry}
         '401': {description: Not signed in}
         '403': {description: Person with keys.manage required or resulting scopes exceed a ceiling}
         '404': {description: Key not found in this tenant}
