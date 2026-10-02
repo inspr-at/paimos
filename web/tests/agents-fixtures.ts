@@ -225,7 +225,7 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
     if (path === '/api/decision-desk/projection') {
-      const now = await page.evaluate(() => Date.now())
+      const now = Date.now()
       const items = [
         ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/agents?needs=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
         ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/agents?needs=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),

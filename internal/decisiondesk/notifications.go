@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -13,28 +14,79 @@ import (
 )
 
 // NoticesTx is the bounded source adapter for AEON-455's existing scheduler.
-// Already claimed recipients are removed before LIMIT, so quiet normal work
-// and old sent notices cannot starve later held work or expiry warnings.
+// Native project/workspace decision authority is filtered before LIMIT. Scope
+// permissions checked only in Go receive a terminal skipped claim in ClaimTx.
 func NoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int) ([]Item, error) {
-	page, err := readProjection(ctx, tx, p, limit, nil, true, true, "", "")
+	page, err := readProjection(ctx, tx, p, limit, nil, true, true)
 	return page.Items, err
 }
 
-// CurrentTx rechecks access, source state, revision and held-work links directly
-// before transport. The caller reuses phone preferences and subscription checks.
+// CurrentTx rechecks just this source's access, state, revision and held-work
+// links before transport. The caller reuses phone preferences and subscriptions.
 func CurrentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
-	return currentTx(ctx, tx, p, item, false)
-}
-
-func currentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, unclaimed bool) (bool, error) {
-	page, err := readProjection(ctx, tx, p, 1, nil, true, unclaimed, item.ID, item.Kind)
-	if err != nil {
+	current, ok, err := currentSourceTx(ctx, tx, p, item)
+	if err != nil || !ok {
 		return false, err
 	}
-	if len(page.Items) != 1 || page.Items[0].Revision != item.Revision || !page.Items[0].PushEligible(page.AsOf) {
-		return false, nil
+	return canDecideTx(ctx, tx, p, current)
+}
+
+func currentSourceTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (Item, bool, error) {
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !validID(item.ID) || item.Revision < 1 {
+		return Item{}, false, nil
 	}
-	current := page.Items[0]
+	source, permission := "", ""
+	switch item.Kind {
+	case "question":
+		source, permission = "questions", "questions.read"
+	case "approval":
+		source, permission = "approvals", "approvals.read"
+	case "action_request":
+		source, permission = "held_requests", "inbox.manage"
+	default:
+		return Item{}, false, nil
+	}
+	// The source CTEs filter by native UUID before joins/held-work checks. Only
+	// the selected source is referenced; totals, chores and project scans are absent.
+	var now time.Time
+	var raw []byte
+	err := tx.QueryRow(ctx, sourceSQL+" SELECT clock.at,to_jsonb(s) FROM "+source+" s CROSS JOIN clock WHERE s.id=$3::uuid", p.TenantID, item.Kind, item.ID).Scan(&now, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Item{}, false, nil
+	}
+	if err != nil {
+		return Item{}, false, err
+	}
+	var current Item
+	if err = json.Unmarshal(raw, &current); err != nil {
+		return Item{}, false, err
+	}
+	if current.Revision != item.Revision || !current.PushEligible(now) {
+		return Item{}, false, nil
+	}
+	if err = authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: current.ProjectID}); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return Item{}, false, nil
+		}
+		return Item{}, false, err
+	}
+	if item.Kind == "action_request" {
+		// Keep the same canonicalization boundary as the projection, including an
+		// answered canonical question. Use the source's project, never the caller hint.
+		if err = authz.RequireTx(ctx, tx, p, "questions.read", authz.Scope{ProjectID: current.ProjectID}); err == nil {
+			var canonical bool
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.tenant_id=a.tenant_id AND q.node_id=a.question_id WHERE a.tenant_id=$1 AND a.source_request_id=$2 AND q.project_id=$3)`, p.TenantID, current.ID, current.ProjectID).Scan(&canonical)
+			if err != nil || canonical {
+				return Item{}, false, err
+			}
+		} else if !errors.Is(err, authz.ErrForbidden) {
+			return Item{}, false, err
+		}
+	}
+	return current, true, nil
+}
+
+func canDecideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, current Item) (bool, error) {
 	if current.Kind == "approval" {
 		return approvals.CanNotify(ctx, tx, p, current.ID)
 	}
@@ -42,7 +94,7 @@ func currentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, un
 	if current.Kind == "question" {
 		permission = "questions.decide"
 	}
-	if err = authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: current.ProjectID}); err != nil {
+	if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: current.ProjectID}); err != nil {
 		if errors.Is(err, authz.ErrForbidden) {
 			return false, nil
 		}
@@ -51,31 +103,43 @@ func currentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, un
 	return true, nil
 }
 
-// ClaimTx must be the final admission in the scheduler's claim transaction.
-// It serializes with access changes and decisions on the existing tree fence,
-// reauthorizes inside the write, then claims once per source/revision/recipient.
-// No locks or events follow it in this transaction.
+// claimExistsSQL preserves at-most-once delivery across canonical source aliases.
+// Native UUID equality and the recipient index bound each durable-claim lookup.
+const claimExistsSQL = `SELECT EXISTS(SELECT 1 FROM desk_notification_claims c
+ WHERE c.tenant_id=$1 AND c.recipient_id=$2 AND (
+ c.kind=$3 AND c.item_id=$4::uuid AND c.revision=$5
+ OR $3='question' AND c.kind='action_request' AND c.revision=1 AND EXISTS(
+  SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.question_id=$4::uuid AND a.source_request_id=c.item_id)
+ OR $3='action_request' AND c.kind='question' AND EXISTS(
+  SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.source_request_id=$4::uuid AND a.question_id=c.item_id)))`
+
+// ClaimTx is the final admission in the scheduler's claim transaction. Tenant
+// access fence, tree, native source row and current-source authorization precede
+// the insert. No later lock or event acquisition belongs in this transaction.
 func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
-	if p.Kind != tenant.Person || p.KeyCreatorID != "" {
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !validID(item.ID) || item.Revision < 1 {
 		return false, nil
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, p.TenantID); err != nil {
+	// Acquire the tenant fence first (global lock order). LockProjectWrite also
+	// takes the canonical tree fence and retains tenant SHARE through the write.
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, p.TenantID).Scan(&tenantID); err != nil {
 		return false, err
 	}
-	var query, permission string
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return false, err
+	}
+	var query string
 	switch item.Kind {
 	case "question":
 		query = `SELECT node_id::text FROM desk_questions WHERE tenant_id=$1 AND node_id=$2 FOR NO KEY UPDATE`
-		permission = "questions.read"
 	case "approval":
 		query = `SELECT id::text FROM approval_requests WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`
-		permission = "approvals.read"
 	case "action_request":
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,55))`, p.TenantID); err != nil {
 			return false, err
 		}
 		query = `SELECT id::text FROM inbox_compat_messages WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`
-		permission = "inbox.manage"
 	default:
 		return false, nil
 	}
@@ -86,18 +150,24 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (boo
 		}
 		return false, err
 	}
-	current, err := currentTx(ctx, tx, p, item, true)
-	if err != nil || !current {
+	current, ok, err := currentSourceTx(ctx, tx, p, item)
+	if err != nil || !ok {
 		return false, err
 	}
-	if err = authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: item.ProjectID}); err != nil {
-		if errors.Is(err, authz.ErrForbidden) {
-			return false, nil
-		}
+	var exists bool
+	if err = tx.QueryRow(ctx, claimExistsSQL, p.TenantID, p.ID, current.Kind, current.ID, current.Revision).Scan(&exists); err != nil || exists {
 		return false, err
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO desk_notification_claims(tenant_id,kind,item_id,revision,recipient_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, p.TenantID, item.Kind, item.ID, item.Revision, p.ID)
-	return err == nil && tag.RowsAffected() == 1, err
+	allowed, err := canDecideTx(ctx, tx, p, current)
+	if err != nil {
+		return false, err
+	}
+	state := "claimed"
+	if !allowed {
+		state = "skipped"
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO desk_notification_claims(tenant_id,kind,item_id,revision,recipient_id,state,completed_at) VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $6='skipped' THEN clock_timestamp() END) ON CONFLICT DO NOTHING`, p.TenantID, current.Kind, current.ID, current.Revision, p.ID, state)
+	return err == nil && allowed && tag.RowsAffected() == 1, err
 }
 
 // FinishTx records transport evidence without private content. A failed or

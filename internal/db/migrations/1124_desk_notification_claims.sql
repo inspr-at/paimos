@@ -18,3 +18,7 @@ ALTER TABLE desk_notification_claims FORCE ROW LEVEL SECURITY;
 CREATE POLICY desk_notification_claims_tenant ON desk_notification_claims
  USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
  WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
+
+-- Recipient scans and canonical source aliases use UUID comparisons.
+CREATE INDEX desk_notification_claims_recipient
+ ON desk_notification_claims(tenant_id,recipient_id,kind,item_id,revision);

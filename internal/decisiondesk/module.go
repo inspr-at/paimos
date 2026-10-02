@@ -24,6 +24,8 @@ import (
 // 30-second scan. Scheduler integration must retain quiet hours and escalation.
 const NearExpiry = 15 * time.Minute
 
+var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
+
 type Item struct {
 	ID        string     `json:"id"`
 	Kind      string     `json:"kind"`
@@ -111,6 +113,10 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
+	if errors.Is(err, ErrCoverage) {
+		httpapi.WriteError(w, 422, "decision desk coverage exceeds 1000 projects")
+		return
+	}
 	if err != nil {
 		httpapi.WriteError(w, 500, "decision desk could not be read")
 		return

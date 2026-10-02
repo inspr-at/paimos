@@ -217,7 +217,7 @@ paths:
         A parked/paused/stopped question is held only with a live unfinished work link; carries_on alone is quiet.
         Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
         Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
-        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects fails explicitly.
+        counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
         The existing question-only decision-desk endpoint remains available.
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
@@ -227,6 +227,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/Error'}
   /queue:
     get:
@@ -8989,7 +8990,7 @@ components:
         expires_at: {type: string, format: date-time}
         held: {type: boolean}
         href: {type: string, description: App review link to the exact source}
-        source: {type: string, description: Authorized API link to the exact source}
+        source: {type: string, description: Authorized app route or API link to the exact source}
     DecisionDeskProjection:
       type: object
       required: [items, counts, has_more, as_of]

@@ -276,7 +276,7 @@ export const useAgents = defineStore('agents', () => {
     })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })
     return loadFlight
   }
-  // The badge uses the server's same mixed-source count as the desk/briefing.
+  // P6/P8 switches the badge and briefing together with the complete desk UI.
   async function loadNeeds(force = false) {
     if (!force && Date.now() - needsAt < 30_000) return
     needsAt = Date.now()
@@ -332,7 +332,7 @@ export const useAgents = defineStore('agents', () => {
   // ---------- Derived ----------
   const pending = computed(() => pendingApprovals(approvals.value, now.value))
   const held = computed<HeldRequest[]>(() => Object.entries(pendingHeld.value).flatMap(([projectId, list]) => heldRequests(list).map(m => ({ ...m, projectId }))))
-  const needsCount = computed(() => deskProjection.value?.counts.open ?? 0)
+  const needsCount = computed(() => pending.value.length + held.value.length)
   const accountById = computed(() => new Map(accounts.value.map(a => [a.id, a])))
   const modelById = computed(() => new Map(models.value.map(m => [m.id, m])))
   function viewOf(session: HarnessSession): SessionView {

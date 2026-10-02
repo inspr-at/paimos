@@ -280,21 +280,29 @@ links appear only after successful reads. Merge facts use changes to a ticket’
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
 do not count as merges. The visit-bounded autopilot log must also load completely
 before the cutoff advances. Journey next actions use one batch snapshot query.
-The Decision Desk section and the Agents badge use the same server projection:
-`GET /api/decision-desk/projection`. Held approvals sort by expiry, then other
-held work by age, then ordinary open items by age, with source ID ties. Questions
-with several askers count once; a question replaces its linked action
-request. Sign-ins remain separate chores. Counts cover all currently readable
-sources independently of page size; failed reads and coverage limits stay visible.
-The briefing preserves server order and links to the exact question/source;
-ordinary questions appear here without a push. Journey/autopilot checks remain
-in a separate section until their desk adapters exist.
+The additive `GET /api/decision-desk/projection` supplies the future Decision
+Desk's canonical order and exact counts. Held approvals sort by expiry, then
+other held work by age, then ordinary open items by age, with source ID ties.
+Questions with several askers count once; a question replaces its linked action
+request. Sign-ins remain separate chores. Counts cover currently readable sources
+independently of page size; coverage above 1000 projects returns an explicit 422.
+The current Agents badge continues to count the approvals and held requests its
+panel can display. Morning briefing retains actionable approvals with their scope
+labels/rationale and held requests with their project/body and app Source links.
+P6/P8 must switch desk, badge and briefing together when the complete desk UI and
+question deep links are available; ordinary questions currently remain in the
+server projection, without generating pushes.
 
 AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
 `NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
 existing AEON-455 phone scheduler. Eligible work has a real unfinished work
 link or a correlated unresolved held request; a parked label alone is insufficient.
 The proposed approval expiry-warning window is 15 minutes, subject to the phone scheduler's quiet hours and escalation.
+Notice scans filter project/workspace decision authority before their limit.
+An approval lacking its native scope authority gets a terminal skipped claim,
+so it cannot block later notices. Final claims take the tenant access fence,
+tree fence and source row lock, then recheck only that source's current project,
+revision, state and decision authority. Recipient indexes compare native UUIDs.
 Claims persist once per source/revision/recipient across devices and replicas,
 including action requests later represented by their canonical question.
 An ambiguous transport failure retains its claim and records failure rather
@@ -302,9 +310,14 @@ than repeating a push. Payloads contain only source pointers. Answer commits,
 grace edits, corrections and expiry never emit success notifications; doctrine
 keeps its existing per-person toast claim and has no competing desk push.
 Phone scheduler activation remains dependent on AEON-455 landing on main;
-this package adds no scheduler or competing subscription store.
+this package adds no scheduler or competing subscription store. Full P7 acceptance
+remains open: AEON-455 owns runtime delivery, quiet-hour/escalation/subscription
+tests, agreement on the warning window and integrated doctrine toast suppression.
+The current adapter treats approval requests against unfinished ticket/task work
+as held; the coordinator must confirm that policy before activation. Durable
+claims retain retry evidence rather than being pruned while a source can recur.
 
-This slice delivers the in-app briefing; e-mail and spoken delivery remain future work.
+The in-app briefing is available; push, e-mail and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 

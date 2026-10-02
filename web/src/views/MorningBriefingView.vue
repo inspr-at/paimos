@@ -4,7 +4,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem, APIError } from '../lib/api'
 import { can, ensurePermissions, onAccessChange, refreshPermissions } from '../lib/authz'
 import { createScope, scopeOwner } from '../lib/identityScope'
-import { loadDeskProjection } from '../lib/decisionDesk'
+import { pendingApprovals, heldRequests, scopeLabel, canDecideApproval } from '../lib/agentState'
+import type { Approval, MessagePage } from '../lib/agents'
 import type { Journey } from '../lib/journey'
 import { loadUsageDashboard } from '../lib/usageDashboard'
 import type { UsageDashboard, AllowanceWindow } from '../lib/usageFormat'
@@ -24,8 +25,8 @@ const range = ref<BriefingRange | null>(null), preference = ref<BriefingPreferen
 const time = ref('08:00'), loading = ref(false), saving = ref(false), error = ref(''), saveError = ref('')
 const delivered = ref<BriefingFact[]>([]), failures = ref<BriefingFact[]>([]), needs = ref<BriefingNeed[]>([])
 const usage = ref<BriefingUsage | null>(null), tickets = ref<ListItem[]>([]), notices = ref<string[]>([])
-const showAll = ref(false), deskCount = ref<number | null>(null), chores = ref<number | null>(null), otherNeeds = ref<BriefingNeed[]>([])
-const next = computed(() => recommendedStep([...needs.value, ...otherNeeds.value], failures.value))
+const showAll = ref(false)
+const next = computed(() => recommendedStep(needs.value, failures.value))
 const cost = computed(() => usage.value ? briefingCost(usage.value.totals) : null)
 const usageSources = ref<{ href: string; label: string }[]>([])
 const visibleTickets = computed(() => tickets.value.filter(t => t.planning?.cost && can('harness.read', t.project?.id ?? undefined)))
@@ -39,7 +40,7 @@ function accountUsage(account: AllowanceWindow) {
   return `${account.used.toLocaleString()} of ${account.allowance.toLocaleString()} ${account.unit} used`
 }
 function clear() {
-  range.value = null; preference.value = null; deskCount.value = null; chores.value = null; otherNeeds.value = []; delivered.value = []; failures.value = []; needs.value = []
+  range.value = null; preference.value = null; delivered.value = []; failures.value = []; needs.value = []
   usage.value = null; usageSources.value = []; tickets.value = []; notices.value = []; error.value = ''; saveError.value = ''; loading.value = false; saving.value = false
 }
 async function knownPermissions(projectId?: string) {
@@ -61,7 +62,7 @@ function load() {
       range.value = snapshot.range
       const window = snapshot.range
       return after(read(window, signal, snapshot.events), data => {
-        delivered.value = data.delivered; failures.value = data.failures; needs.value = data.needs; otherNeeds.value = data.otherNeeds; deskCount.value = data.deskCount; chores.value = data.chores
+        delivered.value = data.delivered; failures.value = data.failures; needs.value = data.needs
         usage.value = data.usage; usageSources.value = data.usageSources; tickets.value = data.tickets; notices.value = data.notices
         if (!data.complete) return
         const value = { ...pref, time: time.value, last_visit: window.to }
@@ -86,11 +87,11 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
   for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(p => source(`Access in ${p.routeKey}`, knownPermissions(p.id), true)))
   const costProjects = projectList.filter(p => can('harness.read', p.id))
   const emptyWindow = window.from === window.to
-  const [outcomes, baseEvents, autopilotEvents, desk] = await Promise.all([
+  const [outcomes, baseEvents, autopilotEvents, approvals] = await Promise.all([
     emptyWindow ? Promise.resolve({ items: [], truncated: false }) : source('Outcome history', loadBriefingOutcomes(window, signal), true),
     initialEvents ? Promise.resolve(initialEvents) : source('Event history', loadBriefingEvents(window, signal), true),
     emptyWindow ? Promise.resolve({ items: [], truncated: false }) : source('Status autopilot history', loadBriefingEvents(window, signal, true), true),
-    source('Decision Desk', loadDeskProjection(signal)),
+    source('Approvals', briefingJSON<Approval[]>('/approvals?pending=true&limit=200', signal)),
   ])
   const eventItems = [...baseEvents?.items ?? [], ...autopilotEvents?.items ?? []]
   if (outcomes?.truncated || baseEvents?.truncated || autopilotEvents?.truncated) { complete = false; notes.push('This window has more records than the briefing can show. Your previous visit has been kept.') }
@@ -108,9 +109,9 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
   if (dashboard?.truncated) notes.push('Usage is partial. Open its source for coverage details.')
   const events = { items: [...new Map(eventItems.map(e => [e.id, e])).values()] }
   if (window.capped) notes.push('Your last visit was more than 366 days ago. This briefing covers the latest 366 days.')
-  if (desk?.truncated) notes.push('Decision Desk coverage is partial or changed while reading. Refresh to include the current queue.')
+  if (approvals?.length === 200) notes.push('Approvals show the latest 200 pending requests. Open Agents to check older requests.')
   const logIds = new Set([...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...events.items.filter(e => eventFact(e, 'p', 't') || eventNeed(e, 'p', 't')).map(e => e.node_id).filter((id): id is string => !!id)])
-  const ids = [...logIds]
+  const ids = [...new Set([...logIds, ...(approvals?.filter(a => a.resource_kind === 'node').map(a => a.resource_id).filter((id): id is string => !!id) ?? [])])]
   const rows: ListItem[] = []
   for (let i = 0; i < ids.length; i += 200) {
     const page = await source('Ticket details', listNodes({ ids: ids.slice(i, i + 200), limit: 200 }, { signal }), ids.slice(i, i + 200).some(id => logIds.has(id)))
@@ -139,21 +140,39 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
     const need = eventNeed(event, byProject.get(node.project?.id ?? '')?.routeKey ?? '', node.key)
     if (need) waiting.push(need)
   }
+  const pending = pendingApprovals(approvals ?? [], Date.now())
+  for (const approval of pending) {
+    const node = nodeById.get(approval.resource_id ?? ''), projectId = node?.kind_slug === 'project' ? node.id : node?.project?.id
+    if (!canDecideApproval(approval, permission => can(permission, projectId))) continue
+    const href = `/agents?needs=${encodeURIComponent(`a:${approval.id}`)}`
+    waiting.push({ id: `a:${approval.id}`, title: scopeLabel(approval.scope), detail: approval.rationale, href, source: href })
+  }
   const actionProjects = projectList.filter(p => can('journey.act', p.id) && can('journey.read', p.id))
   for (let i = 0; i < actionProjects.length; i += 100) {
     const query = new URLSearchParams({ project_ids: actionProjects.slice(i, i + 100).map(p => p.id).join(',') })
     const actions = await source('Project decisions', briefingJSON<{ items: { project_node_id: string; next_action: Journey['next_action'] }[] }>(`/journey/next-actions?${query}`, signal))
     for (const item of actions?.items ?? []) {
       const project = byProject.get(item.project_node_id), action = item.next_action
-      if (!project || !action.available || !personJourneyActions.has(action.key) || desk?.items.some(a => a.kind === 'approval' && a.id === action.approval_request_id)) continue
+      if (!project || !action.available || !personJourneyActions.has(action.key) || pending.some(a => a.id === action.approval_request_id)) continue
       const href = `/p/${encodeURIComponent(project.routeKey)}/journey`
       waiting.push({ id: `j:${project.id}`, title: `${project.routeKey} · ${action.label}`, detail: action.reason ?? '', href, source: href })
     }
   }
+  for (let i = 0; i < projectList.length; i += 3) await Promise.all(projectList.slice(i, i + 3).map(async project => {
+    if (!can('inbox.manage', project.id)) return
+    const messages = await source(`Human requests in ${project.routeKey}`, briefingJSON<MessagePage>(`/projects/${encodeURIComponent(project.id)}/messages?pending=true&limit=200`, signal))
+    if (messages?.items.length === 200) notes.push(`Human requests in ${project.routeKey} may be incomplete. Open Agents for the full queue.`)
+    for (const message of heldRequests(messages?.items ?? [])) {
+      const href = `/agents?needs=${encodeURIComponent(`m:${message.id}`)}`
+      waiting.push({ id: `m:${message.id}`, title: `Human check · ${project.routeKey}`, detail: message.body, href, source: href })
+    }
+  }))
   facts.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)); failed.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-  waiting.sort((a, b) => a.id.localeCompare(b.id))
+  // Project reads can finish in any order; keep the next step deterministic.
+  const approvalOrder = new Map(pending.map((a, i) => [`a:${a.id}`, i]))
+  waiting.sort((a, b) => (approvalOrder.get(a.id) ?? Infinity) - (approvalOrder.get(b.id) ?? Infinity) || a.id.localeCompare(b.id))
   const factIds = new Set([...parentIds, ...(outcomes?.items.map(o => o.ticket_node_id) ?? []), ...(events?.items.filter(e => eventFact(e, 'p', 't')).map(e => e.node_id) ?? [])])
-  return { delivered: facts, failures: failed, needs: (desk?.items ?? []).map(item => ({ id: `${item.kind}:${item.id}`, title: item.title, detail: item.held ? 'Work is waiting for this decision.' : '', href: item.href, source: item.source })), deskCount: desk?.counts.open ?? null, chores: desk?.counts.chores ?? null, otherNeeds: [...new Map(waiting.map(n => [n.id, n])).values()], usage: dashboard, usageSources, tickets: rows.filter(t => factIds.has(t.id)), notices: notes, complete }
+  return { delivered: facts, failures: failed, needs: [...new Map(waiting.map(n => [n.id, n])).values()], usage: dashboard, usageSources, tickets: rows.filter(t => factIds.has(t.id)), notices: notes, complete }
 }
 function saveTime() {
   if (!validBriefingTime(time.value) || !preference.value || loading.value) return
@@ -186,19 +205,13 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose() })
     <template v-else>
       <p v-if="error" class="glass-card note" role="alert">{{ error }} <button class="btn sm" type="button" @click="load">Try again</button></p>
       <aside v-if="notices.length" class="glass-card note" aria-label="Briefing coverage"><p v-for="notice in notices" :key="notice">{{ notice }}</p></aside>
-      <section v-if="next" class="glass-card next-step" aria-label="Recommended next step"><p class="eyebrow">One next step</p><RouterLink :to="next.href">{{ next.title }}</RouterLink><p v-if="next.detail">{{ next.detail }}</p><a v-if="next.source.startsWith('/api/')" class="source" :href="next.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="next.source">Source</RouterLink></section>
+      <section v-if="next" class="glass-card next-step" aria-label="Recommended next step"><p class="eyebrow">One next step</p><RouterLink :to="next.href">{{ next.title }}</RouterLink><p v-if="next.detail">{{ next.detail }}</p><RouterLink class="source" :to="next.source">Source</RouterLink></section>
       <div v-if="range" class="briefing-grid">
         <section class="glass-card briefing-section" aria-labelledby="briefing-needs">
-          <header><h2 id="briefing-needs">Decision Desk</h2><span v-if="deskCount !== null" class="count-badge">{{ deskCount }}</span></header>
-          <p v-if="deskCount === null" class="muted">Decision Desk could not be read. Refresh to include it.</p>
-          <p v-else-if="!needs.length" class="muted">No open desk items.</p>
-          <ul v-else><li v-for="need in (showAll ? needs : needs.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><a v-if="need.source.startsWith('/api/')" class="source" :href="need.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="need.source">Source</RouterLink></li></ul>
+          <header><h2 id="briefing-needs">Needs you now</h2><span class="count-badge">{{ needs.length }}</span></header>
+          <p v-if="!needs.length" class="muted">No person action in the sources that answered.</p>
+          <ul v-else><li v-for="need in (showAll ? needs : needs.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><RouterLink class="source" :to="need.source">Source</RouterLink></li></ul>
         </section>
-        <section v-if="otherNeeds.length" class="glass-card briefing-section" aria-labelledby="briefing-other">
-          <header><h2 id="briefing-other">Other checks</h2><span class="count-badge">{{ otherNeeds.length }}</span></header>
-          <ul><li v-for="need in (showAll ? otherNeeds : otherNeeds.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><a v-if="need.source.startsWith('/api/')" class="source" :href="need.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="need.source">Source</RouterLink></li></ul>
-        </section>
-        <p v-if="chores" class="muted">{{ chores }} sign-in {{ chores === 1 ? 'request' : 'requests' }} · <RouterLink to="/agents">Review sign-ins</RouterLink></p>
         <section v-for="section in sections" :key="section.key" class="glass-card briefing-section" :aria-labelledby="`briefing-${section.key}`">
           <header><h2 :id="`briefing-${section.key}`">{{ section.title }}</h2><span class="count-badge">{{ section.rows.length }}</span></header>
           <p v-if="!section.rows.length" class="muted">{{ section.empty }}</p>
@@ -216,7 +229,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose() })
           <div v-if="visibleTickets.length" class="planning-table"><h3>Recorded ticket totals</h3><p class="muted">Measured and estimated figures use the planning columns. Totals cover each ticket’s sessions, not only this window.</p><table><thead><tr><th>Ticket</th><th>≈ Cost</th><th>Paid</th></tr></thead><tbody><tr v-for="ticket in visibleTickets" :key="ticket.id"><td><RouterLink :to="`/p/${encodeURIComponent(projects.byId(ticket.project?.id ?? '')?.routeKey ?? '')}/${encodeURIComponent(ticket.key)}`">{{ ticket.key }}</RouterLink></td><td><PlanningCell column="list_cost" :row="ticket" /></td><td><PlanningCell column="paid" :row="ticket" /></td></tr></tbody></table></div>
         </section>
       </div>
-      <button v-if="!showAll && [needs.length, otherNeeds.length, delivered.length, failures.length].some(n => n > 8)" type="button" class="btn" @click="showAll = true">Show all briefing items</button>
+      <button v-if="!showAll && [needs.length, delivered.length, failures.length].some(n => n > 8)" type="button" class="btn" @click="showAll = true">Show all briefing items</button>
     </template>
   </main>
 </template>
