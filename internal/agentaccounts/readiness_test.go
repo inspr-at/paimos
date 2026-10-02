@@ -380,6 +380,7 @@ func TestReadinessDaemonPollScopesAndResourcePrivacy(t *testing.T) {
 	}
 	callStatus(t, f.mod, &f.runner, issueKey(t, f.runner, []string{"account.read"}), "GET", "/api/agent-accounts?include_checks=true", "", 403, nil)
 	other := addPrincipal(t, f.admin.TenantID, "agent", "Other daemon", []string{"admin"})
+	dbtest.BindRole(t, testDB, other.TenantID, other.ID, "admin")
 	other.Scopes = []string{"account.read", "account.probe"}
 	callStatus(t, f.mod, &other, issueKey(t, other, []string{"account.read", "account.probe"}), "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
 	if len(accounts) != 0 {
