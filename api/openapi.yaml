@@ -14553,6 +14553,7 @@ components:
       type: object
       additionalProperties: false
       required: [binding_revision, result]
+      description: Automatic reports without check_id may replay durable observations older than 24 hours while their binding and resource membership remain current. Original observation and reading times are preserved; replay does not renew freshness or replace newer facts. Manual reports retain the 24-hour observation bound and their check generation and expiry fences.
       properties:
         check_id: {type: string, format: uuid, description: Omitted for automatic captures including daemon restart; a supplied check ID remains fenced to its original generation and expiry.}
         binding_revision: {type: integer, minimum: 0}

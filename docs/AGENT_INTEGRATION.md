@@ -841,7 +841,10 @@ local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
 every 30 minutes; the retry deadline survives restart. Check now can request one
 capture before that deadline. Every completion is persisted before delivery.
 Lost automatic observations replay unchanged after restart while their binding
-and resource membership remain current; manual completions keep their original
+and resource membership remain current, including after outages longer than 24
+hours. Replay preserves the original observation and reading times, so old room
+stays stale, unresolved hard stops remain recorded and newer facts win.
+Manual completions retain the 24-hour observation bound and keep their original
 generation, revision and check ID and are dropped when expired or invalidated.
 A restarted daemon sends a generation heartbeat with `measurement_only: true`
 before handling checks. Measurement reports and this heartbeat preserve the health probe's

@@ -65,14 +65,18 @@ func checkResultOK(s string) bool {
 	return false
 }
 
-func (v ReadinessFactWrite) validate(now time.Time) error {
+func (v ReadinessFactWrite) validate(now time.Time, automatic bool) error {
 	if !uuidRE.MatchString(v.ResourceID) || v.WindowKey == "check" || len(v.WindowKey) > 128 || !accountKeyRE.MatchString(v.WindowKey) || looksLikeCredential(v.WindowKey) {
 		return fail(400, "invalid readiness resource/window")
 	}
 	if v.Source != "agentd" && v.Source != "harness" && v.Source != "provider" {
 		return fail(400, "invalid readiness source")
 	}
-	if v.ObservedAt.IsZero() || v.ObservedAt.After(now.Add(time.Minute)) || v.ObservedAt.Before(now.Add(-24*time.Hour)) {
+	// Automatic completions survive outages and restart in the daemon outbox.
+	// Accept their original evidence time: freshness still uses reading_at, and
+	// storeReadinessFact never lets old evidence overwrite a newer observation.
+	// Expiring manual requests cannot replay historical captures as fresh work.
+	if v.ObservedAt.IsZero() || v.ObservedAt.After(now.Add(time.Minute)) || !automatic && v.ObservedAt.Before(now.Add(-24*time.Hour)) {
 		return fail(400, "invalid readiness observation time")
 	}
 	if v.ReadingAt != nil && (v.ReadingAt.After(v.ObservedAt) || v.ReadingAt.IsZero()) {
@@ -268,7 +272,7 @@ func completeReadinessReport(ctx context.Context, tx pgx.Tx, a Account, generati
 	// Validate everything before acquiring fact locks in resource/window order.
 	seen := map[string]bool{}
 	for _, v := range in.Facts {
-		if err := v.validate(now); err != nil {
+		if err := v.validate(now, in.CheckID == ""); err != nil {
 			return err
 		}
 		if !members[v.ResourceID] {
