@@ -57,6 +57,7 @@
     "create": "Create"
   },
   "special": {
+    "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations"
   }
 }

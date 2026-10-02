@@ -268,6 +268,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "agents":
+		if len(parts) == 2 && parts[1] == "plan" && read {
+			return "agents.plan.read", true
+		}
 	case "releases":
 		// Build history is readable by agents. Presentation writes remain person-only.
 		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] != "") {

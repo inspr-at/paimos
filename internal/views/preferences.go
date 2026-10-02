@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -90,6 +91,16 @@ func (m *Module) putPreference(w http.ResponseWriter, r *http.Request) {
 	if len(trimmed) > maxPreferenceBytes {
 		httpapi.WriteError(w, http.StatusRequestEntityTooLarge, "value is too large")
 		return
+	}
+	if key == agentplan.PreferenceKey {
+		if p.Kind != tenant.Person {
+			httpapi.WriteError(w, http.StatusForbidden, "only the person may change their plan")
+			return
+		}
+		if _, _, err := agentplan.Decode(trimmed); err != nil {
+			httpapi.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	out := preference{Key: key}
 	err := m.inTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {

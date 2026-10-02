@@ -24,6 +24,7 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/agents/plan":                                                    "agents.plan.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",
 	"POST /api/agent-pairing/account-link/lookup":                             "profile.write",
 	"POST /api/agent-pairing/account-link/{requestId}/approve":                "profile.write",
