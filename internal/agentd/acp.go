@@ -154,7 +154,7 @@ func (p *acpProcess) Wait() (err error) {
 	return errors.Join(err, p.wireProcess.Stop(ctx))
 }
 
-func (p *acpProcess) promptLocked(text string) (*acpTurn, error) {
+func (p *acpProcess) promptLocked(ctx context.Context, text string) (*acpTurn, error) {
 	if p.closed {
 		return nil, ErrNotOwned
 	}
@@ -167,7 +167,7 @@ func (p *acpProcess) promptLocked(text string) (*acpTurn, error) {
 	t := &acpTurn{id: strconv.FormatInt(p.next.Add(1), 10), accepted: make(chan struct{})}
 	p.turn, p.idle = t, make(chan struct{})
 	n, _ := strconv.ParseInt(t.id, 10, 64)
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": map[string]any{
+	if err := p.sendContext(ctx, map[string]any{"jsonrpc": "2.0", "id": n, "method": "session/prompt", "params": map[string]any{
 		"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": text}},
 	}}); err != nil {
 		p.finishLocked(err)
@@ -192,7 +192,7 @@ func (p *acpProcess) Control(ctx context.Context, op, text string) error {
 			return ErrNotOwned
 		}
 		idle := p.idle
-		err := p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}})
+		err := p.sendContext(ctx, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}})
 		p.mu.Unlock()
 		if err != nil {
 			return err
@@ -216,7 +216,7 @@ func (p *acpProcess) Control(ctx context.Context, op, text string) error {
 		p.mu.Unlock()
 		return ErrUnsupported
 	}
-	t, err := p.promptLocked(text)
+	t, err := p.promptLocked(ctx, text)
 	p.mu.Unlock()
 	if err != nil {
 		return err
@@ -453,7 +453,7 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 		prompt = r.Rules + "\n\n" + prompt
 	}
 	p.mu.Lock()
-	_, err = p.promptLocked(prompt)
+	_, err = p.promptLocked(op, prompt)
 	p.mu.Unlock()
 	if err != nil {
 		return w.failStart(err)

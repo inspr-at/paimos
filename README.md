@@ -1245,6 +1245,16 @@ even when another writer keeps the pipe open. Cleanup suppresses further stream
 callbacks and bounds the wait for an in-flight callback; local closure never proves EOF
 for a final Codex receipt. `Stop` keeps its process-only role so an observer can
 call it without waiting on itself.
+Protocol writes, including startup and control frames, have a 20-second maximum
+and honor shorter caller deadlines while queued or blocked in the pipe. A canceled
+partial write closes the transport and cleans up its owned process group. Account
+probes also clean up their own descendants and bound inherited-pipe waits. Vendor
+launches bound stderr draining to two seconds after leader exit, including failed
+ownership checks; cleanup signals the launch group before reaping its leader.
+Codex quota capture applies its three-second budget to every protocol write. The
+native Grok proxy rejects headers beyond 4096 bytes before buffering more input.
+The local `run-agent` runner shares the accepted run deadline across the agent
+and `--test-exec`; Stop cancels both phases and waits for owned process cleanup.
 The reporter retains bounded normalized state in memory, never raw output or
 worker leases on disk. Restart/crash recovery and external worker capture remain
 separate work; an unavailable endpoint can leave the last snapshot provisional.
@@ -1711,6 +1721,10 @@ Login navigates to
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use
 same-origin credentials, a ten-second timeout, and no browser response cache.
 The backend owns authentication cookies and the configured OIDC authentication redirect.
+OIDC discovery has a five-second deadline and shares one in-flight attempt without
+holding the sign-in mutex over network I/O. Canceled callers can leave immediately;
+failed discovery remains retryable. Discovery and signing-key responses are capped
+at 1 MiB before decoding.
 Email comparisons fold only ASCII A-Z; Unicode characters remain distinct in
 bootstrap admin checks, development sign-in, invitation provisioning, imported
 profile matching and link suggestions. Classic principal backfills take the
