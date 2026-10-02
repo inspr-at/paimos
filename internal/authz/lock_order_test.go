@@ -61,7 +61,7 @@ func TestInviteAcceptTenantBeforeAdvisory(t *testing.T) {
 }
 
 func TestAccessMutationTenantBeforeTree(t *testing.T) {
-	for _, name := range []string{"project membership", "operator actor"} {
+	for _, name := range []string{"project membership", "project write", "operator actor"} {
 		t.Run(name, func(t *testing.T) {
 			d := dbtest.Open(t)
 			var tid string
@@ -74,7 +74,10 @@ func TestAccessMutationTenantBeforeTree(t *testing.T) {
 						_, err := operatoractor.Ensure(ctx, tx, tid)
 						return err
 					}
-					return lockProjectMutation(ctx, tx, tid)
+					if name == "project write" {
+						return LockProjectWrite(ctx, tx, tid)
+					}
+					return LockProjectMutation(ctx, tx, tid)
 				})
 			})
 		})

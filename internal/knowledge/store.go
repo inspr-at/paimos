@@ -430,7 +430,7 @@ func trimDecimal(s string) string {
 func lockNode(ctx context.Context, tx pgx.Tx, tenantID, id string, deleted bool) (nodeSnap, string, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (n.deleted_at IS NULL OR $4::bool)`,
+	  WHERE n.tenant_id=$1 AND n.id=$2::uuid AND k.slug = ANY($3::text[]) AND (n.deleted_at IS NULL OR $4::bool) FOR UPDATE OF n`,
 		tenantID, id, kindSlugs(), deleted).Scan(&kind); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nodeSnap{}, "", errNotFound
