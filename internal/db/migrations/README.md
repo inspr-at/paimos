@@ -216,3 +216,12 @@ Classify `account_quota_warnings` as personal quota telemetry (resource/window
 identity, reading time, remaining percentage, reset, threshold and recovery),
 located by `(tenant_id,id)`, when merging with the inventory branch. These
 records contain no credentials, local paths or raw vendor responses.
+
+AEON-613 fix2 reserves **1137** for `account_quota_warning_observations` before
+creating the migration. This stores the latest measured quota/window state,
+including healthy readings, separately from notification receipts in 1136.
+The reservation is recorded on AEON-613; the coordinator must mirror it to the
+shared ledger under the same ownership boundary. Existing receipts remain
+unchanged, and current availability resumes with the next fresh measurement.
+Classify this table as personal quota telemetry, located by
+`(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.

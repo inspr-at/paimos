@@ -219,32 +219,72 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 				return errNotFound
 			}
 		}
-		var id string
-		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-			return err
-		}
-		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{
-			ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.Recipient,
-			ReplyToID: in.ReplyTo, IdempotencyKey: in.Key, ExpiresAt: in.Expires,
-		}})
-		if err != nil {
-			return err
-		}
-		out, err = scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
-			tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
-			sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
-			RETURNING `+messageCols,
-			p.TenantID, id, p.ID, in.Recipient, in.ReplyTo, ev.ID, in.Body, in.Key, in.Expires, in.RecipientSessionID, in.SenderSessionID, senderLabel))
-		if err != nil {
-			return mapWrite(err)
-		}
-		if err := enqueueWakes(ctx, tx, p, out); err != nil {
-			return err
-		}
-		return insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", "")
+		out, err = AcceptMessageTx(ctx, tx, p, Acceptance{
+			RecipientPrincipalID: in.Recipient, RecipientSessionID: in.RecipientSessionID,
+			SenderSessionID: in.SenderSessionID, SenderLabel: senderLabel,
+			Body: in.Body, IdempotencyKey: in.Key, ReplyToID: in.ReplyTo, ExpiresAt: in.Expires,
+		})
+		return err
 	})
 	return out, err
+}
+
+// Acceptance contains the already authorized, normalized fields of a new inbox
+// message. ProjectID scopes its sent event when an internal service knows the
+// project; ordinary principal messages keep their existing node-less event.
+type Acceptance struct {
+	RecipientPrincipalID string
+	RecipientSessionID   *string
+	SenderSessionID      *string
+	SenderLabel          string
+	Body                 string
+	IdempotencyKey       string
+	ReplyToID            *string
+	ExpiresAt            *time.Time
+	ProjectID            *string
+}
+
+// AcceptMessageTx shares atomic acceptance between the ordinary send path and
+// internal services: sent event, message, wakes and queued receipt/deadline.
+// The caller must authorize under its access-change fence, serialize/check
+// idempotency, and lock every existing FK parent and session BEFORE its first
+// event append. This function acquires no existing-row locks. Any error must
+// roll back the caller's transaction. Terminal failure notices intentionally
+// use their separate receipt-free path so failures cannot recurse.
+func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
+	if in.Body == "" || strings.ContainsRune(in.Body, 0) || len(in.Body) > maxBodyRunes*utf8.UTFMax || utf8.RuneCountInString(in.Body) > maxBodyRunes {
+		return Message{}, badRequest("invalid body")
+	}
+	if in.IdempotencyKey == "" || strings.ContainsRune(in.IdempotencyKey, 0) || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
+		return Message{}, badRequest("invalid idempotency_key")
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+		return Message{}, err
+	}
+	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
+		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
+		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
+	}})
+	if err != nil {
+		return Message{}, err
+	}
+	out, err := scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
+		tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
+		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
+		RETURNING `+messageCols,
+		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel))
+	if err != nil {
+		return Message{}, mapWrite(err)
+	}
+	if err := enqueueWakes(ctx, tx, p, out); err != nil {
+		return Message{}, err
+	}
+	if err := insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", ""); err != nil {
+		return Message{}, err
+	}
+	return out, nil
 }
 
 func sameSend(m Message, in sendInput) bool {

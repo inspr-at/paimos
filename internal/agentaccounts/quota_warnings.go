@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -154,6 +154,32 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		reset := "none"
 		if f.ResetsAt != nil {
 			reset = f.ResetsAt.UTC().Format(time.RFC3339Nano)
+		}
+		// Seed an upgrade's watermark from retained receipts in this tenant's
+		// fenced write. Old recovery evidence retained no healthy percentage;
+		// keep that balance unknown instead of inventing one. A later measured
+		// sample replaces it normally, while delayed reports remain fenced out.
+		if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warning_observations(tenant_id,quota_key,window_key,resource_id,reset_key,reading_at,remaining_percent,resets_at)
+          SELECT tenant_id,quota_key,window_key,resource_id,reset_key,greatest(reading_at,recovered_at),CASE WHEN recovered_at IS NULL THEN remaining_percent END,resets_at
+          FROM account_quota_warnings WHERE quota_key=$1 AND window_key=$2
+          ORDER BY greatest(reading_at,recovered_at) DESC,(recovered_at IS NULL) DESC,reading_at DESC,remaining_percent,threshold_percent LIMIT 1
+          ON CONFLICT(tenant_id,quota_key,window_key) DO NOTHING`, quotaKey, f.WindowKey); err != nil {
+			return nil, err
+		}
+		// One durable watermark per quota/window covers healthy observations
+		// and reset transitions even before the first notification. Pooled
+		// computers cannot replace newer evidence with delayed measurements.
+		// An identical replay may find new recipients; conflicting equal-time
+		// samples cannot change either current state or notification history.
+		tag, err := tx.Exec(ctx, `INSERT INTO account_quota_warning_observations(tenant_id,quota_key,window_key,resource_id,reset_key,reading_at,remaining_percent,resets_at)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+          ON CONFLICT(tenant_id,quota_key,window_key) DO UPDATE SET resource_id=EXCLUDED.resource_id,reset_key=EXCLUDED.reset_key,reading_at=EXCLUDED.reading_at,remaining_percent=EXCLUDED.remaining_percent,resets_at=EXCLUDED.resets_at
+          WHERE account_quota_warning_observations.reading_at<EXCLUDED.reading_at OR (account_quota_warning_observations.reading_at=EXCLUDED.reading_at AND account_quota_warning_observations.reset_key=EXCLUDED.reset_key AND account_quota_warning_observations.remaining_percent=EXCLUDED.remaining_percent)`, p.TenantID, quotaKey, f.WindowKey, f.ResourceID, reset, *f.ReadingAt, remaining, f.ResetsAt)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			continue
 		}
 		// A newer observation of recovery or a new measured reset clears the
 		// old episode. Clock passage, missing data and delayed samples cannot.
@@ -312,15 +338,10 @@ func flushQuotaNotices(ctx context.Context, tx pgx.Tx, p tenant.Principal, notic
 			if present {
 				continue
 			}
-			var id string
-			if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-				return err
-			}
-			ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &n.project, Type: "inbox.sent", After: map[string]any{"id": id, "sender_principal_id": p.ID, "recipient_principal_id": n.recipient}})
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'System')`, p.TenantID, id, p.ID, n.recipient, ev.ID, n.body, key, n.session); err != nil {
+			if _, err := inbox.AcceptMessageTx(ctx, tx, p, inbox.Acceptance{
+				RecipientPrincipalID: n.recipient, RecipientSessionID: &n.session,
+				Body: n.body, IdempotencyKey: key, SenderLabel: "System", ProjectID: &n.project,
+			}); err != nil {
 				return err
 			}
 		}
@@ -385,11 +406,13 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		// Select the most urgent applicable binding window per session. RLS
 		// limits both sessions and runs to projects visible to the caller.
+		// Notification suppression is historical deduplication, not current
+		// availability: only the latest measured quota/window observation counts.
 		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(s.id) s.id::text,s.project_id::text,a.id::text,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN 'urgent' ELSE 'early' END,q.remaining_percent,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN coalesce((SELECT urgent_percent FROM quota_warning_settings),3) ELSE coalesce((SELECT early_percent FROM quota_warning_settings),10) END,q.window_key,q.resets_at
           FROM harness_sessions s JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
-          JOIN account_quota_warnings q ON q.tenant_id=a.tenant_id AND ((q.quota_key=q.resource_id::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND q.quota_key='pool:'||a.harness||':'||a.quota_pool_fingerprint))
-          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.remaining_percent<=coalesce((SELECT early_percent FROM quota_warning_settings),10) AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
-          ORDER BY s.id,q.remaining_percent,q.id LIMIT $5`, nullableUUID(after), now, string(p.Kind), p.ID, limit+1)
+          JOIN account_quota_warning_observations q ON q.tenant_id=a.tenant_id AND ((q.quota_key=q.resource_id::text AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))) OR (a.quota_pool_fingerprint<>'' AND q.quota_key='pool:'||a.harness||':'||a.quota_pool_fingerprint))
+          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.remaining_percent<=coalesce((SELECT early_percent FROM quota_warning_settings),10) AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
+          ORDER BY s.id,q.remaining_percent,q.quota_key,q.window_key LIMIT $5`, nullableUUID(after), now, string(p.Kind), p.ID, limit+1)
 		if err != nil {
 			return err
 		}
