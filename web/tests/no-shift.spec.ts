@@ -147,6 +147,18 @@ for (const width of [1440, 1024, 390]) {
         ...['more', 'fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: `Codex: at most one ${direction}` }).click() })),
       ],
     })
+  })
+
+  test(`Agents working harness modes stay put at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await setup(page)
+    await page.goto('/agents')
+    const dial = page.getByRole('region', { name: 'Agents at once' })
+    const more = dial.getByRole('button', { name: 'One agent more at once' })
+    const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
+    const row = dial.locator('[data-key="codex"]')
+    await expect(row).toBeVisible()
     await expectStableControls({
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
       scrollAreas: { rows: dial.locator('.rows') },

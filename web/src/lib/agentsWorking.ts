@@ -28,6 +28,9 @@ export function stepLimit(plan: WorkingPreference, harness: string, effective: n
   const next = clamp(shown + delta)
   return setLimit(plan, harness, next < 1 ? 'off' : next)
 }
+export function stepExpandedLimit(plan: WorkingPreference, harness: string, shown: number, delta: number): WorkingPreference {
+  return setLimit(plan, harness, Math.max(1, clamp(shown + delta)))
+}
 export function effectiveLimit(total: number, running: number, room: number | null): number {
   // Unknown account room never becomes an invented zero or a claim of capacity.
   return room === null ? total : Math.min(total, running + room)

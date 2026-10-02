@@ -20,7 +20,7 @@ function setup() {
 }
 beforeEach(() => {
   mocks.api.mockReset(); mocks.queue.mockReset()
-  mocks.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === 'PUT' ? json({}) : path === '/agents/plan' ? json(snapshot) : json({ value: null }))
+  mocks.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === 'PUT' ? json({ updated_at: '2026-10-02T18:00:00.000001Z' }) : path === '/agents/plan' ? json(snapshot) : json({ value: null }))
   mocks.queue.mockResolvedValue({ items: [], capacity: {} })
 })
 afterEach(() => scope?.stop())
@@ -32,7 +32,7 @@ describe('canonical plan persistence', () => {
     control.save({ total: 0, limits: { codex: 'off' } }); await flush()
     const writes = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')
     expect(writes.map(([path]) => path)).toEqual(['/preferences/agents.working'])
-    expect(JSON.parse(writes[0]![1].body)).toEqual({ value: { total: 0, limits: { codex: 'off' } } })
+    expect(JSON.parse(writes[0]![1].body)).toEqual({ value: { total: 0, limits: { codex: 'off' } }, expected_updated_at: null })
   })
   it('serializes rapid clicks and coalesces edits behind a held write', async () => {
     const held = deferred<Response>(), writes: number[] = []
@@ -40,13 +40,15 @@ describe('canonical plan persistence', () => {
       if (init?.method !== 'PUT') return path === '/agents/plan' ? json(snapshot) : json({ value: null })
       const total = JSON.parse(init.body as string).value.total
       writes.push(total)
-      return writes.length === 1 ? held.promise : json({})
+      return writes.length === 1 ? held.promise : json({ updated_at: '2026-10-02T18:00:00.000002Z' })
     })
     const { control } = setup(); await flush()
     control.save({ total: 4, limits: {} }); control.save({ total: 3, limits: {} }); control.save({ total: 2, limits: {} })
     expect(control.plan.value?.total).toBe(2); expect(writes).toEqual([4])
-    held.resolve(json({})); await flush()
+    held.resolve(json({ updated_at: '2026-10-02T18:00:00.000001Z' })); await flush()
     expect(writes).toEqual([4, 2])
+    const requests = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(requests.map(([, init]) => JSON.parse(init.body).expected_updated_at)).toEqual([null, '2026-10-02T18:00:00.000001Z'])
   })
   it('a late read cannot erase a newer dial edit', async () => {
     const read = deferred<Response>(), write = deferred<Response>()
@@ -100,6 +102,38 @@ describe('canonical plan persistence', () => {
     expect(control.plan.value).toBeNull()
     expect(control.error.value).toContain('Couldn’t read')
     control.save({ total: 15, limits: {} }); await flush()
+    expect(mocks.api.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
+  it('retains a failed save across successful polls until another deliberate edit', async () => {
+    const { control } = setup(); await flush()
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === 'PUT' ? json({}, 500) : path === '/agents/plan' ? json({ ...snapshot, running_total: 13 }) : json({ value: null }))
+    control.save({ total: 4, limits: {} }); await flush()
+    await control.refresh()
+    expect(control.error.value).toContain('Couldn’t save')
+    expect(control.snapshot.value?.running_total).toBe(13)
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === 'PUT' ? json({ updated_at: '2026-10-02T18:00:00.000001Z' }) : path === '/agents/plan' ? json(snapshot) : json({ value: null }))
+    control.save({ total: 3, limits: {} }); await flush()
+    expect(control.error.value).toBe('')
+  })
+  it('re-reads a conflicted plan and discards queued stale edits without overwriting newer limits', async () => {
+    const { control } = setup(); await flush()
+    const held = deferred<Response>(), newer = { ...snapshot, total: 7, limits: { claude: 'off' }, updated_at: '2026-10-02T18:00:00.000005Z' }
+    mocks.api.mockImplementation(async (path: string, init?: RequestInit) => init?.method === 'PUT' ? held.promise : path === '/agents/plan' ? json(newer) : json({ value: null }))
+    control.save({ total: 4, limits: { codex: 4 } })
+    control.save({ total: 3, limits: { codex: 4 } })
+    held.resolve(json({}, 409)); await flush()
+    expect(control.plan.value).toEqual({ total: 7, limits: { claude: 'off' } })
+    expect(control.error.value).toContain('changed elsewhere')
+    expect(mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1)
+    await control.refresh()
+    expect(control.error.value).toContain('changed elsewhere')
+    control.save({ total: 6, limits: { claude: 'off' } })
+    const last = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)!
+    expect(JSON.parse(last[1].body).expected_updated_at).toBe(newer.updated_at)
+  })
+  it('does not save an unchanged total or harness selection', async () => {
+    const { control } = setup(); await flush()
+    control.save({ total: snapshot.total, limits: { ...snapshot.limits } }); await flush()
     expect(mocks.api.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
   })
 })

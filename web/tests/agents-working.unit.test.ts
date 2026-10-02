@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { effectiveLimit, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingRows, type PlanSnapshot } from '../src/lib/agentsWorking'
+import { effectiveLimit, liveCopy, noOwnTip, nowCopy, setLimit, statusCopy, stepExpandedLimit, stepLimit, stepTotal, waitingCopy, workingRows, type PlanSnapshot } from '../src/lib/agentsWorking'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
 describe('the one dial', () => {
   it('changes only the ceiling, preserving running agents and independent harness limits', () => {
@@ -29,6 +29,13 @@ describe('the one dial', () => {
     expect(effectiveLimit(0, 12, 3)).toBe(0)
     expect(effectiveLimit(5, 0, null)).toBe(5)
     expect(noOwnTip('claude', 0)).toBe('Claude has no limit of its own; with 0 at once, nothing new starts.')
+  })
+  it('expanded limits stop at one, while a stored API zero stays visible until increased', () => {
+    const input = { total: 5, limits: { codex: 1 } }
+    expect(stepExpandedLimit(input, 'codex', 1, -1).limits.codex).toBe(1)
+    expect(stepExpandedLimit({ ...input, limits: { codex: 0 } }, 'codex', 0, 1).limits.codex).toBe(1)
+    expect(workingRows({ ...input, limits: { codex: 0 } }, snapshot, {}, null)[0]!.shown).toBe(0)
+    expect(stepLimit(input, 'codex', 5, -1).limits.codex).toBe('off')
   })
   it('uses the approved wind-down, zero, full and room wording', () => {
     expect(liveCopy(5, 16, 7)).toBe('16 running · winding down to 5')

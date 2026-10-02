@@ -52,6 +52,9 @@ const totalMore = (page: Page) => dial(page).getByRole('button', { name: 'One ag
 const totalFewer = (page: Page) => dial(page).getByRole('button', { name: 'One agent fewer at once' })
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) for (const state of Object.keys(states) as (keyof typeof states)[]) {
   test(`${width} ${theme} ${state}: stepping, modes and folding keep every control put`, async ({ page }) => {
+    // Three stability guards plus optional captures: allow hosted workers=2
+    // load without weakening any geometry, interaction or overflow assertion.
+    test.setTimeout(90_000)
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     const errors = watchErrors(page), { work, calls } = await setup(page, state)
@@ -161,6 +164,112 @@ test('zero and thirty are real ceilings; idle glyph rests and disabled boundarie
   await expect(more).toBeDisabled()
   await expect(fewer).toBeFocused()
   await expect(card.locator('[data-key="codex"] button').last()).toBeDisabled()
+})
+
+test('expanded limits cannot create bare zero; API zero and total boundaries do not save unchanged values', async ({ page }) => {
+  const { work } = await setup(page, 'zero')
+  work.preferences['agents.working'] = { total: 0, limits: { codex: 1 } }
+  let writes = 0
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() === 'PUT') writes++
+    await route.fallback()
+  })
+  await page.goto('/agents')
+  const card = dial(page), row = card.locator('[data-key="codex"]'), plus = row.getByRole('button', { name: 'Codex: at most one more' }), minus = row.getByRole('button', { name: 'Codex: at most one fewer' })
+  await expect(minus).toBeDisabled()
+  await plus.focus(); await plus.press('ArrowDown')
+  await expect(row.locator('.lim-num')).toHaveText('1')
+  await row.getByRole('radio', { name: 'At most', exact: true }).click()
+  await totalMore(page).focus(); await totalMore(page).press('ArrowDown')
+  await expect(card.locator('.f-num')).toHaveText('0')
+  expect(writes).toBe(0)
+  await expect(card.locator('.f-num')).not.toHaveAttribute('aria-live')
+  await expect(card.locator('.f-live')).toHaveAttribute('role', 'status')
+  work.preferences['agents.working'] = { total: 30, limits: { codex: 0 } }
+  await page.reload()
+  await expect(row.locator('.lim-num')).toHaveText('0')
+  await expect(minus).toBeDisabled()
+  await card.locator('.f-fold').click()
+  const storedZero = card.locator('[data-harness="codex"]')
+  await expect(storedZero.locator('.pm').first()).toBeDisabled()
+  await expect(storedZero.locator('.pm').last()).toBeEnabled()
+  await storedZero.locator('.pm').last().focus()
+  await storedZero.locator('.pm').last().press('ArrowLeft')
+  await expect(storedZero.locator('.f-n')).toHaveText('0')
+  await card.locator('.f-fold').click()
+  await totalFewer(page).focus(); await totalFewer(page).press('ArrowUp')
+  await plus.focus(); await plus.press('ArrowDown')
+  expect(writes).toBe(0)
+  await plus.click()
+  await expect(row.locator('.lim-num')).toHaveText('1')
+  await expect(minus).toBeDisabled()
+  await expect.poll(() => writes).toBe(1)
+  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 30, limits: { codex: 1 } })
+  await card.locator('.f-fold').click()
+  const chip = card.locator('[data-harness="codex"]')
+  await chip.locator('.pm').first().click()
+  await expect(chip.locator('.f-n')).toHaveText('off')
+})
+
+test('save failure remains visible after a successful scheduled poll', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  await setup(page)
+  await page.route('**/api/preferences/agents.working', route => route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'save failed' } }) : route.fallback())
+  let reads = 0
+  await page.route('**/api/agents/plan', async route => { reads++; await route.fallback() })
+  await page.goto('/agents')
+  await expect(dial(page).locator('.f-num')).toHaveText('5')
+  await totalMore(page).click()
+  await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save')
+  const initialReads = reads
+  await page.clock.fastForward(15_000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save')
+})
+
+test('a conflicted save re-reads newer limits before the next deliberate change', async ({ page }) => {
+  const { work } = await setup(page, 'room')
+  let revision: string | null = null
+  const puts: { value: { total: number; limits: Record<string, unknown> }; expected_updated_at: string | null }[] = []
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: revision } }))
+  await page.route('**/api/preferences/agents.working', route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    const request = route.request().postDataJSON()
+    puts.push(request)
+    if (puts.length === 1) {
+      work.preferences['agents.working'] = { total: 7, limits: { claude: 'off' } }
+      revision = '2026-10-02T18:00:00.000001Z'
+      return route.fulfill({ status: 409, json: { error: 'changed' } })
+    }
+    expect(request.expected_updated_at).toBe(revision)
+    work.preferences['agents.working'] = request.value
+    revision = '2026-10-02T18:00:00.000002Z'
+    return route.fulfill({ json: { key: 'agents.working', value: request.value, updated_at: revision } })
+  })
+  await page.goto('/agents')
+  await expect(dial(page).locator('.f-num')).toHaveText('8')
+  await totalFewer(page).click()
+  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(dial(page).locator('.f-num')).toHaveText('7')
+  await expect(dial(page).locator('[data-key="claude"]').getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await totalFewer(page).click()
+  await expect(dial(page).locator('.f-num')).toHaveText('6')
+  await expect.poll(() => puts.length).toBe(2)
+  expect(puts[0]!.expected_updated_at).toBeNull()
+  expect(puts[1]!.value).toEqual({ total: 6, limits: { claude: 'off' } })
+})
+
+test('running agents hover, look and blink with motion allowed, and stop under reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await setup(page, 'room')
+  await page.goto('/agents')
+  const glyph = dial(page).locator('.f-bot')
+  await expect(glyph).toHaveClass(/busy/)
+  const animations = await glyph.evaluate(el => el.getAnimations({ subtree: true }).map(animation => ({ name: (animation as CSSAnimation).animationName, state: animation.playState, iterations: animation.effect!.getTiming().iterations })))
+  expect(animations.map(a => a.name.replace(/^(f-(?:blink|hover|look|tip)).*$/, '$1')).sort()).toEqual(['f-blink', 'f-hover', 'f-look', 'f-tip'])
+  expect(animations.every(a => a.state === 'running' && a.iterations === Infinity)).toBe(true)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => glyph.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
 })
 
 for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and remain independent of the total`, async ({ page }) => {

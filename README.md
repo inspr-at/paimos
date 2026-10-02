@@ -107,7 +107,12 @@ explicit person save updates the canonical row and reconciles existing alias
 copies. Other preferences remain private to the calling principal.
 
 The person saves the plan through `PUT /api/preferences/agents.working`:
-`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}}}`.
+`{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}},"expected_updated_at":null}`.
+`expected_updated_at` is the exact timestamp from the last plan snapshot;
+null requires an unset plan. The check and save are atomic across linked aliases.
+A stale revision returns 409 without writing; re-read before another change.
+Legacy clients may omit this optional precondition. The dial always supplies it,
+discards queued stale edits on conflict, and shows the re-read values for review.
 Total and numeric limits range from 0 to 30. Missing limits mean No limit;
 numeric zero means at most zero, while `"off"` explicitly disables a harness.
 Limits may add up to more than the total. Legacy `cap` (1–12) maps to total;
@@ -126,15 +131,21 @@ On **Agents**, the control reads “Run up to … agents at once.” The total a
 harness limits save to the same canonical plan used by coordinators. The folded
 line keeps compact − / + controls and a harness mark that cycles No limit →
 At most → Off; a muted number means no own limit, capped by the total and measured
-account room. Details grow below the dial with each harness's controls and the
+account room. Expanded numeric controls stop at 1; folded − from 1 selects Off.
+A stored API/CLI zero stays visible and only + is enabled. Details grow below the
+dial with each harness's controls and the
 read-only Now, Accounts, Waiting and Checks. Folding is remembered separately
 for the signed-in viewer in `agents.working.display`; it never changes the plan.
 Arrow keys step a focused − / + or move between harness modes, preserving
-browser and OS modifier shortcuts. Failed saves are visible in the live line.
+browser and OS modifier shortcuts. Failed saves stay visible across successful
+polls until another deliberate change. Repeated selections and arrows at a
+boundary do not write. The live line announces total changes once.
 Unknown account or queue readings stay explicit. The visible queue's ready work
 is not reported as starting until the launcher picks it up. Lowering the total
 or turning a harness off never pauses or stops existing work. Launcher
-integration remains a separate AEON-540 part.
+integration remains a separate AEON-540 part. The approved start-check copy
+requires part D to be live before this UI is released; keep AEON-540's pill and
+benefit out of release notes until enforcement is live.
 
 ## Local models for in-app AI
 
