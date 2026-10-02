@@ -139,7 +139,7 @@ func TestUIReleasePickerForceOverlapAndSchedulerDeduplication(t *testing.T) {
 }
 
 func TestUIDelayedPublicationUsesDatabaseClock(t *testing.T) {
-	for _, tc := range []struct{ start, due string }{{"now", "2026-10-24T23:30:00Z"}, {"hour", "2026-10-25T00:30:00Z"}, {"morning", "2026-10-25T05:00:00Z"}} {
+	for _, tc := range []struct{ start, due string }{{"now", "2026-10-24T23:30:00Z"}, {"hour", "2026-10-25T00:30:00Z"}, {"morning", "2026-10-26T05:00:00Z"}} {
 		t.Run(tc.start, func(t *testing.T) {
 			f := setup(t)
 			f.now = timestamp(t, "2026-10-24T23:00:00Z")

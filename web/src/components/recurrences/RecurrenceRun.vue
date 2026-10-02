@@ -21,6 +21,13 @@ function keys(event: KeyboardEvent) {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
   if (event.key === 'Enter' && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.shiftKey && !event.altKey) { event.preventDefault(); run() }
   if (event.key === 'Escape') { event.preventDefault(); if (!busy.value) emit('close') }
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const group = (event.target as HTMLElement).closest('[role="radiogroup"]')
+    if (!group) return
+    const buttons = [...group.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')], at = buttons.indexOf(event.target as HTMLButtonElement)
+    if (!buttons.length) return
+    event.preventDefault(); const next = buttons[(at + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1) + buttons.length) % buttons.length]; next?.click(); next?.focus()
+  }
 }
 onMounted(() => {
   dialog.value?.showModal()
@@ -33,5 +40,5 @@ onBeforeUnmount(() => dialog.value?.close())
 </template>
 <style scoped>
 .run-dialog { position: fixed; inset: auto; top: 64px; left: 50%; transform: translateX(-50%); margin: 0; padding: 0; width: min(580px, calc(100vw - 32px)); max-height: calc(100dvh - 80px); color: var(--ink); background: var(--surface-raised); border: 1px solid var(--glass-edge); border-radius: 16px; box-shadow: var(--shadow-pop); overflow: hidden; }.run-dialog[open] { display: flex; flex-direction: column; }.run-dialog::backdrop { background: var(--scrim); }header { display: flex; align-items: center; gap: 12px; height: 60px; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--line); flex: none; }h2 { flex: 1; font: 600 16px var(--font); }.actions { display: flex; gap: 8px; }.actions .primary { min-width: 142px; }.keys { display: flex; gap: 2px; }.run-body { padding: 16px 20px; overflow: auto; display: grid; gap: 12px; font-size: 13px; }.overlap { color: var(--warn-ink); }.release-choices { display: grid; gap: 1px; }.release-choices button { min-height: 50px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; }.release-choices button[aria-checked="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }.release-choices button:hover:not(:disabled) { background: var(--row-hover); }.release-choices b, .release-choices small { display: block; }.release-choices small { color: var(--ink-3); font-size: 12px; }
-@media (max-width: 600px) { .run-dialog { top: 8px; left: 0; transform: none; width: 100%; max-height: calc(100dvh - 8px); }header { padding: 8px 12px; }.keys { display: none; }.actions .primary { min-width: 110px; } }
+@media (max-width: 600px) { .run-dialog { top: 8px; left: 0; transform: none; width: 100%; max-width: none; max-height: calc(100dvh - 8px); }header { padding: 8px 12px; }.keys { display: none; }.actions .primary { min-width: 110px; } }
 </style>

@@ -111,3 +111,17 @@ func TestTemplateVariablesAndBounds(t *testing.T) {
 		t.Fatal("unbounded title")
 	}
 }
+
+func TestEventMorningFollowsLocalDateAcrossDST(t *testing.T) {
+	trigger := Trigger{Kind: "event", EventStart: "morning", EventTimezone: "Europe/Vienna"}
+	for _, tc := range []struct{ published, want string }{
+		{"2026-10-24T21:30:00Z", "2026-10-25T05:00:00Z"},
+		{"2026-10-24T23:30:00Z", "2026-10-26T05:00:00Z"},
+		{"2026-03-28T22:30:00Z", "2026-03-29T04:00:00Z"},
+	} {
+		got := eventTime(trigger, timestamp(t, tc.published))
+		if got.Format(time.RFC3339) != tc.want {
+			t.Fatalf("published %s: got %s, want %s", tc.published, got, tc.want)
+		}
+	}
+}
