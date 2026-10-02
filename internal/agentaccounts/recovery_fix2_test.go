@@ -160,25 +160,21 @@ func TestBPromotionWaitsForStartedWorkAndPreservesFailedClaims(t *testing.T) {
 	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: vendor") {
 		t.Fatalf("started work did not fence promotion: %d %s", code, response)
 	}
-	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NULL`, resource) != 1 {
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND recovery_run_id IS NULL`, resource) != 1 {
 		t.Fatal("blocked claim consumed a permit")
 	}
 	bFinish(t, f, started, now, "completed", 1)
 	// A real manual cap still blocks promotion after started work has left.
-	var cap Window
-	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(time.Hour), "requests", 1, "unrestricted"), 201, &cap)
-	seed(t, f.admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance WHERE id=$1`, cap.ID)
-		return err
-	})
+	limitPath := "/api/agent-accounts/" + f.account.ID + "/limit"
+	callStatus(t, f.mod, &f.admin, "", "PUT", limitPath, `{"amount":1,"unit":"runs","period":"day"}`, 200, nil)
 	code, response = call(t, f.mod, &f.runner, f.token, "POST", path, body)
 	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: allowance") {
 		t.Fatalf("manual cap did not fence promotion: %d %s", code, response)
 	}
-	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id IS NULL`, resource) != 1 {
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND recovery_run_id IS NULL`, resource) != 1 {
 		t.Fatal("failed manual-cap claim consumed a permit")
 	}
-	callStatus(t, f.mod, &f.admin, "", "DELETE", "/api/agent-accounts/"+f.account.ID+"/windows/"+cap.ID, "", 204, nil)
+	callStatus(t, f.mod, &f.admin, "", "DELETE", limitPath, "", 204, nil)
 	mustRoute(t, f.mod, f.runner, f.token, queued, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1})
 }
 

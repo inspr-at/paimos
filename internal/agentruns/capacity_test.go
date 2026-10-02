@@ -16,6 +16,15 @@ import (
 // the 100 units this run already holds. Sprint pins the whole remainder.
 func roundTheClock(t *testing.T, f *fixture, runID string) {
 	t.Helper()
+	var accountID string
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT account_id::text FROM agent_runs WHERE id=$1`, runID).Scan(&accountID)
+	})
+	roundTheClockAccount(t, f, accountID)
+}
+
+func roundTheClockAccount(t *testing.T, f *fixture, accountID string) {
+	t.Helper()
 	s := capacity.DefaultSchedule()
 	for i := range s.Week {
 		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
@@ -24,8 +33,9 @@ func roundTheClock(t *testing.T, f *fixture, runID string) {
 	s.Override = "sprint"
 	raw, _ := json.Marshal(s)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1) RETURNING tenant_id,id)
- INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a`, runID, f.person.ID, raw)
+		_, err := tx.Exec(t.Context(), `WITH a AS (UPDATE agent_accounts SET capacity_owner=$2 WHERE id=$1 RETURNING tenant_id,id)
+ INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,$2,'account',id::text,id,$3 FROM a
+ ON CONFLICT (tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, accountID, f.person.ID, raw)
 		return err
 	})
 }

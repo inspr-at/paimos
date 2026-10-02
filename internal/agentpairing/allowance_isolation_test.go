@@ -106,13 +106,8 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	}
 	// The launcher catalog and normal account health must use the same ordinary
 	// budgets as managed routing, not the exhausted internal verification cap.
-	// AEON-478's accountprivacy.Load/mask withholds quota windows from an
-	// unlinked person, including the pairing approver. Confirm ownership through
-	// the real account-link flow before asserting the owner's budget details;
+	// Ownership was confirmed through the real account-link flow above;
 	// pairing approval alone grants ongoing use, not quota visibility.
-	offer := offerLink(t, f, p, key, e.AccountID)
-	review := reviewLink(t, f, offer)
-	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
 	var catalog agentaccounts.Catalog
 	decodeResult(t, f.call("GET", "/api/agent-accounts/catalog", nil, true, "", 200), &catalog)
 	found := false
