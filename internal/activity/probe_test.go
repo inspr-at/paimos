@@ -18,6 +18,41 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+// TestTimelineAtImportScaleLatency is opt-in: AEON_ACTIVITY_IMPORT_SCALE_PROBE=1.
+// Run without -race on an idle dedicated test runner with local Postgres.
+// Fixture setup is excluded. Warm up five first-page requests, then measure
+// 30 sequential first-page requests (handler plus JSON decoding, no think time).
+// The nearest-rank p95 (29th ordered sample) must stay below 100 ms; the maximum
+// is diagnostic only. This synthetic workload does not measure full traversal.
+func TestTimelineAtImportScaleLatency(t *testing.T) {
+	if os.Getenv("AEON_ACTIVITY_IMPORT_SCALE_PROBE") != "1" {
+		t.Skip("opt-in synthetic import-scale latency probe")
+	}
+	f, want := setupTimelineImportScale(t)
+	read := func() time.Duration {
+		start := time.Now()
+		page := f.page("?limit=20")
+		elapsed := time.Since(start)
+		assertTimelineItems(t, page.Items, want[:20])
+		if page.NextCursor == nil {
+			t.Fatal("latency probe page is missing its continuation cursor")
+		}
+		return elapsed
+	}
+	for range 5 {
+		read()
+	}
+	durations := make([]time.Duration, 30)
+	for i := range durations {
+		durations[i] = read()
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	t.Logf("27422 unrelated imported events, 240 same-ticket history snapshots, 30 comments; 5 warmups, 30 samples: median=%s p95=%s max=%s", (durations[14]+durations[15])/2, durations[28], durations[29])
+	if durations[28] >= 100*time.Millisecond {
+		t.Errorf("activity p95 exceeds 100ms: %s", durations[28])
+	}
+}
+
 // TestReadOnlyImportedDataset is an opt-in local acceptance probe. It never
 // migrates or seeds the target and forces every transaction to be read-only.
 // Set AEON_ACTIVITY_PROBE_DATABASE_URL and AEON_ACTIVITY_PROBE_TENANT_ID.

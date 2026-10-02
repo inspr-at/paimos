@@ -573,13 +573,7 @@ func (rt *runtime) updateIssueResult(in issuePatch) (issueUpdateResult, error) {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if n.UpdatedAt.IsZero() {
-			return issueUpdateResult{}, usagef("%s has no revision timestamp; nothing was written", n.Key)
-		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
-			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
-				stale.msg += "; nothing was written"
-			}
+		if err := rt.patchNode(n, patch, &n); err != nil {
 			return issueUpdateResult{}, err
 		}
 	}
@@ -974,10 +968,7 @@ func (rt *runtime) updateKnowledgeResult(typ, slug, project, title, body, status
 	if len(patch) == 0 {
 		return knowledgeView{}, usagef("nothing to update")
 	}
-	if n.UpdatedAt.IsZero() {
-		return knowledgeView{}, usagef("%s has no revision timestamp; nothing was written", n.Key)
-	}
-	if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
+	if err := rt.patchNode(n, patch, &n); err != nil {
 		return knowledgeView{}, err
 	}
 	view := viewKnowledge(n, kinds)
@@ -994,6 +985,19 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s/%s (%s)\n", view.Type, view.Slug, view.Key)
 	return nil
+}
+
+// patchNode guards every read/merge/write with the exact snapshot revision.
+// Callers that already created other records must report that partial result.
+func (rt *runtime) patchNode(n apiNode, patch map[string]any, out any) error {
+	if n.UpdatedAt.IsZero() {
+		return usagef("%s has no revision timestamp; nothing was written", n.Key)
+	}
+	err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, out, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)})
+	if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+		stale.msg += "; nothing was written by this patch"
+	}
+	return err
 }
 
 type issueSearchResult struct {

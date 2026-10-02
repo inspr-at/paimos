@@ -196,7 +196,7 @@ func (w *Worker) claim(ctx context.Context, tenantID string) ([]claimedWake, err
 			  AND t.kind = 'webhook'
 			ORDER BY w.next_attempt_at, w.message_id, w.target_id
 			LIMIT $2
-			FOR UPDATE OF w, t SKIP LOCKED`, w.maxTries, w.batch)
+			FOR NO KEY UPDATE OF w, t SKIP LOCKED`, w.maxTries, w.batch)
 		if err != nil {
 			return err
 		}

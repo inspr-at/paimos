@@ -269,10 +269,13 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	if msg.RecipientSessionID != nil {
 		return nil
 	} // Wake targets belong to the principal, not this generation.
+	// Targets are soft-disabled, never removed here. A concurrent disable may
+	// leave a queued wake, which claim drops after checking enabled. Do not
+	// lock target state after the event counter: FK KEY SHARE is sufficient
+	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		ORDER BY id
-		FOR UPDATE`, msg.RecipientPrincipalID)
+		ORDER BY id`, msg.RecipientPrincipalID)
 	if err != nil {
 		return err
 	}

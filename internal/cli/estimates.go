@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var estimatePattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?|\.[0-9]+)(h|m)?$`)
@@ -182,7 +180,7 @@ func (rt *runtime) estimateMissing(project, file string, apply bool) error {
 		fields := fieldMap(action.node.Fields)
 		estimateFields(fields, action.Hours, "agent")
 		var updated apiNode
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(action.node.ID), map[string]any{"fields": fields}, &updated, map[string]string{"If-Unmodified-Since": action.node.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
+		if err := rt.patchNode(action.node, map[string]any{"fields": fields}, &updated); err != nil {
 			fmt.Fprintf(rt.stderr, "estimate plan stopped at %s; earlier applied entries remain applied\n", action.Key)
 			return err
 		}
