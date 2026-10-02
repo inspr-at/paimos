@@ -34,7 +34,7 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   let state: TierState = { session_id: id, revision: 1, active_tier: active, pending: null, read_only: !!(options.unmanaged || options.ended), read_only_reason: options.unmanaged ? 'Reported by fixture-cli; change it in its terminal.' : options.ended ? 'This session has ended' : '', reports, requests: options.request ? [{ id: 'request-fixture', session_id: id, tier: 'fast', reason: 'QA waits on this screen', state: 'pending', requested_by_principal_id: String(data.sessions[0]!.agent_principal_id), created_at: new Date().toISOString() }] : [] }
   if (options.evidence) {
     state.run_cost = { model: report.model, run_id: String(data.sessions[0]!.run_id), cost_usd: '4.800000000000', default_cost_usd: '2.400000000000', provisional: false, segments: [{ tier: 'fast', price_multiplier: 2 }] }
-    state.estimates = report.tiers.map(t => ({ tier: t.tier, n: 1, basis: 'Last completed matching run · 1 run · frozen price version 7. Only model time scales; tools and waits keep their time.', run_id: 'last-run-fixture', cost_usd: String(2.4 * t.price_multiplier!), duration_ms: 300000 + 600000 / t.speed_factor! }))
+    state.estimates = report.tiers.map(t => ({ tier: t.tier, actual: t.tier === 'default', n: 1, basis: 'Last run: 2400000 tokens, $2.40, 15 min (10 min model time) at Default. Last completed matching run · 1 run · frozen price version 7. Only model time scales; tools and waits keep their time.', run_id: 'last-run-fixture', cost_usd: String(2.4 * t.price_multiplier!), duration_ms: 300000 + 600000 / t.speed_factor! }))
     state.history = [
       { id: 4, action: 'changed', from_tier: 'default', to_tier: 'fast', actor_id: me.id, actor_name: 'Markus', asked_by_name: 'fixture-agent', at: '2026-10-02T10:00:00Z' },
       { id: 3, action: 'approved', from_tier: 'default', to_tier: 'fast', actor_id: me.id, actor_name: 'Markus', asked_by_name: 'fixture-agent', at: '2026-10-02T09:00:00Z' },
@@ -325,6 +325,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const dialog = picker(page)
     await expect(dialog.locator('[data-option=fast] .tp-estimate')).toContainText('≈ $4.80')
     await expect(dialog.locator('[data-option=fast] .tp-estimate')).toContainText('≈ 10 min')
+    await expect(dialog.locator('[data-option=default] .tp-estimate')).toContainText('$2.40')
+    await expect(dialog.locator('[data-option=default] .tp-estimate')).toContainText('15 min')
+    await expect(dialog.locator('[data-option=default] .tp-estimate')).not.toContainText('≈')
     const controls = { choices: dialog.getByRole('radiogroup'), fast: dialog.locator('[data-option=fast]'), default: dialog.locator('[data-option=default]'), fastest: dialog.locator('[data-option=fastest]'), cancel: dialog.getByRole('button', { name: /Cancel/ }), confirm: dialog.locator('.tp-go'), ...(width === 390 ? { frame: dialog } : {}) }
     await expectStableControls({ controls, scrollAreas: { body: dialog, notes: dialog.locator('.tp-notes') }, interactions: ['fast', 'fastest', 'default'].map(t => ({ name: `estimate choice ${t}`, run: async () => { await dialog.locator(`[data-option=${t}]`).click(); await expect(dialog.locator(`[data-option=${t}]`)).toHaveAttribute('aria-checked', 'true') } })) })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
@@ -381,4 +384,44 @@ test('failed evidence reads show placeholders, never a zero-run or vendor conclu
   await expect(dialog.locator('[data-option=fast] .tp-estimate')).toHaveText('—')
   await expect(dialog.locator('[data-option=fast] .tp-text')).not.toContainText('not offered')
   await expect(dialog.locator('.estimate-source')).toHaveCount(0)
+})
+
+test('live evidence ignores sibling sessions and batches selected telemetry over five seconds', async ({ page }) => {
+  const at = new Date()
+  await page.clock.install({ time: at })
+  await page.clock.pauseAt(new Date(at.getTime() + 1000))
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      receive = (event: Event) => {
+        const { name, after } = (event as CustomEvent<{ name: string; after: unknown }>).detail
+        this.dispatchEvent(new MessageEvent(name, { data: JSON.stringify({ after }) }))
+      }
+      constructor() { super(); window.addEventListener('test:tier-evidence', this.receive) }
+      close() { window.removeEventListener('test:tier-evidence', this.receive) }
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+  const { data, getReads } = await setup(page)
+  await page.goto(`/agents/${id}`)
+  await expect(page.getByRole('region', { name: 'Service tier', exact: true }).locator('.estimate-source')).toContainText('0 runs')
+  const before = getReads()
+  const emit = (name: string, after: unknown) => page.evaluate(({ name, after }) => window.dispatchEvent(new CustomEvent('test:tier-evidence', { detail: { name, after } })), { name, after })
+  const batch = () => Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/harness-sessions'),
+    page.clock.runFor(400),
+  ])
+  await emit('run.telemetry', { run_id: 'sibling-run' }); await batch()
+  await emit('harness.usage_reported', { session_id: 'sibling-session' }); await batch()
+  expect(getReads()).toBe(before)
+  await emit('run.telemetry', { run_id: data.sessions[0]!.run_id })
+  await expect.poll(getReads).toBe(before + 1)
+  for (let i = 0; i < 12; i++) {
+    await emit('harness.usage_reported', { session_id: id }); await batch()
+  }
+  expect(getReads()).toBe(before + 1)
+  await page.clock.runFor(199); expect(getReads()).toBe(before + 1)
+  await page.clock.runFor(1); await expect.poll(getReads).toBe(before + 2)
+  await page.clock.runFor(5000); expect(getReads()).toBe(before + 2)
 })
