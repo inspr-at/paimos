@@ -7,8 +7,8 @@ const hint = computed(() => modelEstimateHint(props.history, props.kindLabel, pr
 </script>
 <template>
   <!-- Reserved below the picker controls; empty/loading history never moves them. -->
-  <p class="model-estimate-hint" :title="hint ? history?.basis : undefined" aria-live="polite">{{ hint }}</p>
+  <span class="model-estimate-hint" :title="hint ? history?.basis : undefined" aria-live="polite">{{ hint }}</span>
 </template>
 <style scoped>
-.model-estimate-hint { height: 1.5em; line-height: 1.5; margin: 6px 0 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ink-3); }
+.model-estimate-hint { display: block; height: 1.5em; line-height: 1.5; margin: 6px 0 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ink-3); }
 </style>

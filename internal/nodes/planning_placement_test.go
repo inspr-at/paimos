@@ -354,7 +354,10 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 	before := expected{gap: "area", rate: 5_000_000, cost: 10}
 	views = planningOf(t, w.admin, path+"&sort=list_cost")
 	s, b := views[security.Key], views[twin.Key]
-	if s.RouteGap != "" || s.Route == nil || s.Tokens.Calibration.AnyRoute || *s.Tokens.Estimated != 4_000_000 || *s.Cost.ListEstimated != "4.000000" || !reflect.DeepEqual(s, b) || before.gap == s.RouteGap || before.rate == s.Tokens.Calibration.TokensPerHour || before.cost == 4 {
+	// The model and rates are equal; learning evidence names each distinct kind.
+	sLegacy, bLegacy := *s, *b
+	sLegacy.ModelEstimate, bLegacy.ModelEstimate = nil, nil
+	if s.RouteGap != "" || s.Route == nil || s.Tokens.Calibration.AnyRoute || *s.Tokens.Estimated != 4_000_000 || *s.Cost.ListEstimated != "4.000000" || !reflect.DeepEqual(sLegacy, bLegacy) || before.gap == s.RouteGap || before.rate == s.Tokens.Calibration.TokensPerHour || before.cost == 4 {
 		t.Fatalf("security did not change to twin: %+v %+v", s, b)
 	}
 	var afterTotal int64
@@ -373,7 +376,7 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			}
 		}
 		var same bool
-		if err := tx.QueryRow(t.Context(), `SELECT (SELECT snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$1)=(SELECT snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$2)`, security.ID, twin.ID).Scan(&same); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$1)=(SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$2)`, security.ID, twin.ID).Scan(&same); err != nil {
 			return err
 		}
 		if !same {

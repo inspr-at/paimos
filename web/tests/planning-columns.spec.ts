@@ -59,8 +59,9 @@ test('server list response preserves exact usage-less and mixed-session hovers',
   await expect(row(page, 'HOVER-1').locator('.c-tokens .plan-figure')).toHaveText('—')
   await assertTip('HOVER-1', 'c-tokens', 'Usage not reported yet\n1 session running on Cursor grok-4.7')
   await assertTip('HOVER-2', 'c-tokens', 'Usage not reported yet')
-  await assertTip('HOVER-6', 'c-tokens', 'Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
-  for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-6', 'c-tokens', 'Uncalibrated · insufficient model history (n=0)\n1 session running on Cursor grok-4.7')
+  for (const key of ['HOVER-1', 'HOVER-2']) await assertTip(key, 'c-list-cost', 'Billing not reported yet')
+  await assertTip('HOVER-6', 'c-list-cost', 'Uncalibrated · insufficient model history (n=0)')
   await assertTip('HOVER-3', 'c-tokens', 'Measured so far 1.1M · Cursor grok-4.7\n1 session running · input 1,100,000 (0 cached) · output 0')
   for (const [key, spent, input, value] of [['HOVER-4', '1M', '1,000,000', '$2.00'], ['HOVER-5', '0', '0', '$0']] as const) {
     await assertTip(key, 'c-tokens', `Measured so far ${spent} · Cursor grok-4.7\n1 session running · input ${input} (0 cached) · output 0\n1 session has no usage report yet`)

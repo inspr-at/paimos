@@ -20,7 +20,7 @@ describe('server list payload planning hovers', () => {
     expect(r.planning!.tokens).toMatchObject({ spent: null, unreported: 1, sessions: 1, running: 1 })
     expect(tokensCell(r).tip).toBe('Usage not reported yet\n1 session running on Cursor grok-4.7')
     expect(tokensCell(serverRow('HOVER-2')).tip).toBe('Usage not reported yet')
-    expect(tokensCell(serverRow('HOVER-6')).tip).toBe('Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
+    expect(tokensCell(serverRow('HOVER-6')).tip).toBe('Uncalibrated · insufficient model history (n=0)\n1 session running on Cursor grok-4.7')
   })
   it('has no cost lower bound until a list value is measured', () => {
     for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) {

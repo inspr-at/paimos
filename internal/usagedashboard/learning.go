@@ -296,9 +296,12 @@ func LearningBasis(samples []LearningSample, c LearningCell, level string) strin
 }
 
 func (m *Module) modelEstimates(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if len(r.URL.RawQuery) > 2048 {
+		return nil, workorders.Fail(http.StatusBadRequest, "model estimate query too large")
+	}
 	q := r.URL.Query()
 	id, kind, bucket, project := q.Get("profile_id"), q.Get("kind"), q.Get("bucket"), q.Get("project_id")
-	if len(r.URL.RawQuery) > 2048 || !workorders.UUID(id) || len(kind) == 0 || len(kind) > 64 || strings.ContainsAny(kind, "\r\n\t") || (bucket != "normal" && bucket != "complex") || (project != "" && !workorders.UUID(project)) {
+	if !workorders.UUID(id) || len(kind) == 0 || len(kind) > 64 || strings.ContainsAny(kind, "\r\n\t") || (bucket != "normal" && bucket != "complex") || (project != "" && !workorders.UUID(project)) {
 		return nil, workorders.Fail(http.StatusBadRequest, "invalid model estimate query")
 	}
 	if err := authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project, AnyProject: project == ""}); err != nil {
