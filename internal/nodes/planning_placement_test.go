@@ -418,3 +418,38 @@ func TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate(t *testing.T) {
 		t.Fatalf("archived area accepted: %d", code)
 	}
 }
+
+func TestPlanningResidencyAliasesMatchDispatchPlacement(t *testing.T) {
+	w := planningSetup(t)
+	for i, residency := range []string{"eu", "eu-e1", " eu-e1 ", "local", "local-l1", " local-l1 ", "any", "unknown", ""} {
+		t.Run(fmt.Sprintf("%d-%s", i, residency), func(t *testing.T) {
+			n := placementNode(t, w, fmt.Sprintf("RESIDENCY-%d", i+1), map[string]any{"area": "backend", "complexity": "M", "residency": residency})
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+				placement, err := modelregistry.PlacementFor(t.Context(), tx, tenant.Principal{}, modelregistry.WorkQuery{TicketID: n.ID}, time.Now().UTC())
+				if err != nil {
+					return err
+				}
+				want := modelprefs.NormalizeResidency(residency)
+				if placement.TicketRequirement != want {
+					t.Fatalf("dispatch residency = %q, want %q", placement.TicketRequirement, want)
+				}
+				rows, err := loadPlanRows(t.Context(), tx, []string{n.ID}, nil)
+				if err != nil {
+					return err
+				}
+				filtered, err := filteredPlanPlacements(t.Context(), tx, listQuery{IDs: []string{n.ID}})
+				if err != nil {
+					return err
+				}
+				for name, got := range map[string][]planRow{"display/snapshot": rows, "sort": filtered} {
+					if len(got) != 1 || got[0].residency != want {
+						t.Errorf("%s placement for %q = %+v, want residency %q", name, residency, got, want)
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package harness_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
@@ -172,4 +173,47 @@ func TestManagedRegistrationCopiesDispatchPlacementAfterPreferencesChange(t *tes
 		}
 		return nil
 	})
+	// A run remains attached after binding changes, but its placement describes
+	// only its original ticket. Detaching clears it; returning restores it.
+	other := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id,fields)
+		 SELECT tenant_id,$2,'HTS-3',kind_id,'Other placement ticket',parent_id,
+		 '{"area":"docs","complexity":"M","route_role":"mechanical"}'::jsonb FROM nodes WHERE id=$1`, f.ticket, other)
+		return err
+	})
+	path := "/api/projects/" + f.project + "/harness-sessions/" + session["id"].(string)
+	for _, tc := range []struct {
+		name, shape string
+		ticket      *string
+	}{{"different ticket", "ship", &other}, {"detached", "unknown", nil}, {"original ticket", "ship", &f.ticket}} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := decode(t, f.call(f.person, "GET", path, nil, ""))
+			expect(t, f.call(f.person, "PATCH", path+"/binding", map[string]any{"expected_revision": current["revision"], "ticket_node_id": tc.ticket, "work_shape": tc.shape}, ""), 200)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var raw json.RawMessage
+				if err := tx.QueryRow(t.Context(), `SELECT work_placement FROM harness_sessions WHERE id=$1`, session["id"]).Scan(&raw); err != nil {
+					return err
+				}
+				if tc.ticket == nil {
+					if len(raw) != 0 {
+						t.Fatalf("detached session retained placement: %s", raw)
+					}
+					return nil
+				}
+				var got modelregistry.WorkPlacement
+				if err := json.Unmarshal(raw, &got); err != nil {
+					return err
+				}
+				if *tc.ticket == other {
+					if got.Kind != "docs" || got.Bucket != "normal" || got.Role != "mechanical" || got.PersonID != nil || got.PlannedProfileID != nil {
+						t.Fatalf("rebound placement copied old run or editor preference: %+v", got)
+					}
+				} else if !reflect.DeepEqual(got, trace.Placement) {
+					t.Fatalf("original ticket lost frozen run placement: %+v != %+v", got, trace.Placement)
+				}
+				return nil
+			})
+		})
+	}
 }
