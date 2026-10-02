@@ -24,7 +24,7 @@ paths:
       parameters:
         - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
-        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: Pairing lifecycle proof, daemon only; never log}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string}, description: 'Pairing lifecycle proof, daemon only; never log'}
       responses:
         '200':
           description: Private daemon challenge; Cache-Control no-store
