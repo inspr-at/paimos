@@ -257,6 +257,31 @@ for (const width of [1440, 390]) test(`newest answered questions and fresh corre
   await rows.first().click(); await page.getByTestId('choice-0').click()
   await expect(page.getByTestId('desk-decide')).toBeEnabled()
 })
+test('Load 100 more resumes the answered cursor without rereading loaded pages', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  world.questions.push(...Array.from({ length: 205 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
+  await page.goto('/decision-desk')
+  await page.getByRole('button', { name: /^Decided/ }).click()
+  const rows = page.locator('.desk-list .desk-row'), load = page.getByRole('button', { name: 'Load 100 more' })
+  await expect(rows).toHaveCount(100)
+  const answeredReads = () => world.reads.filter(path => path.includes('state=answered'))
+  const initial = answeredReads().length
+  await load.click(); await expect(rows).toHaveCount(200)
+  expect(answeredReads()).toHaveLength(initial + 1)
+  const secondCursor = new URL(answeredReads().at(-1)!, 'https://test.invalid').searchParams.get('cursor')
+  expect(secondCursor).toBeTruthy()
+  await load.click(); await expect(rows).toHaveCount(205)
+  expect(answeredReads()).toHaveLength(initial + 2)
+  expect(new URL(answeredReads().at(-1)!, 'https://test.invalid').searchParams.get('cursor')).not.toBe(secondCursor)
+  await expect(load).toHaveCount(0)
+  const beforeRefresh = answeredReads().length
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+  await expect(rows).toHaveCount(205)
+  expect(answeredReads()).toHaveLength(beforeRefresh + 3)
+  expect(new URL(answeredReads()[beforeRefresh]!, 'https://test.invalid').searchParams.has('cursor')).toBe(false)
+})
+
 test('loaded open and answered pages survive focus refresh with their memo still actionable', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.push(...Array.from({ length: 100 }, (_, at) => sampleQuestion(`open-${at}`)))

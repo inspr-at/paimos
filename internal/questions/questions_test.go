@@ -148,6 +148,18 @@ func (f *fixture) ask(t *testing.T, in Input) Question {
 	return question(t, request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", in), 201)
 }
 
+func TestAnsweredNewestFirstIndex(t *testing.T) {
+	d := dbtest.Open(t)
+	var definition string
+	if err := d.Admin.QueryRow(t.Context(), `SELECT pg_get_indexdef(indexrelid) FROM pg_index
+ WHERE indexrelid=to_regclass('desk_answers_newest') AND indisvalid AND indisready`).Scan(&definition); err != nil {
+		t.Fatalf("newest-answer pagination needs a ready, valid index: %v", err)
+	}
+	if !strings.Contains(definition, "USING btree (tenant_id, project_id, created_at DESC, question_id DESC)") {
+		t.Fatalf("index must cover tenant/project scope and the descending timestamp/ID tie-break: %s", definition)
+	}
+}
+
 func TestAnsweredNewestFirstKeysetAndIsolation(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
