@@ -265,10 +265,12 @@ func TestTierHistoryEventFenceFiresAcrossXIDEpochs(t *testing.T) {
 						return err
 					}
 				}
-				if _, err := tx.Exec(t.Context(), `SAVEPOINT fence_negative_control`); err != nil {
+				if _, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "harness.test_fence", After: map[string]any{"session_id": sessionID}}); err != nil {
 					return err
 				}
-				if _, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "harness.test_fence", After: map[string]any{"session_id": sessionID}}); err != nil {
+				// The event must carry the top-level xid. Start the recovery
+				// savepoint afterwards; an event inside it would carry a subxid.
+				if _, err := tx.Exec(t.Context(), `SAVEPOINT fence_negative_control`); err != nil {
 					return err
 				}
 				_, err := tx.Exec(t.Context(), `INSERT INTO harness_tier_history(tenant_id,session_id,action,from_tier,to_tier,actor_id) VALUES($1,$2,'switch_requested','default','fast',$3)`, f.person.TenantID, sessionID, f.person.ID)
