@@ -3,6 +3,7 @@
 package views
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -50,36 +51,25 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusForbidden, "person plan required")
 		return
 	}
-	out := agentsPlanSnapshot{PrincipalID: owner, Running: map[string]int{}}
+	out := agentsPlanSnapshot{Running: map[string]int{}}
 	// The plan's total spans projects. This narrowly scoped aggregate is
 	// authorized by person ownership, not project visibility. Keep explicit
 	// tenant and owner predicates; return no project/session identities.
 	ctx := db.AllProjects(r.Context(), "agents plan: authorized person's running count only")
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		var canonicalOwner string
-		err := tx.QueryRow(ctx, `SELECT canonical.id::text FROM principals person
-			JOIN principals canonical ON canonical.tenant_id=person.tenant_id AND canonical.id=coalesce(person.linked_to,person.id)
-			WHERE person.tenant_id=$1::uuid AND person.id=$2::uuid AND person.kind='person'
-			AND person.status='active' AND canonical.kind='person' AND canonical.status='active'`, p.TenantID, owner).Scan(&canonicalOwner)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return authz.ErrForbidden
-		}
+		canonicalOwner, err := agentsPlanOwner(ctx, tx, p.TenantID, owner)
 		if err != nil {
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, agentplan.ReadScope, authz.Scope{}); err != nil {
 			return err
 		}
-		var raw []byte
-		var at time.Time
-		err = tx.QueryRow(ctx, `SELECT value,updated_at FROM user_preferences
-			WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND key=$3`, p.TenantID, owner, agentplan.PreferenceKey).Scan(&raw, &at)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		out.PrincipalID = canonicalOwner
+		raw, at, err := readAgentsPlanPreference(ctx, tx, p.TenantID, canonicalOwner)
+		if err != nil {
 			return err
 		}
-		if err == nil {
-			out.UpdatedAt = &at
-		}
+		out.UpdatedAt = at
 		out.Plan, out.Source, err = agentplan.Decode(raw)
 		if err != nil {
 			return err // Malformed stored plans fail closed, never fall back.
@@ -120,4 +110,72 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+func agentsPlanOwner(ctx context.Context, tx pgx.Tx, tenantID, owner string) (string, error) {
+	var canonical string
+	err := tx.QueryRow(ctx, `SELECT canonical.id::text FROM principals person
+		JOIN principals canonical ON canonical.tenant_id=person.tenant_id AND canonical.id=coalesce(person.linked_to,person.id)
+		WHERE person.tenant_id=$1::uuid AND person.id=$2::uuid AND person.kind='person'
+		AND person.status='active' AND canonical.kind='person' AND canonical.status='active'`, tenantID, owner).Scan(&canonical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", authz.ErrForbidden
+	}
+	return canonical, err
+}
+
+// Read every saved plan in the family, preferring the canonical row. Comparing
+// effective ceilings preserves legacy shapes and treats a missing limit like
+// explicit no_limit, while never guessing between conflicting start allowances.
+func readAgentsPlanPreference(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
+	rows, err := tx.Query(ctx, `SELECT pref.value,pref.updated_at FROM user_preferences pref
+		JOIN principals person ON person.tenant_id=pref.tenant_id AND person.id=pref.principal_id
+		WHERE pref.tenant_id=$1::uuid AND pref.key=$3 AND person.kind='person'
+		AND coalesce(person.linked_to,person.id)=$2::uuid
+		ORDER BY (person.id=$2::uuid) DESC,person.id`, tenantID, owner, agentplan.PreferenceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var selected []byte
+	var updatedAt *time.Time
+	var selectedPlan agentplan.Plan
+	for rows.Next() {
+		var raw []byte
+		var at time.Time
+		if err := rows.Scan(&raw, &at); err != nil {
+			return nil, nil, err
+		}
+		plan, _, err := agentplan.Decode(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		if updatedAt == nil {
+			selected, updatedAt, selectedPlan = raw, &at, plan
+		} else if !sameAgentsPlan(selectedPlan, plan) {
+			return nil, nil, errors.New("conflicting linked person plans")
+		}
+	}
+	return selected, updatedAt, rows.Err()
+}
+
+func sameAgentsPlan(a, b agentplan.Plan) bool {
+	if a.Total != b.Total {
+		return false
+	}
+	for _, limits := range []map[string]agentplan.Limit{a.Limits, b.Limits} {
+		for harness := range limits {
+			left, right := a.Limits[harness], b.Limits[harness]
+			if left.Mode == "" {
+				left.Mode = agentplan.NoLimit
+			}
+			if right.Mode == "" {
+				right.Mode = agentplan.NoLimit
+			}
+			if left != right {
+				return false
+			}
+		}
+	}
+	return true
 }

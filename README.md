@@ -50,6 +50,12 @@ The person reads their own plan. An agent key reads only its live person
 creator's plan and needs the explicit `agents.plan.read` scope and live role
 permission. There is no person or tenant selector. Existing coordinator keys
 must receive this scope through the person's normal key-scope controls.
+Plan reads, writes and running counts use the canonical person, including when
+the caller or key creator is a linked alias. The snapshot returns that canonical
+`principal_id`. With no canonical preference, a saved alias preference remains
+readable; conflicting effective plans across linked rows fail closed. An
+explicit person save updates the canonical row and reconciles existing alias
+copies. Other preferences remain private to the calling principal.
 
 The person saves the plan through `PUT /api/preferences/agents.working`:
 `{"value":{"total":5,"limits":{"codex":4,"cursor":"off","claude":"no_limit"}}}`.

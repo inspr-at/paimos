@@ -164,3 +164,165 @@ func TestAgentsPlanPrivateOwnershipValidationAndCounts(t *testing.T) {
 		t.Fatal("invalid stored plan did not fail closed")
 	}
 }
+
+func TestAgentsPlanLinkedPersonReadWriteAndConflicts(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tid, project string
+	must(d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('linked-plan','Linked plan') RETURNING id::text`).Scan(&tid))
+	must(d.Admin.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'LINKED-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project))
+	person := func(kind, name string, linked *string) tenant.Principal {
+		t.Helper()
+		p := tenant.Principal{TenantID: tid, Kind: tenant.PrincipalKind(kind)}
+		must(d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,linked_to) VALUES($1,$2,$3,$4) RETURNING id::text`, tid, kind, name, linked).Scan(&p.ID))
+		if linked == nil {
+			dbtest.BindRole(t, d, tid, p.ID, "viewer")
+		}
+		return p
+	}
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	request := func(p tenant.Principal, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	for _, tc := range []struct {
+		name, canonical, alias, secondAlias, source string
+		total, status                               int
+	}{
+		{name: "unset family", total: 15, source: "default", status: 200},
+		{name: "canonical zero blocks alias key", canonical: `{"total":0}`, total: 0, source: "plan", status: 200},
+		{name: "alias only zero", alias: `{"total":0}`, total: 0, source: "plan", status: 200},
+		{name: "alias only legacy", alias: `{"cap":6,"view":"model","model":{"codex":4}}`, total: 6, source: "legacy", status: 200},
+		{name: "equivalent legacy and explicit no limit", canonical: `{"cap":6,"area":{"dev":2}}`, alias: `{"total":6,"limits":{"codex":"no_limit"}}`, total: 6, source: "legacy", status: 200},
+		{name: "conflicting totals", canonical: `{"total":5}`, alias: `{"total":0}`, status: 500},
+		{name: "conflicting harness limits", canonical: `{"total":5,"limits":{"codex":"off"}}`, alias: `{"total":5}`, status: 500},
+		{name: "off and numeric zero stay distinct", canonical: `{"total":5,"limits":{"codex":"off"}}`, alias: `{"total":5,"limits":{"codex":0}}`, status: 500},
+		{name: "conflicting aliases without canonical row", alias: `{"total":0}`, secondAlias: `{"total":5}`, status: 500},
+		{name: "malformed canonical is not masked", canonical: `{"total":99}`, alias: `{"total":0}`, status: 500},
+		{name: "malformed alias is not masked", canonical: `{"total":0}`, alias: `{"total":99}`, status: 500},
+		{name: "malformed alias only", alias: `{"total":99}`, status: 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			canonical := person("person", tc.name, nil)
+			alias := person("person", "Linked alias", &canonical.ID)
+			secondAlias := person("person", "Second alias", &canonical.ID)
+			agent := person("agent", "Enforcer", nil)
+			agent.KeyCreatorID, agent.Scopes = canonical.ID, []string{agentplan.ReadScope}
+			aliasKey := agent
+			aliasKey.KeyCreatorID = alias.ID
+			// The canonical save is a real preference request, including the
+			// reported regression: total zero read by a key created by an alias.
+			if tc.canonical != "" && tc.canonical != `{"total":99}` {
+				if w := request(canonical, "PUT", "/api/preferences/agents.working", `{"value":`+tc.canonical+`}`); w.Code != 200 {
+					t.Fatalf("canonical save status=%d body=%s", w.Code, w.Body.String())
+				}
+			}
+			for _, saved := range []struct{ owner, value string }{
+				{canonical.ID, tc.canonical}, {alias.ID, tc.alias}, {secondAlias.ID, tc.secondAlias},
+			} {
+				if saved.value != "" {
+					_, err := d.Admin.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working',$3::jsonb)
+						ON CONFLICT(tenant_id,principal_id,key) DO UPDATE SET value=EXCLUDED.value`, tid, saved.owner, saved.value)
+					must(err)
+				}
+			}
+			for _, owner := range []*string{&canonical.ID, &alias.ID, nil} {
+				_, err := d.Admin.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,phase,activity)
+					VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker',uuid_send(gen_random_uuid()),uuid_send(gen_random_uuid()),'working','busy')`, tid, project, agent.ID, owner)
+				must(err)
+			}
+			_, err := d.Admin.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id)
+				VALUES($1,$2,'alias key',gen_random_uuid()::text,'test-only-not-a-credential',$3)`, tid, agent.ID, alias.ID)
+			must(err)
+			for _, reader := range []tenant.Principal{canonical, alias, agent, aliasKey} {
+				w := request(reader, "GET", "/api/agents/plan", "")
+				if w.Code != tc.status {
+					t.Fatalf("reader %s plan status=%d want=%d body=%s", reader.ID, w.Code, tc.status, w.Body.String())
+				}
+				if tc.status == 200 {
+					var out agentsPlanSnapshot
+					must(json.Unmarshal(w.Body.Bytes(), &out))
+					if out.PrincipalID != canonical.ID || out.Total != tc.total || out.Source != tc.source || out.RunningTotal != 3 || out.Running["codex"] != 3 || (out.UpdatedAt == nil) != (tc.source == "default") {
+						t.Fatalf("linked plan %+v", out)
+					}
+					if tc.total == 0 {
+						if ok, reason := agentplan.CanStart(out.Plan, out.Running, "codex"); ok || reason != "planned total reached" {
+							t.Fatalf("zero plan allows start: %v %s", ok, reason)
+						}
+					}
+				} else if strings.Contains(w.Body.String(), "total") || strings.Contains(w.Body.String(), "principal_id") {
+					t.Fatal("conflict exposed a usable plan snapshot")
+				}
+			}
+			for _, reader := range []tenant.Principal{canonical, alias} {
+				w := request(reader, "GET", "/api/preferences/agents.working", "")
+				if w.Code != tc.status {
+					t.Fatalf("preference status=%d want=%d body=%s", w.Code, tc.status, w.Body.String())
+				}
+				if tc.status == 200 {
+					var out preference
+					must(json.Unmarshal(w.Body.Bytes(), &out))
+					want := tc.canonical
+					if want == "" {
+						want = tc.alias
+					}
+					if want == "" {
+						want = "null"
+					}
+					var gotJSON, wantJSON any
+					must(json.Unmarshal(out.Value, &gotJSON))
+					must(json.Unmarshal([]byte(want), &wantJSON))
+					got, _ := json.Marshal(gotJSON)
+					expected, _ := json.Marshal(wantJSON)
+					if string(got) != string(expected) {
+						t.Fatalf("raw preference %s want=%s", got, expected)
+					}
+				}
+			}
+			// Saving as the alias must write the canonical row, recover from
+			// conflicting legacy copies, and never interrupt existing work.
+			if w := request(alias, "PUT", "/api/preferences/agents.working", `{"value":{"total":0,"limits":{"cursor":"off"}}}`); w.Code != 200 {
+				t.Fatalf("alias save status=%d body=%s", w.Code, w.Body.String())
+			}
+			var canonicalValue []byte
+			must(d.Admin.QueryRow(ctx, `SELECT value FROM user_preferences WHERE tenant_id=$1 AND principal_id=$2 AND key='agents.working'`, tid, canonical.ID).Scan(&canonicalValue))
+			var saved agentplan.Plan
+			must(json.Unmarshal(canonicalValue, &saved))
+			if saved.Total != 0 || saved.Limits["cursor"].Mode != agentplan.Off {
+				t.Fatalf("canonical value after alias save: %s", canonicalValue)
+			}
+			for _, reader := range []tenant.Principal{canonical, alias, agent, aliasKey} {
+				w := request(reader, "GET", "/api/agents/plan", "")
+				if w.Code != 200 {
+					t.Fatalf("reconciled plan status=%d body=%s", w.Code, w.Body.String())
+				}
+				var out agentsPlanSnapshot
+				must(json.Unmarshal(w.Body.Bytes(), &out))
+				if out.PrincipalID != canonical.ID || out.Total != 0 || out.RunningTotal != 3 || out.Limits["cursor"].Mode != agentplan.Off {
+					t.Fatalf("reconciled snapshot %+v", out)
+				}
+			}
+			// Ordinary UI preferences still belong to each raw principal.
+			if w := request(alias, "PUT", "/api/preferences/list:p1", `{"value":{"split":0.4}}`); w.Code != 200 {
+				t.Fatalf("ordinary preference save status=%d", w.Code)
+			}
+			w := request(canonical, "GET", "/api/preferences/list:p1", "")
+			var out preference
+			must(json.Unmarshal(w.Body.Bytes(), &out))
+			if w.Code != 200 || string(out.Value) != "null" {
+				t.Fatal("ordinary preferences leaked across aliases")
+			}
+		})
+	}
+}
