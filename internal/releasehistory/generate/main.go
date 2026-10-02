@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 	opts := releasehistory.Options{Repo: *repo, Repository: *repository, Candidate: *candidate}
 	if *candidate != "" {
-		opts.CandidateCI = candidateRun(*repository, os.Getenv)
+		opts.CandidateCI = candidateRun(*repository, os.Getenv("GITHUB_RUN_ID"), os.Getenv("GITHUB_WORKFLOW"), os.Getenv("GITHUB_SERVER_URL"))
 	}
 	if !*offline && *repository != "" {
 		opts.GitHub = &releasehistory.GitHub{Token: os.Getenv("GITHUB_TOKEN")}
@@ -73,12 +73,10 @@ func main() {
 }
 
 // The building workflow is still running. Its conclusion cannot be known here.
-func candidateRun(repository string, getenv func(string) string) *releasehistory.Run {
-	id := getenv("GITHUB_RUN_ID")
+func candidateRun(repository, id, name, server string) *releasehistory.Run {
 	if !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(id) || !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repository) {
 		return nil
 	}
-	server := getenv("GITHUB_SERVER_URL")
 	if server == "" {
 		server = "https://github.com"
 	}
@@ -86,7 +84,6 @@ func candidateRun(repository string, getenv func(string) string) *releasehistory
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil
 	}
-	name := getenv("GITHUB_WORKFLOW")
 	if name == "" || len(name) > 255 || strings.ContainsFunc(name, unicode.IsControl) {
 		return nil
 	}
