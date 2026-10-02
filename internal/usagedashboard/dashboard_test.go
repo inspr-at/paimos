@@ -637,6 +637,7 @@ func TestFix2AllowanceOwnerSharingBoundary(t *testing.T) {
 
 func TestAllowanceTruncationAndPartialPrivacyAreExplicit(t *testing.T) {
 	w := newWorld(t)
+	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
 	account, _ := w.allowanceWindow(t, "bounded", "Visible", 10, 0, 0)
 	private, _ := w.allowanceWindow(t, "private", "Private", 917, 0, 0)
 	w.tx(t, w.home, func(tx pgx.Tx) error {

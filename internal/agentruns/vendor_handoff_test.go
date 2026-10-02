@@ -129,7 +129,11 @@ func TestShortVendorWaitContinuesSameAccountAfterReset(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET vendor_retry_same_account=true,vendor_retry_at=now()-interval '1 second' WHERE id=$1`, v.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET at=now()-interval '2 hours' WHERE run_id=$1`, v.ID)
+		if _, err := tx.Exec(t.Context(), `UPDATE run_telemetry SET at=now()-interval '2 hours' WHERE run_id=$1`, v.ID); err != nil {
+			return err
+		}
+		// Advance the persisted retry clock too; telemetry edits cannot reset it.
+		_, err := tx.Exec(t.Context(), `UPDATE account_readiness_facts SET next_attempt_at=now()-interval '1 second' WHERE resource_id IN (SELECT resource_id FROM account_readiness_memberships WHERE account_id=$1) AND stop_kind='unnamed'`, v.AccountID)
 		return err
 	})
 	var queued []agentruns.Run

@@ -47,6 +47,10 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	v := f.redeem(p)
 	e := v.Enrollments[0]
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	// Quota details require the separate person link, even for the approver.
+	offer := offerLink(t, f, p, key, e.AccountID)
+	review := reviewLink(t, f, offer)
+	f.call("POST", accountLinkPath+"/"+review.RequestID+"/approve", approveLinkBody(review), true, "", 200)
 	var verificationWindow string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT id::text FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, e.AccountID).Scan(&verificationWindow); err != nil {
 		t.Fatal(err)

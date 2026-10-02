@@ -654,6 +654,11 @@ func TestNamedClaudeDenialDoesNotWaitForTheOtherWindow(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2, status='cancelled' WHERE id=$1`, cause, a.ID); err != nil {
 			return err
 		}
+		// Bind the named denying bucket to the stopped run. Unnamed stops
+		// require controlled inference and cannot be erased by another reading.
+		if _, err := tx.Exec(t.Context(), `UPDATE account_capacity_readings SET run_id=$2 WHERE account_id=$1 AND window_kind='5h' AND read_at=$3`, a.ID, cause, readAt); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,at) VALUES($1,$2,1,'usage','vendor_limit',$3)`, person.TenantID, cause, stop)
 		return err
 	}); err != nil {
@@ -1048,7 +1053,7 @@ func TestUnstartedRecoveryReleasesPermit(t *testing.T) {
 	}
 	held := s
 	held.Override = "hold"
-	until := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	until := time.Now().UTC().Add(time.Hour)
 	held.OverrideUntil = &until
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &held}), 204, nil)
 	if w := admit(day); w == nil || w.Code != "hold" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(until) {

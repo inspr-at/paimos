@@ -276,3 +276,151 @@ func TestBStaleKeyCapPersistsAcrossNullChecks(t *testing.T) {
 	report(now.Add(2*time.Hour+2*time.Minute), "key_cap", &room)
 	f.route(t, 200)
 }
+
+func bPiWorld(t *testing.T, slug string, now time.Time) limitFixture {
+	t.Helper()
+	f := readinessWorld(t, slug, now)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET harness='pi',provider='openrouter' WHERE id=$1`, f.account.ID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'b-openrouter','1','pi','openai','test','high','strong') RETURNING id::text`, f.admin.TenantID).Scan(&f.profile)
+	})
+	f.account.Harness, f.account.Provider = "pi", "openrouter"
+	bAt(t, &f, now, "g1")
+	return f
+}
+
+func TestBUnresolvedBalanceSharesRecoveryAcrossPeople(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := bPiWorld(t, "b-shared-balance", now)
+	peer := addPrincipal(t, f.admin.TenantID, "person", "Peer", []string{"admin"})
+	var other Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "peer", "harness": "pi", "provider": "openrouter", "daemon_id": "daemon-a", "label": "Peer", "max_parallel_runs": 3}), 201, &other)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3 WHERE id=$1`, other.ID, peer.ID, now)
+		return err
+	})
+	other.OwnerPersonID = &peer.ID
+	s := capacity.DefaultSchedule("UTC")
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
+	callStatus(t, f.mod, &peer, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: other.ID, Schedule: &s}), 204, nil)
+	second := f
+	second.account = other
+	second.admin = peer
+	bAt(t, &second, now, "g1")
+	bStop(t, f, now, "money_402")
+	var resource string
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT resource_id::text FROM account_readiness_facts WHERE reported_by_account_id=$1 AND stop_kind='money_402'`, f.account.ID).Scan(&resource)
+	})
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_memberships WHERE resource_id=$1 AND account_id=ANY($2::uuid[])`, resource, []string{f.account.ID, other.ID}) != 2 {
+		t.Fatal("unresolved balance was divided by person or key")
+	}
+	f.route(t, 409)
+	second.route(t, 409)
+	// Key room and null reports do not assert total money replenishment.
+	local := bResource(t, second)
+	room := 10.0
+	at := now.Add(time.Minute)
+	bAt(t, &second, at, "g1")
+	callStatus(t, second.mod, &second.runner, second.token, "POST", "/api/agent-accounts/"+other.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: local, WindowKey: "key_cap", Source: "provider", ObservedAt: at, ReadingAt: &at, Remaining: &room, CreditState: "unknown"}}}}), 200, nil)
+	second.route(t, 409)
+	_, body := call(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "")
+	if strings.Contains(body, "money_402") || strings.Contains(body, resource) {
+		t.Fatal("shared balance detail crossed the other owner's privacy")
+	}
+	callStatus(t, second.mod, &peer, "", "POST", "/api/agent-accounts/"+other.ID+"/check", requestBody("early", 0), 202, nil)
+	run, _ := second.route(t, 200)
+	f.route(t, 409)
+	bFinish(t, second, run, at, "completed", 3)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND stop_kind='money_402'`, resource) != 0 {
+		t.Fatal("successful shared-resource inference left stop")
+	}
+	f.route(t, 200)
+}
+
+func TestBFreshFactBudgetsShareLedgerAndStaleRoomDoesNotFenceClaim(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-facts", now)
+	resource := bResource(t, f)
+	used := 99.0
+	reset := now.Add(5 * time.Hour)
+	report := func(at time.Time, amount float64) {
+		t.Helper()
+		bAt(t, &f, at, "g1")
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "five_hour", Source: "harness", ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: &amount, CreditState: "unknown"}}}}), 200, nil)
+	}
+	// Sprint spends the measured remainder while preserving its hard boundary.
+	s := capacity.DefaultSchedule("UTC")
+	s.Override = "sprint"
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
+	report(now, used)
+	run, out := f.route(t, 200)
+	f.route(t, 409)
+	if len(out.Reservations) != 1 {
+		t.Fatal("fact budget not reserved exactly once")
+	}
+	later := now.Add(11 * time.Minute)
+	bAt(t, &f, later, "g2")
+	ctx := context.WithValue(dbtest.Seed(t.Context()), clockKey{}, later)
+	if err := db.InTenant(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error { return ValidateReservedCapacity(ctx, tx, run, f.account.ID) }); err != nil {
+		t.Fatalf("stale room prevented claim: %v", err)
+	}
+	f.route(t, 200) // Unknown room is bounded by real slots, not stale 99%.
+	report(later.Add(time.Minute), 100)
+	f.route(t, 409)
+}
+
+func TestBUnknownScheduleDSTNightsAndRunNow(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/Vienna")
+	for _, month := range []time.Month{time.March, time.October} {
+		t.Run(month.String(), func(t *testing.T) {
+			day := 29
+			if month == time.October {
+				day = 25
+			}
+			now := time.Date(2026, month, day, 3, 30, 0, 0, loc)
+			f := readinessWorld(t, "b-dst-"+month.String(), now)
+			s := capacity.DefaultSchedule(loc.String())
+			s.Week = capacity.Preset(7)
+			s.Reserve = capacity.ReserveOff
+			save := func() {
+				callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
+			}
+			save()
+			f.route(t, 409)
+			seed(t, f.admin, func(tx pgx.Tx) error {
+				a, err := getAccount(t.Context(), tx, f.account.ID)
+				if err != nil {
+					return err
+				}
+				_, w, err := admission(t.Context(), tx, a, a.Windows, now, 0, runRow{Purpose: "managed"}, false)
+				if err == nil && (w == nil || w.Code != "schedule" || w.Until == nil || w.Until.In(loc).Hour() != 8 || !w.RunNowAllowed) {
+					t.Fatalf("DST schedule wait: %+v", w)
+				}
+				return err
+			})
+			s.Nights = true
+			save()
+			run, _ := f.route(t, 200)
+			seed(t, f.admin, func(tx pgx.Tx) error { return Release(t.Context(), tx, f.runner, run, "", "") })
+			s.Nights = false
+			save()
+			seed(t, f.admin, func(tx pgx.Tx) error {
+				a, err := getAccount(t.Context(), tx, f.account.ID)
+				if err != nil {
+					return err
+				}
+				_, w, err := admission(t.Context(), tx, a, a.Windows, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+				if err == nil && w != nil {
+					t.Fatalf("Run now lost across DST: %+v", w)
+				}
+				return err
+			})
+		})
+	}
+}

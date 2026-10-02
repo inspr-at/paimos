@@ -254,6 +254,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
+	if err := reconcileReadinessResources(ctx, tx, a); err != nil {
+		return err
+	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return err
@@ -304,7 +307,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		return fail(http.StatusConflict, "reserved capacity is not eligible")
 	}
 	var invalidCapacity bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND (NOT w.capacity_allowed OR w.capacity_retired OR (w.capacity_source<>'estimate' AND w.capacity_read_at<$2::timestamptz-interval '10 minutes' AND w.capacity_refresh_run IS DISTINCT FROM r.run_id) OR w.ends_at<=$2 OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
+	// A stale/retired room ledger is no longer evidence of a budget. Current
+	// hard stops are checked above against their resource/window facts.
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id WHERE r.run_id=$1 AND r.state='active' AND w.capacity_read_at IS NOT NULL AND w.capacity_source<>'estimate' AND w.capacity_read_at>=$2::timestamptz-interval '10 minutes' AND w.ends_at>$2 AND NOT w.capacity_retired AND (NOT w.capacity_allowed OR w.used+w.reserved>w.allowance))`, run.ID, now).Scan(&invalidCapacity); err != nil {
 		return err
 	}
 	if invalidCapacity {
