@@ -116,12 +116,20 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	countState := func() string {
 		var state string
-		if err := d.Admin.QueryRow(ctx, `SELECT jsonb_build_array((SELECT count(*) FROM principals),(SELECT count(*) FROM identities),(SELECT count(*) FROM events),(SELECT count(*) FROM schema_migrations),(SELECT count(*) FROM sessions),(SELECT count(*) FROM agent_keys),(SELECT sum(revision) FROM personal_profiles))::text`).Scan(&state); err != nil {
+		if err := d.Admin.QueryRow(ctx, `SELECT jsonb_build_array((SELECT count(*) FROM principals),(SELECT count(*) FROM identities),(SELECT count(*) FROM schema_migrations),(SELECT count(*) FROM sessions),(SELECT count(*) FROM agent_keys),(SELECT sum(revision) FROM personal_profiles))::text`).Scan(&state); err != nil {
 			t.Fatal(err)
 		}
 		return state
 	}
+	countEvents := func() int {
+		var count int
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
 	before := countState()
+	beforeEvents := countEvents()
 	opts := Options{Tenant: "dsar-kit", ActorID: owner, Person: "SUBJECT@example.test"}
 	report, err := Collect(t.Context(), d.App, opts)
 	if err != nil {
@@ -138,6 +146,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	if len(section(report, "aithema_deprovisioned_subjects").Records) != 1 {
 		t.Fatal("OIDC subject/issuer mapping was not exact")
+	}
+	oidc := section(report, "aithema_deprovisioned_subjects")
+	var locator map[string]string
+	if err := json.Unmarshal(oidc.Records[0].Locator, &locator); err != nil || locator["issuer"] != "dsar-fixture" || locator["subject"] != "00000000-0000-0000-0000-000000000123" || !contains(strings.Join(oidc.ReviewColumns, " "), "subject") {
+		t.Fatalf("OIDC logical locator or manual review subject missing: %v", err)
 	}
 	nodeSection := section(report, "nodes")
 	if len(nodeSection.Records) != 1 || !strings.Contains(string(nodeSection.Records[0].Locator), visibleNode) {
@@ -170,6 +183,9 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if section(plan, "time_periods").Hold != "financial-review" || section(plan, "events").Hold != "audit-review" || !contains(strings.Join(section(plan, "personal_profiles").TouchColumns, " "), "first_name") {
 		t.Fatal("erase columns or hold review missing")
 	}
+	if !contains(strings.Join(section(plan, "aithema_deprovisioned_subjects").TouchColumns, " "), "subject") {
+		t.Fatal("OIDC subject missing from erase review")
+	}
 	for _, s := range plan.Sections {
 		for _, r := range s.Records {
 			if len(r.Data) != 0 {
@@ -200,6 +216,34 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if _, err := Collect(t.Context(), d.App, unknown); err == nil {
 		t.Fatal("cross-tenant subject resolved")
 	}
+	if countState() != before || countEvents() != beforeEvents {
+		t.Fatal("read-only collection changed stored state")
+	}
+	assertAudit := func(got Report, expected int, kind string) {
+		t.Helper()
+		if countEvents() != expected {
+			t.Fatal("successful command must append exactly one event")
+		}
+		var actorID, tenantID, eventType string
+		var after json.RawMessage
+		var minimal bool
+		if err := d.Admin.QueryRow(ctx, `SELECT actor_principal_id::text,tenant_id::text,type,after,
+			before IS NULL AND node_id IS NULL AND metadata IS NULL AND undo_of IS NULL
+			FROM events WHERE type LIKE 'dsar.%' ORDER BY at DESC LIMIT 1`).Scan(&actorID, &tenantID, &eventType, &after, &minimal); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(after, &payload); err != nil {
+			t.Fatal(err)
+		}
+		records := 0
+		for _, s := range got.Sections {
+			records += len(s.Records)
+		}
+		if actorID != owner || tenantID != tid || eventType != kind || !minimal || len(payload) != 5 || payload["subject_principal_id"] != subject || payload["operation"] != got.Operation || payload["dry_run"] != got.DryRun || payload["record_count"] != float64(records) || payload["table_count"] != float64(len(got.Sections)) {
+			t.Fatal("audit must contain only actor, tenant, subject reference, kind and accurate counts")
+		}
+	}
 	// Both command operations, including a private file and no-overwrite.
 	for _, op := range []string{"export", "erase"} {
 		args := []string{op, "--tenant", "dsar-kit", "--actor-principal-id", owner, "--person", subject}
@@ -211,13 +255,27 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		if err := Execute(t.Context(), d.App, command, &out); err != nil {
+		expected := countEvents() + 1
+		// A different connection must see the committed event before any byte
+		// reaches the writer; an audit in the read snapshot cannot satisfy this.
+		writer := auditWriter(func(content []byte) (int, error) {
+			if countEvents() != expected {
+				t.Fatal("packet emitted before audit committed")
+			}
+			return out.Write(content)
+		})
+		if err := Execute(t.Context(), d.App, command, writer); err != nil {
 			t.Fatal(err)
 		}
 		var got Report
 		if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Operation != op {
 			t.Fatalf("%s command JSON: %v", op, err)
 		}
+		kind := "dsar.export.collected"
+		if op == "erase" {
+			kind = "dsar.erase.planned"
+		}
+		assertAudit(got, expected, kind)
 		command.Output = filepath.Join(t.TempDir(), "packet.json")
 		if err := Execute(t.Context(), d.App, command, &out); err != nil {
 			t.Fatal(err)
@@ -226,12 +284,69 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 		if err != nil || stat.Mode().Perm() != 0600 {
 			t.Fatalf("private file permissions: %v", err)
 		}
+		content, err := os.ReadFile(command.Output)
+		if err != nil || json.Unmarshal(content, &got) != nil {
+			t.Fatal("private file did not contain a packet")
+		}
+		assertAudit(got, expected+1, kind)
 		if err := Execute(t.Context(), d.App, command, &out); err == nil {
 			t.Fatal("existing output overwritten")
 		}
+		if countEvents() != expected+1 {
+			t.Fatal("output path failure appended a success event")
+		}
 	}
 	if countState() != before {
-		t.Fatal("manual DSAR commands changed stored state")
+		t.Fatal("manual DSAR commands changed state beyond the audit log")
+	}
+	// Fail both event insertion and its deferred commit. Each failure must
+	// roll back the audit (including the event counter) and release no packet.
+	for _, deferred := range []bool{false, true} {
+		trigger := `CREATE TRIGGER dsar_audit_failure BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION dsar_reject_audit()`
+		if deferred {
+			trigger = `CREATE CONSTRAINT TRIGGER dsar_audit_failure AFTER INSERT ON events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION dsar_reject_audit()`
+		}
+		if _, err := d.Admin.Exec(ctx, `CREATE OR REPLACE FUNCTION dsar_reject_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type LIKE 'dsar.%' THEN RAISE EXCEPTION 'fixture audit refusal'; END IF; RETURN NEW; END $$`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Admin.Exec(ctx, trigger); err != nil {
+			t.Fatal(err)
+		}
+		eventsBeforeFailure := countEvents()
+		var counterBefore int64
+		if err := d.Admin.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, tid).Scan(&counterBefore); err != nil {
+			t.Fatal(err)
+		}
+		for _, erase := range []bool{false, true} {
+			for _, path := range []string{"-", filepath.Join(t.TempDir(), "blocked.json")} {
+				var out bytes.Buffer
+				command := Command{Options: Options{Tenant: "dsar-kit", ActorID: owner, Person: subject, Erase: erase}, Output: path}
+				if err := Execute(t.Context(), d.App, command, &out); err == nil || !strings.Contains(err.Error(), "audit") || out.Len() != 0 {
+					t.Fatalf("audit failure released output: %v", err)
+				}
+				if path != "-" {
+					stat, err := os.Stat(path)
+					if err != nil || stat.Size() != 0 {
+						t.Fatal("audit failure wrote personal data to file")
+					}
+				}
+			}
+		}
+		var counterAfter int64
+		if err := d.Admin.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, tid).Scan(&counterAfter); err != nil {
+			t.Fatal(err)
+		}
+		if countEvents() != eventsBeforeFailure || counterAfter != counterBefore || countState() != before {
+			t.Fatal("failed audit left committed state")
+		}
+		if _, err := d.Admin.Exec(ctx, `DROP TRIGGER dsar_audit_failure ON events`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A failed collection also records nothing and releases no bytes.
+	var failedOutput bytes.Buffer
+	if err := Execute(t.Context(), d.App, Command{Options: unknown, Output: "-"}, &failedOutput); err == nil || failedOutput.Len() != 0 || countEvents() != beforeEvents+4 {
+		t.Fatal("failed collection emitted output or a success event")
 	}
 	// A duplicate email is ambiguous rather than selecting the first person.
 	if _, err := d.Admin.Exec(ctx, `UPDATE principals SET email='subject@example.test' WHERE id=$1::uuid`, other); err != nil {
@@ -249,7 +364,14 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if _, err := Collect(t.Context(), d.App, opts); err == nil {
 		t.Fatal("deactivated owner authorized")
 	}
+	if err := auditCollection(t.Context(), d.App, owner, report); err == nil || countEvents() != beforeEvents+4 {
+		t.Fatal("audit did not recheck owner authorization")
+	}
 }
+
+type auditWriter func([]byte) (int, error)
+
+func (w auditWriter) Write(content []byte) (int, error) { return w(content) }
 
 func section(report Report, table string) Section {
 	for _, s := range report.Sections {

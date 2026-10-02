@@ -28,6 +28,14 @@ import (
 //go:embed inventory.json
 var inventoryJSON string
 
+// Known direct and pseudonymous identifiers cannot enter the non-personal
+// allowlist just because a schema contributor registers the column.
+var personalColumn = regexp.MustCompile(`(^|_)(email|name|display_name|user_id|person_id|principal_id|phone|subject|account_id|account_key|session_id)$|^(sid|issuer|requester|decided_by|capacity_owner)$`)
+
+// Any exception must name one table.column and explain why it does not identify
+// a person. There are currently no exceptions; new ones need privacy review.
+var nonPersonalExceptions = map[string]string{}
+
 // Domain is a table's read adapter and erase-review policy. Space-separated
 // column lists keep the complete inventory inspectable in one small file.
 type Domain struct {
@@ -81,6 +89,11 @@ func validateInventory(domains []Domain) error {
 				seen[c] = true
 			}
 		}
+		for _, c := range strings.Fields(d.Metadata) {
+			if (personalColumn.MatchString(c) || contains(d.Subjects, c)) && nonPersonalExceptions[d.Table+"."+c] == "" {
+				return fmt.Errorf("personal identifier in non-personal metadata: %s.%s", d.Table, c)
+			}
+		}
 		for _, c := range strings.Fields(d.Subjects + " " + d.Locator) {
 			if !seen[c] || contains(d.Secret, c) {
 				return fmt.Errorf("unsafe inventory selector/locator %s.%s", d.Table, c)
@@ -127,6 +140,9 @@ func (d Domain) columns() string {
 // or column. It checks the migrated catalog, so quoted names, ALTER TABLE,
 // renames and SQL syntax changes cannot bypass a source-text heuristic.
 func CheckSchema(ctx context.Context, tx pgx.Tx, domains []Domain) error {
+	if err := validateInventory(domains); err != nil {
+		return err
+	}
 	rows, err := tx.Query(ctx, `SELECT c.table_name,c.column_name
 		FROM information_schema.columns c JOIN information_schema.tables t
 		ON t.table_schema=c.table_schema AND t.table_name=c.table_name

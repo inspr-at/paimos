@@ -23,6 +23,11 @@ type Options struct {
 	Erase   bool
 }
 
+const ownerQuery = `SELECT EXISTS (SELECT 1 FROM principals p JOIN role_bindings b
+	ON b.tenant_id=p.tenant_id AND b.principal_id=p.id JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+	WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL
+	AND b.scope_type='workspace' AND r.builtin AND r.key='owner')`
+
 type Subject struct {
 	ID      string   `json:"principal_id"`
 	Aliases []string `json:"principal_ids"`
@@ -93,10 +98,7 @@ func Collect(ctx context.Context, pool *pgxpool.Pool, opts Options) (Report, err
 		return report, errors.New("scope DSAR transaction failed")
 	}
 	var authorized bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM principals p JOIN role_bindings b
-		ON b.tenant_id=p.tenant_id AND b.principal_id=p.id JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
-		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL
-		AND b.scope_type='workspace' AND r.builtin AND r.key='owner')`, tenantID, opts.ActorID).Scan(&authorized); err != nil || !authorized {
+	if err := tx.QueryRow(ctx, ownerQuery, tenantID, opts.ActorID).Scan(&authorized); err != nil || !authorized {
 		return report, errors.New("DSAR requires an active workspace owner person in the selected tenant")
 	}
 	domains, err := Inventory()
@@ -151,7 +153,8 @@ func Collect(ctx context.Context, pool *pgxpool.Pool, opts Options) (Report, err
 		}
 		report.Sections = append(report.Sections, section)
 	}
-	// Roll back even on success: no transaction in this package ever commits.
+	// Roll back even on success. Execute records collection in a separate
+	// minimal write transaction before releasing the packet.
 	return report, nil
 }
 

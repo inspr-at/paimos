@@ -161,8 +161,12 @@ The offline `aeon admin dsar export --tenant SLUG --actor-principal-id OWNER_UUI
 --person UUID_OR_EMAIL` produces a JSON review packet; free text, files and
 third-party information need manual review and supplementation before delivery.
 `aeon admin dsar erase` with the same scope and `--dry-run` lists review targets
-and hold assessments. Both commands are read-only; there is no self-service
-erasure or automatic retention. Use `--output PATH` for a new mode-0600 file in
+and hold assessments. Collection uses a read-only snapshot. Before releasing
+either packet, a separate transaction records one tenant audit event with the
+owner, subject principal reference, operation and counts, without personal
+content. Audit failure releases no packet; the event records collection, not
+successful delivery. There is no self-service erasure or automatic retention.
+Use `--output PATH` for a new mode-0600 file in
 a private directory, and include retained copies and backups in the assessment.
 
 Before upgrading, read the target release notes, take a verified backup, and
