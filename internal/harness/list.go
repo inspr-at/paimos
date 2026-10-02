@@ -209,7 +209,7 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	}
 	for i := range out.Items {
 		s := &out.Items[i]
-		if noteID, ok := latestNotes[s.ID]; ok {
+		if noteID, ok := latestNotes[s.ID]; ok && s.ActivityNote != nil {
 			s.ActivityNoteID = &noteID
 		}
 		s.Project = summaries[s.ProjectID]

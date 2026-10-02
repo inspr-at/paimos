@@ -20,6 +20,10 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['g'], ['b']], joiner: 'then', label: 'Go to Business' },
     { keys: [['?']], label: 'This sheet' },
   ] },
+  { title: 'Work queue', rows: [
+    { keys: [['q']], label: 'Queue or remove the focused ticket; queue a selection' },
+    { keys: [[ALT, { icon: 'arrow-up', label: 'Up arrow' }], [ALT, { icon: 'arrow-down', label: 'Down arrow' }]], label: 'In the Queue view: move the ticket up or down' },
+  ] },
   { title: 'Projects', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous project' },
     { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }], [{ icon: 'arrow-up', label: 'Up arrow' }], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Among cards: the card beside, above or below' },

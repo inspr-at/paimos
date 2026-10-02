@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.2",
-    "sha256": "6cb33bcb1fb01c762888237dcc8305e733de1aa8b9c6cc3bc87644753e86ad89",
+    "version": "harness-session/2.3",
+    "sha256": "165f454376ffca3aded5a7c4ce2b398352ac76c9b6a3ea1a396a5f9b5bedeb7c",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -756,6 +756,14 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "agent_activity_mode": {
+            "enum": [
+              "off",
+              "tool_activity",
+              "agent_summary"
+            ],
+            "type": "string"
           },
           "agent_principal_id": {
             "format": "uuid",
@@ -1058,6 +1066,69 @@
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "current_activity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "source": {
+                    "enum": [
+                      "agent",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "agent",
+                    "auto"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "source",
+                "at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "display_label": {
             "maxLength": 128,
@@ -1693,6 +1764,14 @@
             },
             "type": "array"
           },
+          "agent_activity_mode": {
+            "enum": [
+              "off",
+              "tool_activity",
+              "agent_summary"
+            ],
+            "type": "string"
+          },
           "agent_principal_id": {
             "format": "uuid",
             "type": "string"
@@ -1994,6 +2073,69 @@
           "created_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "current_activity": {
+            "oneOf": [
+              {
+                "properties": {
+                  "at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "source": {
+                    "enum": [
+                      "agent",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "source",
+                  "at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_activity_history": {
+            "items": {
+              "properties": {
+                "at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "agent",
+                    "auto"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "source",
+                "at"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "display_label": {
             "maxLength": 128,
@@ -2581,6 +2723,8 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/brief",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/commits/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/continuation/properties/handover",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity/oneOf/0",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/current_activity_history/items",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/handover",
@@ -2594,6 +2738,8 @@
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/brief",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/commits/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/continuation/properties/handover",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity/oneOf/0",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/current_activity_history/items",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/handover",

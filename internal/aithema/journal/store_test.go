@@ -613,8 +613,8 @@ func TestHTTPRouteMatrixAndStableStatuses(t *testing.T) {
 	turn := f.record("turn")
 	host := f.record("authz-epoch")
 	future := f.record("turn")
-	future["min_reader"] = 2
-	future["minor"] = 2
+	future["min_reader"] = 3
+	future["minor"] = 3
 	for _, tc := range []struct {
 		name, area, action, method, query string
 		raw                               []byte

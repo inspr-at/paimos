@@ -23,7 +23,7 @@ const (
 	Me              = "me/1.2"
 	BaselineBatches = "baseline-batches/1.0"
 	Approvals       = "approvals/1.1"
-	HarnessSession  = "harness-session/2.2"
+	HarnessSession  = "harness-session/2.3"
 )
 
 // WithHeader adds the declared contract before a route writes any status or body.

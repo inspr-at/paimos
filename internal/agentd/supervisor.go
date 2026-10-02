@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
@@ -1022,8 +1023,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				entry.doneRequested = true
 				entry.mu.Unlock()
 			}
+			reportActivity := func(doing string) (string, bool) {
+				entry.mu.Lock()
+				id := entry.harness.ID
+				entry.mu.Unlock()
+				mode := agentactivity.Off
+				if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
+					mode = policy.SessionActivityMode(id)
+				}
+				if mode != agentactivity.Summary || doing == "" {
+					return mode, false
+				}
+				s.observe(entry, AdapterEvent{Doing: doing})
+				return mode, true
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone})
+				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1210,6 +1225,24 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	mode := agentactivity.Summary
+	if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
+		entry.mu.Lock()
+		id := entry.harness.ID
+		entry.mu.Unlock()
+		mode = policy.SessionActivityMode(id)
+	}
+	if mode != agentactivity.Off && (ev.ToolActivity != nil || ev.Doing != "") {
+		entry.mu.Lock()
+		if ev.ToolActivity != nil && agentactivity.ValidAuto(ev.ToolActivity.Text) && ev.ToolActivity.Source == "auto" {
+			copy := *ev.ToolActivity
+			entry.harness.ToolActivity = &copy
+		}
+		if text, valid := agentactivity.CleanSummary(ev.Doing); valid && mode == agentactivity.Summary {
+			entry.harness.Doing, entry.harness.DoingAt = text, time.Now().UTC()
+		}
+		entry.mu.Unlock()
+	}
 	s.observeBudget(entry, ev)
 	if ev.VendorLimit != nil {
 		s.observeVendorLimit(entry, ev.VendorLimit)

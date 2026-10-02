@@ -686,10 +686,10 @@ same-user code can still open an independent terminal and request the review.
 Ancestors are identified from kernel metadata only. On Linux that is
 `/proc/<pid>/stat` plus the directory uid, so a root-owned sshd, su or sudo
 ancestor stays acceptable; the target still needs its executable and cwd. On a
-Mac with an upgraded pairing whose daemon reports that Touch ID can run, the
-unsaved default also requires an enclave-signed confirmation before a session
-exists. Type `WATCH`, then open the paired
-instance's Agents page and choose
+Mac with a browser-pinned local confirmation key, the unsaved default requires
+an enclave-signed confirmation before a session exists, regardless of the daemon's
+capability report. If Touch ID cannot run, activation fails closed. Type `WATCH`,
+then open the paired instance's Agents page and choose
 **Attach session**. Review the code and snapshot, then approve. Keep the terminal
 open; Ctrl-C detaches without signalling the harness. Missing helper polls,
 identity changes, replaced/truncated transcripts, network errors or revocation

@@ -33,6 +33,15 @@ pickup atomically, move the ticket to In progress and remove its queue marker.
 Ticket API and CLI JSON include `queued: {position, by, at, …}` while waiting.
 Capacity hours are advice, not a reservation or a hard cap.
 
+The project queue and ticket drawer move work using the server's shared
+positions, including Move to top of the displayed project queue. Readiness
+accepts live blocker relations. A failed queue read exposes an error and Retry
+even before any queue snapshot exists. Suggested releases prefer the server's
+expected start; otherwise they use earlier visible work and parallel capacity.
+The hover labels this local estimate: other projects, current runs and blocker
+delays are not included. Unmeasured capacity or an unknown unblock time keeps
+the suggestion empty.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open
@@ -71,6 +80,32 @@ Without a configured, enabled workspace provider and feature, CRM generation
 makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
+
+## Link a vendor account to yourself
+
+On a paired computer, select your enrolled login with `paimos use` as usual.
+`paimos harness run` matches that private login home to the existing registry and
+shows one line for an unlinked account: `Link this account to you: <origin>/link
+· code 482 913`. Open `/link`, enter that code and confirm the named account,
+computer and person once. The terminal then says `Linked to Markus` once;
+future launches do not repeat it. Capacity, groups and limits need no form.
+
+For a standalone terminal, run `aeon-agentd link-account --harness claude`
+(or `codex`, `grok`, `cursor`, `pi`). Multiple local logins require
+`--account-id UUID`; `--setup-root PATH` or `--socket PATH` selects private
+pairing state. `harness run` accepts the same optional selectors. The daemon
+verifies the enrolled vendor login through its existing adapter before offering
+the code. Codes last ten minutes and are single-use. An expired offer remains
+expired until `link-account --renew` explicitly requests a new code.
+
+**Your linked accounts** on `/link` and Settings → Accounts offers **Unlink**
+as one action, only for the owner. Ownership is distinct from machine pairing,
+ongoing-use approval and spending authority; none of those controls change when
+a person links or unlinks. Other people on the computer link their own enrolled
+logins using the same flow. The person must be signed in; agent keys cannot
+confirm or unlink. Tenant-scoped, persistent rate limits and revision-bound
+confirmation prevent code guessing, reuse and stale-session approval. Audit
+records carry account and person IDs, never codes or installation proofs.
 
 ## Develop
 
@@ -188,6 +223,36 @@ Records use session-scoped client IDs. Exact retries preserve the original resul
 changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
 cited sources, turns and design inputs; `format=stored` also returns the exact
 submitted bytes. `cursor` returns the latest snapshot and replay position.
+
+Journal and snapshot contracts support minor 2 while retaining legacy inline
+pending operations. New `pending_op.content` records and reference snapshots
+require `min_reader: 2`. Content is immutable and deduplicated by SHA-256 within
+each tenant/session; every submitted event ID retains byte-exact conflict
+checking through an alias wire digest, without copying canonical bytes. A reference
+snapshot commits only after its content sequence, digest
+and UTF-8 size match an acknowledged content record in the same session.
+
+Large content and snapshots use the AIT-89 chunk protocol on the existing
+routes: POST with `upload=<original-byte SHA-256>&ack=seq` and a JSON body
+`{offset,total,chunk}` containing canonical base64 of up to 256 KiB. Intermediate
+replies contain `{offset,total}`; only a complete, digest-verified submission
+commits and returns `{seq}`. Offset zero restarts an interrupted upload. Staging
+survives host restarts, permits at most 64 unfinished uploads per session, and
+is discarded on takeover or purge. Staged totals are capped at 16 MiB before
+buffering; every request retains the 1 MiB cap and every response the 4 MiB cap.
+`ack=seq` also works for ordinary writes. `cursor?snapshot=seq` returns a bounded
+snapshot reference; `records?digests=<sha256>` resolves content addresses to
+sequences, and `records?ids=<seq>&offset=<byte offset>&length=262144` returns
+`{seq,offset,total,chunk}` for lossless hydration. The adapter verifies and
+hydrates reference content through these reads; snapshots retain their exact
+reference envelopes. Records larger than 1 MiB require range reads backed by
+durable 256 KiB rows, so Postgres never detoasts the entire large bytea for a
+range. Inline ids/after/cursor reads return 413 too_large for large records or
+a response exceeding 4 MiB; use digest lookup and snapshot=seq to find sequences.
+Migration 1100 installs the replacement check NOT VALID and drops the old check
+in one isolated statement, the only policy exception requiring coordinator review
+before merge/release. Migration 1101 validates after the exclusive lock is released;
+1102 builds the unique content-address index concurrently.
 
 The ledger admits against session, principal/day and tenant/day caps, commits
 one digest-bound claim per hold after a matching worker `budget.hold` journal
@@ -476,6 +541,10 @@ Harness sessions return `model_profile_id` for a unique tenant registry match by
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
 Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
 
+Settings → Workspace → **Agent activity** applies to every project: **Off** collects and shows no activity, **Tool activity** uses sanitized tool observations without summary tokens, and **Agent summary** (default) prefers a public phrase for ten minutes, then uses tool activity. Heartbeat and attached-session replies include `agent_activity_mode`; agents should spend summary tokens only when it is `agent_summary`. `harness heartbeat --doing "Running Go tests"` reports a phrase of at most 60 characters. The heartbeat helper reads optional `doing` from its existing status file, anchoring freshness to the file's modification time, so an unchanged file never makes an old phrase fresh. Managed workers can query and report through `aeon_activity`. Hook observations live only in the current generation's existing private state directory. Approved conversation tails classify new tool envelopes; status-only attachment never opens a transcript. Automatic payloads contain only fixed phrases or safe source-file basenames, never raw commands, arguments, environment values or file contents. The agents table shows current activity below the name; details keep up to twenty changes and coordinators summarize their active workers. The existing `activity` busy/idle field remains unchanged; the additive phrase is `current_activity: {text, source, at}`.
+
+Agent summaries, tool basenames and legacy heartbeat notes share one credential filter on the server and browser. It rejects credential words, known key prefixes, opaque tokens, credential URLs, environment assignments, invisible Unicode format characters and combining/enclosing marks. Status-file notes are screened before truncation, incoming notes before storage, and stored activity and histories before display; an unsafe summary falls back to valid tool activity. Legacy notes retain their 120-character limit and control stripping. Activity history follows the session's tenant and project visibility for both reads and writes.
+
 `aeon harness run-heartbeat --status-file .agent-status.json` reads `pct`, `remaining_min` and `note` on every beat. Bound workers send the percent and a ready ETA anchored to the file's modification time plus the remaining minutes, including zero. An unchanged file's ETA can become overdue; after 30 minutes without an update, the CLI warns `stale_progress`. Minutes must be finite numbers from 0 to 524160 (364 days); ETAs outside the server's allowed window are omitted. Workers with `--worktree` default to that worktree's `.agent-status.json`; coordinators read a file only with an explicit `--status-file` and retain their separate live-ETA reporting. Missing, malformed or refused status files never stop the loop. If the server rejects status-file estimates, the CLI retries the heartbeat without those fields. Status reads retain the credential, symlink and hard-link fence.
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
@@ -528,7 +597,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.2`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.3`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -562,10 +631,10 @@ request is not a process exit receipt: offline or older launchers can leave an
 unconfirmed request, which remains visible in the deadline report. The server
 never claims such a process has stopped. Existing part-A records without a
 level retain their original cancel-on-expiry behavior. The response contract
-adds optional fields at `harness-session/2.2`; request headers stay unchanged.
+adds optional fields at `harness-session/2.3`; request headers stay unchanged.
 
 Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
-in contract 2.1. `pause.state` distinguishes requested, planned, paused,
+in contract 2.2. `pause.state` distinguishes requested, planned, paused,
 resume_requested, resumed and cancelled; the established phase values remain
 unchanged. `state=paused` selects resumable closed generations, including those
 older than 24 hours in `view=current`; existing stopped filters remain compatible.
@@ -1286,6 +1355,26 @@ Both version surfaces use the unchanged, verified calendar bundle in Pretty
 mode with brand gold. The shared helper provides reveal and copy interactions;
 `dev` remains plain text. Every production web build verifies the bundle pin.
 
+The release history's Highlights eyebrow reads “PAIMOS AEON · Release” (or the
+configured wordmark); generation and release counts stay in Details. The live
+codename leads in light display type with the heading's spacing, above one
+glass dock holding live status and the Pretty version. Its separators use the
+theme's muted ink; resting hours and minutes use primary ink at the renderer's
+80% weight for AA contrast in both themes.
+Hover or keyboard focus crossfades the renderer's characters to the full canonical version over
+one second; reduced motion switches instantly. Click or Enter copies the exact
+canonical value, including `.0.0`, and announces “Version copied”. This character
+crossfade is an Aeon presentation layer over the pinned renderer and its shared
+timing and opacity helpers; the vendor bundle remains unchanged.
+
+Release list rows keep the codename and its badges visible while a separate
+Pretty version sits at the right of the heading. That version uses the same
+crossfade and canonical copy feedback as the dock; copying keeps the current
+selection and address. When the heading is too narrow, the version wraps below
+the codename and stays right-aligned. The history uses interactive grid rows so
+the copy button is available to assistive technology; j/k and arrow keys retain
+the selected-row navigation.
+
 The connect screen keeps Connect available when a selection mixes verifiable
 and unverifiable harnesses. Clicking it offers **Connect without verification**
 for the whole selection or **Leave them out** to keep only the verifiable
@@ -1805,7 +1894,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.2`, declared by the response-only
+The reporter contract is `harness-session/2.3`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a

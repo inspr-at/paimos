@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
@@ -81,6 +82,9 @@ type heartbeatDeps struct {
 
 type heartbeatOptions struct {
 	OwnedStop         bool
+	LinkAccountID     string
+	LinkSetupRoot     string
+	LinkSocket        string
 	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
@@ -100,6 +104,7 @@ type heartbeatOptions struct {
 	Brief             string
 	Worktree          string
 	Branch            string
+	Doing             string
 	Note              string
 	Phase             string
 	Activity          string
@@ -160,6 +165,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
 			fs.string(&o.Branch, "branch", 0, "branch name")
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
+			fs.string(&o.Doing, "doing", 0, "public activity summary, at most 60 characters; agent_summary mode only")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
 			fs.string(&o.Succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
@@ -253,6 +259,11 @@ func (o *heartbeatOptions) applyRuntimeDefaults() {
 }
 
 func (o *heartbeatOptions) prepare() error {
+	if o.Doing != "" {
+		if _, valid := agentactivity.CleanSummary(o.Doing); !valid {
+			return usagef("--doing must be a public summary of at most 60 characters")
+		}
+	}
 	o.normalize()
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
@@ -1204,8 +1215,25 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if note == "" {
 		note = status.Note
 	}
-	if note != "" {
+	if note != "" && (session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary) {
 		body["activity_note"] = note
+	}
+	if session.disk.ActivityMode != agentactivity.Off {
+		if raw, err := session.hold.readFile("activity.json", 512); err == nil {
+			var observed hookActivity
+			if json.Unmarshal(raw, &observed) == nil && observed.Session == session.id && observed.Activity.Source == "auto" && agentactivity.ValidAuto(observed.Activity.Text) && !observed.Activity.At.After(now) && now.Sub(observed.Activity.At) < agentactivity.Fresh {
+				body["tool_activity"] = observed.Activity
+			}
+		}
+	}
+	if session.disk.ActivityMode == agentactivity.Summary {
+		doing, at := status.Doing, status.ModifiedAt
+		if o.Doing != "" {
+			doing, at = o.Doing, session.disk.RegisteredAt
+		}
+		if doing != "" && !at.IsZero() && !at.After(now) && now.Sub(at) < agentactivity.Fresh {
+			body["doing"], body["doing_at"] = doing, at
+		}
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
@@ -1217,6 +1245,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
+		Mode     string                    `json:"agent_activity_mode"`
 		Warnings []harness.EstimateWarning `json:"warnings"`
 		Pause    *harness.Pause            `json:"pause"`
 	}
@@ -1270,6 +1299,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	session.pauseWakeAt = time.Time{}
 	if response.Pause != nil && response.Pause.WakeInMS > 0 && response.Pause.WakeInMS <= 86400000 {
 		session.pauseWakeAt = beatStarted.Add(time.Duration(response.Pause.WakeInMS) * time.Millisecond)
+	}
+	if agentactivity.Mode(response.Mode) {
+		session.disk.ActivityMode = response.Mode
+		payload, _ := json.Marshal(map[string]string{"session_id": session.id, "mode": response.Mode})
+		_ = session.hold.writeFile("activity-mode.json", payload)
 	}
 	if label, ok := body["display_label"].(string); ok {
 		session.disk.LabelSent = true
@@ -1720,7 +1754,7 @@ func heartbeatText(raw string, max int) string {
 
 func heartbeatNote(raw string) string {
 	clean := heartbeatText(raw, 1<<20)
-	if clean == "" {
+	if clean == "" || !agentactivity.SafeText(clean) {
 		return ""
 	}
 	if utf8.RuneCountInString(clean) <= heartbeatNoteMax {
@@ -1730,6 +1764,7 @@ func heartbeatNote(raw string) string {
 }
 
 type agentStatus struct {
+	Doing      string
 	Note       string
 	Progress   *int
 	Remaining  *float64
@@ -1759,6 +1794,7 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 	}
 	var doc struct {
 		Note      string          `json:"note"`
+		Doing     string          `json:"doing"`
 		Pct       json.RawMessage `json:"pct"`
 		Remaining json.RawMessage `json:"remaining_min"`
 	}
@@ -1766,6 +1802,9 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 		return agentStatus{}, false
 	}
 	status := agentStatus{Note: heartbeatNote(doc.Note), ModifiedAt: st.ModTime().UTC()}
+	if text, valid := agentactivity.CleanSummary(doc.Doing); valid {
+		status.Doing = text
+	}
 	valid := true
 	if len(doc.Pct) > 0 && string(doc.Pct) != "null" {
 		var n int

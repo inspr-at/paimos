@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -27,9 +28,11 @@ import (
 // Remote uses a scoped agent key through AEON's public HTTP contract.
 // NewRemote callers should pin the base URL to HTTPS or a trusted loopback.
 type Remote struct {
+	activityModes        map[string]string
 	Client               *client.Client
 	mu                   sync.RWMutex
 	daemonID, generation string
+	accountLinkProof     string
 }
 
 func NewRemote(baseURL, token string) *Remote {
@@ -255,11 +258,32 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
-	var out struct {
+	r.mu.RLock()
+	mode := r.activityModes[s.ID]
+	r.mu.RUnlock()
+	if mode != agentactivity.Off && s.ToolActivity != nil {
+		body["tool_activity"] = s.ToolActivity
+	}
+	if mode == agentactivity.Summary && s.Doing != "" {
+		if text, valid := agentactivity.CleanSummary(s.Doing); valid {
+			body["doing"] = text
+			body["doing_at"] = s.DoingAt
+		}
+	}
+	var result struct {
+		Mode  string        `json:"agent_activity_mode"`
 		Pause *HarnessPause `json:"pause"`
 	}
-	err := r.harnessWorker(ctx, s, "/heartbeat", body, &out)
-	return out.Pause, err
+	err := r.harnessWorker(ctx, s, "/heartbeat", body, &result)
+	if err == nil && agentactivity.Mode(result.Mode) {
+		r.mu.Lock()
+		if r.activityModes == nil {
+			r.activityModes = make(map[string]string)
+		}
+		r.activityModes[s.ID] = result.Mode
+		r.mu.Unlock()
+	}
+	return result.Pause, err
 }
 
 func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {
@@ -471,4 +495,14 @@ func (r *Remote) RefuseVerification(ctx context.Context, run, daemon, generation
 	return r.Client.Do(ctx, "POST", "/api/runs/"+url.PathEscape(run)+"/claim", map[string]any{
 		"daemon_id": daemon, "daemon_generation": generation, "reservation_ids": []string{}, "verification_unavailable": reason,
 	}, nil)
+}
+
+// Unknown policy fails closed locally until the first accepted heartbeat.
+func (r *Remote) SessionActivityMode(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if mode := r.activityModes[id]; agentactivity.Mode(mode) {
+		return mode
+	}
+	return agentactivity.Off
 }
