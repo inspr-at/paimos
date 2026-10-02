@@ -52,7 +52,7 @@ async function loadMore() {
   const turn = ++generation, identity = owner.value, previous = currentRead
   loading.value = true
   try {
-    const result = await loadMoreQuestions(previous, state)
+    const result = await loadMoreQuestions(previous, state, () => currentRead ?? previous)
     if (!alive || turn !== generation || identity !== owner.value) return
     applyRead(result)
   } catch { if (alive && turn === generation && identity === owner.value) warnings.value = [...new Set([...warnings.value, 'More questions could not be read. Try again or refresh.'])] }

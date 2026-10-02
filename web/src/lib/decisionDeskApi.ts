@@ -189,19 +189,25 @@ export interface DeskRead {
   questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
 }
 /** Continue only the requested list. Refresh uses loadDesk to recheck all
- * sources from the beginning; callers keep this snapshot bound to its owner. */
-export async function loadMoreQuestions(previous: DeskRead, state: QuestionState): Promise<DeskRead> {
+ * sources from the beginning; callers keep this snapshot bound to its owner.
+ * Read the latest snapshot after the request so recorded decisions survive. */
+export async function loadMoreQuestions(previous: DeskRead, state: QuestionState, latest: () => DeskRead = () => previous): Promise<DeskRead> {
   const position = previous.questionPositions[state]
   if (!previous.hasMore[state] || !position || position.pages >= MAX_QUESTION_PAGES) return previous
   const result = await readQuestions(state === 'answered' ? { state, cursor: position.nextCursor } : { state, offset: position.pages * 100 })
   const nextPosition = pagePosition(state, result, position)
-  const sources = { ...previous.sources, questions: new Map(previous.sources.questions) }, items = new Map(previous.items.map(item => [item.id, item]))
+  const current = latest()
+  const sources = { ...current.sources, questions: new Map(current.sources.questions), actions: new Map(current.sources.actions) }
+  const items = new Map(current.items.filter(item => item.kind === 'question' || item.kind === 'handover').map(item => [item.id, item]))
   for (const question of result.items) {
-    const item = questionItem(question, previous.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    const item = questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable')
     sources.questions.set(item.id, question); items.set(item.id, item)
   }
-  return { ...previous, sources, items: [...items.values()], hasMore: { ...previous.hasMore, [state]: result.has_more },
-    questionPositions: { ...previous.questionPositions, [state]: nextPosition } }
+  const projected = new Set([...sources.questions.values()].map(question => question.input.source_request_id).filter(Boolean))
+  for (const [id, message] of sources.actions) if (projected.has(message.id)) sources.actions.delete(id)
+  const protectedItems = current.items.filter(item => item.kind !== 'question' && item.kind !== 'handover' && !(item.kind === 'action' && projected.has(item.id.slice(2))))
+  return { ...current, sources, items: [...items.values(), ...protectedItems], hasMore: { ...current.hasMore, [state]: result.has_more },
+    questionPositions: { ...current.questionPositions, [state]: nextPosition } }
 }
 export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
