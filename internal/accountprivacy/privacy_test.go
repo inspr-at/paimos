@@ -80,3 +80,25 @@ func TestCatalogAndStrictCapacityScheduleRemainReadable(t *testing.T) {
 		t.Fatalf("strict schedule decoder: %s %v", body, err)
 	}
 }
+
+func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := []byte(`{"groups":[{"id":"group","schedule":{"timezone":"Europe/Vienna","week":[]}}],"pins":[{"id":"pin","code":"schedule"}],"accounts":[{"account_id":"` + id + `","unavailable_reasons":["probe"],"code":"vendor","windows":[{"used":42}]}]}`)
+	body, err := Redact(raw, Policy{}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	group := got["groups"].([]any)[0].(map[string]any)
+	pin := got["pins"].([]any)[0].(map[string]any)
+	account := got["accounts"].([]any)[0].(map[string]any)
+	if group["details_redacted"] != nil || group["schedule"].(map[string]any)["timezone"] != "Europe/Vienna" || pin["code"] != "schedule" {
+		t.Fatalf("non-account records were masked: %s", body)
+	}
+	if account["code"] != "state" || account["unavailable_reasons"].([]any)[0] != "state" || len(account["windows"].([]any)) != 0 {
+		t.Fatalf("legacy enum or quota boundary violated: %s", body)
+	}
+}

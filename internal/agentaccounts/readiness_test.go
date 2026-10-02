@@ -460,3 +460,205 @@ func TestReadinessPairingRevocationInvalidatesPending(t *testing.T) {
 		})
 	}
 }
+
+func TestFix2OwnerMixedSchedules(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-schedules", now)
+	schedule := capacity.DefaultSchedule("Europe/Vienna")
+	for _, scope := range []string{"user", "pool", "account"} {
+		in := scheduleOverride{Scope: scope, Schedule: &schedule}
+		if scope == "pool" {
+			in.Pool = "codex"
+		}
+		if scope == "account" {
+			in.AccountID = f.account.ID
+		}
+		callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, in), 204, nil)
+	}
+	var rows []struct {
+		Scope           string
+		Schedule        capacity.Schedule
+		DetailsRedacted bool `json:"details_redacted"`
+	}
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &rows)
+	if len(rows) != 3 {
+		t.Fatalf("expected all three stored schedules: %+v", rows)
+	}
+	for _, row := range rows {
+		if row.DetailsRedacted || encoded(t, row.Schedule) != encoded(t, schedule) {
+			t.Fatalf("owner's %s schedule changed: %+v", row.Scope, row)
+		}
+	}
+}
+
+func TestFix2PooledDaemonOwnControlFields(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-pooled", now)
+	other := addPrincipal(t, f.admin.TenantID, "agent", "Peer daemon", []string{"admin"})
+	peer := addPrincipal(t, f.admin.TenantID, "person", "Peer owner", []string{"admin"})
+	dbtest.BindRole(t, testDB, other.TenantID, other.ID, "admin")
+	other.Scopes = []string{"account.read", "account.probe", "account.manage"}
+	token := issueKey(t, other, other.Scopes)
+	var sibling Account
+	callStatus(t, f.mod, &other, token, "POST", "/api/agent-accounts", `{"account_key":"peer","harness":"codex","daemon_id":"peer-daemon","label":"Peer"}`, 201, &sibling)
+	ownFixtureAccount(t, peer, &sibling)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('a',64) WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var check AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("pooled", 0), 202, &check)
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	var rows []Account
+	callStatus(t, f.mod, &f.runner, issueKey(t, f.runner, f.runner.Scopes), "GET", "/api/agent-accounts?include_checks=true", "", 200, &rows)
+	if len(rows) != 1 || rows[0].PendingCheck == nil || rows[0].PendingCheck.ID != check.ID || len(rows[0].ReadinessResources) != 1 {
+		t.Fatalf("daemon lost its own capture: %+v", rows)
+	}
+	if len(rows[0].Windows) != 0 || !rows[0].DetailsRedacted {
+		t.Fatalf("pooled quota was disclosed: %+v", rows)
+	}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "timeout"}}), 200, nil)
+	var page struct {
+		Items []AccountReadiness `json:"items"`
+	}
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+	for _, row := range page.Items {
+		if row.AccountID == f.account.ID && (row.CheckResult != "timeout" || !row.DetailsRedacted || row.MeasuredUsage != nil) {
+			t.Fatalf("owner's check result lost or quota disclosed: %+v", row)
+		}
+	}
+}
+
+func TestFix2RestartReadinessProbe(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-restart", now)
+	path := "/api/agent-accounts/" + f.account.ID
+	var check AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("old", 0), 202, &check)
+	later := fixedClockModule{Module: New(appPool), at: now.Add(time.Minute)}
+	report := ReadinessReport{BindingRevision: ptrRevision(0), Result: "unsupported"}
+	probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &report}
+	var account Account
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, &account)
+	if account.LastProbeAt == nil || !account.LastProbeAt.Equal(later.at) {
+		t.Fatalf("restart lost heartbeat: %+v", account)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, check.ID) != 1 {
+		t.Fatal("old-generation capture survived")
+	}
+	report.CheckID = check.ID
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 409, nil)
+	report.CheckID = ""
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	var fresh AccountCheck
+	callStatus(t, later, &f.admin, "", "POST", path+"/check", requestBody("new", 0), 202, &fresh)
+	report.CheckID = fresh.ID
+	report.Result = "success"
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+}
+
+func TestFix2PendingCheckExpiry(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-expiry", now)
+	path := "/api/agent-accounts/" + f.account.ID
+	var first, coalesced, fresh AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("first", 0), 202, &first)
+	before := fixedClockModule{Module: New(appPool), at: now.Add(5*time.Minute - time.Microsecond)}
+	callStatus(t, before, &f.admin, "", "POST", path+"/check", requestBody("before", 0), 202, &coalesced)
+	if coalesced.ID != first.ID {
+		t.Fatal("capture expired before TTL")
+	}
+	after := fixedClockModule{Module: New(appPool), at: now.Add(5 * time.Minute)}
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	var accounts []Account
+	callStatus(t, after, &f.runner, issueKey(t, f.runner, f.runner.Scopes), "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
+	if len(accounts) != 1 || accounts[0].PendingCheck != nil {
+		t.Fatalf("expired capture still polled: %+v", accounts)
+	}
+	callStatus(t, after, &f.admin, "", "POST", path+"/check", requestBody("fresh", 0), 202, &fresh)
+	if fresh.ID == first.ID || !fresh.RequestedAt.Equal(after.at) {
+		t.Fatalf("expired capture coalesced forever: %+v", fresh)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated'`, first.ID) != 1 {
+		t.Fatal("expiry not persisted")
+	}
+	callStatus(t, after, &f.admin, "", "POST", path+"/check", requestBody("first", 0), 409, nil)
+	callStatus(t, after, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: first.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 409, nil)
+}
+
+func TestFix2SharedResourceReadingErrorsStayPerAccount(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-errors", now)
+	var sibling Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"sibling","harness":"codex","daemon_id":"daemon-a","label":"Sibling"}`, 201, &sibling)
+	ownFixtureAccount(t, f.admin, &sibling)
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision) SELECT tenant_id,$2,resource_id,0 FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID, sibling.ID); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/agent-accounts/" + f.account.ID + "/probe"
+	report := ReadinessReport{BindingRevision: ptrRevision(0), Result: "identity_mismatch"}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path, encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &report}), 200, nil)
+	check := func(want string) {
+		t.Helper()
+		var page struct {
+			Items []AccountReadiness `json:"items"`
+		}
+		callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &page)
+		if len(page.Items) != 2 {
+			t.Fatalf("missing shared accounts: %+v", page)
+		}
+		for _, row := range page.Items {
+			if row.AccountID == sibling.ID && (slices.Contains(row.ReasonCodes, "identity_mismatch") || slices.Contains(row.ReasonCodes, "sign_in") || row.CheckResult == "identity_mismatch") {
+				t.Fatalf("sibling inherited account error: %+v", row)
+			}
+			if row.AccountID == f.account.ID && row.CheckResult != want {
+				t.Fatalf("own error overwritten by sibling: %+v", row)
+			}
+		}
+	}
+	check("identity_mismatch")
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+sibling.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success"}}), 200, nil)
+	check("identity_mismatch")
+}
+
+func TestFix2LegacyReadinessFactsUseMembershipAndUnknownBalance(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix2-legacy", now)
+	f.report(t, 41, now, now.Add(time.Hour))
+	var facts []ReadinessFact
+	err := db.InTenant(t.Context(), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		var err error
+		facts, err = legacyReadinessFacts(t.Context(), tx, f.account, now)
+		return err
+	})
+	if err != nil || len(facts) != 1 {
+		t.Fatalf("legacy facts: %+v %v", facts, err)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_memberships WHERE account_id=$1 AND resource_id=$2 AND binding_revision=0`, f.account.ID, facts[0].ResourceID) != 1 {
+		t.Fatalf("legacy fact invents membership: %+v", facts)
+	}
+}
+
+func TestFix2KnownKeyCapKeepsTotalBalanceUnknown(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	remaining := 12.0
+	input := ReadinessInput{AccountID: "opaque", Now: now, Facts: []ReadinessFact{{ReadinessFactWrite: ReadinessFactWrite{WindowKey: "key_cap", ObservedAt: now, ReadingAt: &now, Remaining: &remaining, CreditState: "unknown"}}}}
+	out := ProjectReadiness(input)
+	if !out.CanTry || out.State != "unknown" || !slices.Contains(out.ReasonCodes, UsageUnknownReason) || len(out.MeasuredUsage) != 1 {
+		t.Fatalf("known key cap pretended to know total balance: %+v", out)
+	}
+}
+
+func TestFix2OversizedMutationReportsCommittedOutcome(t *testing.T) {
+	p := tenant.Principal{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", TenantID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Kind: tenant.Person}
+	r := httptest.NewRequest("POST", "/api/agent-accounts", nil).WithContext(tenant.WithPrincipal(t.Context(), p))
+	w := httptest.NewRecorder()
+	committed := false
+	New(nil).privateResponse(func(w http.ResponseWriter, r *http.Request) {
+		committed = true
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(strings.Repeat("x", (4<<20)+1)))
+	})(w, r)
+	if !committed || w.Code != 503 || w.Header().Get("X-Aeon-Write-Committed") != "true" || !strings.Contains(w.Body.String(), "write committed") {
+		t.Fatalf("committed mutation reported as failed: %d %s", w.Code, w.Body.String())
+	}
+}

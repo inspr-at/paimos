@@ -581,3 +581,56 @@ func TestDashboardRejectsBadRange(t *testing.T) {
 		}
 	}
 }
+
+func TestFix2AllowanceOwnerSharingBoundary(t *testing.T) {
+	w := newWorld(t)
+	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
+	account, _ := w.allowanceWindow(t, "fix2-private", "Private window", 917, 41, 7)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, account, w.home.ID)
+		return err
+	})
+	check := func(p tenant.Principal, visible bool) {
+		t.Helper()
+		code, page, body := w.get(t, p, "/api/usage/dashboard")
+		if code != 200 {
+			t.Fatalf("dashboard status: %d %s", code, body)
+		}
+		if visible {
+			if len(page.Allowance.Windows) != 1 || page.Allowance.Windows[0].Allowance != 917 {
+				t.Fatalf("authorized window missing: %s", body)
+			}
+		} else {
+			if len(page.Allowance.Windows) != 0 || page.Allowance.State != "withheld" {
+				t.Fatalf("private allowance disclosed: %s", body)
+			}
+			var raw struct {
+				Allowance struct {
+					Accounts []struct {
+						AccountID    string `json:"account_id"`
+						Label        string
+						AccountState string `json:"account_state"`
+					} `json:"accounts"`
+				}
+			}
+			if err := json.Unmarshal([]byte(body), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if len(raw.Allowance.Accounts) != 1 || raw.Allowance.Accounts[0].AccountID != account || raw.Allowance.Accounts[0].Label != "Private window" || raw.Allowance.Accounts[0].AccountState != "available" {
+				t.Fatalf("availability was withheld with quota: %s", body)
+			}
+		}
+	}
+	check(w.home, true)
+	check(w.admin, false)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true WHERE id=$1`, account)
+		return err
+	})
+	check(w.admin, true)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=false WHERE id=$1`, account)
+		return err
+	})
+	check(w.admin, false)
+}
