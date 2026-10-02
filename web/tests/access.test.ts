@@ -22,7 +22,7 @@ const ticketRegistry = TICKET_WORKER_SCOPES.map(key => P(key, key === 'search.re
 test('every preset respects Admin, Member, editor and live registry ceilings', () => {
   const catalog = [...new Set(KEY_SCOPE_PRESETS.flatMap(p => p.scopes === 'all' ? [] : p.scopes)), 'future.write', 'keys.manage'].map(key => ({ ...P(key, 'Work', 'low'), agent_grantable: key !== 'keys.manage' }))
   for (const r of [role('admin', 'admin', catalog.map(p => p.key)), role('member', 'member', TICKET_WORKER_SCOPES)]) {
-    const ceiling = agentScopeCeiling(agent('worker', { workspace_role: r }), [r], catalog, true)!
+    const ceiling = agentScopeCeiling(agent('worker', { workspace_role: r }), [r], catalog, 'existing')!
     for (const preset of KEY_SCOPE_PRESETS) {
       const editor = new Set(catalog.map(p => p.key).filter(key => key !== 'comments.write'))
       const held = new Set([...editor].filter(key => ceiling.has(key)))
@@ -56,7 +56,7 @@ test('Full access includes mixed workspace/project role scopes without promoting
   const viewer = role('viewer', 'viewer', ['nodes.read'])
   const project = role('project', 'member', [...TICKET_WORKER_SCOPES, 'account.manage'])
   const worker = agent('mixed', { workspace_role: viewer, project_roles: [{ project_id: 'p', project_key: 'P', project_title: 'Project', role: project }] })
-  const ceiling = agentScopeCeiling(worker, [viewer, project], catalog, true)!
+  const ceiling = agentScopeCeiling(worker, [viewer, project], catalog, 'existing')!
   assert.deepEqual([...ceiling], TICKET_WORKER_SCOPES)
   assert.deepEqual(grantablePresetScopes('all', ceiling, catalog), TICKET_WORKER_SCOPES)
   assert.ok(!ceiling.has('account.manage'))
@@ -67,16 +67,17 @@ test('Full access includes mixed workspace/project role scopes without promoting
 test('client/server scope ceiling parity, including project self-service and person-only exclusions', () => {
   const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
   for (const fixture of ceilingParity.cases) {
-    const workspace = fixture.workspace === null ? null : role('workspace', 'workspace', fixture.workspace, false)
+    const workspace = fixture.workspace === null ? null : role('workspace', fixture.private_role ? 'agent_parity' : 'workspace', fixture.workspace, false)
     const projects = fixture.projects.map((permissions, i) => role(`project-${i}`, `project-${i}`, permissions, false))
     const roles = [...(workspace ? [workspace] : []), ...projects]
     const worker = agent('parity', { workspace_role: workspace, project_roles: projects.map(r => ({ project_id: r.id, project_key: r.id, project_title: r.name, role: r })) })
-    for (const respectPrivateRole of [false, true]) {
-      const ceiling = agentScopeCeiling(worker, roles, catalog, respectPrivateRole)
+    for (const mode of ['create', 'existing', 'rotate'] as const) {
+      const ceiling = agentScopeCeiling(worker, roles, catalog, mode)
+      const want = mode === 'rotate' ? fixture.rotation_want ?? fixture.want : fixture.want
       // Creation may configure an unbound agent; editing and rotation cannot.
-      if (!workspace && !projects.length && !respectPrivateRole) assert.equal(ceiling, null)
-      else assert.deepEqual([...ceiling!].sort(), fixture.want, fixture.name)
-      if (ceiling) assert.deepEqual(grantablePresetScopes('all', ceiling, catalog).sort(), fixture.want, fixture.name)
+      if (mode === 'create' && (fixture.private_role || !workspace && !projects.length)) assert.equal(ceiling, null)
+      else assert.deepEqual([...ceiling!].sort(), want, fixture.name)
+      if (ceiling) assert.deepEqual(grantablePresetScopes('all', ceiling, catalog).sort(), want, fixture.name)
     }
   }
 })
@@ -208,19 +209,21 @@ test('errors carry the server’s reason and field', () => {
 
 const agent = (name: string, extra: Partial<Agent> = {}): Agent => ({ principal_id: name, name, has_avatar: false, workspace_role: null, key_count: 0, last_seen_at: null, service: false, ...extra })
 
-test('rotation and codes cap private or absent roles and include only project-grantable project scopes', () => {
+test('rotation caps private roles while codes and edits combine existing grants', () => {
   const privateRole = role('private', 'agent_worker', ['nodes.read'], false)
   const projectRole = role('project', 'member', ['nodes.read', 'nodes.delete', 'audit.read'])
   const projectBinding = { project_id: 'p', project_key: 'P', project_title: 'Project', role: { id: projectRole.id, key: projectRole.key, name: projectRole.name } }
   const worker = agent('worker', { workspace_role: { id: privateRole.id, key: privateRole.key, name: privateRole.name }, project_roles: [projectBinding] })
   const roles = [privateRole, projectRole]
   assert.equal(agentScopeCeiling(worker, roles, registry), null)
-  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, true)!], ['nodes.read', 'nodes.delete'])
-  assert.deepEqual([...agentScopeCeiling(agent('unbound'), roles, registry, true)!], [])
+  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, 'rotate')!], ['nodes.read'])
+  assert.deepEqual([...agentScopeCeiling(worker, [{ ...privateRole, builtin: true }, projectRole], registry, 'rotate')!], ['nodes.read', 'nodes.delete'])
+  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, 'existing')!], ['nodes.read', 'nodes.delete'])
+  assert.deepEqual([...agentScopeCeiling(agent('unbound'), roles, registry, 'existing')!], [])
   assert.equal(agentScopeCeiling(agent('new'), roles, registry), null)
   const projectOnly = agent('project-only', { project_roles: [projectBinding] })
-  assert.deepEqual([...agentScopeCeiling(projectOnly, roles, registry, true)!], ['nodes.read', 'nodes.delete'])
-  assert.deepEqual([...agentScopeCeiling(agent('stale', { workspace_role: { id: 'missing', key: 'missing', name: 'Missing' } }), roles, registry, true)!], [])
+  assert.deepEqual([...agentScopeCeiling(projectOnly, roles, registry, 'existing')!], ['nodes.read', 'nodes.delete'])
+  assert.deepEqual([...agentScopeCeiling(agent('stale', { workspace_role: { id: 'missing', key: 'missing', name: 'Missing' } }), roles, registry, 'existing')!], [])
 })
 
 test('agents split into working, deactivated and internal; a server without status knows only working ones', () => {

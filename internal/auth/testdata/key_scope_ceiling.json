@@ -21,6 +21,14 @@
   ],
   "cases": [
     {
+      "name": "private role caps rotation despite project grants",
+      "private_role": true,
+      "workspace": ["nodes.read"],
+      "projects": [["nodes.write", "kinds.read", "profile.write"]],
+      "want": ["kinds.read", "nodes.read", "nodes.write", "profile.write"],
+      "rotation_want": ["nodes.read"]
+    },
+    {
       "name": "mixed roles with project self-service",
       "workspace": ["nodes.read", "members.read", "keys.read", "ownership.transfer", "retired.scope"],
       "projects": [["nodes.read", "nodes.write", "events.read", "kinds.read", "profile.read", "profile.write", "authz.read", "models.manage", "profile.manage", "keys.manage", "profile.portal_read", "rules.publish"]],

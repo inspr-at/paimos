@@ -34,7 +34,7 @@ const showUnavailable = ref(false)
 const allowed = computed(() => can('keys.manage'))
 // Presets never extend a role. Explicit checkbox changes still use the existing
 // server-authorized role-extension confirmation below.
-const ceiling = computed(() => agentScopeCeiling(access.agent(props.agent.principal_id) ?? props.agent, access.roles, access.registry, true))
+const ceiling = computed(() => agentScopeCeiling(access.agent(props.agent.principal_id) ?? props.agent, access.roles, access.registry, 'existing'))
 const presetHeld = computed(() => new Set([...grantable.value].filter(key => myPermissions().has(key) && (!ceiling.value || ceiling.value.has(key)))))
 const groups = computed(() => {
   // Keep obsolete or newly restricted scopes visible so they can be removed.

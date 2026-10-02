@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -23,10 +24,12 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 	var fixture struct {
 		Registry []authz.Permission `json:"registry"`
 		Cases    []struct {
-			Name      string     `json:"name"`
-			Workspace []string   `json:"workspace"`
-			Projects  [][]string `json:"projects"`
-			Want      []string   `json:"want"`
+			Name         string     `json:"name"`
+			Workspace    []string   `json:"workspace"`
+			Projects     [][]string `json:"projects"`
+			Want         []string   `json:"want"`
+			PrivateRole  bool       `json:"private_role"`
+			RotationWant []string   `json:"rotation_want"`
 		} `json:"cases"`
 	}
 	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
@@ -73,7 +76,11 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 					return err
 				}
 				if tc.Workspace != nil {
-					if err := bind("ceiling_workspace", "", tc.Workspace); err != nil {
+					name := "ceiling_workspace"
+					if tc.PrivateRole {
+						name = "agent_" + strings.ReplaceAll(agent.ID, "-", "")
+					}
+					if err := bind(name, "", tc.Workspace); err != nil {
 						return err
 					}
 				}
@@ -140,13 +147,31 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 					t.Fatalf("outside-ceiling rotation status = %d for %s", w.Code, tc.scope)
 				}
 			}
+			rotationScopes := tc.Want
+			body := map[string]any{"rotate_key_id": key.ID}
+			if tc.RotationWant != nil {
+				rotationScopes = tc.RotationWant
+				// Preserving a key must not bypass the private role's narrower cap.
+				if w := keyRequest(m, owner, body); w.Code != http.StatusForbidden {
+					t.Fatalf("preserved private-role rotation status = %d", w.Code)
+				}
+				for _, scope := range tc.Want {
+					if slices.Contains(rotationScopes, scope) {
+						continue
+					}
+					if w := keyRequest(m, owner, map[string]any{"rotate_key_id": key.ID, "rotation_scopes": []string{scope}}); w.Code != http.StatusForbidden {
+						t.Fatalf("project-only private-role rotation status = %d for %s", w.Code, scope)
+					}
+				}
+				body["rotation_scopes"] = rotationScopes
+			}
 			keys, events := keyCounts(t, m, owner)
 			if keys != beforeKeys || events != beforeEvents || rotationAccessSnapshot(t, m, owner) != beforeAccess {
 				t.Fatal("creation, edits or rejected rotations changed grants or leaked key/audit writes")
 			}
-			next := decodeKey(t, keyRequest(m, owner, map[string]any{"rotate_key_id": key.ID}))
-			if next.ID == key.ID || next.Token == key.Token || next.PrincipalID != key.PrincipalID || !slices.Equal(next.Scopes, key.Scopes) {
-				t.Fatal("rotation did not preserve the Full access set and agent")
+			next := decodeKey(t, keyRequest(m, owner, body))
+			if next.ID == key.ID || next.Token == key.Token || next.PrincipalID != key.PrincipalID || !slices.Equal(next.Scopes, rotationScopes) {
+				t.Fatal("rotation did not preserve the allowed scope set and agent")
 			}
 			keys, events = keyCounts(t, m, owner)
 			if keys != beforeKeys+1 || events != beforeEvents+2 || rotationAccessSnapshot(t, m, owner) != beforeAccess {

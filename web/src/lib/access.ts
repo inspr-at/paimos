@@ -183,18 +183,21 @@ export const scopeLabel = (key: string) => permissionLabel(key)
 // same for every key, so a long one shows its distinguishing tail.
 export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefix.slice(-8)}_…` : `aeon_${prefix}_…`
 // The most a new key for this agent may carry besides my own permissions: an
-// agent on a shared role (built-in or custom) is capped by that role; an agent
+// agent on a shared role (built-in or custom) is capped by its live grants; an agent
 // with no role, or with the role the server keeps for it alone, may configure
-// that role during creation. Codes and rotation respect existing roles only.
+// that role during creation. Codes and edits respect existing grants. Rotation
+// also caps a generated private role at its configured workspace permissions.
 // null means creation may configure a role; it never applies to rotation.
-export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], respectPrivateRole = false): Set<string> | null {
+export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], mode: 'create' | 'existing' | 'rotate' = 'create'): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
   const grantable = new Set(keyScopes(registry).map(p => p.key))
   const projectKeys = new Set(keyScopes(registry).filter(p => p.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(p.key)).map(p => p.key))
   const projectPermissions = (agent.project_roles ?? []).flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k))
   if (!role && agent.project_roles?.length) return new Set(projectPermissions)
-  if (!role) return agent.workspace_role || respectPrivateRole ? new Set() : null
-  if (!respectPrivateRole && !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
+  if (!role) return agent.workspace_role || mode !== 'create' ? new Set() : null
+  const privateRole = !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`
+  if (privateRole && mode === 'create') return null
+  if (privateRole && mode === 'rotate') return new Set(role.permissions.filter(key => grantable.has(key)))
   // Like AgentKeyCeilingTx: project permissions may be key scopes too. Actual
   // requests still check the project's binding; this grants no workspace access.
   return new Set([...role.permissions, ...projectPermissions].filter(key => grantable.has(key)))

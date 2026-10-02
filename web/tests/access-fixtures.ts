@@ -5,6 +5,7 @@
 // contract's rules (last owner, no escalation, roles in use, field reasons), so
 // specs see the answers the real server gives. Register after the work mocks.
 import type { Page, Route } from '@playwright/test'
+import projectSelfPermissions from '../../internal/authz/project_self_permissions.json' with { type: 'json' }
 
 export const ME = '11111111-1111-4111-8111-111111111111'
 export const MIRA = '22222222-2222-4222-8222-222222222222'
@@ -456,11 +457,14 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if ((agentRow.status ?? 'active') === 'deactivated') return route.fulfill({ status: 409, json: { error: 'agent is deactivated; reactivate it first' } })
       const scopes = old ? Array.isArray(body.rotation_scopes) ? [...body.rotation_scopes as string[]] : [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
       if (scopes.length > 256 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
-      // Never more than the creator holds, nor (on a shared role) than the agent's role.
+      // Shared roles combine workspace and project grants. Rotation also caps
+      // generated private roles; project grants cannot restore removed scopes.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
-      const projectScopes = world.bindings.filter(b => b.principal_id === agentRow.principal_id).flatMap(b => world.roles.find(r => r.id === b.role_id)?.permissions ?? []).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project'))
-      if (projectScopes.length && scopes.some(k => !projectScopes.includes(k))) return fail(route, 403, 'forbidden', 'Beyond project role.')
-      if (scopes.some(k => !mine(world).has(k) || (agentRole && !agentRole.permissions.includes(k)))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      const bindings = world.bindings.filter(b => b.principal_id === agentRow.principal_id)
+      const projectScopes = bindings.flatMap(b => world.roles.find(r => r.id === b.role_id)?.permissions ?? []).filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(k))
+      const privateRole = agentRole && !agentRole.builtin && agentRole.key === `agent_${agentRow.principal_id.replace(/-/g, '')}`
+      const ceiling = new Set([...(agentRole?.permissions ?? []), ...(old && privateRole ? [] : projectScopes)])
+      if (scopes.some(k => !mine(world).has(k) || (old || agentRole || bindings.length) && !ceiling.has(k))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
       const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
       if (old) {

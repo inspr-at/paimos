@@ -33,16 +33,8 @@ const term = ref('')
 // rest show, disabled, with the reason.
 const mine = computed(() => myPermissions())
 const currentAgent = computed(() => access.agent(props.agent.principal_id) ?? props.agent)
-// Rotating a generated private role must respect its configured workspace cap.
-// A project binding cannot restore a scope removed from that private role.
-const ceilingAgent = computed(() => {
-  const agent = currentAgent.value
-  const role = access.roles.find(r => r.id === agent.workspace_role?.id)
-  return props.rotateKey && role && !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`
-    ? { ...agent, project_roles: [] } : agent
-})
-const ceiling = computed(() => agentScopeCeiling(ceilingAgent.value, access.roles, access.registry, !!props.rotateKey))
-const codeCeiling = computed(() => agentScopeCeiling(ceilingAgent.value, access.roles, access.registry, true))
+const ceiling = computed(() => agentScopeCeiling(currentAgent.value, access.roles, access.registry, props.rotateKey ? 'rotate' : 'create'))
+const codeCeiling = computed(() => agentScopeCeiling(currentAgent.value, access.roles, access.registry, props.rotateKey ? 'rotate' : 'existing'))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // Bulk actions respect an existing dedicated role too; only explicit scope
 // choices may configure that role during creation.
