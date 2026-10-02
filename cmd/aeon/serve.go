@@ -33,6 +33,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/autopilotlanes"
 	"github.com/inspr-at/paimos/internal/brand"
 	"github.com/inspr-at/paimos/internal/business/costunits"
 	"github.com/inspr-at/paimos/internal/business/crm"
@@ -373,6 +374,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
+			autopilotlanes.New(pool),
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),

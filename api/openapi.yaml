@@ -6,6 +6,147 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/autopilot-lanes:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listAutopilotLanes
+      summary: Read project dispatch policies separately from Status autopilot
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: ID-ordered visible lanes; autopilot.read required, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLanePage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createAutopilotLane
+      description: >-
+        Person-only autopilot.manage in the project. Creates a disabled project child node and policy,
+        owned by the caller. Queued tickets only; release scope is stored for AEON-596 without another
+        migration, but release activation/preparation is unavailable in this slice. No scheduler or launch.
+        Every write is authorized inside its mutation transaction and emits an event. Body at most 16 KiB.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneCreate'}}}}
+      responses:
+        '201': {description: Disabled lane, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLane'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}:
+    parameters:
+      - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAutopilotLane
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Current visible policy; autopilot.read required, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLane'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: patchAutopilotLane
+      description: >-
+        Person-only autopilot.manage. A stale expected_revision returns 409 without any write.
+        Enabling additionally requires the lane owner's current nodes.read, run.create,
+        work_orders.write, work_orders.assign and runs.write in this project. An editor enabling
+        another person's lane needs those authorities too. Active policy edits recheck both sets.
+        Management permission grants no execution authority. Use resume to clear paused state.
+        Policy changes never grant merge, deployment, provider/account access or launch work.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLanePatch'}}}}
+      responses:
+        '200': {description: Updated policy, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLane'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}/preview:
+    get:
+      operationId: previewAutopilotLane
+      description: >-
+        Read-only bounded advisory samples in the shared ticket queue order, with exclusions,
+        proposed role-ladder route, uncalibrated estimate basis, next window and missing decisions.
+        Does not reserve budget/slots, settle usage, change estimates or launch. Account readiness,
+        locked policy and execution enforcement must be rechecked by AEON-599/600. Release scope
+        reports unavailable until AEON-596 supplies its ordered items. No Status autopilot dependency.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 1024}}
+      responses:
+        '200': {description: Preview requiring autopilot.read, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLanePreview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}/history:
+    get:
+      operationId: getAutopilotLaneHistory
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200': {description: Ascending event-ID history; autopilot.read required, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneHistory'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}/pause:
+    post:
+      operationId: pauseAutopilotLane
+      description: >-
+        Revision-checked autopilot.pause. People or live queue coordinators with an explicit pause
+        key scope may pause. No implicit new scopes for existing keys. Prevents future attempts;
+        never stops current work. Identical state is a no-op; only actual writes emit events.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneAction'}}}}
+      responses:
+        '200': {description: Paused policy, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLane'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}/resume:
+    post:
+      operationId: resumeAutopilotLane
+      description: Person-only autopilot.manage; revision and live execution authority checks as for activation. Enables and unpauses the policy, without launching work.
+      security: [{session: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneAction'}}}}
+      responses:
+        '200': {description: Resumed policy, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLane'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /autopilot-lanes/{laneId}/prepare:
+    post:
+      operationId: prepareAutopilotLaneTicket
+      description: >-
+        Person-only autopilot.manage plus current queue/work-order/run authority of caller and owner.
+        Explicitly requests preparation after queue refusal, for an in-scope project ticket with
+        missing estimate or criteria. Checks both lane and ticket revisions. Persists an idempotent
+        intent and event; returns requested with launched=false. No run, order, estimate/criteria
+        write or budget reservation here. Existing criteria stay authoritative; estimates may be
+        automatic only when criteria exist, otherwise criteria drafts require person acceptance.
+      security: [{session: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLanePrepare'}}}}
+      responses:
+        '202': {description: Durable preparation intent, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotPreparationRequest'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /recurrences:
     get:
       operationId: listRecurrences
@@ -8850,6 +8991,163 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    AutopilotLaneScope:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [queued_tickets, release]}
+        release_node_id: {type: [string, 'null'], format: uuid}
+      description: queued_tickets has no release_node_id; release requires a live release node in the same project.
+    AutopilotLaneBudget:
+      type: object
+      additionalProperties: false
+      required: [agent_hours]
+      properties:
+        agent_hours: {type: number, exclusiveMinimum: 0, maximum: 10000}
+      description: Maximum summed owned-process hours per work-window instance. Subscription accounts only; existing quota reserve remains binding. This policy is not a usage or free-budget measurement.
+    AutopilotLaneWindow:
+      type: object
+      additionalProperties: false
+      required: [timezone, days, start, end]
+      properties:
+        timezone: {type: string, minLength: 1, maxLength: 100}
+        days: {type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: {type: integer, minimum: 1, maximum: 7}}
+        start: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+        end: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'}
+      description: IANA timezone, ISO weekdays of window start. End before start means overnight; equal endpoints are invalid. At window end only the current reserved attempt may finish; no new starts.
+    AutopilotLanePolicy:
+      type: object
+      additionalProperties: false
+      required: [allowed_kinds, allowed_tags, allowed_areas, max_ticket_estimate_hours, parallel_limit, budget, window]
+      properties:
+        allowed_kinds: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 80}}
+        allowed_tags: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 80}}
+        allowed_areas: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 80}}
+        max_ticket_estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}
+        parallel_limit: {type: integer, minimum: 1, maximum: 20}
+        budget: {$ref: '#/components/schemas/AutopilotLaneBudget'}
+        window: {$ref: '#/components/schemas/AutopilotLaneWindow'}
+      description: Empty filters allow any queueable kind/tag/area. Nonempty tag filters match at least one tag; kind and area filters each match their own dimension. No backlog intake, account/model override, or governance authority can be specified.
+    AutopilotLaneCreate:
+      type: object
+      additionalProperties: false
+      required: [name, policy]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        priority: {type: integer, minimum: 0, maximum: 1000, default: 100}
+        scope: {$ref: '#/components/schemas/AutopilotLaneScope'}
+        policy: {$ref: '#/components/schemas/AutopilotLanePolicy'}
+    AutopilotLanePatch:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        priority: {type: integer, minimum: 0, maximum: 1000}
+        scope: {$ref: '#/components/schemas/AutopilotLaneScope'}
+        policy: {$ref: '#/components/schemas/AutopilotLanePolicy'}
+        enabled: {type: boolean}
+      description: At least one change is required; policy/scope replacements are complete. Owner and paused state cannot be changed here.
+    AutopilotLaneAction:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        reason: {type: string, maxLength: 500}
+    AutopilotLanePrepare:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ticket_node_id, expected_ticket_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ticket_node_id: {type: string, format: uuid}
+        expected_ticket_revision: {type: integer, minimum: 1}
+    AutopilotLane:
+      type: object
+      required: [id, project_id, owner_principal_id, name, priority, revision, enabled, paused, scope, policy, pause_reason, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        owner_principal_id: {type: string, format: uuid}
+        name: {type: string}
+        priority: {type: integer}
+        revision: {type: integer, minimum: 1}
+        enabled: {type: boolean}
+        paused: {type: boolean}
+        pause_reason: {type: string}
+        scope: {$ref: '#/components/schemas/AutopilotLaneScope'}
+        policy: {$ref: '#/components/schemas/AutopilotLanePolicy'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AutopilotLanePage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotLane'}}
+        next_after: {type: [string, 'null'], format: uuid}
+    AutopilotLanePreview:
+      type: object
+      required: [lane_id, revision, items, candidate, next_cursor, missing_decisions, budget_basis, next_window, execution_available]
+      properties:
+        lane_id: {type: string, format: uuid}
+        revision: {type: integer}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotLanePreviewItem'}}
+        candidate: {oneOf: [{$ref: '#/components/schemas/AutopilotLanePreviewItem'}, {type: 'null'}]}
+        next_cursor: {type: [string, 'null']}
+        missing_decisions: {type: array, items: {type: string}}
+        budget_basis: {type: string}
+        next_window:
+          type: [object, 'null']
+          required: [starts_at, ends_at]
+          properties:
+            starts_at: {type: string, format: date-time}
+            ends_at: {type: string, format: date-time}
+        execution_available: {type: boolean, const: false}
+    AutopilotLanePreviewItem:
+      type: object
+      required: [ticket_node_id, ticket_revision, run_id, key, title, eligible, exclusions, preparation, estimate_basis, proposed_route]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        ticket_revision: {type: integer}
+        run_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        eligible: {type: boolean}
+        exclusions: {type: array, items: {type: string}}
+        preparation: {type: string, enum: [none, automatic_estimate, criteria_draft_requires_person]}
+        estimate_basis: {type: string}
+        proposed_route:
+          type: object
+          required: [role, area, profile_id, basis]
+          properties:
+            role: {type: string}
+            area: {type: string}
+            profile_id: {type: [string, 'null']}
+            basis: {type: string}
+    AutopilotLaneHistory:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Event'}}
+        next_after: {type: [integer, 'null']}
+    AutopilotPreparationRequest:
+      type: object
+      required: [id, lane_id, project_id, ticket_node_id, ticket_revision, lane_revision, requested_by_principal_id, preparation, status, launched, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        lane_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_revision: {type: integer}
+        lane_revision: {type: integer}
+        requested_by_principal_id: {type: string, format: uuid}
+        preparation: {type: string, enum: [automatic_estimate, criteria_draft_requires_person]}
+        status: {type: string, const: requested}
+        launched: {type: boolean, const: false}
+        created_at: {type: string, format: date-time}
     QuestionOption:
       type: object
       additionalProperties: false

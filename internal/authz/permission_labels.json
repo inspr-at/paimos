@@ -1,5 +1,6 @@
 {
   "resources": {
+    "autopilot": "autopilot lanes",
     "recurrences": "recurring work",
     "questions": "questions",
     "nodes": "work",
@@ -57,7 +58,8 @@
     "decide": "Decide on",
     "log": "Log",
     "run": "Run",
-    "create": "Create"
+    "create": "Create",
+    "pause": "Pause"
   },
   "special": {
     "harness.watch": "View live conversations"

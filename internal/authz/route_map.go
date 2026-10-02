@@ -24,6 +24,15 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/projects/{projectId}/autopilot-lanes":  "autopilot.read",
+	"POST /api/projects/{projectId}/autopilot-lanes": "autopilot.manage",
+	"GET /api/autopilot-lanes/{laneId}":              "autopilot.read",
+	"PATCH /api/autopilot-lanes/{laneId}":            "autopilot.manage",
+	"GET /api/autopilot-lanes/{laneId}/preview":      "autopilot.read",
+	"GET /api/autopilot-lanes/{laneId}/history":      "autopilot.read",
+	"POST /api/autopilot-lanes/{laneId}/prepare":     "autopilot.manage",
+	"POST /api/autopilot-lanes/{laneId}/pause":       "autopilot.pause",
+	"POST /api/autopilot-lanes/{laneId}/resume":      "autopilot.manage",
 	"GET /api/recurrences":                         "recurrences.manage",
 	"POST /api/recurrences":                        "recurrences.manage",
 	"GET /api/recurrences/{recurrenceId}":          "recurrences.manage",

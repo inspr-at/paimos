@@ -62,6 +62,26 @@ required before merge/release. Before rolling back below this fence, set all
 residency requirements to `any` or pause dispatch; older binaries cannot enforce
 these stamps.
 
+AEON-598 adds `1127_autopilot_lane_policy.sql`: project child lane nodes with
+person ownership, policy revisions, tenant and project RLS, and durable explicit
+preparation intents. The API installs the `autopilot_lane` kind lazily per tenant.
+Lanes start disabled; only people manage/activate/resume them. Activation checks
+the actor's and owner's live queue/work-order/run permissions under the tenant
+access fence. Coordinators need an explicit `autopilot.pause` scope and live
+coordinator authority to pause. The lock order is tenant, tree, records, event last.
+
+The lane scope discriminator supports `queued_tickets` and a same-project
+`release` node without another schema change. Release activation waits for its
+ordered-item integration. Preparation intents report `requested` and
+`launched=false`; they are neither dispatch ownership nor execution authority.
+The scheduler must recheck their recorded lane/ticket revisions before consuming
+them. Subscription agent-hours are a policy ceiling per work-window instance,
+not measured usage. Existing criteria require person acceptance when absent;
+when criteria exist, estimates may be automatic. Window end permits only the
+current already reserved attempt to finish, and Aeon retains coordinator review.
+No Status autopilot setting, queue contract, worker launch, merge or deploy gate
+is changed. Scheduler/ownership and budget/slot enforcement belong to AEON-599/600.
+
 ## Expand and contract (AEON-415)
 
 Ship schema changes in two releases. The expansion release adds the replacement

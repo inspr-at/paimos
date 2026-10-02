@@ -125,6 +125,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["laneId"] != "":
+		return "node", values["laneId"]
 	case values["recurrenceId"] != "":
 		return "recurrence", values["recurrenceId"]
 	case values["questionId"] != "":
