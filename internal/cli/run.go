@@ -141,6 +141,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
+		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
 		rt.cmdRelation(),

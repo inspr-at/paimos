@@ -1,5 +1,6 @@
 {
   "resources": {
+    "recurrences": "recurring work",
     "nodes": "work",
     "comments": "comments",
     "knowledge": "knowledge",

@@ -10,6 +10,87 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Recurring work
+
+`aeon recur create|list|get|update|pause|resume|run-now|preview` manages
+server-owned schedules. Create reads a JSON definition from stdin or
+`--body-file`; update takes the recurrence UUID and a full definition with
+`expected_revision`. Pause/resume accept `--revision`, or read the current
+revision before writing. Run now requires `--idempotency-key` so retries return
+the original occurrence receipt. Named instances and `--json` work as usual.
+
+A definition names a project and an immutable parent, a ticket/task template,
+and a trigger. Time triggers accept `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,FR`, or
+`FREQ=MONTHLY;BYMONTHDAY=1,-1`, plus `time_of_day` (`HH:MM`), an IANA `timezone`,
+and an optional `start_date` (defaults to today's local date). Omitted weekday
+or month-day comes from that start date; other RRULE parts are rejected. Invalid
+month dates and spring gaps are skipped; a repeated fall time uses its first
+instant. Preview uses the same calendar and returns UTC timestamps without
+writing anything, including while paused. Event triggers use
+`{"kind":"event","event":"release.published"}`; future publication dates
+cannot be previewed.
+
+For example, a weekly tool sweep under the code-health epic can be created with
+this body (replace project/parent UUIDs with the intended existing nodes):
+
+```json
+{
+  "project_id": "<project UUID>",
+  "parent_id": "<code-health epic UUID>",
+  "template": {
+    "title": "Weekly tool sweep {{date}} (#{{occurrence}})",
+    "description": "Run lint, gosec, govulncheck, semgrep and npm audit; compare the stored baseline and verify new findings.",
+    "acceptance_criteria": ["Compare the baseline", "Verify and deduplicate new findings"],
+    "estimate_hours": 0.34,
+    "priority": "high",
+    "type": "ticket"
+  },
+  "trigger": {"kind":"time","rrule":"FREQ=WEEKLY;BYDAY=MO","time_of_day":"09:00","timezone":"Europe/Vienna"},
+  "queue_each": true,
+  "overlap_policy": "skip",
+  "catch_up_policy": "one"
+}
+```
+
+The rolling deep read uses the same weekly trigger with its own template and
+3-hour estimate. A per-release delta audit uses the event trigger and a template
+such as `Delta audit {{release_name}} ({{release_version}})`, with a 1-hour
+estimate. These are configuration examples; installing a release creates no
+production audit schedules automatically. Template variables also work in
+descriptions and criteria. `tags` contains existing tag-node UUIDs; occurrence
+creation resolves their current names into ordinary ticket `fields.tags`.
+
+The server uses the database clock and tenant/tree claims, with durable unique
+occurrence keys. Each pass consumes at most the latest missed time or release
+per recurrence, avoiding a downtime burst. `overlap_policy=skip` suppresses work
+while any earlier live occurrence ticket remains nonterminal; `create` allows
+concurrent occurrences. Created and skipped attempts both increment the
+occurrence number. Resume discards work accumulated while paused; manual run
+now is allowed while paused and does not move the schedule. Queueing reuses
+queue readiness, work orders and the inert queue holder, awaiting coordinator
+routing. It requires a positive estimate and acceptance criteria.
+
+Journey publications and the configured product's immutable release history
+produce tenant/project-scoped `release.published` events; the same project and
+version are deduplicated across sources. Newly configured schedules ignore
+publications from before their creation. Occurrence tickets and their node,
+queue and recurrence audit events use the keyless system actor **Recurring
+work**. Occurrence receipts link each ticket back to its recurrence. Management
+requires `recurrences.manage`; agents need an explicit custom-role grant plus
+a key scope, even when bound to Owner/Admin. Saving a definition also requires
+`nodes.write`; `queue_each` adds `run.create` and `work_orders.write`.
+
+DSAR integration note (AEON-490): the inventory is absent from this branch and
+its `origin/main` baseline. Migration 1115 introduces `recurrences` and
+`recurrence_occurrences`, both tenant-scoped with forced RLS and project
+visibility. Classify `recurrences.template` and `created_by_principal_id` as
+personal; other definition, schedule and cursor columns as metadata. Locate a
+recurrence by `(tenant_id,id)`. Classify occurrence receipt columns as metadata,
+located by `(tenant_id,recurrence_id,occurrence_key)`; linked ticket contents and
+actor identity remain personal data in the existing nodes/principals/events
+inventory. The coordinator must add these entries when merging onto the DSAR
+inventory. No new secret storage is introduced.
+
 ## Ticket work queue
 
 `aeon queue list`, `add <ticket>`, `remove <ticket>`, `move <ticket> <position>`,

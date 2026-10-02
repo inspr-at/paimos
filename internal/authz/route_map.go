@@ -24,6 +24,15 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/recurrences":                         "recurrences.manage",
+	"POST /api/recurrences":                        "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}":          "recurrences.manage",
+	"PUT /api/recurrences/{recurrenceId}":          "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/pause":   "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/resume":  "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/preview":  "recurrences.manage",
+
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",
 	"POST /api/agent-pairing/account-link/lookup":                             "profile.write",

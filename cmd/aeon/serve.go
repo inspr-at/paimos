@@ -66,6 +66,7 @@ import (
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -276,6 +277,31 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go knowledge.NewTagger(pool).Run(ctx)
 	statusAuto := statusautopilot.New(pool)
 	go statusAuto.Run(ctx)
+	recurringWork := recurrences.New(pool)
+	publishedHistory, err := releasehistory.Embedded()
+	if err != nil {
+		return err
+	}
+	publications := []recurrences.Publication{}
+	for _, release := range publishedHistory.Releases {
+		if release.State != releasehistory.StatePublished {
+			continue
+		}
+		at := release.PublishedAt
+		if at == nil {
+			at = release.TaggedAt
+		}
+		if at == nil {
+			continue
+		}
+		name := release.Codename
+		if name == "" {
+			name = release.Version
+		}
+		publications = append(publications, recurrences.Publication{ProjectKey: "AEON", Name: name, Version: release.Version, PublishedAt: *at})
+	}
+	recurringWork.WithHistory(publications)
+	go recurringWork.Run(ctx)
 	pairingMod := agentpairing.New(pool, cfg.PublicURL, cfg.BootstrapTenantSlug, cfg.PairingNixGuide)
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
@@ -354,6 +380,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			requirements.New(pool),
 			releases.New(pool),
 			statusAuto,
+			recurringWork,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
