@@ -194,7 +194,7 @@ func TestTierAuditFailureRollsBackDecisionAndHistory(t *testing.T) {
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_tier_audit() RETURNS trigger LANGUAGE plpgsql AS $$
  BEGIN
-  IF NEW.type='harness.control_requested' THEN RAISE EXCEPTION 'audit unavailable'; END IF;
+  IF NEW.type='harness.control_requested' THEN RAISE EXCEPTION 'audit unavailable' USING ERRCODE='XX000'; END IF;
   RETURN NEW;
  END $$;
  CREATE TRIGGER reject_tier_audit BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_tier_audit()`)
