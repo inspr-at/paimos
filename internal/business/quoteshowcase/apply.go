@@ -139,7 +139,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, filesDir 
 		return db.InTenant(db.AllProjects(txCtx, "quote showcase bundle"), pool, tenantID, func(tx pgx.Tx) error {
 			if apply {
 				var locked string
-				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-showcase"); err != nil {

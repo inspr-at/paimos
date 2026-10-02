@@ -245,8 +245,10 @@ func LockProfileBundles(ctx context.Context, pool *pgxpool.Pool, tenantID string
 	sort.Strings(names)
 	return db.InTenant(db.AllProjects(ctx, "quote profile bundle locks"), pool, tenantID, func(tx pgx.Tx) error {
 		// Every apply takes the tenant lock before profile and blob locks.
+		// NO KEY UPDATE still serializes settings/applies, but permits the
+		// tenant FK checks of publishers that may already hold a blob lock.
 		var locked string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 			return err
 		}
 		for _, name := range names {
@@ -272,8 +274,9 @@ func applyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.
+			// Permit concurrent publishers' tenant FK checks (KEY SHARE).
 			var locked string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&locked); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":quote-profile:"+in.Name); err != nil {

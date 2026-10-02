@@ -55,12 +55,16 @@ func (b *firstBlobLockBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, d
 }
 
 func TestProfileAndShowcaseBlobLockInterleaving(t *testing.T) {
-	for _, composite := range []bool{false, true} {
-		name := "profile"
-		if composite {
-			name = "showcase"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, test := range []struct {
+		name                      string
+		composite, publisherFirst bool
+	}{
+		{"profile/apply_first", false, false},
+		{"showcase/apply_first", true, false},
+		{"profile/publisher_first", false, true},
+		{"showcase/publisher_first", true, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			database := dbtest.Open(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
@@ -126,41 +130,36 @@ func TestProfileAndShowcaseBlobLockInterleaving(t *testing.T) {
 			}
 			high, low := bodies[staged[1].SHA256], bodies[staged[0].SHA256]
 			profiles := []ProfileSpec{makeProfile("First profile", map[string][]byte{"a.png": high, "z.png": low})}
-			if composite {
+			if test.composite {
 				profiles = []ProfileSpec{makeProfile("First profile", map[string][]byte{"a.png": high}), makeProfile("Second profile", map[string][]byte{"z.png": low})}
 			}
 			barrier := &firstBlobLockBarrier{locked: make(chan struct{}), resume: make(chan struct{})}
 			cfg := database.App.Config()
 			cfg.ConnConfig.Tracer = barrier
-			applyPool, err := pgxpool.NewWithConfig(ctx, cfg)
+			tracedPool, err := pgxpool.NewWithConfig(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer applyPool.Close()
+			defer tracedPool.Close()
+			applyPool, publisherPool := tracedPool, database.App
+			if test.publisherFirst {
+				applyPool, publisherPool = database.App, tracedPool
+			}
 			// Cancel before pool.Close on every failure, releasing the tracer barrier.
 			defer cancel()
 			applyDone := make(chan error, 1)
-			go func() {
-				if composite {
+			applyRun := func() {
+				if test.composite {
 					_, err := Apply(ctx, applyPool, tenantID, actorID, store.FilesDir, Bundle{Profiles: profiles}, nil, nil, true)
 					applyDone <- err
 				} else {
 					_, err := quotes.ApplyProfileBundle(ctx, applyPool, tenantID, actorID, store.FilesDir, "", quotes.ProfileBundle{Profile: profiles[0].Raw, Files: profiles[0].Files}, false, true)
 					applyDone <- err
 				}
-			}()
-			select {
-			case <-barrier.locked:
-			case err := <-applyDone:
-				t.Fatalf("apply before barrier: %v", err)
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
 			}
 			publishDone := make(chan error, 1)
-			publisherPID := make(chan uint32, 1)
-			go func() {
-				publishDone <- db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
-					publisherPID <- tx.Conn().PgConn().PID()
+			publishRun := func() {
+				publishDone <- db.InTenant(dbtest.Seed(ctx), publisherPool, tenantID, func(tx pgx.Tx) error {
 					if err := attachments.Publish(ctx, tx, attachments.OwnerAvatar, staged...); err != nil {
 						return err
 					}
@@ -170,26 +169,33 @@ func TestProfileAndShowcaseBlobLockInterleaving(t *testing.T) {
 					_, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actorID, Kind: tenant.Agent}, events.Change{Type: "profile.updated", After: map[string]any{"avatar_original_hash": staged[0].SHA256, "avatar_hashes": map[string]string{"32": staged[1].SHA256}}})
 					return err
 				})
-			}()
-			var pid uint32
+			}
+			firstRun, secondRun := applyRun, publishRun
+			firstDone, secondDone := applyDone, publishDone
+			if test.publisherFirst {
+				firstRun, secondRun = publishRun, applyRun
+				firstDone, secondDone = publishDone, applyDone
+			}
+			go firstRun()
 			select {
-			case pid = <-publisherPID:
-			case err := <-publishDone:
-				t.Fatalf("publish before barrier: %v", err)
+			case <-barrier.locked:
+			case err := <-firstDone:
+				t.Fatalf("first writer before barrier: %v", err)
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
+			go secondRun()
 			for {
 				var waiting bool
-				if err := database.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)`, pid).Scan(&waiting); err != nil {
+				if err := database.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND locktype='advisory' AND NOT granted)`).Scan(&waiting); err != nil {
 					t.Fatal(err)
 				}
 				if waiting {
 					break
 				}
 				select {
-				case err := <-publishDone:
-					t.Fatalf("publish did not wait: %v", err)
+				case err := <-secondDone:
+					t.Fatalf("second writer did not wait: %v", err)
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				default:
@@ -198,6 +204,8 @@ func TestProfileAndShowcaseBlobLockInterleaving(t *testing.T) {
 			// Old path-order locking holds high here while the avatar holds low.
 			// Resuming then deadlocks (40P01). Sorted transaction-wide locking lets
 			// apply finish while the avatar waits on low, then the avatar commits.
+			// Publisher-first also covers the tenant FK: apply must permit KEY
+			// SHARE while waiting on the avatar's low hash, or that is a cycle.
 			close(barrier.resume)
 			if err := <-applyDone; err != nil {
 				t.Fatalf("apply: %v", err)
