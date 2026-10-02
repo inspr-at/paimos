@@ -99,8 +99,12 @@ func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 	out := workKindPage{Items: []workKind{}}
 	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{ProjectID: project}); err != nil {
-			return err
+		// Project readers need the same default/project kind choices as ticket
+		// editors. models.read remains workspace-only for the global registry.
+		if project == "" {
+			if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{}); err != nil {
+				return err
+			}
 		}
 		if err := readableProject(ctx, tx, p, project); err != nil {
 			return err

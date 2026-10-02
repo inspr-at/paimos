@@ -6559,6 +6559,7 @@ paths:
   /work-kinds:
     get:
       operationId: listWorkKinds
+      description: Project readers can list default and target-project kinds when project_id is supplied; the workspace list requires models.read.
       security: *auth
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}

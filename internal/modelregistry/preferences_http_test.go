@@ -417,7 +417,7 @@ func TestWorkKindsProjectOnlyReaders(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'kind_reader','Kind reader') RETURNING id::text`, admin.TenantID).Scan(&role); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'models.read'),($1,$2,'nodes.read')`, admin.TenantID, role); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read')`, admin.TenantID, role); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, admin.TenantID, reader.ID, role, project)
@@ -434,6 +434,17 @@ func TestWorkKindsProjectOnlyReaders(t *testing.T) {
 		t.Fatal("project reader cannot reach kind handler", err)
 	}
 	page := decode[workKindPage](t, &reader, "GET", "/api/work-kinds?project_id="+project, "", 200)
+	// Built-in project guests need the same choices, without global model access.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='guest') WHERE principal_id=$1 AND scope_id=$2`, reader.ID, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	guestPage := decode[workKindPage](t, &reader, "GET", "/api/work-kinds?project_id="+project, "", 200)
+	if len(guestPage.Items) != len(page.Items) {
+		t.Fatal("guest work choices differ from project reader")
+	}
 	found := false
 	for _, k := range page.Items {
 		if k.ID == firmware {

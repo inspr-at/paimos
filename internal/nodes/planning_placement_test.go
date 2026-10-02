@@ -527,7 +527,7 @@ func TestPlanningLookupWorkSharedWithinReadTransaction(t *testing.T) {
 		for marker, want := range map[string]int{
 			"WHERE r.role = $1": 2,
 			"SELECT id::text,slug,label,hint,project_id::text,system,position FROM work_kinds": 2,
-			"SELECT coalesce(cp.linked_to,cp.id) FROM principals cp WHERE cp.id=($1)":          1,
+			"SELECT " + modelprefs.CanonicalPersonSQL("$1") + "::text":                         1,
 			"SELECT n.id::text, '' AS parent":                                                  1,
 		} {
 			if got := countMarker(calls, marker); got != want {
@@ -560,7 +560,7 @@ func TestPlanningPlacementLimitBeforeResolution(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','One beyond cap') RETURNING id::text`, w.admin.TenantID).Scan(&extra); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields) SELECT $1,id,$2,'CAP-EXTRA','Extra',jsonb_build_object('assignee',$3::text,'area','backend','route_role','build','estimate_hours',2) FROM node_kinds WHERE slug='ticket'`, w.admin.TenantID, w.root.ID, extra)
+		_, err = tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,parent_id,key,title,fields) SELECT $1,id,$2,'CAP-4097','Extra',jsonb_build_object('assignee',$3::text,'area','backend','route_role','build','estimate_hours',2) FROM node_kinds WHERE slug='ticket'`, w.admin.TenantID, w.root.ID, extra)
 		return err
 	}); err != nil {
 		t.Fatal(err)

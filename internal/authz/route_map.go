@@ -30,7 +30,7 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/model-preferences/levels/{level}":                              "models.read|model_prefs.manage",
 	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":                   "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}":                "models.read|model_prefs.manage",
-	"GET /api/work-kinds":                                                       "models.read",
+	"GET /api/work-kinds":                                                       "models.read|nodes.read",
 	"POST /api/work-kinds":                                                      "model_prefs.manage",
 	"PATCH /api/work-kinds/{kindId}":                                            "model_prefs.manage",
 	"DELETE /api/work-kinds/{kindId}":                                           "model_prefs.manage",

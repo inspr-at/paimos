@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -15,7 +16,7 @@ func TestKnownRouteArea(t *testing.T) {
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var project, otherProject string
 		for i, dst := range []*string{&project, &otherProject} {
-			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'ROUTE-'||$2::text,'Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID, i+1).Scan(dst); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'ROUTE-'||$2::text,'Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID, strconv.Itoa(i+1)).Scan(dst); err != nil {
 				return err
 			}
 		}
