@@ -1584,6 +1584,10 @@ their multipliers, and run telemetry records the active tier. Earlier tokens are
 never repriced when a tier changes; vendor billed costs remain vendor costs.
 The UI is delivered separately in part B.
 
+Regression coverage includes native acknowledgement and Undo, pending replay,
+tenant/project isolation, revoked authority, vendor cooldown and stored costs
+across tier changes.
+
 ### Session recovery
 
 Managed sandbox controls (AEON-260) use the additive
