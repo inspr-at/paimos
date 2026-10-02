@@ -168,6 +168,23 @@ func TestCandidateLaterTaggedBuild(t *testing.T) {
 	}
 }
 
+func TestCandidateAlreadyTaggedWithNewerHistory(t *testing.T) {
+	dir := repo(t)
+	// Rebuilding an older version after another tag was fetched must keep the
+	// normal entry, rather than rejecting it as an obsolete new candidate.
+	candidateGit(t, dir, "tag", "-a", "v260925120000.0.0", "-m", "PAIMOS AEON v260925120000.0.0 · inspr-calendar-v2 · stable · release_sequence 4 · Later release")
+	baseline := Options{Repo: dir, Repository: "inspr-at/paimos", Now: func() time.Time { return time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC) }}
+	normal, err := Build(t.Context(), baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline.Candidate = "260923143005.0.0"
+	got, err := Build(t.Context(), baseline)
+	if err != nil || !reflect.DeepEqual(normal, got) {
+		t.Fatalf("existing tagged version differs: %v", err)
+	}
+}
+
 func TestCandidateRejectsInvalidInputs(t *testing.T) {
 	for _, test := range []struct {
 		name    string

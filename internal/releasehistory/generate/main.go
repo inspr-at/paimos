@@ -87,7 +87,7 @@ func candidateRun(repository string, getenv func(string) string) *releasehistory
 	}
 	name := getenv("GITHUB_WORKFLOW")
 	if name == "" {
-		name = "CI"
+		return nil
 	}
 	return &releasehistory.Run{Name: name, URL: strings.TrimRight(server, "/") + "/" + repository + "/actions/runs/" + id, Status: "in_progress"}
 }
