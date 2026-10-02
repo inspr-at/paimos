@@ -56,10 +56,10 @@ func TestInboxReplayComparesCompleteOriginalRequest(t *testing.T) {
 			}
 		})
 	}
-	// Publication edits must not change what the original UUID identifies.
-	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE doctrine_proposals SET input_digest=$2 WHERE id=$1`, in.RequestID, strings.Repeat("b", 64)); err != nil {
-		t.Fatal(err)
-	}
+	// A person's real edit/publication path rewrites the publication digest
+	// and retires the draft; neither changes what the original UUID identifies.
+	why := "A person reviewed and clarified this proposal."
+	f.call(owner, "POST", path+"/"+in.RequestID+"/pull-request", InboxSubmit{Why: &why, RuleSHA: rule.SHA256}, 200)
 	var replay Proposal
 	if err := json.Unmarshal(f.call(owner, "POST", path, in, 200), &replay); err != nil || replay.ID != in.RequestID {
 		t.Fatal("original request no longer replays")

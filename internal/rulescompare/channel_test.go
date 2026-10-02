@@ -33,6 +33,21 @@ func TestDeliveryRequiresCompleteActiveInstruction(t *testing.T) {
 	}
 }
 
+func TestDeliveryComparesIndexedSourceAndStrength(t *testing.T) {
+	rule := PinnedRule{Identity: "org/repo/kernel#safe", Text: "🔴 Preserve safety.", Source: "- 🔴 Preserve safety.\n  Why: Never bypass the check.\n"}
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{rule}}
+	for _, body := range []string{rule.Source, strings.ReplaceAll(rule.Source, "  Why:", "    Why:")} {
+		if status, detail := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "ok" {
+			t.Fatalf("legitimate indentation: %s %s", status, detail)
+		}
+	}
+	for _, body := range []string{strings.ReplaceAll(rule.Source, "🔴", "🟡"), "- " + rule.Text + "\n", strings.ReplaceAll(rule.Source, "Never bypass", "Sometimes bypass")} {
+		if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "fail" {
+			t.Fatal("modified source certified")
+		}
+	}
+}
+
 func TestDeliveryReportOneChannel(t *testing.T) {
 	const (
 		identity = "inspr-at/fixture-doctrine/docs/AGENTS-KERNEL.md#secrets"

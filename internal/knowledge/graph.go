@@ -230,25 +230,13 @@ func loadGraph(ctx context.Context, tx pgx.Tx, tenantID string, q graphQuery) (G
 		rows, err = tx.Query(ctx, `WITH refs AS MATERIALIZED (
    SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(slug text,kind text,strict boolean)
   ), candidates AS MATERIALIZED (
-   SELECT n.id,k.slug AS kind,n.fields->>'slug' AS lookup,n.updated_at,true AS current
-   FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-   WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug=ANY($4::text[])
-    AND n.fields ? 'slug' AND n.fields->>'slug' IN (SELECT slug FROM refs)
-   UNION ALL
-   SELECT DISTINCT n.id,k.slug,e.before->'fields'->>'slug',n.updated_at,false
-   FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
-    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-   WHERE e.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug=ANY($4::text[])
-    AND e.type IN ('knowledge.updated','node.updated') AND e.undo_of IS NULL
-    AND e.before->'fields' ? 'slug' AND e.before->'fields'->>'slug' IN (SELECT slug FROM refs)
-    AND e.before->>'kind_id'=n.kind_id::text
-    AND (e.after->'fields'->>'slug') IS DISTINCT FROM (e.before->'fields'->>'slug')
+`+slugCandidatesSQL+`
   ), scoped AS MATERIALIZED (
    SELECT c.* FROM candidates c JOIN nodes n ON n.tenant_id=$1 AND n.id=c.id `+nearestProject+`
    WHERE proj.id=$2::uuid
   ) SELECT r.slug,r.kind,r.strict,found.id::text FROM refs r CROSS JOIN LATERAL (
    SELECT c.id FROM scoped c WHERE c.lookup=r.slug AND (NOT r.strict OR c.kind=r.kind)
-   ORDER BY (c.kind=r.kind) DESC,c.current DESC,c.updated_at DESC,c.id LIMIT 1
+   ORDER BY (c.kind=r.kind) DESC,`+slugCandidateOrder+` LIMIT 1
   ) found`, tenantID, q.project, string(encoded), kindSlugs())
 		if err != nil {
 			return g, err

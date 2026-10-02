@@ -97,6 +97,40 @@ func TestCRMUndoUsesCurrentAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestCRMUndoBindingRequiresManageGrant(t *testing.T) {
+	f := setup(t)
+	withUndo(t, &f)
+	expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/contacts/"+f.contact+"/principals", map[string]any{"principal_id": f.customer}), 201)
+	event := eventOf(t, f, EventContactBound)
+	var role string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'crm_writer','CRM writer') RETURNING id::text`, f.admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1::uuid,$2::uuid,unnest(ARRAY['nodes.read','events.read','events.undo','crm.write'])`, f.admin.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.admin.ID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	undoEvent(t, f, event, 403)
+	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 1 {
+		t.Fatal("denied undo removed binding")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'crm.manage')`, f.admin.TenantID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	undoEvent(t, f, event, 201)
+	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 0 {
+		t.Fatal("permitted undo left binding")
+	}
+}
 func TestCRMUndoStaleAndPrimary(t *testing.T) {
 	f := setup(t)
 	withUndo(t, &f)
