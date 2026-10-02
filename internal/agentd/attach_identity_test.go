@@ -88,6 +88,47 @@ func writeAttachImage(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+func TestAdditionalHarnessAttachRequiresRecordedNativeImage(t *testing.T) {
+	for _, harness := range []string{Gemini, OpenCode} {
+		for _, scenario := range []string{"recorded", "no-pin", "foreign-owner", "node-interpreter"} {
+			t.Run(harness+"/"+scenario, func(t *testing.T) {
+				m, peer, target, req, image := attachIdentityFixture(t, harness)
+				root := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(image))))
+				pkg := "opencode-ai"
+				if harness == Gemini {
+					pkg = "@google/gemini-cli"
+				}
+				image = filepath.Join(root, pkg, "bin", harness)
+				writeAttachImage(t, image)
+				m.cfg.Executables[harness], target.Executable = image, image
+				identity := agentsetup.RecordAttachIdentity(harness, image, m.cfg.Workspace)
+				if identity == nil || identity.Exact {
+					t.Fatal("missing vendor root")
+				}
+				m.cfg.Identities = map[string]agentsetup.AttachIdentity{harness: *identity}
+				m.signature = func(context.Context, string) (attachSignature, error) {
+					t.Fatal("new harness borrowed vendor signature authority")
+					return attachSignature{}, nil
+				}
+				switch scenario {
+				case "no-pin":
+					delete(m.cfg.Identities, harness)
+				case "foreign-owner":
+					identity.Owner++
+					m.cfg.Identities[harness] = *identity
+				case "node-interpreter":
+					target.Executable = filepath.Join(root, "node")
+					writeAttachImage(t, target.Executable)
+				}
+				_, err := m.handle(t.Context(), peer, req)
+				if scenario == "recorded" && err != nil || scenario != "recorded" && (err == nil || len(m.sessions) != 0) {
+					t.Fatal("native pin fence", scenario, err)
+				}
+			})
+		}
+	}
+}
 func TestAttachRelease13WrapperPairingUpgradeWithoutRepin(t *testing.T) {
 	for _, harness := range []string{Claude, Codex} {
 		t.Run(harness, func(t *testing.T) {

@@ -17,7 +17,7 @@ var (
 		"scout": true, "mechanical": true, "build": true, "build-hard": true, "review-gate": true,
 	}
 	modelHarnesses = map[string]bool{
-		"codex": true, "claude": true, "pi": true, "cursor": true, "grok": true,
+		"codex": true, "claude": true, "pi": true, "cursor": true, "grok": true, "gemini": true, "opencode": true,
 	}
 	agentNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 )

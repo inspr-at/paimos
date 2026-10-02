@@ -80,7 +80,7 @@ func privateFile(path string, maximum int64) ([]byte, error) {
 func serve(args []string) error {
 	f := flag.NewFlagSet("serve", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
-	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath string
+	var base, keyFile, workspace, state, daemonID, accountsPath, codexPath, claudePath, nodePath, sdkPath, piPath, cursorPath, geminiPath, openCodePath string
 	var estimateRequests, estimateTokens, estimateCost int64
 	var capacityInterval time.Duration
 	f.DurationVar(&capacityInterval, "capacity-interval", 5*time.Minute, "minimum interval between idle quota captures")
@@ -99,6 +99,8 @@ func serve(args []string) error {
 	f.StringVar(&nodePath, "node-path", "", "pinned Node.js")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude SDK module")
 	f.StringVar(&piPath, "pi-path", "", "pinned Pi CLI")
+	f.StringVar(&geminiPath, "gemini-path", "", "pinned Gemini CLI")
+	f.StringVar(&openCodePath, "opencode-path", "", "pinned OpenCode CLI")
 	f.StringVar(&cursorPath, "cursor-path", "", "pinned Cursor CLI")
 	f.Int64Var(&estimateRequests, "estimate-requests", 0, "per-run request reservation; 0 omits this unit")
 	f.Int64Var(&estimateTokens, "estimate-tokens", 0, "per-run token reservation; 0 omits this unit")
@@ -175,6 +177,7 @@ func serve(args []string) error {
 	claudeHomes := map[string]string{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
+	acpHomes := map[string]map[string]string{agentd.Gemini: {}, agentd.OpenCode: {}}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range reg.Accounts {
 		if a.Key == "" || a.AccountID == "" {
@@ -185,6 +188,8 @@ func serve(args []string) error {
 		case agentd.Codex:
 			codexHomes[a.Key] = a.Home
 			codexEmails[a.Key] = a.Identity
+		case agentd.Gemini, agentd.OpenCode:
+			acpHomes[a.Harness][a.Key] = a.Home
 		case agentd.Pi:
 			piHomes[a.Key] = a.Home
 		case agentd.Cursor:
@@ -250,6 +255,18 @@ func serve(args []string) error {
 			return err
 		}
 		adapters = append(adapters, cursor)
+	}
+	for name, path := range map[string]string{agentd.Gemini: geminiPath, agentd.OpenCode: openCodePath} {
+		if path == "" {
+			continue
+		}
+		a := agentd.NewGeminiAdapter(path, acpHomes[name])
+		a.Harness = name
+		a.Nodes, err = resolveNodes(path, acpHomes[name])
+		if err != nil {
+			return err
+		}
+		adapters = append(adapters, a)
 	}
 	if len(grokBindings) > 0 {
 		grok := agentd.NewGrokAdapter(grokBindings)
