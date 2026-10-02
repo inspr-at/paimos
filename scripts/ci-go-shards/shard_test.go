@@ -287,7 +287,16 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
 		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
-	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+	foundCheckout, foundSetup := false, false
+	for _, step := range job.Steps {
+		if strings.HasPrefix(step.Uses, "actions/checkout@") {
+			foundCheckout = step.With["persist-credentials"] == false
+		}
+		if strings.HasPrefix(step.Uses, "actions/setup-go@") {
+			foundSetup = step.With["cache"] == true && step.With["cache-dependency-path"] == "go.sum"
+		}
+	}
+	if !foundCheckout || !foundSetup {
 		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
 	}
 	foundCache := false
@@ -939,15 +948,18 @@ func TestTimingStepAlwaysUsesHostedAndIsRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	timing := workflow.Jobs["go-timing"]
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "" {
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "" || timing.Needs != "tree-reuse" {
 		t.Fatal("timing job must always run hosted")
+	}
+	if len(timing.Steps) == 0 || timing.Steps[0].If != "needs.tree-reuse.outputs.reuse == 'tree'" || !strings.Contains(timing.Steps[0].Run, "reuse=tree") {
+		t.Fatal("timing job must positively report API-verified full-suite reuse")
 	}
 	count := 0
 	for _, step := range timing.Steps {
 		if strings.Contains(step.Run, "ci-go-shards test-timing") {
 			count++
-			if step.If != "" {
-				t.Fatal("timing budgets have a conditional skip")
+			if step.If != "needs.tree-reuse.outputs.reuse != 'tree'" {
+				t.Fatal("timing budgets may only skip an API-verified equal tree")
 			}
 			if step.Env["GOFLAGS"] != "-count=1" {
 				t.Fatal("timing budgets must execute rather than replay cached results")
