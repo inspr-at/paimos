@@ -386,10 +386,13 @@ for (const above of [false, true]) test(`floating search ${above ? 'above' : 'be
 })
 
 for (const width of [1440, 1024]) {
-  test(`Display grouping keeps sort, density and columns in their slots at ${width}`, async ({ page }) => {
+  for (const constrained of [false, true]) test(`Display grouping keeps sort, density and columns in their slots at ${width}${constrained ? ' with wider text and scrollbar' : ''}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
+    // Exercise wider text metrics and a classic scrollbar even on macOS, whose
+    // default overlay scrollbar and system font leave more room than Linux CI.
+    if (constrained) await page.addStyleTag({ content: '.display-panel { font-family: var(--mono); } .floating { scrollbar-gutter: stable; } .floating::-webkit-scrollbar { width: 15px; height: 15px; }' })
     await page.getByRole('button', { name: /^Display:/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
     const groups = dialog.getByRole('radiogroup', { name: 'Group by' })
@@ -399,6 +402,9 @@ for (const width of [1440, 1024]) {
       interactions: ['None', 'Status', 'Priority', 'None'].map(name => ({ name, run: async () => { await groups.getByRole('radio', { name, exact: true }).click(); await expect(groups.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
     })
     await expect(dialog.getByRole('button', { name: 'Expand groups' })).toBeDisabled()
+    for (const button of await dialog.locator('.pair button').all()) {
+      expect(await button.evaluate(el => el.scrollWidth - el.clientWidth), 'group action label fits its button').toBeLessThanOrEqual(1)
+    }
   })
 
   test(`invalid date range feedback never moves Apply at ${width}`, async ({ page }) => {

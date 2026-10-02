@@ -524,6 +524,13 @@ test.describe('phone', () => {
     const inside = () => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))
     await page.keyboard.press('Shift+Tab')
     expect(await inside()).toBe(true)
+    const close = trap.getByRole('button', { name: 'Close without saving' })
+    const selectedOffDay = trap.getByRole('radio', { checked: true })
+    await expect(selectedOffDay).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(close).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(selectedOffDay).toBeFocused()
     for (let i = 0; i < 40; i++) { await page.keyboard.press('Tab'); expect(await inside()).toBe(true) }
     for (let i = 0; i < 40; i++) { await page.keyboard.press('Shift+Tab'); expect(await inside()).toBe(true) }
     await page.keyboard.press('Escape')

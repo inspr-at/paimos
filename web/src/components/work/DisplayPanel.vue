@@ -74,7 +74,8 @@ const emit = defineEmits<{
 .group-option:hover { color: var(--ink); }
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
 .group-option:focus-visible { box-shadow: var(--focus-ring); }
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.pair .btn { min-width: 0; padding-inline: 4px; gap: 4px; font-size: 12px; }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }

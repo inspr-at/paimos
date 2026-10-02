@@ -163,7 +163,7 @@ function keydown(event: KeyboardEvent) {
 // The sheet is modal: Tab and Shift+Tab cycle inside it, including from the
 // heading (focused on open) or anything else that is not a tab stop.
 function focusables() {
-  return [...(root.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(x => x.offsetParent !== null)
+  return [...(root.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(x => x.tabIndex >= 0 && x.offsetParent !== null)
 }
 function trapTab(event: KeyboardEvent) {
   const list = focusables()
