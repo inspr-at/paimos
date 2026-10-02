@@ -16,6 +16,32 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
+func TestReviewPromptRejectsLegacyProviderLabel(t *testing.T) {
+	r, order, profile := reviewPromptFixture(t)
+	if err := os.WriteFile(filepath.Join(r.dir, "change.txt"), []byte("review this change\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "change.txt")
+	r.run("commit", "-m", "change fixture")
+	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+	// Both the binding and label agree; the provider binding contradicts them.
+	profile.Harness, profile.Model = "grok", "grok-4.7"
+	order.Review.AuthorFamily = "xai"
+	if prompt, err := reviewPrompt(t.Context(), r.dir, order, profile); !errors.Is(err, errReviewContext) || prompt != "" {
+		t.Fatal("review prompt accepted spoofed independence")
+	}
+}
+
+func TestGrokStartRejectsLegacyProviderLabel(t *testing.T) {
+	for _, family := range []string{"anthropic", "openai", "unknown", ""} {
+		r := StartRequest{Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: family}, AccountKey: "fixture"}
+		p, err := NewGrokAdapter().Start(t.Context(), r, func(AdapterEvent) { t.Error("unexpected adapter event") })
+		if p != nil || err == nil || err.Error() != "native Grok profile or account unavailable" {
+			t.Errorf("family %q reached native account lookup: %v", family, err)
+		}
+	}
+}
+
 func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	r := newLaunchedRepo(t)
 	r.run("remote", "add", "origin", "https://github.com/example/review-fixture.git")
