@@ -10,12 +10,12 @@ import type { Shell } from './helpers/no-shift-shells'
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 async function setup(page: Page, failDecision = false) {
   const work = fixtures()
-  work.preferences['agents.working'] = { cap: 9, view: 'model', model: { codex: 1 } }
+  work.preferences['agents.working'] = { total: 9, limits: { codex: 1 } }
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
   data.accounts = capacity.accounts as unknown as typeof data.accounts
-  await mockAgents(page, data, { capacity, failDecision })
+  await mockAgents(page, data, { capacity, failDecision, workingPreference: () => work.preferences['agents.working'] })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('account.read', 'account.manage')
@@ -128,31 +128,29 @@ for (const width of [1440, 1024, 390]) {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await setup(page)
     await page.goto('/agents')
-    const dial = page.getByRole('region', { name: 'Agents working at once' })
-    const more = dial.getByRole('button', { name: 'More agents at once' })
-    const fewer = dial.getByRole('button', { name: 'Fewer agents at once' })
+    const dial = page.getByRole('region', { name: 'Agents at once' })
+    const more = dial.getByRole('button', { name: 'One agent more at once' })
+    const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
     await expect(row).toBeVisible()
     await expect(more).toHaveCSS('transition-property', 'background')
     const rowCount = await dial.locator('.rows > li').count()
     const rowsHeight = (await dial.locator('.rows').boundingBox())!.height
-    expect(rowsHeight, 'short lists have no padded rows').toBeLessThanOrEqual(rowCount * 60)
-    expect((await dial.locator('.spare').boundingBox())!.height).toBeLessThan(64)
-    expect((await dial.locator('.foot').boundingBox())!.height).toBeLessThan(38)
+    expect(rowsHeight, 'rows reserve controls and their explanation slot').toBeLessThanOrEqual(rowCount * (width <= 760 ? 127 : 61))
     await expectStableControls({
-      controls: { more, fewer, selector: dial.getByRole('tablist'), row, rowMore: row.getByRole('button', { name: /^More agents/ }), rowFewer: row.getByRole('button', { name: /^Fewer agents/ }) },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore: row.getByRole('button', { name: 'Codex: at most one more' }), rowFewer: row.getByRole('button', { name: 'Codex: at most one fewer' }) },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: [
         { name: 'hold total stepper', run: async () => { await more.hover(); await page.mouse.down() } },
         { name: 'release total stepper', run: () => page.mouse.up() },
         ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
-        ...['More', 'Fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: new RegExp(`^${direction} agents`) }).click() })),
+        ...['more', 'fewer'].map(direction => ({ name: `${direction} on Codex`, run: () => row.getByRole('button', { name: `Codex: at most one ${direction}` }).click() })),
       ],
     })
     await expectStableControls({
-      controls: { more, fewer, selector: dial.getByRole('tablist') },
+      controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
       scrollAreas: { rows: dial.locator('.rows') },
-      interactions: ['By area', 'By model'].map(name => ({ name, run: async () => { await dial.getByRole('tab', { name }).click(); await expect(dial.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true') } })),
+      interactions: ['No limit', 'Off', 'At most'].map(name => ({ name, run: async () => { await row.getByRole('radio', { name, exact: true }).click(); await expect(row.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
     })
   })
 }

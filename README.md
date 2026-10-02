@@ -122,9 +122,19 @@ when their agent's key creators identify one person unambiguously. The API
 returns counts without session or project details. Malformed saved plans fail
 closed. `agentplan.CanStart` checks total and harness limits without changing
 running work; launchers must serialize starts and check account room separately.
-This backend change supplies the read path and helper; launcher integration
-and the revised control are separate AEON-540 parts. Lowering the plan never
-pauses or stops existing work.
+On **Agents**, the control reads “Run up to … agents at once.” The total and
+harness limits save to the same canonical plan used by coordinators. The folded
+line keeps compact − / + controls and a harness mark that cycles No limit →
+At most → Off; a muted number means no own limit, capped by the total and measured
+account room. Details grow below the dial with each harness's controls and the
+read-only Now, Accounts, Waiting and Checks. Folding is remembered separately
+for the signed-in viewer in `agents.working.display`; it never changes the plan.
+Arrow keys step a focused − / + or move between harness modes, preserving
+browser and OS modifier shortcuts. Failed saves are visible in the live line.
+Unknown account or queue readings stay explicit. The visible queue's ready work
+is not reported as starting until the launcher picks it up. Lowering the total
+or turning a harness off never pauses or stops existing work. Launcher
+integration remains a separate AEON-540 part.
 
 ## Local models for in-app AI
 
