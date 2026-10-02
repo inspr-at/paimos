@@ -27,6 +27,7 @@ import (
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/features":                           true,
+	"GET /api/decision-desk":                      true,
 	"GET /api/journey/next-actions":               true,
 	"GET /api/queue":                              true,
 	"GET /api/me/host-labels":                     true,
@@ -123,6 +124,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["questionId"] != "":
+		return "node", values["questionId"]
 	case values["nodeId"] != "":
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):

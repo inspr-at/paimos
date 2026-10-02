@@ -181,7 +181,7 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 
 // NextForRun is also used by the vendor-stop handoff. It preserves the original
 // requested-account fence and the owning principal/daemon; it writes nothing.
-func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude string, now time.Time) (CapacityNext, error) {
+func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude string, now time.Time, residency ...string) (CapacityNext, error) {
 	run, err := loadWaitRun(ctx, tx, runID)
 	if err != nil {
 		return CapacityNext{}, err
@@ -208,7 +208,10 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 		}
 		kept = append(kept, a)
 	}
-	kept, err = narrowCandidates(ctx, tx, run, harness, kept)
+	if len(residency) > 0 {
+		run.Residency = residency[0]
+	}
+	kept, _, err = narrowCandidates(ctx, tx, run, harness, kept)
 	if err != nil {
 		return CapacityNext{}, err
 	}

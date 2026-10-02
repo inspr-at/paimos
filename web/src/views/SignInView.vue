@@ -35,7 +35,7 @@ const flowErrors = computed<Record<string, { title: string; body: string }>>(() 
   denied: { title: 'Sign-in was cancelled', body: `Access was declined${providerName.value ? ` at ${providerName.value}` : ''}. Sign in again whenever you are ready.` },
   expired: { title: 'Your session ended', body: 'For your security you were signed out after a while. Sign in again to pick up where you left off.' },
   not_member: { title: 'Not a member of this workspace yet', body: `${providerAccount.value} works, but this workspace has not added you. Ask its owner for an invitation.` },
-  imported_account: { title: 'Your earlier account was found', body: 'Your earlier PMA account was found; ask an admin to invite you. Your verified email can connect its history when you accept. An admin can help with multiple matches or inactive accounts.' },
+  imported_account: { title: 'Your earlier account was found', body: 'Your earlier account from classic PAIMOS was found; ask an admin to invite you. Your verified email can connect its history when you accept. An admin can help with multiple matches or inactive accounts.' },
   unavailable: { title: 'Sign-in is not available right now', body: 'The workspace is not ready to accept sign-ins. Please try again in a moment.' },
 }))
 const flowError = computed(() => {

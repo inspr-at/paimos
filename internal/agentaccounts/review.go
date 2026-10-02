@@ -10,7 +10,7 @@ import (
 
 // ReviewAccount uses the ordinary admission policy without reserving. Actual
 // reservation and claim recheck capacity and approval on the existing paths.
-func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID string, now time.Time) (*Account, error) {
+func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID string, now time.Time, residency ...string) (*Account, error) {
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -19,6 +19,12 @@ func ReviewAccount(ctx context.Context, tx pgx.Tx, profileID, harness, projectID
 	for _, a := range accounts {
 		if a.Harness == harness {
 			kept = append(kept, a)
+		}
+	}
+	if len(residency) > 0 {
+		kept, _, err = applyResidency(ctx, tx, kept, profileID, residency[0], now)
+		if err != nil {
+			return nil, err
 		}
 	}
 	advice, err := routingAdvice(ctx, tx, kept, profileID, runRow{Purpose: "managed"}, now)

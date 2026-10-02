@@ -6,6 +6,8 @@
 export const AVATAR_SIZES = [32, 64, 128, 256] as const
 export type AvatarSize = typeof AVATAR_SIZES[number]
 export const MAX_AVATAR_BYTES = 8 << 20
+export const MAX_AVATAR_PIXELS = 4_194_304
+export const MAX_AVATAR_DIMENSION = 4096
 export const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 // The picture at one size; `version` (the variant's hash) makes it cacheable for good.
@@ -78,10 +80,48 @@ export function uploadError(status: number, message: string): string {
   if (status === 413) return 'This photo is larger than 8 MB. Choose a smaller one.'
   if (/PNG, JPEG or WebP/.test(message)) return 'Use a PNG, JPEG or WebP image.'
   if (/invalid image/.test(message)) return 'This file could not be read as an image.'
-  if (/dimensions/.test(message)) return 'This image has too many pixels. Choose one under 100 megapixels.'
-  if (/crop/.test(message)) return 'The crop fell outside the photo. Please adjust it and try again.'
+  if (/dimensions/.test(message)) return 'Use a photo with at most 4,194,304 pixels and 4096 pixels per side, and a square crop at most 2048 pixels per side.'
+  if (/crop/.test(message)) return 'Choose a square inside the photo, at most 2048 pixels per side. Please adjust it and try again.'
   if (status === 0) return 'The upload did not reach the server. Check your connection and try again.'
   return 'Your photo could not be saved. Please try again.'
+}
+
+// Fit the whole oriented photo, preserving its aspect ratio. Flooring keeps both
+// the pixel and side limits inclusive; the shorter side is then at most 2048.
+export function avatarUploadDimensions(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    throw new Error('This file could not be read as an image.')
+  }
+  const scale = Math.min(1, MAX_AVATAR_DIMENSION / width, MAX_AVATAR_DIMENSION / height, Math.sqrt(MAX_AVATAR_PIXELS / width / height))
+  return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) }
+}
+
+// The loaded preview has already applied EXIF orientation. Drawing that same
+// image bakes the orientation into the pixels; canvas encoding drops EXIF so
+// the server will not rotate them again. Small originals keep their bytes.
+export async function prepareAvatarUpload(file: File, image: HTMLImageElement) {
+  const dimensions = avatarUploadDimensions(image.naturalWidth, image.naturalHeight)
+  if (dimensions.width === image.naturalWidth && dimensions.height === image.naturalHeight) {
+    return { file, ...dimensions }
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = dimensions.width
+  canvas.height = dimensions.height
+  try {
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('This photo could not be resized. Please try another image.')
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    // WebP preserves transparency for PNG/WebP input while keeping the upload
+    // small. JPEG camera photos stay JPEG.
+    const resized = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('This photo could not be resized. Please try another image.')), file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp', 0.92)
+    })
+    const problem = uploadProblem(resized)
+    if (problem) throw new Error(problem)
+    return { file: resized, ...dimensions }
+  } finally {
+    canvas.width = canvas.height = 0
+  }
 }
 
 // ---------- Crop: a square viewport over the image, which always covers it ----------
