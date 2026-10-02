@@ -2238,9 +2238,8 @@ use `tell --reply-to UUID --session-cookie-file PATH` on a held request. The
 file contains only the `aeon_session` cookie value; the command uses the selected
 instance URL (or `AEON_URL` / `PAIMOS_URL`), sends that cookie without an
 Authorization header, and ignores ambient agent keys and sender sessions.
-This records the answer/outbox and settles
-the request atomically, returning `status: pending`, a question ID, revision and
-deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
+This records the answer/outbox and settles the request atomically, returning
+`status: pending`, a question ID, revision and deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
 permission approvals keep their existing immediate semantics. Desk dispatch and
 ordinary replies reserve the obligation, message, delivery and receipt rows
 before appending events. Migration 1117 permits event references to be filled

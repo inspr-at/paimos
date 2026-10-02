@@ -60,7 +60,7 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("api %d", e.Status)
 }
 
-// Client calls one Aeon instance with an agent API key.
+// Client calls one Aeon instance with an agent key or an explicit person session.
 type Client struct {
 	BaseURL      string
 	Token        string

@@ -3,7 +3,7 @@ package inbox
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type deskEventBarrier struct {
@@ -107,7 +108,7 @@ func TestDeskReplyReservesBeforeEventWithConcurrentSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	if replies != 2 || receipts != 2 || closed != 1 {
-		t.Fatal(fmt.Sprintf("replies=%d receipts=%d closed=%d", replies, receipts, closed))
+		t.Fatalf("replies=%d receipts=%d closed=%d", replies, receipts, closed)
 	}
 }
 
@@ -125,7 +126,8 @@ func TestMessageEventReservationCannotCommitIncomplete(t *testing.T) {
 				reachedCommit = true
 				return nil
 			})
-			if !reachedCommit || err == nil {
+			var constraint *pgconn.PgError
+			if !reachedCommit || !errors.As(err, &constraint) || constraint.Code != "23502" {
 				t.Fatalf("deferred reservation guard: reached commit=%t err=%v", reachedCommit, err)
 			}
 			var valid bool
