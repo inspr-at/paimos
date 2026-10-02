@@ -2,10 +2,12 @@
 package releaseworkflow
 
 import (
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,7 +38,7 @@ func TestTreeReuseRetainsChecksAndFullFallback(t *testing.T) {
 	if len(jobs) != 13 {
 		t.Fatalf("job inventory changed; review verifier's full-suite coverage: %d", len(jobs))
 	}
-	for _, id := range []string{"go", "web", "release-check", "e2e"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "migration-compat"} {
 		j := treeMap(jobs[id])
 		if j == nil || (j["name"] != nil && j["name"] != id) {
 			t.Fatalf("required check %s renamed or removed", id)
@@ -86,14 +88,37 @@ func TestTreeReuseRetainsChecksAndFullFallback(t *testing.T) {
 	}
 }
 
+func TestFailedTreeProofCannotSkipRequiredJobs(t *testing.T) {
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	proof := treeMap(jobs["tree-reuse"])
+	if proof["continue-on-error"] != true {
+		t.Fatal("failed, timed-out or cancelled proof must not fail a dependency and skip the suite")
+	}
+	if proof["if"] != nil || treeMap(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		t.Fatal("proof failure must leave reuse unset and the full-suite fallback eligible")
+	}
+	for _, id := range []string{"web", "release-check", "e2e", "migration-compat", "go-test", "go-static", "go-timing"} {
+		if treeMap(jobs[id])["if"] != nil {
+			t.Fatalf("%s can skip instead of running the full fallback after proof failure", id)
+		}
+	}
+	if treeMap(jobs["go"])["if"] != "always()" {
+		t.Fatal("go must report a result even after dependency failure")
+	}
+}
+
 func TestTreeRecordIsTrustedCompletionWithLeastPrivilege(t *testing.T) {
 	ci := treeWorkflow(t, "ci.yml")
 	detector := treeMap(treeMap(ci["jobs"])["tree-reuse"])
 	if !reflect.DeepEqual(treeMap(detector["permissions"]), map[string]any{"contents": "read", "actions": "read", "packages": "read"}) {
 		t.Fatal("reuse lookup token must be read-only")
 	}
-	if detector["runs-on"] != "ubuntu-latest" || detector["timeout-minutes"] != 1 {
+	if timeout, ok := detector["timeout-minutes"].(int); detector["runs-on"] != "ubuntu-latest" || !ok || timeout < 5 || timeout > 10 {
 		t.Fatal("proof must be a bounded hosted job")
+	}
+	checkout := treeMap(detector["steps"].([]any)[0])
+	if checkout["name"] != "Checkout tested commit ${{ github.sha }}" || treeMap(checkout["with"])["ref"] != nil {
+		t.Fatal("source run must snapshot the actual default checkout, never a live PR merge ref")
 	}
 	w := treeWorkflow(t, "ci-tree-record.yml")
 	if !reflect.DeepEqual(treeMap(w["on"]), map[string]any{"workflow_run": map[string]any{"workflows": []any{"CI"}, "types": []any{"completed"}}}) {
@@ -116,7 +141,7 @@ func TestTreeRecordIsTrustedCompletionWithLeastPrivilege(t *testing.T) {
 	if len(steps) != 2 || j["runs-on"] != "ubuntu-latest" {
 		t.Fatal("publisher must execute only the trusted checkout and recorder")
 	}
-	checkout := treeMap(steps[0])
+	checkout = treeMap(steps[0])
 	if checkout["uses"] != "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" || !reflect.DeepEqual(treeMap(checkout["with"]), map[string]any{"persist-credentials": false, "ref": "${{ github.sha }}"}) {
 		t.Fatal("publisher must never check out source-run or PR code")
 	}
@@ -132,5 +157,103 @@ func TestTreeReuseFixtureProgram(t *testing.T) {
 	cmd.Dir = root(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("tree reuse fixtures: %v\n%s", err, out)
+	}
+}
+
+func TestTreeReuseRegressionsRejectOriginal(t *testing.T) {
+	const original = "e18f107f1ac720696760302395ad4f26e6a92866"
+	baseline := func(path string) []byte {
+		t.Helper()
+		cmd := exec.Command("git", "show", original+":"+path)
+		cmd.Dir = root(t)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Skip("original commit unavailable in a shallow checkout; baseline comparison requires branch history")
+		}
+		return out
+	}
+	dir := t.TempDir()
+	for _, path := range []string{".github/workflows/ci.yml", "scripts/ci-tree-reuse.mjs"} {
+		body := baseline(path)
+		target := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	packageDir := filepath.Join(dir, "scripts/releaseworkflow")
+	if err := os.MkdirAll(packageDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Re-run the current test binary against the original workflow fixture.
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFailedTreeProofCannotSkipRequiredJobs$")
+	cmd.Dir = packageDir
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "failed, timed-out or cancelled proof") {
+		t.Fatalf("original proof workflow must fail the intended regression: %v\n%s", err, out)
+	}
+	fixtures, err := os.ReadFile(filepath.Join(root(t), "scripts/ci-tree-reuse.test.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scripts/ci-tree-reuse.test.mjs"), fixtures, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("node", "--test", "--test-name-pattern=behind-main PR", "scripts/ci-tree-reuse.test.mjs")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "PR merge tree differs from head") {
+		t.Fatalf("original head-tree verifier must fail the intended regression: %v\n%s", err, out)
+	}
+}
+
+func TestTreeReuseRecomputesRealImmutableMerge(t *testing.T) {
+	dir := t.TempDir()
+	git := func(input string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("", "init", "--quiet", "--initial-branch=main")
+	git("", "remote", "add", "origin", dir)
+	commit := func(files map[string]string, parents ...string) (string, string) {
+		t.Helper()
+		var entries []string
+		for name, content := range files {
+			blob := git(content, "hash-object", "-w", "--stdin")
+			entries = append(entries, "100644 blob "+blob+"\t"+name+"\n")
+		}
+		tree := git(strings.Join(entries, ""), "mktree")
+		args := []string{"-c", "user.name=Tree proof fixture", "-c", "user.email=fixture@example.invalid", "commit-tree", tree, "-m", "Fixture"}
+		for _, parent := range parents {
+			args = append(args, "-p", parent)
+		}
+		return git("", args...), tree
+	}
+	ancestor, _ := commit(map[string]string{"shared": "original\n"})
+	base, _ := commit(map[string]string{"shared": "original\n", "upstream": "main\n"}, ancestor)
+	head, headTree := commit(map[string]string{"shared": "original\n", "feature": "PR\n"}, ancestor)
+	checkout, tree := commit(map[string]string{"shared": "original\n", "upstream": "main\n", "feature": "PR\n"}, base, head)
+	if tree == headTree {
+		t.Fatal("fixture must preserve a behind-main merge that differs from the PR head")
+	}
+	conflict, _ := commit(map[string]string{"shared": "conflict\n"}, ancestor)
+	otherConflict, _ := commit(map[string]string{"shared": "other conflict\n"}, ancestor)
+	script := (&url.URL{Scheme: "file", Path: filepath.Join(root(t), "scripts/ci-tree-reuse.mjs")}).String()
+	program := `import assert from 'node:assert/strict';
+import { cleanMergeTree } from ` + strconv.Quote(script) + `;
+const [base, head, checkout, tree, conflict, otherConflict] = process.argv.slice(1);
+assert.equal(cleanMergeTree(base, head, checkout), tree);
+assert.throws(() => cleanMergeTree(conflict, otherConflict, checkout));`
+	cmd := exec.Command("node", "--input-type=module", "-e", program, base, head, checkout, tree, conflict, otherConflict)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("real clean/conflicting merge proof: %v\n%s", err, out)
 	}
 }

@@ -47,9 +47,25 @@ export function github(repository, request) {
   return async (path, options) => (await request(`https://api.github.com/repos/${repository}/${path}`, options)).json();
 }
 
-// PR run.head_sha is the branch head, not GITHUB_SHA's synthetic merge commit.
-// An ancestor base proves the merge tree is the head tree without trusting PR artifacts.
-export async function verifyRun(repository, runID, api) {
+// Fetch only immutable run snapshots, never a branch or live PR merge ref.
+// Missing history, conflicts and resource limits all make the proof unavailable.
+export function cleanMergeTree(base, head, checkout, { execute = execFileSync, deadline = Date.now() + 7000 } = {}) {
+  ensure([base, head, checkout].every(value => oid.test(value)), 'invalid merge snapshot');
+  const git = (args, budget) => {
+    const timeout = Math.min(budget, deadline - Date.now());
+    ensure(timeout > 0, 'merge proof deadline exceeded');
+    return execute('git', args, { timeout, maxBuffer: 65536, encoding: 'utf8' }).trim();
+  };
+  git(['fetch', '--no-tags', '--no-write-fetch-head', '--depth=256', 'origin', base, head, checkout], 5000);
+  const merged = git(['merge-tree', '--write-tree', base, head], 2000);
+  ensure(oid.test(merged), 'merge is not clean');
+  ensure(Date.now() < deadline, 'merge proof deadline exceeded');
+  return merged;
+}
+
+// PR run.head_sha is the branch head. The successful checkout step snapshots
+// GITHUB_SHA in immutable job metadata; source commits remain data, never code.
+export async function verifyRun(repository, runID, api, mergeTree = cleanMergeTree) {
   ensure(positive(runID), 'invalid run');
   const [run, workflow] = await Promise.all([
     api(`actions/runs/${runID}`), api('actions/workflows/ci.yml'),
@@ -59,15 +75,6 @@ export async function verifyRun(repository, runID, api) {
   ensure(run.status === 'completed' && run.conclusion === 'success' && positive(run.run_attempt), 'run not successful');
   ensure(['push', 'pull_request'].includes(run.event) && oid.test(run.head_sha), 'ineligible event');
   if (run.event === 'push') ensure(run.head_branch === 'main', 'ineligible push');
-  if (run.event === 'pull_request') {
-    ensure(run.pull_requests?.length === 1, 'missing PR binding');
-    const pr = run.pull_requests[0];
-    ensure(pr.head?.sha === run.head_sha && pr.head?.repo?.id === run.repository.id && pr.base?.repo?.id === run.repository.id && oid.test(pr.base?.sha), 'wrong PR binding');
-    const comparison = await api(`compare/${pr.base.sha}...${run.head_sha}?per_page=1`);
-    ensure(['ahead', 'identical'].includes(comparison.status) && comparison.merge_base_commit?.sha === pr.base.sha, 'PR merge tree differs from head');
-  }
-  const commit = await api(`git/commits/${run.head_sha}`);
-  ensure(commit.sha === run.head_sha && oid.test(commit.tree?.sha), 'missing source tree');
   // A green aggregate alone is insufficient: reject skipped or incomplete suites.
   const jobs = await api(`actions/runs/${runID}/attempts/${run.run_attempt}/jobs?per_page=100`);
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
@@ -76,16 +83,34 @@ export async function verifyRun(repository, runID, api) {
   for (const name of ['tree-reuse', 'go', 'go-static', 'go-timing', 'web', 'release-check', 'e2e', 'footer-ui', 'status-help-ui', 'status-autopilot-ui', 'migration-compat', 'runner-route / route']) ensure(names.has(name), 'missing suite job');
   const shards = jobs.jobs.filter(job => /^go-test \([1-7]\)$/.test(job.name)).map(job => job.name).sort();
   ensure([4, 7].includes(shards.length) && shards.every((name, index) => name === `go-test (${index + 1})`), 'missing Go shard');
+  let testedSHA = run.head_sha;
+  if (run.event === 'pull_request') {
+    ensure(run.pull_requests?.length === 1, 'missing PR binding');
+    const pr = run.pull_requests[0];
+    ensure(pr.head?.sha === run.head_sha && pr.head?.repo?.id === run.repository.id && pr.base?.repo?.id === run.repository.id && oid.test(pr.base?.sha), 'wrong PR binding');
+    const detectors = jobs.jobs.filter(job => job.name === 'tree-reuse');
+    ensure(detectors.length === 1, 'ambiguous checkout job');
+    const snapshots = detectors[0].steps?.filter(step => /^Checkout tested commit [a-f0-9]{40}$/.test(step.name));
+    ensure(snapshots?.length === 1 && snapshots[0].status === 'completed' && snapshots[0].conclusion === 'success', 'missing tested checkout');
+    testedSHA = snapshots[0].name.slice('Checkout tested commit '.length);
+    const checkout = await api(`git/commits/${testedSHA}`);
+    ensure(checkout.sha === testedSHA && oid.test(checkout.tree?.sha), 'missing checkout tree');
+    ensure(checkout.parents?.length === 2 && checkout.parents[0].sha === pr.base.sha && checkout.parents[1].sha === pr.head.sha, 'checkout parents differ from run snapshots');
+    ensure(await mergeTree(pr.base.sha, pr.head.sha, testedSHA) === checkout.tree.sha, 'recomputed merge differs from tested checkout');
+    return { schema, repository, repository_id: run.repository.id, workflow_id: workflow.id, workflow: workflowPath, run: run.id, attempt: run.run_attempt, sha: run.head_sha, checkout: testedSHA, tree: checkout.tree.sha };
+  }
+  const commit = await api(`git/commits/${testedSHA}`);
+  ensure(commit.sha === testedSHA && oid.test(commit.tree?.sha), 'missing source tree');
   return { schema, repository, repository_id: run.repository.id, workflow_id: workflow.id, workflow: workflowPath, run: run.id, attempt: run.run_attempt, sha: run.head_sha, tree: commit.tree.sha };
 }
 
-export async function decide({ event, killSwitch, tree, repository, readRecord, api }) {
+export async function decide({ event, killSwitch, tree, repository, readRecord, api, mergeTree }) {
   if (event !== 'merge_group' || killSwitch === 'off') return { reuse: 'none', reason: 'disabled or not a merge group' };
   try {
     ensure(oid.test(tree), 'invalid target tree');
     const record = await readRecord(tree);
     ensure(record?.schema === schema && record.repository === repository && record.workflow === workflowPath && record.tree === tree && oid.test(record.sha) && positive(record.run), 'invalid record');
-    const verified = await verifyRun(repository, record.run, api);
+    const verified = await verifyRun(repository, record.run, api, mergeTree);
     for (const key of Object.keys(verified)) ensure(record[key] === verified[key], 'record provenance mismatch');
     return { reuse: 'tree', tree, run: verified.run, reason: 'verified successful full suite' };
   } catch {
@@ -149,10 +174,11 @@ async function main(mode, vars) {
     if (vars.GITHUB_EVENT_NAME === 'merge_group' && killSwitch !== 'off') {
       try {
         const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { timeout: 2000, maxBuffer: 128, encoding: 'utf8' }).trim();
+        const deadline = Date.now() + 10000;
         const request = transport(token, actor, AbortSignal.timeout(10000));
         const api = github(repository, request);
         const store = await registry(repository, token, actor, request);
-        decision = await decide({ event: vars.GITHUB_EVENT_NAME, killSwitch, tree, repository, readRecord: store.read, api });
+        decision = await decide({ event: vars.GITHUB_EVENT_NAME, killSwitch, tree, repository, readRecord: store.read, api, mergeTree: (base, head, checkout) => cleanMergeTree(base, head, checkout, { deadline }) });
       } catch { decision = { reuse: 'none', reason: 'tree lookup unavailable' }; }
     }
     if (vars.GITHUB_OUTPUT) appendFileSync(vars.GITHUB_OUTPUT, `reuse=${decision.reuse}\n`);
@@ -176,11 +202,12 @@ async function main(mode, vars) {
   const bytes = buffer.subarray(0, length);
   const event = JSON.parse(bytes.toString('utf8'));
   ensure(event.action === 'completed' && event.workflow_run?.conclusion === 'success', 'unsuccessful completion');
+  const deadline = Date.now() + 45000;
   const request = transport(token, actor, AbortSignal.timeout(45000));
   const api = github(repository, request);
-  // Diverged/fork PRs are ineligible, not failed writes. Establish eligibility first.
+  // Missing merge proof/fork PRs are ineligible. Establish eligibility first.
   let record;
-  try { record = await verifyRun(repository, event.workflow_run.id, api); }
+  try { record = await verifyRun(repository, event.workflow_run.id, api, (base, head, checkout) => cleanMergeTree(base, head, checkout, { deadline })); }
   catch { console.log('No verified successful full-suite tree available; no record published'); return; }
   const store = await registry(repository, token, actor, request, true);
   await publish(record, api, store);

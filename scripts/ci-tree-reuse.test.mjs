@@ -1,36 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, verifyRun, registry, transport, publish, workflowPath } from './ci-tree-reuse.mjs';
+import * as reuse from './ci-tree-reuse.mjs';
+const { decide, verifyRun, registry, transport, publish, cleanMergeTree, workflowPath } = reuse;
 
 const repository = 'inspr-at/paimos';
 const sha = 'a'.repeat(40);
 const tree = 'b'.repeat(40);
 const base = 'c'.repeat(40);
+const checkoutSHA = 'd'.repeat(40);
+const headTree = 'e'.repeat(40);
 const jobNames = ['tree-reuse', 'go', 'go-static', 'go-timing', 'web', 'release-check', 'e2e', 'footer-ui', 'status-help-ui', 'status-autopilot-ui', 'migration-compat', 'runner-route / route', ...Array.from({ length: 7 }, (_, index) => `go-test (${index + 1})`)];
 
 function fixture(event = 'push') {
   const run = { id: 123, repository: { id: 10, full_name: repository }, head_repository: { full_name: repository }, workflow_id: 20, path: workflowPath, status: 'completed', conclusion: 'success', run_attempt: 1, event, head_sha: sha, head_branch: 'main', pull_requests: [{ head: { sha, repo: { id: 10 } }, base: { sha: base, repo: { id: 10 } } }] };
   const workflow = { id: 20, path: workflowPath };
-  const commit = { sha, tree: { sha: tree } };
-  const comparison = { status: 'ahead', merge_base_commit: { sha: base } };
+  const commit = { sha, tree: { sha: event === 'pull_request' ? headTree : tree } };
+  const checkout = { sha: checkoutSHA, tree: { sha: tree }, parents: [{ sha: base }, { sha }] };
+  const comparison = { status: 'diverged', merge_base_commit: { sha: 'f'.repeat(40) } };
   const jobs = { total_count: jobNames.length, jobs: jobNames.map(name => ({ name, status: 'completed', conclusion: 'success' })) };
+  jobs.jobs[0].steps = [{ name: `Checkout tested commit ${checkoutSHA}`, status: 'completed', conclusion: 'success' }];
   const calls = [];
   const api = async path => {
     calls.push(path);
     if (path === 'actions/runs/123') return run;
     if (path === 'actions/workflows/ci.yml') return workflow;
     if (path === `git/commits/${sha}`) return commit;
+    if (path === `git/commits/${checkoutSHA}`) return checkout;
     if (path === `compare/${base}...${sha}?per_page=1`) return comparison;
     if (path === 'actions/runs/123/attempts/1/jobs?per_page=100') return jobs;
     throw new Error('Unexpected fixture request');
   };
   const record = { schema: 'aeon.ci.tree-green.v1', repository, repository_id: 10, workflow_id: 20, workflow: workflowPath, run: 123, attempt: 1, sha, tree };
-  return { run, workflow, commit, comparison, jobs, record, calls, api };
+  if (event === 'pull_request') record.checkout = checkoutSHA;
+  const mergeTree = async (baseSnapshot, headSnapshot, testedSnapshot) => {
+    assert.deepEqual([baseSnapshot, headSnapshot, testedSnapshot], [base, sha, checkoutSHA]);
+    calls.push('recompute clean merge');
+    return tree;
+  };
+  return { run, workflow, commit, checkout, jobs, record, calls, api, mergeTree };
 }
 
 function check(f, overrides = {}) {
-  return decide({ event: 'merge_group', tree, repository, readRecord: async () => f.record, api: f.api, ...overrides });
+  return decide({ event: 'merge_group', tree, repository, readRecord: async () => f.record, api: f.api, mergeTree: f.mergeTree, ...overrides });
 }
 
 test('equal target and verified source trees reuse', async () => {
@@ -80,18 +92,71 @@ for (const [name, mutate] of [
   });
 }
 
-test('an ancestor PR base proves synthetic merge and head trees equal', async () => {
+test('a behind-main PR records and reuses the tested merge tree, not its head tree', async () => {
   const f = fixture('pull_request');
+  assert.notEqual(f.commit.tree.sha, f.checkout.tree.sha);
+  assert.deepEqual(await verifyRun(repository, 123, f.api, f.mergeTree), f.record);
   assert.equal((await check(f)).reuse, 'tree');
-  assert(f.calls.includes(`compare/${base}...${sha}?per_page=1`));
+  assert(f.calls.includes(`git/commits/${checkoutSHA}`));
+  assert(f.calls.includes('recompute clean merge'));
+  assert(!f.calls.includes(`git/commits/${sha}`));
+  // Any live PR read, including merge_commit_sha, throws in this fixture.
+  assert(!f.calls.some(path => path.startsWith('pulls/')));
+});
+
+test('equal head and merge trees still require the tested checkout and clean merge', async () => {
+  const f = fixture('pull_request');
+  f.commit.tree.sha = tree;
+  assert.equal((await check(f)).reuse, 'tree');
+  assert(f.calls.includes('recompute clean merge'));
+});
+
+test('verification never reads the live PR merge commit', async () => {
+  const f = fixture('pull_request');
+  const api = async path => {
+    assert(!path.startsWith('pulls/'), 'must never read live merge_commit_sha');
+    return f.api(path);
+  };
+  assert.equal((await check(f, { api })).reuse, 'tree');
+});
+
+test('a missing or conflicting recomputed merge fails closed', async () => {
+  const f = fixture('pull_request');
+  assert.equal((await check(f, { mergeTree: async () => { throw new Error('merge conflict or missing history'); } })).reuse, 'none');
+  assert.equal((await check(f, { mergeTree: async () => headTree })).reuse, 'none');
+});
+
+test('clean merge proof fetches only immutable snapshots with bounded Git commands', () => {
+  const calls = [];
+  const execute = (command, args, options) => {
+    calls.push({ command, args, options });
+    return args[0] === 'merge-tree' ? `${tree}\n` : '';
+  };
+  assert.equal(cleanMergeTree(base, sha, checkoutSHA, { execute }), tree);
+  assert.deepEqual(calls.map(call => [call.command, call.args]), [
+    ['git', ['fetch', '--no-tags', '--no-write-fetch-head', '--depth=256', 'origin', base, sha, checkoutSHA]],
+    ['git', ['merge-tree', '--write-tree', base, sha]],
+  ]);
+  assert(calls.every(call => call.options.timeout > 0 && call.options.timeout <= 5000 && call.options.maxBuffer === 65536));
+  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => { throw new Error('conflict'); } }), /conflict/);
+  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => 'not a clean tree' }), /not clean/);
+  assert.throws(() => cleanMergeTree(base, sha, checkoutSHA, { execute: () => assert.fail('expired proof must not fetch'), deadline: 0 }), /deadline/);
 });
 
 for (const [name, mutate] of [
-  ['diverged PR', f => { f.comparison.status = 'diverged'; }],
-  ['different merge base', f => { f.comparison.merge_base_commit.sha = 'd'.repeat(40); }],
   ['missing PR', f => { f.run.pull_requests = []; }],
   ['wrong PR head', f => { f.run.pull_requests[0].head.sha = 'd'.repeat(40); }],
   ['foreign PR base', f => { f.run.pull_requests[0].base.repo.id = 99; }],
+  ['missing checkout snapshot', f => { f.jobs.jobs[0].steps = []; }],
+  ['skipped checkout snapshot', f => { f.jobs.jobs[0].steps[0].conclusion = 'skipped'; }],
+  ['duplicate checkout snapshot', f => { f.jobs.jobs[0].steps.push({ ...f.jobs.jobs[0].steps[0] }); }],
+  ['wrong checkout SHA', f => { f.checkout.sha = sha; }],
+  ['changed run base', f => { f.run.pull_requests[0].base.sha = headTree; }],
+  ['wrong checkout base', f => { f.checkout.parents[0].sha = headTree; }],
+  ['wrong checkout head', f => { f.checkout.parents[1].sha = headTree; }],
+  ['wrong checkout parents', f => { f.checkout.parents.pop(); }],
+  ['wrong recorded checkout', f => { f.record.checkout = sha; }],
+  ['wrong checkout tree', f => { f.checkout.tree.sha = headTree; }],
 ]) test(`${name} falls back`, async () => {
   const f = fixture('pull_request'); mutate(f);
   assert.equal((await check(f)).reuse, 'none');

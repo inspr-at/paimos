@@ -228,15 +228,23 @@ Only merge-queue runs can reuse a record. `scripts/ci-tree-reuse.mjs` verifies
 the source run through GitHub's repository-scoped API: repository, `ci.yml`
 workflow ID/path, successful completion, exact run attempt, commit tree, and
 successful full-suite jobs and Go shards. PR API run IDs identify the branch
-head, while checkout tests its synthetic merge: PR records therefore require
-the recorded base to be an ancestor of the head, proving both trees equal.
-Forks, diverged PR bases, missing/expired records, incomplete suites, malformed
-records, API failures and lookup timeouts fall back to the full suite. A new
+head, while checkout tests its synthetic merge. The checkout step snapshots
+`github.sha` in the run attempt's job metadata. PR records bind that immutable
+commit to the run's exact base/head parents and require a recomputed clean merge
+tree to equal its checkout tree, including for branches behind main. The PR's
+live `merge_commit_sha` is never read. Git fetch uses only immutable commit IDs,
+bounded history (256 commits), a five-second deadline and a two-second merge.
+Forks, missing checkout snapshots/history, merge conflicts, mismatched parents,
+missing/expired records, incomplete suites, malformed records, API failures and
+lookup timeouts fall back to the full suite. A new
 attempt invalidates an earlier record until a fresh successful publication.
 
 Required check names stay unchanged. Each reused test job reports `reuse=tree`
 and bypasses dependency setup, test execution and database service startup;
 the Go aggregate still requires every shard, static and timing job to succeed.
+The proof job continues on error and allows five minutes for checkout plus the
+bounded lookup; failed checkout or proof leaves reuse unset so dependencies run
+their full fallback. Required suite jobs have no skipping job-level conditions.
 Set the repository Actions variable `CI_TREE_REUSE=off` to disable both lookup
 and publication. Lookup has a 10-second total network deadline and bounded
 responses. Registry records and commit statuses are hints, never success proof
@@ -250,9 +258,12 @@ deployment or identity-token writes are granted. The publisher never checks
 out PR code or downloads source artifacts. Fixtures run with
 `node --test scripts/ci-tree-reuse.test.mjs` and
 `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard`; they cover forged provenance,
-tree equality/difference, incomplete suites, partial writes and the kill switch.
-The ≤45-second unmoved-main queue target needs coordinator measurement after
-merge; hosted-runner queue latency is outside the lookup's time bound.
+tree equality/difference, immutable PR merges, proof failure, incomplete suites,
+partial writes and the kill switch. The ≤45-second unmoved-main queue target
+requires an available checkout/clean-merge proof and coordinator measurement
+after merge; older PR runs without the snapshot run the full suite, including
+ahead/identical branches. Hosted-runner queue latency is outside the lookup's
+time bound.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.

@@ -366,18 +366,33 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	// These are the active main ruleset's contexts. Renaming or conditionally
 	// skipping them would strand a PR or merge queue waiting for its checks.
 	jobs := mapping(workflow["jobs"])
+	// A proof outage must remain an unset reuse output, never a failed need
+	// that skips the full suite. This includes checkout failures/timeouts.
+	proof := mapping(jobs["tree-reuse"])
+	if proof == nil || proof["continue-on-error"] != true {
+		return fmt.Errorf("tree-reuse must continue on error so proof failure cannot skip required CI jobs")
+	}
+	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
+		return fmt.Errorf("tree-reuse needs a bounded 5–10 minute timeout for checkout plus the 10 second proof")
+	}
+	if proof["if"] != nil || mapping(proof["outputs"])["reuse"] != "${{ steps.proof.outputs.reuse }}" {
+		return fmt.Errorf("tree-reuse must always run and expose only its proof step output")
+	}
 	for _, id := range []string{"go-test", "go-static", "go-timing", "runner-route"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		if id == "go-static" || id == "go-timing" {
+		if id != "runner-route" {
 			if _, exists := job["if"]; exists {
 				return fmt.Errorf("required CI job %q must run without an if condition", id)
 			}
+			if !hasNeed(job["needs"], "tree-reuse") {
+				return fmt.Errorf("required CI job %q must use the non-failing tree-reuse dependency", id)
+			}
 		}
 	}
-	for _, context := range []string{"go", "web", "release-check", "e2e"} {
+	for _, context := range []string{"go", "web", "release-check", "e2e", "migration-compat"} {
 		job := mapping(jobs[context])
 		if job == nil {
 			return fmt.Errorf("required check %q is missing", context)
@@ -394,6 +409,8 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 		} else if _, exists := job["if"]; exists {
 			return fmt.Errorf("required check %q must run for every CI event: %v", context, job["if"])
+		} else if !hasNeed(job["needs"], "tree-reuse") {
+			return fmt.Errorf("required check %q must use the non-failing tree-reuse dependency", context)
 		}
 	}
 	return nil

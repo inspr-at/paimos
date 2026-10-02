@@ -28,11 +28,16 @@ jobs:
       actions: read
       packages: read
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    # Checkout has its own retries; a failed proof must never suppress CI.
+    continue-on-error: true
+    timeout-minutes: 5
     outputs:
       reuse: ${{ steps.proof.outputs.reuse }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # GitHub persists the evaluated SHA in this run attempt's job metadata.
+      # The completion publisher must never use the PR's later live merge ref.
+      - name: Checkout tested commit ${{ github.sha }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Verify a successful full-suite tree
