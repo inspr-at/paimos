@@ -122,7 +122,7 @@ func (m *Module) transaction(r *http.Request, p tenant.Principal, write bool, fn
 			return err
 		}
 		if write {
-			if err := lock(ctx, tx, p.TenantID); err != nil {
+			if err := authz.LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 				return err
 			}
 		}
@@ -130,17 +130,6 @@ func (m *Module) transaction(r *http.Request, p tenant.Principal, write bool, fn
 	})
 }
 
-// Share the access revocation fence with authz writers. NO KEY UPDATE does not
-// block FK share locks. Global order: tenant -> tree -> records -> event LAST.
-// RequireTx is deliberately after the fence, never just HTTP middleware.
-func lock(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID).Scan(&id); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, tenantID)
-	return err
-}
 func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, key, project string) error {
 	return authz.RequireTx(ctx, tx, p, key, authz.Scope{ProjectID: project})
 }
@@ -165,6 +154,14 @@ func scan(row pgx.Row) (Lane, error) {
 	err := row.Scan(&l.ID, &l.ProjectID, &l.OwnerPrincipalID, &l.Name, &l.Priority, &l.Revision, &l.Enabled, &l.Paused, &l.PauseReason, &l.Scope.Kind, &l.Scope.ReleaseNodeID, &raw, &l.CreatedAt, &l.UpdatedAt)
 	if err == nil {
 		err = json.Unmarshal(raw, &l.Policy)
+	}
+	// Fail closed if a projection writer stored malformed policy; preview must
+	// never interpret unchecked work-window endpoints or resource ceilings.
+	if err == nil {
+		err = validatePolicy(l.Policy)
+	}
+	if err == nil {
+		err = validateScope(l.Scope)
 	}
 	return l, err
 }

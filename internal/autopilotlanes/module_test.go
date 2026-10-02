@@ -350,12 +350,23 @@ func TestPreviewSharedQueueOrderingAndNoWrites(t *testing.T) {
 	f.call(t, f.owner, "GET", path+"/preview?cursor="+strings.Repeat("a", 1025), nil, 400, nil)
 	// Turning Status autopilot on cannot enable dispatch policy.
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE status_autopilot_settings SET enabled=true`)
+		_, err := tx.Exec(t.Context(), `INSERT INTO status_autopilot_settings(tenant_id,enabled,rules) VALUES($1,true,'{}') ON CONFLICT(tenant_id) DO UPDATE SET enabled=true`, f.owner.TenantID)
 		return err
 	})
 	f.call(t, f.owner, "GET", path, nil, 200, &l)
 	if l.Enabled {
 		t.Fatal("Status autopilot activated a lane")
+	}
+	// Direct projection writers cannot make preview interpret a malformed
+	// window or silently widen policy. Exercise stored data, not just input.
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE autopilot_lanes SET policy=jsonb_set(policy,'{window,start}','""') WHERE node_id=$1`, l.ID)
+		return err
+	})
+	count = f.eventCount(t, l.ID)
+	f.call(t, f.owner, "GET", path+"/preview", nil, 500, nil)
+	if count != f.eventCount(t, l.ID) {
+		t.Fatal("malformed policy preview wrote events")
 	}
 }
 
