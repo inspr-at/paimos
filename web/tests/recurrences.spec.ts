@@ -156,6 +156,21 @@ test('a delayed Run now read is discarded when the project changes', async ({ pa
   await expect(page.getByRole('dialog', { name: 'Run recurring work now' })).toHaveCount(0)
   expect(calls.filter(call => call.path.endsWith('/run-now'))).toHaveLength(0)
 })
+test('renaming legacy monthly and event definitions leaves their trigger unchanged', async ({ page }) => {
+  const { items, calls } = await setup(page)
+  items[0].trigger.rrule = 'FREQ=MONTHLY;BYMONTHDAY=1'
+  items[1].trigger = { kind: 'event', event: 'release.published' }
+  const triggers = items.map(item => ({ ...item.trigger }))
+  await settings(page)
+  for (const [index, name] of ['Weekly tool sweep', 'Release notes'].entries()) {
+    await row(page, name).getByRole('button', { name: /^More/ }).click()
+    await page.getByRole('menuitem', { name: 'Edit…', exact: true }).click()
+    await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill(`${name} renamed`)
+    await expect(editor(page).getByRole('button', { name: /^Save/ })).toBeEnabled()
+    await editor(page).getByRole('button', { name: /^Save/ }).click(); await expect(editor(page)).toHaveCount(0)
+    expect(calls.filter(call => call.method === 'PUT').at(-1)?.body.trigger).toEqual(triggers[index])
+  }
+})
 test('Repeat copies the epic parent, Esc leaves a field first, and browser modifiers stay free', async ({ page }) => {
   await setup(page); await page.goto('/p/PHAROS/PHAROS-10')
   const panel = page.getByRole('complementary', { name: 'Ticket details' })
