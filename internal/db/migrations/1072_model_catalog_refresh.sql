@@ -37,7 +37,7 @@ CREATE TABLE model_refresh_settings (
 -- Separate from immutable profile pins: health never destroys run history.
 CREATE TABLE model_observations (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
-    harness text NOT NULL CHECK (harness IN ('codex','claude','pi','cursor','grok')),
+    harness text NOT NULL CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode')),
     model text NOT NULL CHECK (length(model) BETWEEN 1 AND 128),
     effort text NOT NULL CHECK (length(effort) BETWEEN 1 AND 32),
     last_seen_at timestamptz NOT NULL DEFAULT now(),

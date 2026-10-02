@@ -122,3 +122,57 @@ func TestCatalogRefreshExpansionPreservesPublishedRoutes(t *testing.T) {
 		t.Fatalf("tenant RLS did not reject foreign security route write: %v", err)
 	}
 }
+
+func TestCatalogRefreshObservationsAcceptModelHarnesses(t *testing.T) {
+	d, err := dbtest.New(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var tenantID string
+	if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name)
+		VALUES('catalog-observations','Catalog observations') RETURNING id::text`).Scan(&tenantID); err != nil {
+		t.Fatal(err)
+	}
+	for _, observation := range []struct {
+		harness, model, effort string
+	}{
+		{"gemini", "gemini-2.5-pro", "16384"},
+		{"opencode", "local-model", "high"},
+	} {
+		t.Run(observation.harness, func(t *testing.T) {
+			err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+				var harness, model, effort string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,source)
+					VALUES($1,$2,$3,$4,'agent') RETURNING harness,model,effort`,
+					tenantID, observation.harness, observation.model, observation.effort).Scan(&harness, &model, &effort); err != nil {
+					return err
+				}
+				if harness != observation.harness || model != observation.model || effort != observation.effort {
+					t.Fatalf("observation tuple changed: %s / %s / %s", harness, model, effort)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, harness := range []string{"media", "terminal"} {
+		t.Run(harness, func(t *testing.T) {
+			err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,source)
+					VALUES($1,$2,'local-model','high','agent')`, tenantID, harness)
+				return err
+			})
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "model_observations_harness_check" {
+				t.Fatalf("non-model harness was not rejected by the harness CHECK: %v", err)
+			}
+		})
+	}
+}
