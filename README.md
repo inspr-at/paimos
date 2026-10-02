@@ -196,6 +196,18 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+Event ordering and presentation race tests observe database lock waits. Importer
+request tests use held transports and `testing/synctest` virtual time;
+elapsed time is not evidence that an operation started. Doctrine quotation guards
+use synthetic public and private fixtures in ordinary runs. To survey current
+doctrine checkouts, opt in:
+
+```sh
+AEON_TEST_DOCTRINE_CHECKOUTS=1 go test -count=1 -run '^TestCheckedOutDoctrineGuardCounts$' -v ./internal/rules/doctrine
+```
+
+The survey reports observed counts without requiring historical corpus totals.
+
 The ordinary activity tests check exact pagination through 240 same-ticket
 imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
 imported events, plus the node index definition. They impose no latency budget.
