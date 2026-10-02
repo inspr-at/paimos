@@ -28,7 +28,10 @@ function component(path: string, modules: Record<string, unknown>): Vue.Componen
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: Vue.Component } = {}
   new Function('require', 'exports', outputText)((id: string) => {
-    if (id in modules) return modules[id]
+    if (id in modules) {
+      const value = modules[id]
+      return value && typeof value === 'object' && 'default' in value ? { __esModule: true, ...value } : value
+    }
     throw new Error(`Unexpected dependency: ${id}`)
   }, exports)
   return exports.default!
