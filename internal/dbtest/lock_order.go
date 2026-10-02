@@ -28,7 +28,7 @@ func WaitForLock(t testing.TB, ctx context.Context, d *DB, blocker uint32, want 
 			t.Fatalf("observe %s wait: %v", want, err)
 		}
 		if kind != want {
-			t.Fatalf("waited on %s before %s; tenant fence must precede tree lock", kind, want)
+			t.Fatalf("waited on %s before %s; tenant fence must precede advisory lock", kind, want)
 		}
 		return pid
 	}
@@ -38,6 +38,13 @@ func WaitForLock(t testing.TB, ctx context.Context, d *DB, blocker uint32, want 
 // tenant transaction while retaining a session tree lock exposes the second
 // wait separately. A tree-first writer fails at the first observed wait.
 func TenantBeforeTree(t *testing.T, d *DB, tenantID string, write func(context.Context) error) {
+	t.Helper()
+	TenantBeforeAdvisory(t, d, tenantID, tenantID, 0, write)
+}
+
+// TenantBeforeAdvisory observes the tenant wait, then a wait on the supplied
+// hashtextextended advisory key, for the same writer. Neither barrier sleeps.
+func TenantBeforeAdvisory(t *testing.T, d *DB, tenantID, key string, seed int64, write func(context.Context) error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -54,7 +61,7 @@ func TenantBeforeTree(t *testing.T, d *DB, tenantID string, write func(context.C
 	if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tenantID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,0))`, tenantID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,$2))`, key, seed); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -67,12 +74,12 @@ func TenantBeforeTree(t *testing.T, d *DB, tenantID string, write func(context.C
 	if next := WaitForLock(t, ctx, d, holder.PgConn().PID(), "advisory"); next != pid {
 		t.Fatalf("different writers at the two barriers: %d then %d", pid, next)
 	}
-	// While the writer holds its tenant fence and waits for the tree, foreign
+	// While the writer holds its tenant fence and waits for the advisory, foreign
 	// key readers must still be able to acquire KEY SHARE on that tenant.
 	if _, err = holder.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, tenantID); err != nil {
 		t.Fatalf("tenant fence blocks foreign-key readers: %v", err)
 	}
-	if _, err = holder.Exec(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,0))`, tenantID); err != nil {
+	if _, err = holder.Exec(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,$2))`, key, seed); err != nil {
 		t.Fatal(err)
 	}
 	select {
