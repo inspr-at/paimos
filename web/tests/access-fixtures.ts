@@ -492,6 +492,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       }
       if (method === 'PATCH') {
         if (world.slow) await new Promise(resolve => setTimeout(resolve, world.slow))
+        if (body.expires_at !== undefined && body.expires_at !== null && (typeof body.expires_at !== 'string' || !Number.isFinite(Date.parse(body.expires_at)) || Date.parse(body.expires_at) <= now)) return fail(route, 400, 'invalid', 'expires_at must be null or a future timestamp')
         const added = body.add as string[] ?? []
         const removed = body.remove as string[] ?? []
         const extension = body.role_extension as { role_id: string; add: string[] } | undefined
@@ -501,6 +502,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const after = [...new Set([...cleaned.filter(k => !removed.includes(k)), ...added])]
         if (after.some(k => !eligible.includes(k) || !roleAfter.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed live grants.')
         key.scopes = after
+        if (body.expires_at !== undefined) key.expires_at = body.expires_at as string | null
         if (extension && role) role.permissions = roleAfter
         event('agent_key.scopes_changed', { ...before, ...(extension ? { role: roleBefore } : {}) }, { ...key, ...(extension && role ? { role: { ...role, permissions: [...role.permissions] } } : {}), ...(pruned.length ? { pruned_scopes: pruned } : {}) })
         return route.fulfill({ json: key })

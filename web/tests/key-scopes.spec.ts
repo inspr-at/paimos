@@ -162,6 +162,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await edit(page)
     await sheet(page).getByRole('checkbox', { name: /nodes\.write/ }).check()
     await expect(sheet(page).getByRole('region', { name: 'Confirm role changes' })).toBeVisible()
+    // Actions stay at the top; the long role explanation is in the scrolling body.
+    await sheet(page).getByRole('region', { name: 'Confirm role changes' }).scrollIntoViewIfNeeded()
     const confirmation = await sheet(page).getByRole('region', { name: 'Confirm role changes' }).boundingBox()
     expect(confirmation!.y + confirmation!.height).toBeLessThanOrEqual(width === 390 ? 844 : 1000)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

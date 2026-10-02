@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AccessError, agentDeactivatePoints, agentDescription, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, grantablePresetScopes, groupPermissions, inviteRoles, matchesScope, suggestAgentRole, TICKET_WORKER_SCOPES,
+  AccessError, agentDeactivatePoints, agentDescription, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, grantablePresetScopes, groupPermissions, inviteRoles, KEY_SCOPE_PRESETS, matchesScope, presetScopes, selectScopeGroup, suggestAgentRole, TICKET_WORKER_SCOPES,
   isLastOwner, permissionLabel, projectRolesOf, projectSummary, splitAgents, validEmail, workspaceRolesOf, type Agent, type Permission, type Role,
 } from '../src/lib/access.ts'
 
@@ -18,6 +18,49 @@ test('permissions read as words and group in registry order', () => {
 })
 
 const ticketRegistry = TICKET_WORKER_SCOPES.map(key => P(key, key === 'search.read' ? 'Search' : 'Work', key.endsWith('.read') ? 'low' : 'medium'))
+test('every preset respects Admin, Member, editor and live registry ceilings', () => {
+  const catalog = [...new Set(KEY_SCOPE_PRESETS.flatMap(p => p.scopes === 'all' ? [] : p.scopes)), 'future.write', 'keys.manage'].map(key => ({ ...P(key, 'Work', 'low'), agent_grantable: key !== 'keys.manage' }))
+  for (const r of [role('admin', 'admin', catalog.map(p => p.key)), role('member', 'member', TICKET_WORKER_SCOPES)]) {
+    const ceiling = agentScopeCeiling(agent('worker', { workspace_role: r }), [r], catalog, true)!
+    for (const preset of KEY_SCOPE_PRESETS) {
+      const editor = new Set(catalog.map(p => p.key).filter(key => key !== 'comments.write'))
+      const held = new Set([...editor].filter(key => ceiling.has(key)))
+      const scopes = grantablePresetScopes(preset.scopes, held, catalog)
+      const wanted = presetScopes(preset.scopes, catalog)
+      assert.deepEqual(scopes, wanted.filter(key => held.has(key) && key !== 'keys.manage'))
+      assert.ok(scopes.every(key => ceiling.has(key) && editor.has(key)))
+      assert.ok(!scopes.includes('keys.manage'))
+    }
+  }
+  const full = KEY_SCOPE_PRESETS.find(p => p.id === 'full-access')!
+  assert.equal(full.scopes, 'all')
+  assert.ok(grantablePresetScopes(full.scopes, new Set(catalog.map(p => p.key)), catalog).includes('future.write'))
+  assert.deepEqual(grantablePresetScopes(full.scopes, new Set(), catalog), [])
+  assert.deepEqual(grantablePresetScopes(full.scopes, new Set(['future.write']), []), [])
+})
+
+test('group All stays under the ceiling; None removes only this group, including unavailable scopes', () => {
+  const catalog = [...ticketRegistry, { ...P('keys.manage', 'Work', 'high'), agent_grantable: false }]
+  const held = new Set(['nodes.read', 'nodes.write', 'keys.manage'])
+  const selected = new Set(['events.read', 'keys.manage', 'retired.scope'])
+  const keys = ['nodes.read', 'nodes.write', 'comments.write', 'keys.manage', 'retired.scope']
+  const all = selectScopeGroup(selected, keys, true, held, catalog)
+  assert.deepEqual([...all], ['events.read', 'keys.manage', 'retired.scope', 'nodes.read', 'nodes.write'])
+  assert.deepEqual([...selectScopeGroup(all, keys, false, held, catalog)], ['events.read'])
+  assert.deepEqual([...selected], ['events.read', 'keys.manage', 'retired.scope'])
+})
+
+test('Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions', () => {
+  const catalog = [...ticketRegistry, P('account.manage', 'Accounts', 'high', false)]
+  const viewer = role('viewer', 'viewer', ['nodes.read'])
+  const project = role('project', 'member', [...TICKET_WORKER_SCOPES, 'account.manage'])
+  const worker = agent('mixed', { workspace_role: viewer, project_roles: [{ project_id: 'p', project_key: 'P', project_title: 'Project', role: project }] })
+  const ceiling = agentScopeCeiling(worker, [viewer, project], catalog, true)!
+  assert.deepEqual([...ceiling], TICKET_WORKER_SCOPES)
+  assert.deepEqual(grantablePresetScopes('all', ceiling, catalog), TICKET_WORKER_SCOPES)
+  assert.ok(!ceiling.has('account.manage'))
+})
+
 test('Ticket worker presets are bounded by creator, role, project scope and agent-grantability', () => {
   assert.deepEqual(TICKET_WORKER_SCOPES, ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read'])
   const r = role('project-role', 'ticket-worker', TICKET_WORKER_SCOPES, false)
@@ -123,6 +166,8 @@ test('audit events read as sentences from the server’s shape', () => {
   assert.equal(auditSentence(e('principal.alias_linked', { principal_id: 'jw', linked_to: null }, { principal_id: 'jw', linked_to: 'mira' }, 'jw'), names).text, 'linked jw (classic) to Mira')
   assert.equal(auditSentence(e('principal.deactivated', { principal_id: 'mira', status: 'active' }, { principal_id: 'mira', status: 'deactivated' }, 'mira'), names).text, 'deactivated Mira; their sessions and keys were revoked')
   assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', role: { name: 'Agent worker', permissions: ['nodes.read'] } }, { name: 'worker', role: { name: 'Agent worker', permissions: ['nodes.read', 'nodes.write'] }, pruned_scopes: ['retired.scope'] }), names).text, 'changed scopes for the key worker; added nodes.write to the role Agent worker; pruned unknown scopes retired.scope')
+  assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', scopes: ['nodes.read'], expires_at: '2026-12-31T00:00:00Z' }, { name: 'worker', scopes: ['nodes.read'], expires_at: null }), names).text, 'changed expiry for the key worker; expiry set to Never')
+  assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', scopes: [], expires_at: null }, { name: 'worker', scopes: ['nodes.read'], expires_at: '2026-12-31T00:00:00Z' }), names).text, 'changed scopes and expiry for the key worker; expires 2026-12-31T00:00:00Z')
   assert.equal(auditSentence(e('agent_key.revoked', null, { principal_id: 'x', name: 'deployer', prefix: 'ph4r' }), names).text, 'revoked the key deployer (aeon_ph4r_…)')
   assert.equal(auditSentence(e('something.else', null, {}), names).text, 'something else')
   assert.deepEqual(['role.created', 'binding.removed', 'invite.revoked', 'principal.deactivated', 'agent_key.created', 'node.updated'].map(categoryOf), ['roles', 'bindings', 'invites', 'lifecycle', 'keys', null])
@@ -137,14 +182,14 @@ test('errors carry the server’s reason and field', () => {
 
 const agent = (name: string, extra: Partial<Agent> = {}): Agent => ({ principal_id: name, name, has_avatar: false, workspace_role: null, key_count: 0, last_seen_at: null, service: false, ...extra })
 
-test('rotation and codes cap private or absent roles without promoting project grants', () => {
+test('rotation and codes cap private or absent roles and include only project-grantable project scopes', () => {
   const privateRole = role('private', 'agent_worker', ['nodes.read'], false)
   const projectRole = role('project', 'member', ['nodes.read', 'nodes.delete', 'audit.read'])
   const projectBinding = { project_id: 'p', project_key: 'P', project_title: 'Project', role: { id: projectRole.id, key: projectRole.key, name: projectRole.name } }
   const worker = agent('worker', { workspace_role: { id: privateRole.id, key: privateRole.key, name: privateRole.name }, project_roles: [projectBinding] })
   const roles = [privateRole, projectRole]
   assert.equal(agentScopeCeiling(worker, roles, registry), null)
-  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, true)!], ['nodes.read'])
+  assert.deepEqual([...agentScopeCeiling(worker, roles, registry, true)!], ['nodes.read', 'nodes.delete'])
   assert.deepEqual([...agentScopeCeiling(agent('unbound'), roles, registry, true)!], [])
   assert.equal(agentScopeCeiling(agent('new'), roles, registry), null)
   const projectOnly = agent('project-only', { project_roles: [projectBinding] })

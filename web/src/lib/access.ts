@@ -129,7 +129,8 @@ export interface AgentKeyCreated { id: string; token: string; prefix: string; na
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
 export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
-export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}) })
+export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
+export const keyExpiryAfter = (days: number, now = Date.now()) => days === 0 ? null : new Date(Math.floor(now / 1000) * 1000 + days * 86_400_000).toISOString()
 // One confirmed request commits the replacement and revocation together.
 export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
 
@@ -150,14 +151,28 @@ export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agen
 // What the coordinating agent uses end to end (internal/cli compat test).
 export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
 export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
-export const KEY_SCOPE_PRESETS = [
+export type PresetScopes = string[] | 'all'
+export const KEY_SCOPE_PRESETS: { id: string; label: string; description: string; scopes: PresetScopes }[] = [
+  { id: 'full-access', label: 'Full access', description: 'Every agent-grantable scope allowed by this agent’s role and your permissions.', scopes: 'all' },
   { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
   { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
 ]
 // Presets are suggestions only. The registry and live creator/role ceiling are
 // authoritative, including when a permission stops being agent-grantable.
-export const grantablePresetScopes = (wanted: string[], held: Set<string>, registry: Permission[]) =>
-  wanted.filter(key => held.has(key) && registry.some(p => p.key === key && p.agent_grantable))
+export const presetScopes = (wanted: PresetScopes, registry: Permission[]) => wanted === 'all' ? keyScopes(registry).map(p => p.key) : wanted
+export const grantablePresetScopes = (wanted: PresetScopes, held: Set<string>, registry: Permission[]) =>
+  presetScopes(wanted, registry).filter(key => held.has(key) && registry.some(p => p.key === key && p.agent_grantable))
+// Bulk selection never expands a role. None removes only the displayed group,
+// including unavailable old scopes; All adds only within the live ceiling.
+export function selectScopeGroup(selected: Set<string>, keys: string[], all: boolean, held: Set<string>, registry: Permission[]): Set<string> {
+  const next = new Set(selected)
+  for (const key of all ? grantablePresetScopes(keys, held, registry) : keys) {
+    if (all) next.add(key)
+    else next.delete(key)
+  }
+  return next
+}
+export const PERSON_ONLY_KEY_NOTE = 'Person-only: managing members, roles, keys and settings; the access audit log; approval decisions; rule publishing; conversation watching.'
 export function matchesScope(permission: Permission, term: string): boolean {
   const needle = term.trim().toLowerCase()
   return !needle || `${permissionLabel(permission.key)} ${permission.key} ${permission.group} ${permission.description}`.toLowerCase().includes(needle)
@@ -173,13 +188,14 @@ export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefi
 // null means creation may configure a role; it never applies to rotation.
 export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], respectPrivateRole = false): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
-  if (!role && agent.project_roles?.length) {
-    const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
-    return new Set(agent.project_roles.flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k)))
-  }
+  const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
+  const projectPermissions = (agent.project_roles ?? []).flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k))
+  if (!role && agent.project_roles?.length) return new Set(projectPermissions)
   if (!role) return agent.workspace_role || respectPrivateRole ? new Set() : null
   if (!respectPrivateRole && !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
-  return new Set(role.permissions)
+  // Like AgentKeyCeilingTx: project permissions may be key scopes too. Actual
+  // requests still check the project's binding; this grants no workspace access.
+  return new Set([...role.permissions, ...projectPermissions])
 }
 
 // ---------- Permissions in words ----------
@@ -353,7 +369,11 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       const roleDelta = diff((priorRole.permissions as string[] | undefined) ?? [], (role.permissions as string[] | undefined) ?? [])
       const pruned = Array.isArray(after.pruned_scopes) ? after.pruned_scopes.filter((s): s is string => typeof s === 'string') : []
       const changes = [roleDelta.added.length ? `added ${roleDelta.added.join(', ')} to the role ${str(role.name)}` : '', pruned.length ? `pruned unknown scopes ${pruned.join(', ')}` : ''].filter(Boolean)
-      return { actor, subject: who, text: [`changed scopes for the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.trim(), ...changes].join('; ') }
+      const expiryChanged = before.expires_at !== after.expires_at
+      const scopesChanged = (before.scopes as string[] | undefined)?.join(',') !== (after.scopes as string[] | undefined)?.join(',')
+      const what = expiryChanged ? (scopesChanged ? 'scopes and expiry' : 'expiry') : 'scopes'
+      if (expiryChanged) changes.push(after.expires_at === null ? 'expiry set to Never' : `expires ${str(after.expires_at)}`)
+      return { actor, subject: who, text: [`changed ${what} for the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.trim(), ...changes].join('; ') }
     }
     case 'agent_key.revoked': return { actor, subject: who, text: `revoked the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.replace(/ +/g, ' ').trim() }
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }

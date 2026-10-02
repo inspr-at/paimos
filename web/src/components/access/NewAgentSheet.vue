@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { agentDescription, createAgent, effectLine, KEY_SCOPE_PRESETS, keyScopes, neededToGive, suggestAgentRole, type Agent, type Role } from '../../lib/access'
+import { agentDescription, createAgent, effectLine, KEY_SCOPE_PRESETS, keyScopes, presetScopes, neededToGive, suggestAgentRole, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
 import { useProjects } from '../../stores/projects'
@@ -10,6 +10,7 @@ import AccessSheet from './AccessSheet.vue'
 import AppIcon from '../AppIcon.vue'
 import { problem } from './accessText'
 
+const submitModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl'
 const emit = defineEmits<{ close: []; created: [agent: Agent, presetId: string] }>()
 const access = useAccess()
 const projects = useProjects()
@@ -32,7 +33,7 @@ const grantable = (role: Role) => role.permissions.every(k => myPermissions().ha
 const role = computed(() => roles.value.find(r => r.id === roleId.value))
 const validRole = computed(() => !!role.value && grantable(role.value))
 const availableProjects = computed(() => projects.projects.filter(p => !p.archived))
-const suggested = computed(() => suggestAgentRole(roles.value, preset.value?.scopes ?? [], scope.value === 'projects' ? 'project' : 'workspace', access.registry, myPermissions()))
+const suggested = computed(() => preset.value?.scopes === 'all' ? undefined : suggestAgentRole(roles.value, preset.value?.scopes ?? [], scope.value === 'projects' ? 'project' : 'workspace', access.registry, myPermissions()))
 const roleEffect = (r: Role) => effectLine(neededToGive(r, scope.value === 'projects' ? 'project' : 'workspace', access.registry).filter(key => keyScopes(access.registry).some(p => p.key === key)), access.registry, 3)
 const prefill = computed(() => agentDescription(preset.value?.label ?? '', scope.value, selected.value.map(id => projects.projects.find(p => p.id === id)?.routeKey ?? id)))
 const description = ref(prefill.value)
@@ -67,7 +68,7 @@ onMounted(() => { void projects.load() })
 </script>
 
 <template>
-  <AccessSheet title="New agent" size="center" @close="busy || emit('close')">
+  <AccessSheet title="New agent" size="center" actions-first submit-shortcut @submit="submit" @close="busy || emit('close')">
     <form id="new-agent-form" class="new-agent-form" @submit.prevent="submit">
       <p class="hint">Create an identity for a CLI or script, then choose its first key’s scopes.</p>
       <label for="agent-name">Name</label>
@@ -80,7 +81,7 @@ onMounted(() => { void projects.load() })
       </select>
       <div v-if="preset" class="preset-preview">
         <p class="hint">{{ preset.description }} Preview these scopes; apply them in the first key sheet.</p>
-        <p class="mono preset-scopes">{{ preset.scopes.join(', ') }}</p>
+        <p class="mono preset-scopes">{{ presetScopes(preset.scopes, access.registry).join(', ') }}</p>
       </div>
       <label for="agent-description">Description <span class="optional">optional</span></label>
       <textarea id="agent-description" v-model="description" class="field" rows="2" maxlength="1000" :disabled="busy" placeholder="What this agent does" @input="descriptionEdited = true" />
@@ -96,7 +97,8 @@ onMounted(() => { void projects.load() })
       </select>
       <p id="agent-role-effect" class="hint">{{ role ? roleEffect(role) : 'Choose the role that covers the work this agent needs to do.' }}</p>
       <p v-if="preset" class="hint" aria-live="polite">
-        <template v-if="suggested">{{ suggested.name }} covers {{ preset.label }} with the fewest permissions you may grant{{ scope === 'projects' ? ' on a project' : '' }}.
+        <template v-if="preset.scopes === 'all'">Full access follows the role you choose. Admin allows the full agent-grantable set; person-only permissions stay with people.</template>
+        <template v-else-if="suggested">{{ suggested.name }} covers {{ preset.label }} with the fewest permissions you may grant{{ scope === 'projects' ? ' on a project' : '' }}.
           <button v-if="roleId !== suggested.id" type="button" class="btn sm" :disabled="busy" @click="roleId = suggested.id; roleEdited = true">Use {{ suggested.name }}</button>
         </template>
         <template v-else>No non-admin role you may grant covers all of {{ preset.label }}{{ scope === 'projects' ? ' on a project' : '' }}. Choose a role explicitly or ask for a narrower custom role.</template>
@@ -124,7 +126,7 @@ onMounted(() => { void projects.load() })
     </form>
     <template #foot>
       <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create agent' }}</button>
+      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create agent' }}<kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
     </template>
   </AccessSheet>
 </template>
