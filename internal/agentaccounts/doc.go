@@ -211,6 +211,10 @@
 // 1/2/4/8-hour backoff; only evidenced successful inference clears a 402.
 // An eligible unstarted reservation may acquire that permit during claim;
 // other queued holds stay intact and cannot launch during its recovery wait.
+// A managed run's own expired provisional estimate reaches current admission;
+// measured, manual and pairing ledgers retain their expiry/freshness checks.
+// Telemetry-only denials acquire a canonical wait at claim or a fresh owner
+// check, preserving the original stop/deadline and the exact early intent.
 // Readiness evaluates the same non-mutating admission policy, including fresh
 // fact-only reserves and recovery eligibility, without consuming the permit.
 // Manual allowances cap work but never make unknown vendor usage measured.
