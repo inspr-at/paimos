@@ -1,0 +1,458 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aeon:ci:contracts:v1",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
+  "title": "Aeon shadow CI proof contracts v1",
+  "description": "Offline shadow diagnostics only. Shape validation does not authenticate events, approve executable bytes, satisfy required checks or authorize reuse.",
+  "$defs": {
+    "objectID": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "positive": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "100644",
+            "100755",
+            "120000"
+          ]
+        },
+        "blob": {
+          "$ref": "#/$defs/objectID"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "blob",
+        "content_digest"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/objectID"
+        },
+        "tree": {
+          "$ref": "#/$defs/objectID"
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entry"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "commit",
+        "tree",
+        "manifest_digest",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "pin": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/objectID"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "commit",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "repository_id": {
+          "$ref": "#/$defs/positive"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "pull_request",
+            "merge_group",
+            "push",
+            "schedule",
+            "workflow_dispatch"
+          ]
+        },
+        "delivery_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "generation": {
+          "$ref": "#/$defs/positive"
+        },
+        "base": {
+          "$ref": "#/$defs/objectID"
+        },
+        "candidate": {
+          "$ref": "#/$defs/objectID"
+        },
+        "check_target": {
+          "$ref": "#/$defs/objectID"
+        },
+        "source_head": {
+          "$ref": "#/$defs/objectID"
+        },
+        "pr": {
+          "$ref": "#/$defs/positive"
+        },
+        "group_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "group_prs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/positive"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "repository_id",
+        "event",
+        "delivery_id",
+        "generation",
+        "base",
+        "candidate",
+        "check_target"
+      ],
+      "additionalProperties": false
+    },
+    "obligation": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "aeon.ci.obligation.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "job",
+            "go-row",
+            "go-package"
+          ]
+        },
+        "job": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shard": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1
+        },
+        "test": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "input_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "action": {
+          "type": "string",
+          "const": "run"
+        },
+        "state": {
+          "type": "string",
+          "const": "pending"
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "context",
+        "kind",
+        "job",
+        "definition_digest",
+        "input_digest",
+        "fingerprint",
+        "action",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "aeon.ci.plan.v1"
+        },
+        "id": {
+          "$ref": "#/$defs/digest"
+        },
+        "mode": {
+          "type": "string",
+          "const": "shadow"
+        },
+        "authority": {
+          "type": "string",
+          "const": "diagnostic-only"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "base": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "candidate": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "policy": {
+          "$ref": "#/$defs/pin"
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "environment_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "required_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 5
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obligation"
+          },
+          "minItems": 1
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "mode",
+        "authority",
+        "binding",
+        "base",
+        "candidate",
+        "policy",
+        "inventory_digest",
+        "environment_digest",
+        "required_contexts",
+        "obligations",
+        "reasons"
+      ],
+      "additionalProperties": false
+    },
+    "manifest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "test",
+            "non-test"
+          ]
+        },
+        "expected": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "executed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "kind",
+        "expected",
+        "executed",
+        "skipped"
+      ],
+      "additionalProperties": false
+    },
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "aeon.ci.receipt.v1"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "obligation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "environment_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "candidate_commit": {
+          "$ref": "#/$defs/objectID"
+        },
+        "candidate_tree": {
+          "$ref": "#/$defs/objectID"
+        },
+        "policy_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "workflow_commit": {
+          "$ref": "#/$defs/objectID"
+        },
+        "executor_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "run_id": {
+          "$ref": "#/$defs/positive"
+        },
+        "attempt": {
+          "$ref": "#/$defs/positive"
+        },
+        "job_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completed_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed-out"
+          ]
+        },
+        "manifest": {
+          "$ref": "#/$defs/manifest"
+        },
+        "artifact_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "schema",
+        "plan_id",
+        "obligation_id",
+        "fingerprint",
+        "environment_digest",
+        "candidate_commit",
+        "candidate_tree",
+        "policy_digest",
+        "workflow_commit",
+        "executor_digest",
+        "run_id",
+        "attempt",
+        "job_id",
+        "started_at",
+        "completed_at",
+        "result",
+        "manifest",
+        "artifact_digests"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/obligation"
+    },
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ]
+}
