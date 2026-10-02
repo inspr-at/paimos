@@ -2613,7 +2613,9 @@ paths:
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
         Owner diagnostics are additive: errors retain their existing code and error fields
         and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
-        or code_expired). Registration authenticates the computer lifecycle proof before
+        code_expired, draining, or enrollment_unavailable). Draining or removed enrollments
+        refuse new attachment authority, including status-only attachment of a running process.
+        Registration authenticates the computer lifecycle proof before
         reporting version mismatch; later operations authenticate the registered poll key
         and computer principal before reporting a cause. Unauthenticated and foreign callers
         receive generic refusals without attach_refusal. Revoked bearer credentials remain
@@ -9341,7 +9343,7 @@ components:
         error: {type: string}
         attach_refusal:
           type: string
-          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired]
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable]
           description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
