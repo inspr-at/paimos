@@ -279,6 +279,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewSweeper(pool).Run(ctx)
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	go knowledge.NewTagger(pool).Run(ctx)
+	laneScheduler := autopilotlanes.New(pool)
+	go laneScheduler.Run(ctx)
 	statusAuto := statusautopilot.New(pool)
 	go statusAuto.Run(ctx)
 	recurringWork := recurrences.New(pool)
@@ -374,7 +376,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			deliveryvote.New(pool),
 			usagedashboard.New(pool),
 			workorders.New(pool),
-			autopilotlanes.New(pool),
+			laneScheduler,
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),

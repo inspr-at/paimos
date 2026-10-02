@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/lanedispatch"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -113,11 +114,24 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					}
 				}
 				if route.write {
+					if err := lanedispatch.LockTenant(r.Context(), tx, p.TenantID); err != nil {
+						return err
+					}
 					if err := agentpairing.Lock(r.Context(), tx); err != nil {
 						return err
 					}
 					if err := queueLock(r.Context(), tx); err != nil {
 						return err
+					}
+				}
+				if route.write {
+					if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {
+						return err
+					}
+					if p.Kind == tenant.Agent {
+						if err := authz.RequireQueueCoordinatorEntryTx(r.Context(), tx, p); err != nil {
+							return err
+						}
 					}
 				}
 				var err error
@@ -159,7 +173,7 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
  EXISTS(SELECT 1 FROM node_relations r JOIN nodes b ON b.tenant_id=r.tenant_id AND b.id=r.source_node_id WHERE r.target_node_id=n.id AND r.type='blocks' AND b.deleted_at IS NULL)
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL`
 	if lock {
-		q += ` FOR UPDATE OF n`
+		q += ` FOR NO KEY UPDATE OF n`
 	}
 	var t queueTicket
 	var fields []byte
@@ -254,6 +268,11 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
+	}
+	if owned, err := lanedispatch.Owned(ctx, tx, t.ID); err != nil {
+		return nil, err
+	} else if owned {
+		return nil, workorders.Fail(409, "ticket belongs to a lane dispatch")
 	}
 	existing, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM agent_runs WHERE queue_node_id=$1 AND status IN ('queued','starting','running','waiting')`, t.ID))
 	if err == nil {
@@ -410,6 +429,11 @@ func (m *module) queueRemove(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
+	}
+	if owned, err := lanedispatch.Owned(ctx, tx, t.ID); err != nil {
+		return nil, err
+	} else if owned {
+		return nil, workorders.Fail(409, "ticket belongs to a lane dispatch")
 	}
 	var id string
 	err = tx.QueryRow(ctx, `SELECT id::text FROM agent_runs WHERE queue_node_id=$1 AND status IN ('queued','starting','running','waiting')`, t.ID).Scan(&id)

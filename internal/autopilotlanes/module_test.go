@@ -247,7 +247,7 @@ func TestLanePolicyLifecycleAndTrustBoundaries(t *testing.T) {
 	release, _ := f.ticket(t, f.project, "release", map[string]any{})
 	var rel Lane
 	f.call(t, f.owner, "POST", "/api/projects/"+f.project+"/autopilot-lanes", createInput{Name: "Build release", Scope: &Scope{Kind: "release", ReleaseNodeID: &release}, Policy: testPolicy()}, 201, &rel)
-	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+rel.ID+"/resume", actionInput{ExpectedRevision: 1}, 409, nil)
+	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+rel.ID+"/resume", actionInput{ExpectedRevision: 1}, 200, nil)
 	wrongRelease, _ := f.ticket(t, f.otherProject, "release", map[string]any{})
 	f.call(t, f.owner, "PATCH", "/api/autopilot-lanes/"+rel.ID, patchInput{ExpectedRevision: 1, Scope: &Scope{Kind: "release", ReleaseNodeID: &wrongRelease}}, 404, nil)
 	var preview Preview

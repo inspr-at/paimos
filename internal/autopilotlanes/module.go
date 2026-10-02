@@ -36,6 +36,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/autopilot-lanes/{laneId}/preview", m.preview)
 	mux.HandleFunc("GET /api/autopilot-lanes/{laneId}/history", m.history)
 	mux.HandleFunc("POST /api/autopilot-lanes/{laneId}/prepare", m.prepare)
+	mux.HandleFunc("POST /api/autopilot-lanes/{laneId}/schedule", m.schedule)
+	mux.HandleFunc("GET /api/autopilot-dispatches/{dispatchId}", m.getDispatch)
+	mux.HandleFunc("POST /api/autopilot-dispatches/{dispatchId}/preparation", m.submitPreparation)
+	mux.HandleFunc("POST /api/autopilot-dispatches/{dispatchId}/accept", m.acceptPreparation)
 	mux.HandleFunc("POST /api/autopilot-lanes/{laneId}/pause", m.pause)
 	mux.HandleFunc("POST /api/autopilot-lanes/{laneId}/resume", m.resume)
 }
@@ -76,7 +80,7 @@ func principal(w http.ResponseWriter, r *http.Request, person bool) (tenant.Prin
 		httpapi.WriteError(w, 403, "person required")
 		return p, false
 	}
-	for _, key := range []string{"laneId", "projectId"} {
+	for _, key := range []string{"laneId", "projectId", "dispatchId"} {
 		if id := r.PathValue(key); id != "" && !uuid.MatchString(id) {
 			httpapi.WriteError(w, 400, "invalid "+key)
 			return p, false
@@ -173,9 +177,6 @@ func load(ctx context.Context, tx pgx.Tx, id string, write bool) (Lane, error) {
 	return scan(tx.QueryRow(ctx, query, id))
 }
 func executionAuthority(ctx context.Context, tx pgx.Tx, actor tenant.Principal, l Lane) error {
-	if l.Scope.Kind != "queued_tickets" {
-		return fail(409, "release execution awaits the ordered release integration")
-	}
 	for _, id := range []string{actor.ID, l.OwnerPrincipalID} {
 		owner := tenant.Principal{ID: id, TenantID: actor.TenantID, Kind: tenant.Person}
 		for _, key := range []string{"nodes.read", "run.create", "work_orders.write", "work_orders.assign", "runs.write"} {

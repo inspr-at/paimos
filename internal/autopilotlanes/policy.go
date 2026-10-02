@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package autopilotlanes stores person-approved dispatch policy. It neither
-// schedules nor launches work, and never reads Status autopilot settings.
+// Package autopilotlanes stores person-approved dispatch policy and prepares
+// exclusive workflow requests. It never launches work or reads Status autopilot settings.
 package autopilotlanes
 
 import (
