@@ -6,6 +6,111 @@ info:
 servers:
   - url: /api
 paths:
+  /queue:
+    get:
+      operationId: listWorkQueue
+      description: Visible queued ticket runs, ordered by priority then FIFO until a manual move. Targeted Start now lines are separate. Positions are relative to the caller's visible queue. No hard cap; hours are advisory. People need nodes.read; coordinator agents need their live coordinator binding.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: addWorkQueue
+      description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [node_id]
+              properties:
+                node_id: {type: string, format: uuid}
+                agent_principal_id: {type: string, format: uuid}
+                model_profile_id: {type: string, format: uuid}
+                requested_account_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Active run or changed target conflicts}
+        '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/{nodeId}/readiness:
+    get:
+      operationId: workQueueReadiness
+      description: Check a visible ticket without modifying it. Missing estimate returns a conservative complexity-based suggestion, not an invented acceptance criterion.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/{nodeId}/estimate:
+    post:
+      operationId: applyWorkQueueEstimate
+      description: Explicitly apply an estimate to a queueable ticket that has no valid estimate. Preserves existing estimates, stamps actor provenance and audits the change. Same queue management permission as add.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [estimate_hours], properties: {estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}}}
+      responses:
+        '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/{nodeId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: removeWorkQueue
+      description: Idempotently cancel only a queued ticket run and release its capacity holds. Cancel its generated work order and soft-delete that work-order node in the same transaction. The ticket stays Open or Blocked. Same queue permissions as add.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Run has already started}
+  /queue/{nodeId}/move:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: moveWorkQueue
+      description: Move to a one-based position in the visible shared queue. All affected visible entries must be manageable. The full shared partition is renumbered under the tree lock; hidden entries retain their slots and relative order. Targeted entries cannot move into the shared queue. Manual order lasts until Reset; new arrivals append after the full shared partition while manual order is active.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [position], properties: {position: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Targeted entry cannot be reordered}
+  /queue/reset:
+    post:
+      operationId: resetWorkQueue
+      description: Reset the full shared partition to priority then original FIFO. Requires queue management authority for every visible shared ticket; clears hidden ranks internally under the tree lock without exposing hidden entries. Targeted lines are untouched.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /queue/next:
+    post:
+      operationId: nextWorkQueue
+      description: Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim.
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QueueTarget'}
+      responses:
+        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -3604,6 +3709,8 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        The tenant tree lock is acquired before the node row lock. A database deadlock
+        rolls back the update and returns 409 with code retryable_conflict; retry the request.
         Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
       parameters:
         - name: If-Unmodified-Since
@@ -3623,7 +3730,9 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+          description: |
+            A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+            A database deadlock leaves the node unchanged and returns code retryable_conflict; retry the request.
           content:
             application/json:
               schema:
@@ -3641,7 +3750,7 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
+      description: Soft-delete; cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
       security: *auth
       responses:
         '204':
@@ -5586,7 +5695,7 @@ paths:
       description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
       parameters:
         - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped]}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
         - {name: ticket, in: query, schema: {type: string, format: uuid}}
@@ -5938,8 +6047,8 @@ paths:
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
-        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai or cursor and aliases codex → openai, claude → anthropic, grok → xai. pi is ambiguous; pass the model family instead.", schema: {type: string}}
-        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}}
+        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -5973,7 +6082,7 @@ paths:
       description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
       security: *auth
       parameters:
-        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
         - {name: daemon_id, in: query, schema: {type: string, maxLength: 128}}
         - {name: model_profile_id, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -6043,7 +6152,7 @@ paths:
                     additionalProperties: false
                     required: [pool, reserve]
                     properties:
-                      pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                      pool: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
                       reserve: {type: string, enum: ["", auto, fixed, off]}
                       reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: Required with fixed; omitted otherwise.}
       responses:
@@ -6143,7 +6252,7 @@ paths:
       description: Person run.create and nodes.write in the visible ticket's project.
       parameters:
         - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
-        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
       responses:
         '204': {description: Pin removed}
   /agent-accounts/use:
@@ -6152,7 +6261,7 @@ paths:
       summary: Resolve a harness label or account id to door ids for the local agent
       description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
       parameters:
-        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
         - {name: label, in: query, schema: {type: string, maxLength: 128}}
         - {name: account_id, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -6185,7 +6294,7 @@ paths:
       security: [{session: []}]
       parameters:
         - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate]}}
-        - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor]}}
+        - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}}
       responses:
         '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -8166,7 +8275,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: Harness status and heartbeat response contract, schema: {type: string, enum: ['harness-session/2.0']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.0']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -8467,7 +8576,7 @@ components:
         project_id: {type: string, format: uuid}
         ticket_id: {type: string, format: uuid}
         host: {type: string, maxLength: 128}
-        harness: {type: string, enum: [codex, claude, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, cursor, grok, gemini, opencode]}
         process: {$ref: '#/components/schemas/AttachProcess'}
         transcript: {type: string, maxLength: 1024}
         file_id: {type: string, maxLength: 128}
@@ -8742,7 +8851,7 @@ components:
           type: "array"
           items:
             type: "string"
-            enum: ["claude-code", "codex", "grok", "pi", "cursor"]
+            enum: ["claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"]
           uniqueItems: true
         source:
           type: "object"
@@ -8960,7 +9069,7 @@ components:
           enum: ["coordinator", "builder", "reviewer", "operator"]
         harness:
           type: "string"
-          enum: ["claude-code", "codex", "grok", "pi", "cursor"]
+          enum: ["claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"]
         task_id:
           type: "string"
           format: "uuid"
@@ -9459,15 +9568,15 @@ components:
               artifact_url: {type: string, format: uri}
               checksums_url: {type: string, format: uri}
               command: {type: string}
-    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
-    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingRedeemRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "device_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "device_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
     PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions."}
-    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. No local diagnostics or paths. A ready harness may include attention_accounts naming a proper subset of enrolled accounts that still need a fix, so a healthy account cannot erase a sibling's block. attention_count is the full size of that subset. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that still need a fix while this harness stays ready because another of its accounts can work. Only a proper subset is kept, at most 32 entries, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}}}}
+    PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. No local diagnostics or paths. A ready harness may include attention_accounts naming a proper subset of enrolled accounts that still need a fix, so a healthy account cannot erase a sibling's block. attention_count is the full size of that subset. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that still need a fix while this harness stays ready because another of its accounts can work. Only a proper subset is kept, at most 32 entries, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}}}}
     PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
-    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
@@ -11893,7 +12002,7 @@ components:
         base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
         head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
         author_run_id: {type: string, format: uuid}
-        author_family: {type: string, enum: [openai, anthropic, xai, cursor], description: Person-only declaration for a change outside managed runs.}
+        author_family: {type: string, enum: [openai, anthropic, xai, cursor, google, local], description: Person-only declaration for a change outside managed runs.}
         pull_request: {type: integer, minimum: 1}
     ReviewBinding:
       type: object
@@ -12063,7 +12172,7 @@ components:
         brief: {$ref: '#/components/schemas/HarnessBrief'}
         worktree: {$ref: '#/components/schemas/HarnessWorktree'}
         branch: {$ref: '#/components/schemas/HarnessBranch'}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}
         generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
         command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         host: {type: string, minLength: 1, maxLength: 128}
@@ -12356,7 +12465,7 @@ components:
         activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
         controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
         metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok, media, terminal]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}
         generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
         command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
         watch:
@@ -12562,7 +12671,7 @@ components:
         agent_id: {type: string, format: uuid}
         task_id: {type: string, format: uuid}
         role: {type: string, enum: [coordinator, builder, reviewer, operator]}
-        harness: {type: string, enum: [claude-code, codex, grok, pi, cursor]}
+        harness: {type: string, enum: [claude-code, codex, grok, pi, cursor, gemini, opencode]}
     HarnessRulesReceiptWrite:
       type: object
       additionalProperties: false
@@ -12722,7 +12831,7 @@ components:
         principal_id: {type: string, format: uuid, description: Present only with members.read or harness.read at the project}
         name: {type: string, description: The agent principal's name; present with principal_id. Not the session display label.}
         display_label: {type: string, maxLength: 128, description: Public per-session label. Present only with harness.read at the project. Omitted when the session is unlabeled or the caller lacks that permission. members.read does not reveal it.}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}
         phase: {type: string, enum: [starting, working, stopping, yielded, stopped]}
@@ -12762,10 +12871,74 @@ components:
         message_id: {type: string, format: uuid}
         decision: {type: string, enum: [resolved, dismissed]}
         created_at: {type: string, format: date-time}
+    QueueReadiness:
+      type: object
+      required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
+      properties:
+        queueable: {type: boolean}
+        ready: {type: boolean}
+        missing: {type: array, items: {type: string, enum: [status, estimate, criteria, blocker]}}
+        suggested_estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}
+        security_review_required: {type: boolean}
+    QueueTarget:
+      type: object
+      additionalProperties: false
+      properties:
+        agent_principal_id: {type: string, format: uuid}
+        model_profile_id: {type: string, format: uuid}
+        requested_account_id: {type: string, format: uuid}
+    QueuedTicket:
+      type: object
+      required: [position, by, at, run_id, targeted, waiting]
+      properties:
+        position: {type: integer, minimum: 1}
+        by: {type: object, required: [id, name, kind], properties: {id: {type: string, format: uuid}, name: {type: string}, kind: {type: string, enum: [person, agent]}}}
+        at: {type: string, format: date-time}
+        run_id: {type: string, format: uuid}
+        targeted: {type: boolean}
+        target_agent_id: {type: [string, 'null'], format: uuid}
+        expected_agent_id: {type: [string, 'null'], format: uuid}
+        model_profile_id: {type: [string, 'null'], format: uuid}
+        expected_start_at: {type: [string, 'null'], format: date-time}
+        manual_order: {type: boolean}
+        waiting: {type: boolean}
+        wait_reason: {type: string}
+        security_review_required: {type: boolean}
+    WorkQueueEntry:
+      type: object
+      required: [node_id, key, title, state, priority, estimate_hours, queued]
+      properties:
+        node_id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        key: {type: string}
+        title: {type: string}
+        state: {type: string}
+        priority: {type: string}
+        estimate_hours: {type: number, exclusiveMinimum: 0}
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
+        run: {allOf: [{$ref: '#/components/schemas/AgentRun'}], description: Present only with run.read permission or coordinator queue authority.}
+    WorkQueue:
+      type: object
+      required: [items, count, manual_order, capacity]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/WorkQueueEntry'}}
+        count: {type: integer, minimum: 0}
+        manual_order: {type: boolean}
+        capacity:
+          type: object
+          required: [queued_hours, parallel_runs, work_hours, warning]
+          properties:
+            queued_hours: {type: number, minimum: 0}
+            parallel_runs: {type: integer, minimum: 0}
+            work_hours: {type: [number, 'null'], minimum: 0}
+            warning: {type: boolean, description: 'True from approximately four hours, or when no capacity is available'}
     AgentRun:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        queue_node_id: {type: [string, 'null'], format: uuid}
+        queue_target_agent_id: {type: [string, 'null'], format: uuid}
+        queue_routed_at: {type: [string, 'null'], format: date-time}
         read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
@@ -12892,8 +13065,8 @@ components:
       properties:
         slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
         version: {type: string, minLength: 1, maxLength: 64}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
-        family: {type: string, enum: [openai, anthropic, xai, cursor, unknown]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, google, local, unknown]}
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
@@ -12906,6 +13079,7 @@ components:
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
+            effort_level: {type: integer, minimum: 0, maximum: 5, description: "Normalized Gemini fixed thinking-budget bucket from the immutable effort pin; omitted when unknown."}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]
@@ -12921,7 +13095,7 @@ components:
       required: [role, ladder, owner_required, source]
       properties:
         role: {type: string}
-        author_family: {type: string, enum: ['', openai, anthropic, xai, cursor], description: Normalised author family used for exclusion; empty when none was supplied.}
+        author_family: {type: string, enum: ['', openai, anthropic, xai, cursor, google, local], description: Normalised author family used for exclusion; empty when none was supplied.}
         profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
         ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
         command_template: {type: string}
@@ -13048,7 +13222,7 @@ components:
       required: [scope, schedule]
       properties:
         scope: {type: string, enum: [user, pool, account, group]}
-        pool: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        pool: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         account_id: {type: string, format: uuid}
         group_id: {type: string, format: uuid, description: Set when scope is group. The schedule sits between the account and the vendor pool.}
         schedule:
@@ -13154,7 +13328,7 @@ components:
       required: [id, harness, name, exclusive, account_ids, project_ids]
       properties:
         id: {type: string, format: uuid}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         name: {type: string, minLength: 1, maxLength: 80}
         exclusive: {type: boolean}
         account_ids: {type: array, items: {type: string, format: uuid}}
@@ -13163,7 +13337,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         name: {type: string, minLength: 1, maxLength: 80}
         exclusive: {type: boolean}
         account_ids: {type: array, items: {type: string, format: uuid}}
@@ -13174,7 +13348,7 @@ components:
       required: [ticket_id, harness]
       properties:
         ticket_id: {type: string, format: uuid}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         account_id: {type: string, format: uuid}
         group_id: {type: string, format: uuid}
     AccountUse:
@@ -13190,7 +13364,7 @@ components:
             properties:
               account_id: {type: string, format: uuid}
               daemon_id: {type: string}
-              harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+              harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
               label: {type: string}
               host_label: {type: string}
               quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
@@ -13199,7 +13373,7 @@ components:
       required: [account_key, harness, daemon_id, label]
       properties:
         account_key: {type: string, minLength: 1, maxLength: 128}
-        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         label: {type: string, minLength: 1, maxLength: 128}
         max_parallel_runs: {type: integer, minimum: 1}
@@ -14120,6 +14294,7 @@ components:
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
         id:
           type: string
           format: uuid

@@ -26,6 +26,8 @@ func (*ClaudeAdapter) VerificationSupported() bool { return verificationSupporte
 
 func (*PiAdapter) VerificationSupported() bool { return verificationSupported(Pi) }
 
+func (a *ACPAdapter) VerificationSupported() bool { return verificationSupported(a.Name()) }
+
 func verificationSupported(harness string) bool {
 	return agentverification.For(harness, runtime.GOOS, runtime.GOARCH).Supported
 }

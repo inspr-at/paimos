@@ -13,9 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state, parent_id::text, position::text, created_at, updated_at, deleted_at, human_check`
@@ -23,21 +25,22 @@ const nodeReturning = `id::text, key, kind_id::text, title, body, fields, state,
 const nodeCols = `n.id::text, n.key, n.kind_id::text, n.title, n.body, n.fields, n.state, n.parent_id::text, n.position::text, n.created_at, n.updated_at, n.deleted_at, n.human_check`
 
 type nodeJSON struct {
-	HumanCheck *string         `json:"human_check"`
-	Estimate   *estimateView   `json:"estimate,omitempty"`
-	Warnings   []string        `json:"warnings,omitempty"`
-	ID         string          `json:"id"`
-	Key        string          `json:"key"`
-	KindID     string          `json:"kind_id"`
-	Title      string          `json:"title"`
-	Body       string          `json:"body"`
-	Fields     json.RawMessage `json:"fields"`
-	State      string          `json:"state"`
-	ParentID   *string         `json:"parent_id"`
-	Position   string          `json:"position"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	DeletedAt  *time.Time      `json:"deleted_at"`
+	Queued     *workqueue.Queued `json:"queued,omitempty"`
+	HumanCheck *string           `json:"human_check"`
+	Estimate   *estimateView     `json:"estimate,omitempty"`
+	Warnings   []string          `json:"warnings,omitempty"`
+	ID         string            `json:"id"`
+	Key        string            `json:"key"`
+	KindID     string            `json:"kind_id"`
+	Title      string            `json:"title"`
+	Body       string            `json:"body"`
+	Fields     json.RawMessage   `json:"fields"`
+	State      string            `json:"state"`
+	ParentID   *string           `json:"parent_id"`
+	Position   string            `json:"position"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	DeletedAt  *time.Time        `json:"deleted_at"`
 }
 
 type nodeCreate struct {
@@ -193,6 +196,11 @@ func (m *Module) getNode(ctx context.Context, tenantID, id string) (nodeJSON, er
 			return err
 		}
 		node.Estimate = views[id]
+		queued, err := workqueue.Load(ctx, tx, []string{id})
+		if err != nil {
+			return err
+		}
+		node.Queued = queued[id]
 		return nil
 	})
 	return node, err
@@ -360,6 +368,19 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 	}
 	var node nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if value, ok := raw["state"]; ok {
+			state, _ := parsePatchString(value)
+			if workqueue.Terminal(state) {
+				if err := agentpairing.Lock(ctx, tx); err != nil {
+					return err
+				}
+			}
+		}
+		// Match queue writes and delete: tree before any node row lock. Terminal
+		// edits additionally take pairing first to serialize cancellation and claim.
+		if err := lockTree(ctx, tx); err != nil {
+			return err
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -506,6 +527,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
 			}
 		}
+		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
+			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
+				return err
+			}
+		}
 		idPh := add(id)
 		q := fmt.Sprintf(`UPDATE nodes SET %s WHERE id = %s::uuid AND deleted_at IS NULL RETURNING %s`,
 			strings.Join(sets, ", "), idPh, nodeReturning)
@@ -527,12 +553,15 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		node.Estimate = views[id]
 		return nil
 	})
-	return node, err
+	return node, dbErr("update node", err)
 }
 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) (time.Time, error) {
 	var revision time.Time
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -549,6 +578,9 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		}
 		if kind.Slug == "tag" {
 			return badRequest("delete tags through /api/tags/{tagId}")
+		}
+		if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
+			return err
 		}
 		// Like every other write, the delete moves updated_at forward: a
 		// transaction that started before a later update committed must not

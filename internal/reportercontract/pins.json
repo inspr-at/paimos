@@ -700,7 +700,7 @@
   },
   "harness-session": {
     "version": "harness-session/2.0",
-    "sha256": "4b15e1df4ccc6d039df4e80e327104454d72c2a77ba34b704aa2be8c944b03de",
+    "sha256": "56b33c04245c015f6d38211a7dce4668e5a52211315025bc9e1420d14ac0ed82",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1031,6 +1031,8 @@
               "pi",
               "cursor",
               "grok",
+              "gemini",
+              "opencode",
               "media",
               "terminal"
             ],
@@ -1730,6 +1732,8 @@
               "pi",
               "cursor",
               "grok",
+              "gemini",
+              "opencode",
               "media",
               "terminal"
             ],

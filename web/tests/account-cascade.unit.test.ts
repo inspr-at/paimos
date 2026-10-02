@@ -152,7 +152,9 @@ describe('account catalog contract', () => {
     expect(workRoleFor({ fields: { work_role: 'nope' } })).toEqual({ role: 'build', source: 'default' })
     expect(workRoleFor(null)).toEqual({ role: 'build', source: 'default' })
     expect(authorFamilyFor({ fields: { author_family: 'xai' } })).toBe('xai')
-    expect(authorFamilyFor({ fields: { author_family: 'local' } })).toBe('')
+    expect(authorFamilyFor({ fields: { author_family: 'local' } })).toBe('local')
+    expect(authorFamilyFor({ fields: { author_family: 'google' } })).toBe('google')
+    expect(authorFamilyFor({ fields: { author_family: 'opencode' } })).toBe('')
   })
 
   it('offers pi registry model ids and drops a profile that is not a visible choice', () => {

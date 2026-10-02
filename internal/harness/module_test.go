@@ -326,3 +326,38 @@ func TestHarnessPluginConstructor(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHistoricalRegistrationAndHeartbeatWithoutRequestContract(t *testing.T) {
+	f := fixture(t) // All migrations, including the widened CHECKs, have run.
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	call := func(path string, body any, lease string) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("POST", path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+		r.Header.Set("Authorization", "Bearer "+f.key)
+		if lease != "" {
+			r.Header.Set("X-Aeon-Worker-Lease", lease)
+		}
+		if _, present := r.Header["Aeon-Contract"]; present {
+			t.Fatal("historical request unexpectedly declares a contract")
+		}
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		return w
+	}
+	for _, name := range []string{"codex", "claude", "pi", "cursor", "grok"} {
+		t.Run(name, func(t *testing.T) {
+			lease := "historical-lease-0000000000000000000-" + name
+			w := call(base, map[string]any{"agent_principal_id": f.agent.ID, "harness": name, "host": "historical-reporter", "harness_session_ref": "historical-vendor-session-" + name, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"status"}}, "")
+			expect(t, w, http.StatusCreated)
+			id := decode(t, w)["id"].(string)
+			w = call(base+"/"+id+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
+			expect(t, w, http.StatusOK)
+			if got := decode(t, w); got["harness"] != name || got["phase"] != "working" {
+				t.Fatal("historical heartbeat changed:", got)
+			}
+		})
+	}
+}

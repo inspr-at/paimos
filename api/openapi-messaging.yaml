@@ -159,7 +159,7 @@ components:
       properties:
         address: {type: string}
         principal_id: {type: string, format: uuid}
-        adapter: {type: string, enum: [codex, agentd_codex, agentd_claude, agentd_pi, agentd_cursor, grok_bot_routine, claude_resume, claude_channel]}
+        adapter: {type: string, enum: [codex, agentd_codex, agentd_claude, agentd_pi, agentd_cursor, agentd_gemini, agentd_opencode, grok_bot_routine, claude_resume, claude_channel]}
         target_kind: {type: string, enum: [codex_thread, agentd_session, https_webhook, claude_session]}
         target_ref: {type: string, writeOnly: true}
         target_secret: {type: string, writeOnly: true, description: Required only for grok_bot_routine}

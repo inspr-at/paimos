@@ -291,8 +291,9 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1100_aithema_pending_content.sql']);
-  const [entry] = manifest.exceptions;
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
+  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
+  assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
   const runKinds = manifest.exceptions[1];
   assert.equal(runKinds.file, '1066_run_kinds.sql');
@@ -340,7 +341,7 @@ test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review 
 
 });
 
-test('the current tree passes only with the explicit pinned contract exceptions', () => {
+test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -348,6 +349,22 @@ test('the current tree passes only with the explicit pinned contract exceptions'
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1100_aithema_pending_content.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
+});
+
+test('1088 stages every widened check before definition-selected drops', () => {
+  const sql = readFileSync(new URL('../internal/db/migrations/1088_more_harnesses.sql', import.meta.url), 'utf8');
+  const adds = [...sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+CHECK ([\s\S]*?);/g)];
+  assert.equal(adds.length, 10);
+  for (const [, table, constraint, check] of adds) {
+    assert.match(check, /NOT VALID$/);
+    const validate = `ALTER TABLE ${table} VALIDATE CONSTRAINT ${constraint};`;
+    assert.ok(sql.includes(validate), `missing ${validate}`);
+    assert.ok(sql.indexOf(validate) < sql.indexOf('DROP CONSTRAINT'), 'drop before validation');
+  }
+  assert.match(sql, /pg_get_constraintdef/);
+  assert.doesNotMatch(sql, /DROP CONSTRAINT work_order_reviews_check/);
+  assert.match(sql, /reviewer_profile_id IS NULL/);
+  assert.match(sql, /reviewer_family IS NULL/);
 });
