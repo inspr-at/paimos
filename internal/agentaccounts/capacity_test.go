@@ -223,7 +223,8 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 		}
 	}
 	check(admin, 6)
-	check(reader, 5)
+	// Other administrators receive a neutral, explicitly redacted schedule.
+	check(reader, 7)
 	save(admin, "account", "", a.ID, nil, 204)
 	check(admin, 4)
 	save(admin, "pool", "codex", "", nil, 204)
@@ -511,7 +512,6 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"inherit","harness":"codex","daemon_id":"daemon-a","label":"Inherited"}`, 201, &account)
-	ownFixtureAccount(t, admin, &account)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2`, person.ID, runner.ID); err != nil {
 			return err
@@ -572,7 +572,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"expired","harness":"codex","daemon_id":"daemon-a","label":"Expired","max_parallel_runs":3}`, 201, &a)
-	ownFixtureAccount(t, admin, &a)
+	ownFixtureAccount(t, person, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Week = capacity.Preset(7)

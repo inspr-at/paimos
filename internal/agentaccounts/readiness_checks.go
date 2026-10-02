@@ -148,7 +148,7 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 		return c, err
 	}
 	if aliases >= 256 {
-		return c, fail(429, "too many idempotency keys for this pending check; reuse an existing key")
+		return c, &checkGapError{now.Add(CheckGap), now}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_check_keys(tenant_id,account_id,idempotency_key,binding_revision,check_id,actor_principal_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, p.TenantID, id, in.IdempotencyKey, a.LinkRevision, c.ID, p.ID, now); err != nil {
 		return c, err
@@ -158,7 +158,7 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
             SELECT f.tenant_id,$1,f.resource_id,f.window_key,f.wait_id FROM account_readiness_facts f
             JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id
             WHERE m.account_id=$2 AND m.binding_revision=$3 AND f.wait_id IS NOT NULL AND NOT f.early_recovery_used
-            AND (f.stop_kind='money_402' OR (f.stop_kind='unnamed' AND f.denial_reason IN ('','vendor_denied')))
+            AND (f.stop_kind='money_402' OR (f.stop_kind='unnamed' AND f.denial_reason IN ('','vendor_denied') AND (f.used_percent IS NULL OR f.used_percent<100) AND (f.remaining IS NULL OR f.remaining>0) AND f.credit_state<>'exhausted'))
             ORDER BY f.resource_id,f.window_key LIMIT 33`, c.ID, id, a.LinkRevision)
 		if err != nil {
 			return c, err

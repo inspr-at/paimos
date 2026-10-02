@@ -12912,7 +12912,7 @@ components:
       required: [code, run_now_allowed]
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
-        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, unavailable]}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -14636,7 +14636,7 @@ components:
         last_probe_at: {type: [string, 'null'], format: date-time}
         last_probe_ok: {type: [boolean, 'null']}
         available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
-        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models, unavailable]}}
         remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
         default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
         windows:
