@@ -1322,6 +1322,7 @@ Invite acceptance holds the tenant access lock through its binding inserts;
 linking takes that lock before the alias lock (seed 532) and principal rows.
 These access-write fences use `FOR NO KEY UPDATE` so they serialize with each
 other and membership changes while allowing event writers' tenant FK checks.
+The last-owner trigger uses the same fence during binding removal/deactivation.
 Project-role assignment and attachment writes lock the tree (seed 0), then the
 tenant, before reading current grants and resource rows. Attachment request
 bodies are read before these locks; the final transaction checks permission in
