@@ -416,8 +416,8 @@ The proposed approval expiry-warning window is 15 minutes, subject to the phone 
 Notice scans filter project/workspace decision authority before their limit.
 The scheduler must admit every candidate through ClaimTx before its transport
 check: an approval lacking its native scope authority gets a terminal skipped
-claim and returns false, allowing later scans to advance. Final claims take the tenant access fence,
-tree fence and source row lock, then recheck only that source's current project,
+claim and returns false, allowing later scans to advance. Final claims take the tree fence,
+tenant access fence and source row lock, matching project-access mutations, then recheck only that source's current project,
 revision, state and decision authority. Recipient indexes compare native UUIDs.
 Claims persist once per source/revision/recipient across devices and replicas,
 including action requests later represented by their canonical question.

@@ -113,19 +113,15 @@ const claimExistsSQL = `SELECT EXISTS(SELECT 1 FROM desk_notification_claims c
  OR $3='action_request' AND c.kind='question' AND EXISTS(
   SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.source_request_id=$4::uuid AND a.question_id=c.item_id)))`
 
-// ClaimTx is the final admission in the scheduler's claim transaction. Tenant
-// access fence, tree, native source row and current-source authorization precede
+// ClaimTx is the final admission in the scheduler's claim transaction. Tree,
+// tenant access fence, native source row and current-source authorization precede
 // the insert. No later lock or event acquisition belongs in this transaction.
 func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !validID(item.ID) || item.Revision < 1 {
 		return false, nil
 	}
-	// Acquire the tenant fence first (global lock order). LockProjectWrite also
-	// takes the canonical tree fence and retains tenant SHARE through the write.
-	var tenantID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, p.TenantID).Scan(&tenantID); err != nil {
-		return false, err
-	}
+	// Match project-access mutations: canonical tree fence before tenant SHARE.
+	// LockProjectWrite retains both through the final authorization and insert.
 	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
 		return false, err
 	}
