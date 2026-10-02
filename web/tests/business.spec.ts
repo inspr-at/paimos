@@ -2,7 +2,7 @@
 // Business entry and overview: the header link, admin setup, the week and rates.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
+import { addHistoricalPeriod, businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -13,6 +13,17 @@ async function setup(page: Page, options: BusinessMockOptions = {}) {
   return { data, calls }
 }
 const header = (page: Page) => page.getByRole('banner')
+
+test('the overview includes open periods older than a year in its waiting count', async ({ page }) => {
+  const { data } = await setup(page)
+  addHistoricalPeriod(data)
+  await page.goto('/business')
+  await expect(page.getByText('8h 30m logged this week · 2 periods to approve · 3 rates in force')).toBeVisible()
+  const queue = page.getByRole('list', { name: 'Periods waiting for approval' })
+  await expect(queue.getByRole('link')).toHaveCount(2)
+  await expect(queue.getByRole('link').first()).toContainText('16–22 Sep 2024')
+  await expect(queue.getByRole('link').first()).toContainText('6h 15m')
+})
 
 test('the header offers Business once a business plugin is enabled', async ({ page }) => {
   const errors = watchErrors(page)

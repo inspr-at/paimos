@@ -58,33 +58,59 @@ func (m *Module) listPeriods(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		}
 		principal = p.ID
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+periodColumns+` FROM time_periods WHERE ($1::uuid IS NULL OR principal_id=$1) ORDER BY starts_at DESC,id`, nullable(principal))
+	limit, after, since, until, err := listBounds(r)
 	if err != nil {
 		return nil, err
 	}
-	out := []Period{}
+	if since == nil {
+		v := time.Now().UTC().Truncate(24*time.Hour).AddDate(-1, 0, 0)
+		since = &v
+	}
+	// Keep newest-first order. The cursor row supplies the ordering tuple;
+	// the caller's tenant and principal visibility still constrain the page.
+	var cursorAt *time.Time
+	if after != "" {
+		var at time.Time
+		if err := tx.QueryRow(r.Context(), `SELECT starts_at FROM time_periods WHERE id=$1 AND ($2::uuid IS NULL OR principal_id=$2)`, after, nullable(principal)).Scan(&at); err != nil {
+			return nil, fail(400, "invalid period cursor")
+		}
+		cursorAt = &at
+	}
+	rows, err := tx.Query(r.Context(), `SELECT p.id::text,p.principal_id::text,p.starts_at,p.ends_at,p.state,p.revision,
+        a.approved_by_principal_id::text,a.entries_sha256,a.total_seconds,a.event_id
+        FROM time_periods p LEFT JOIN time_period_approvals a ON a.tenant_id=p.tenant_id AND a.period_id=p.id
+        WHERE ($1::uuid IS NULL OR p.principal_id=$1)
+        AND ($2::timestamptz IS NULL OR p.ends_at >= $2) AND ($3::timestamptz IS NULL OR p.starts_at < $3)
+        AND ($4::timestamptz IS NULL OR p.starts_at<$4 OR (p.starts_at=$4 AND p.id>$5::uuid))
+        ORDER BY p.starts_at DESC,p.id LIMIT $6`, nullable(principal), since, until, cursorAt, nullable(after), limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := listPage[Period]{items: []Period{}}
 	for rows.Next() {
-		v, err := scanPeriod(rows)
-		if err != nil {
-			rows.Close()
+		var v Period
+		var who, digest *string
+		var seconds, event *int64
+		if err := rows.Scan(&v.ID, &v.PrincipalID, &v.StartsAt, &v.EndsAt, &v.State, &v.Revision, &who, &digest, &seconds, &event); err != nil {
 			return nil, err
 		}
-		out = append(out, v)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		if out[i].State == "approved" {
-			if err := hydratePeriod(r.Context(), tx, &out[i]); err != nil {
-				return nil, err
+		v.StartsAt, v.EndsAt = utc(v.StartsAt), utc(v.EndsAt)
+		if v.State == "approved" {
+			if who == nil || digest == nil || seconds == nil || event == nil {
+				return nil, fail(500, "approved period has no approval")
 			}
+			v.Approval = &Approval{ApprovedBy: *who, EntriesSHA256: *digest, TotalSeconds: *seconds, EventID: *event}
 		}
+		if len(out.items) == limit {
+			out.next = out.items[limit-1].ID
+			break
+		}
+		out.items = append(out.items, v)
 	}
-	return out, nil
+	return out, rows.Err()
 }
+
 func (m *Module) getPeriod(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	v, err := loadPeriod(r.Context(), tx, r.PathValue("periodId"))
 	if err != nil {

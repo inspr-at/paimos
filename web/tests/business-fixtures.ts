@@ -99,6 +99,19 @@ export function businessData(options: BusinessMockOptions = {}) {
   return { plugins, units, rates, periods, entries, principals, kinds, meanwhile, events, counter: { next: 1 } }
 }
 export type BusinessData = ReturnType<typeof businessData>
+
+// Preserve the recent fixtures while adding an open period outside the server's
+// default one-year window, with entries that actually belong to that period.
+export function addHistoricalPeriod(data: BusinessData) {
+  const period = { ...data.periods[0], id: 'p-me-old', starts_at: local('2024-09-16'), ends_at: local('2024-09-23') }
+  data.periods.push(period)
+  for (const original of data.entries.filter(e => e.period_id === 'p-me-38')) {
+    const shift = (at: string) => at.replace('2026-09-15', '2024-09-17').replace('2026-09-17', '2024-09-19')
+    data.entries.push({ ...original, id: `${original.id}-old`, period_id: period.id, started_at: shift(original.started_at), ended_at: shift(original.ended_at), rate_amount: '90', amount: amountFor('90', original.duration_seconds) })
+  }
+  data.rates.find(r => r.id === 'r-3')!.effective_from = '2024-01-01'
+  return period
+}
 export interface BusinessCall { path: string; method: string; body: unknown; query: URLSearchParams }
 
 // Money fields go out as JSON number tokens.
@@ -175,7 +188,18 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
         return route.fulfill({ status: 201, json: period })
       }
       const who = q.get('principal_id')
-      return route.fulfill({ json: data.periods.filter(p => !who || p.principal_id === who) })
+      const defaultSince = new Date(NOW)
+      defaultSince.setUTCHours(0, 0, 0, 0)
+      defaultSince.setUTCFullYear(defaultSince.getUTCFullYear() - 1)
+      const since = Date.parse(q.get('since') ?? defaultSince.toISOString())
+      const until = q.has('until') ? Date.parse(q.get('until')!) : Infinity
+      const list = data.periods.filter(p => (!who || p.principal_id === who) && Date.parse(p.ends_at) >= since && Date.parse(p.starts_at) < until)
+        .sort((a, b) => b.starts_at.localeCompare(a.starts_at) || a.id.localeCompare(b.id))
+      const after = q.get('after_id')
+      const offset = after ? list.findIndex(p => p.id === after) + 1 : 0
+      const limit = Number(q.get('limit') ?? 100)
+      const items = list.slice(offset, offset + limit)
+      return route.fulfill({ json: items, headers: offset + limit < list.length ? { 'X-Next-Cursor': items.at(-1)!.id } : {} })
     }
     const approve = /^\/api\/time-periods\/([^/]+)\/approve$/.exec(path)
     if (approve) {

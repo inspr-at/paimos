@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
-import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { command, consume } from '../../lib/commands'
 import { dismiss, toast } from '../../lib/toast'
 import { absoluteTime, plural } from '../../lib/work'
@@ -74,8 +74,8 @@ async function loadWeek() {
   if (!principal) return
   weekState.value = 'loading'
   try {
-    const list = await listPeriods(principal)
     const start = weekStart.value.getTime(), end = weekEnd.value.getTime()
+    const list = await listPeriods(principal, { since: new Date(start).toISOString(), until: new Date(end).toISOString() })
     const inWeek = list.filter(p => Date.parse(p.starts_at) < end && Date.parse(p.ends_at) > start)
     const found = (await Promise.all(inWeek.map(p => listEntries({ period_id: p.id })))).flat()
       .filter(e => Date.parse(e.started_at) >= start && Date.parse(e.started_at) < end)
@@ -337,7 +337,7 @@ const showApproved = ref(false)
 async function loadApprovals() {
   approvalsState.value = 'loading'
   try {
-    const list = await listPeriods()
+    const list = await listPeriods(undefined, { since: PERIOD_HISTORY_START })
     const relevant = list.filter(p => p.state === 'open' || showApproved.value)
     const found = await Promise.all(relevant.map(async p => [p.id, await listEntries({ period_id: p.id })] as const))
     periodEntries.value = new Map(found)
@@ -429,7 +429,7 @@ onMounted(async () => {
   void business.loadCostUnits(); void business.loadPrincipals(); void projects.load()
   if (view.value === 'approvals') void loadApprovals()
   else void loadWeek()
-  if (business.admin) void listPeriods().then(list => { allPeriods.value = list }).catch(() => undefined)
+  if (business.admin && view.value !== 'approvals') void listPeriods(undefined, { since: PERIOD_HISTORY_START }).then(list => { allPeriods.value = list }).catch(() => undefined)
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); phoneQuery.removeEventListener('change', onPhone) })
 const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) <= now).length)

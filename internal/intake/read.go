@@ -84,7 +84,7 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, e
 		       content_sha256, idempotency_key, created_at
 		FROM intake_sources
 		WHERE project_node_id = $1::uuid
-		ORDER BY created_at, id`, projectID)
+		ORDER BY created_at, id LIMIT 201`, projectID)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -93,6 +93,9 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, e
 		view, err := scanSource(sourceRows)
 		if err != nil {
 			return snapshot{}, err
+		}
+		if len(out.Sources) == maxSnapshotRows {
+			return snapshot{}, fail(422, "intake history exceeds 200 sources")
 		}
 		out.Sources = append(out.Sources, view)
 	}
@@ -104,7 +107,7 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, e
 		SELECT id::text, source_id::text, ordinal, speaker, speaker_principal_id::text, body, idempotency_key, created_at
 		FROM intake_transcript_turns
 		WHERE project_node_id = $1::uuid
-		ORDER BY source_id, ordinal, id`, projectID)
+		ORDER BY source_id, ordinal, id LIMIT 201`, projectID)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -113,6 +116,9 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, projectID string) (snapshot, e
 		view, err := scanTurn(turnRows)
 		if err != nil {
 			return snapshot{}, err
+		}
+		if len(out.Turns) == maxSnapshotRows {
+			return snapshot{}, fail(422, "intake history exceeds 200 turns")
 		}
 		out.Turns = append(out.Turns, view)
 	}
@@ -250,7 +256,7 @@ func findDraft(ctx context.Context, tx pgx.Tx, projectID, key string) (draftRow,
 }
 
 func findDraftByID(ctx context.Context, tx pgx.Tx, projectID, id string) (draftRow, error) {
-	rows, err := loadDrafts(ctx, tx, projectID, "")
+	rows, err := loadDraftsFiltered(ctx, tx, projectID, "", id, nil)
 	if err != nil {
 		return draftRow{}, err
 	}
@@ -262,7 +268,13 @@ func findDraftByID(ctx context.Context, tx pgx.Tx, projectID, id string) (draftR
 	return draftRow{}, fail(http.StatusNotFound, "draft not found")
 }
 
+const maxSnapshotRows = 200
+
 func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ...string) ([]draftRow, error) {
+	return loadDraftsFiltered(ctx, tx, projectID, key, "", nodeID)
+}
+
+func loadDraftsFiltered(ctx context.Context, tx pgx.Tx, projectID, key, draftID string, nodeID []string) ([]draftRow, error) {
 	q := `
 		SELECT id::text, kind, requirement_kind, target_node_id::text, title, body,
 		       base_event_id, idempotency_key, proposed_at, extensions, document_bytes, requester_principal_id::text,
@@ -277,6 +289,10 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ..
 		q += ` AND idempotency_key = $2`
 		args = append(args, key)
 	}
+	if draftID != "" {
+		args = append(args, draftID)
+		q += " AND id = $" + strconv.Itoa(len(args)) + "::uuid"
+	}
 	if len(nodeID) > 0 {
 		q += ` AND EXISTS (
 			SELECT 1 FROM intake_draft_acceptances a
@@ -289,7 +305,7 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ..
 			  )))`
 		args = append(args, nodeID[0])
 	}
-	q += ` ORDER BY proposed_at DESC, id`
+	q += ` ORDER BY proposed_at DESC, id LIMIT 201`
 	rows, err := tx.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -301,6 +317,9 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ..
 		if err := rows.Scan(&row.ID, &row.Kind, &row.RequirementKind, &row.TargetNodeID, &row.Title, &row.Body, &row.BaseEventID, &row.IdempotencyKey, &row.ProposedAt, &row.Extensions, &row.DocumentBytes, &row.RequesterPrincipalID, &row.SupersedesDraftID, &row.Superseded); err != nil {
 			return nil, err
 		}
+		if len(drafts) == maxSnapshotRows {
+			return nil, fail(http.StatusUnprocessableEntity, "intake history exceeds 200 drafts; narrow the selection")
+		}
 		row.Citations = []citationWrite{}
 		row.Suggestions = []suggestionView{}
 		drafts = append(drafts, row)
@@ -311,15 +330,17 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ..
 	if len(drafts) == 0 {
 		return nil, nil
 	}
+	ids := make([]string, 0, len(drafts))
 	byID := map[string]*draftRow{}
 	for i := range drafts {
 		byID[drafts[i].ID] = &drafts[i]
+		ids = append(ids, drafts[i].ID)
 	}
 	citations, err := tx.Query(ctx, `
 		SELECT draft_id::text, source_id::text, turn_id::text, locator, quote_sha256
 		FROM intake_citations
-		WHERE project_node_id = $1::uuid
-		ORDER BY draft_id, ordinal`, projectID)
+		WHERE project_node_id = $1::uuid AND draft_id = ANY($2::uuid[])
+		ORDER BY draft_id, ordinal`, projectID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -340,8 +361,8 @@ func loadDrafts(ctx context.Context, tx pgx.Tx, projectID, key string, nodeID ..
 	suggestions, err := tx.Query(ctx, `
 		SELECT draft_id::text, title, estimated_hours::text, later, access_change
 		FROM intake_draft_ticket_suggestions
-		WHERE project_node_id = $1::uuid
-		ORDER BY draft_id, ordinal`, projectID)
+		WHERE project_node_id = $1::uuid AND draft_id = ANY($2::uuid[])
+		ORDER BY draft_id, ordinal`, projectID, ids)
 	if err != nil {
 		return nil, err
 	}

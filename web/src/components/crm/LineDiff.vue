@@ -16,12 +16,12 @@ const counts = computed(() => diffCounts(lines.value))
   <figure class="diff">
     <figcaption class="diff-head">
       <span>{{ label }}</span>
-      <span class="counts dot-list"><span>{{ counts.added }} added</span><span>{{ counts.removed }} removed</span></span>
+      <span v-if="!lines.some(line => line.kind === 'summary')" class="counts dot-list"><span>{{ counts.added }} added</span><span>{{ counts.removed }} removed</span></span>
     </figcaption>
     <ol class="lines" :aria-label="label">
       <li v-for="(line, i) in lines" :key="i" class="line" :class="line.kind">
         <span class="gutter" aria-hidden="true"><AppIcon v-if="line.kind === 'add'" name="plus" :size="11" /><AppIcon v-else-if="line.kind === 'remove'" name="minus" :size="11" /></span>
-        <span v-if="line.kind !== 'same'" class="sr-only">{{ line.kind === 'add' ? 'Added:' : 'Removed:' }}</span>
+        <span v-if="line.kind === 'add' || line.kind === 'remove'" class="sr-only">{{ line.kind === 'add' ? 'Added:' : 'Removed:' }}</span>
         <span class="text">{{ line.text || ' ' }}</span>
       </li>
       <li v-if="!lines.length" class="line same"><span class="gutter" /><span class="text empty">Both are empty.</span></li>
