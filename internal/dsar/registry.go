@@ -239,6 +239,9 @@ func adapterQuery(d Domain, domains map[string]Domain, erase bool) string {
 	direct := "coalesce(" + ownership(d, domains, "t", 0) + ",false)"
 	mentions := possibleMentions(d)
 	where := "t.tenant_id=$1::uuid"
+	if d.Table == "tenants" {
+		where = "t.id=$1::uuid"
+	}
 	if d.Table == "identities" {
 		// Global identity directory: the ownership join is the tenant boundary.
 		where = "true"

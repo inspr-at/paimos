@@ -33,7 +33,7 @@ func TestInventoryAndAdapters(t *testing.T) {
 					t.Fatalf("credential column queried: %s.%s", d.Table, c)
 				}
 			}
-			if d.Table != "identities" && !strings.Contains(q, "t.tenant_id=$1::uuid") {
+			if d.Table != "identities" && d.Table != "tenants" && !strings.Contains(q, "t.tenant_id=$1::uuid") {
 				t.Fatalf("unscoped adapter %s", d.Table)
 			}
 		}
