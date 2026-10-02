@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { briefingCost, briefingDue, eventFact, eventNeed, loadBriefingEvents, loadBriefingOutcomes, loadBriefingWindow, sumBriefingUsage, outcomeFact, recommendedStep, validBriefingTime, type BriefingOutcome } from '../src/lib/morningBriefing'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
 
 const now = new Date('2026-10-01T08:00:00Z')
 const outcome: BriefingOutcome = { id: 'out-1', kind: 'ticket_done', ticket_key: 'AEON-454', ticket_node_id: 'ticket', project_id: 'project', session_id: null, rules_version: null, release_title: null, recorded_at: '2026-10-01T07:00:00Z', payload: { to_state: 'done' } }
@@ -112,6 +112,8 @@ it('sums permitted dashboard amounts exactly and deduplicates shared account win
 
 it('retains partial allowance windows and their independent truncation flag', () => {
   const partial = usageDashboard('reported'), visible = usageDashboard('reported')
+  partial.allowance.windows = [usageAllowanceWindow()]
+  visible.allowance = { state: 'visible', windows: [usageAllowanceWindow()] }
   Object.assign(partial.allowance, { state: 'partial', truncated: true })
   partial.truncated = false
   const total = sumBriefingUsage([partial, visible])
@@ -122,6 +124,7 @@ it('retains partial allowance windows and their independent truncation flag', ()
 
 it('marks a mixture of visible and withheld allowance sources partial', () => {
   const visible = usageDashboard('reported'), withheld = usageDashboard('reported')
+  visible.allowance = { state: 'visible', windows: [usageAllowanceWindow()] }
   withheld.allowance = { state: 'withheld', windows: [] }
   expect(sumBriefingUsage([visible, withheld]).allowance.state).toBe('partial')
 })

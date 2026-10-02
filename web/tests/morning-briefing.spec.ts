@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { setupUsage, NOW } from './usage-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { watchErrors } from './work-fixtures'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
 
 const START = new Date(NOW - 24 * 3600_000).toISOString()
 const AT = new Date(NOW - 3600_000).toISOString()
@@ -100,8 +100,8 @@ test('source failure is visible and keeps the person’s earlier cutoff', async 
 test('partial account allowances keep returned windows and report truncation', async ({ page }) => {
   await setup(page)
   const dashboard = usageDashboard('reported')
-  Object.assign(dashboard.allowance, { state: 'partial', truncated: true })
-  await page.route('**/api/usage/dashboard?**', route => route.fulfill({ json: dashboard }))
+  Object.assign(dashboard.allowance, { state: 'partial', windows: [usageAllowanceWindow()], truncated: true })
+  await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
   await page.goto('/briefing')
   await expect(page.getByRole('heading', { name: 'Accounts now' })).toBeVisible()
   await expect(page.getByRole('link', { name: dashboard.allowance.windows[0]!.label, exact: true })).toBeVisible()

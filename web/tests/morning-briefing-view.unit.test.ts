@@ -8,7 +8,7 @@ import * as Briefing from '../src/lib/morningBriefing'
 import * as Scope from '../src/lib/identityScope'
 import * as AgentState from '../src/lib/agentState'
 import { APIError } from '../src/lib/api'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
 
 const START = '2026-09-30T08:00:00.000Z', END = '2026-10-01T08:00:00.000Z'
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
@@ -32,7 +32,7 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
   const can = (permission: string, project?: string) => permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed')
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
   const dashboard = usageDashboard('reported')
-  if (options.partialAllowance) Object.assign(dashboard.allowance, { state: 'partial', truncated: !!options.truncatedAllowance })
+  if (options.partialAllowance) Object.assign(dashboard.allowance, { state: 'partial', windows: [usageAllowanceWindow()], truncated: !!options.truncatedAllowance })
   dashboard.totals.cost_state = 'known'
   dashboard.totals.cost_unknown_rows = 0; dashboard.totals.unreported_sessions = 0; dashboard.totals.provisional_rows = 0
   const json = async (path: string, _signal?: AbortSignal, init?: RequestInit) => {
@@ -164,7 +164,7 @@ it.each([false, true])('shows returned partial allowance windows and coverage (t
   const { root } = await mount({ projectCost: true, partialAllowance: true, truncatedAllowance })
   const text = textOf(root)
   expect(text).toContain('Accounts now')
-  expect(text).toContain(usageDashboard('reported').allowance.windows[0]!.label)
+  expect(text).toContain(usageAllowanceWindow().label)
   expect(text).not.toContain('No account budget windows recorded.')
   expect(text).toContain(truncatedAllowance ? 'Account budget windows are truncated.' : 'Some account budgets are withheld.')
 })

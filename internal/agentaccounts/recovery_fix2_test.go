@@ -3,11 +3,13 @@ package agentaccounts
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestBRecoveryPromotesReservationBeforeDenial(t *testing.T) {
@@ -83,6 +85,61 @@ func TestBManualAllowanceDoesNotSupplyUnknownMeasurement(t *testing.T) {
 		return err
 	})
 	f.route(t, 409)
+}
+
+func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
+	base := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "b-promote-race", base)
+	first, _ := f.route(t, 200)
+	second, _ := f.route(t, 200)
+	resource := bStop(t, f, base, "unnamed")
+	now := base.Add(time.Hour)
+	bAt(t, &f, now, "g2")
+	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
+	config := appPool.Config()
+	config.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	defer func() {
+		select {
+		case <-tracer.release:
+		default:
+			close(tracer.release)
+		}
+	}()
+	mod := fixedClockModule{Module: New(pool), at: now}
+	statuses := make(chan int, 2)
+	claim := func(run string) {
+		code, body := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		if code == 409 && !strings.Contains(string(body), "reserved capacity is not eligible: vendor") {
+			t.Errorf("competing claim failed for another reason: %s", body)
+		}
+		statuses <- code
+	}
+	go claim(first)
+	bBarrier(t, tracer.held)
+	go claim(second)
+	bBarrier(t, tracer.competing)
+	close(tracer.release)
+	counts := map[int]int{}
+	for range 2 {
+		select {
+		case code := <-statuses:
+			counts[code]++
+		case <-time.After(20 * time.Second):
+			t.Fatal("queued claims hung")
+		}
+	}
+	if counts[200] != 1 || counts[409] != 1 {
+		t.Fatalf("queued claim race: %v", counts)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id=ANY($2::uuid[])`, resource, []string{first, second}) != 1 ||
+		scalar(t, f.admin, `SELECT count(*) FROM account_reservations WHERE run_id=ANY($1::uuid[]) AND state='active'`, []string{first, second}) != 2 {
+		t.Fatal("promotion lost queued ledgers or minted duplicate permits")
+	}
 }
 
 func TestBReadinessSharesFactOnlyReserveAdmission(t *testing.T) {
