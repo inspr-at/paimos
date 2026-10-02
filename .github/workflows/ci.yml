@@ -438,6 +438,8 @@ jobs:
         with:
           node-version: "24"
       - run: node scripts/verify-release.mjs
+      - name: Release rehearsal and tag gate regressions
+        run: node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
       - name: Require this release's own frozen product notes
         run: |
           node --test scripts/check-own-release-notes.test.mjs
