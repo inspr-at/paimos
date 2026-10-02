@@ -165,7 +165,7 @@ func loadGraph(ctx context.Context, tx pgx.Tx, tenantID string, q graphQuery) (G
 	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,k.slug,coalesce(n.fields->>'slug',''),n.title,n.state,n.updated_at,n.body
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id `+nearestProject+`
- WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND proj.id=$2::uuid AND k.slug=ANY($3::text[])
+ WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND proj.id=$2::uuid AND k.slug=ANY($3::text[]) AND (k.slug<>'decision' OR coalesce(n.fields->>'slug','')<>'')
  AND (coalesce(cardinality($4::text[]),0)=0 OR
   (CASE n.state WHEN 'cancelled' THEN 'archived' WHEN 'proposed' THEN 'proposed' ELSE 'active' END)=ANY($4::text[]))
  ORDER BY n.updated_at DESC,n.id LIMIT $5`, tenantID, q.project, types, q.statuses, graphNodeLimit+1)

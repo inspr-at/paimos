@@ -260,6 +260,12 @@ jobs:
         run: npm run test:browser-safety
       - working-directory: web
         run: npm run build
+      - name: Install browser for Decision Knowledge regressions
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Decision Knowledge history and presentation regressions
+        working-directory: web
+        run: npx playwright test -c playwright.ui.config.ts tests/knowledge.spec.ts --grep 'Decision entries' --workers=1 --trace=retain-on-failure
       - name: Access scope and role helper tests
         working-directory: web
         run: node --experimental-strip-types --test tests/access.test.ts tests/agent-login.test.ts
@@ -268,7 +274,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Access dialog regressions (hosted only)
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
+        run: npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/key-full-access.spec.ts tests/scope-codes.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure
       - name: Preserve failed access dialog traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

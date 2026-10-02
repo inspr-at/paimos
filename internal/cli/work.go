@@ -526,13 +526,7 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 	}
 	oldStatus := n.State
 	if len(patch) > 0 {
-		if n.UpdatedAt.IsZero() {
-			return usagef("%s has no revision timestamp; nothing was written", n.Key)
-		}
-		if err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)}); err != nil {
-			if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
-				stale.msg += "; nothing was written"
-			}
+		if err := rt.patchNode(n, patch, &n); err != nil {
 			return err
 		}
 	}
@@ -756,7 +750,7 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 	var kept []apiNode
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
-		if !knowledgeSupported(slug) {
+		if !knowledgeSupported(slug) || slug == "decision" && fieldString(fieldMap(n.Fields), "slug") == "" {
 			continue
 		}
 		if want != "" && slug != want {
@@ -894,7 +888,7 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	if len(patch) == 0 {
 		return usagef("nothing to update")
 	}
-	if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, &n); err != nil {
+	if err := rt.patchNode(n, patch, &n); err != nil {
 		return err
 	}
 	view := viewKnowledge(n, kinds)
@@ -903,6 +897,19 @@ func (rt *runtime) updateKnowledge(typ, slug, project, title, body, status, newS
 	}
 	fmt.Fprintf(rt.stdout, "✓ updated %s/%s (%s)\n", view.Type, view.Slug, view.Key)
 	return nil
+}
+
+// patchNode guards every read/merge/write with the exact snapshot revision.
+// Callers that already created other records must report that partial result.
+func (rt *runtime) patchNode(n apiNode, patch map[string]any, out any) error {
+	if n.UpdatedAt.IsZero() {
+		return usagef("%s has no revision timestamp; nothing was written", n.Key)
+	}
+	err := rt.doHeaders(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), patch, out, map[string]string{"If-Unmodified-Since": n.UpdatedAt.Format(time.RFC3339Nano)})
+	if stale, ok := err.(*exitError); ok && strings.Contains(stale.msg, "api 412:") {
+		stale.msg += "; nothing was written by this patch"
+	}
+	return err
 }
 
 func (rt *runtime) searchIssues(query, project, typ string, limit int) error {
