@@ -165,6 +165,11 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			if e != nil {
 				return nil, e
 			}
+			if c.Kind == "tier" {
+				if e = completeTierHistory(ctx, tx, p, s, c); e != nil {
+					return nil, e
+				}
+			}
 			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
 				return nil, e
 			}
@@ -178,6 +183,11 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			c, e = scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='completed',outcome='rejected',reason='setting_catalog_changed',completed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, c.ID))
 			if e != nil {
 				return nil, e
+			}
+			if c.Kind == "tier" {
+				if e = completeTierHistory(ctx, tx, p, s, c); e != nil {
+					return nil, e
+				}
 			}
 			if e = record(ctx, tx, p, s, "control_completed", nil, c); e != nil {
 				return nil, e

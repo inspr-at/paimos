@@ -219,6 +219,11 @@ func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	}
 	for _, c := range expired {
 		m.controlText.take(relayKey(p.TenantID, s.ID, c.ID))
+		if c.Kind == "tier" {
+			if err = completeTierHistory(r.Context(), tx, p, s, c); err != nil {
+				return err
+			}
+		}
 		if err = record(r.Context(), tx, p, s, "control_completed", nil, c); err != nil {
 			return err
 		}

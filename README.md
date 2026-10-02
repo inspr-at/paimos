@@ -1966,8 +1966,9 @@ Pending agent requests are carried by the session list row, so its “asks for�
 hint does not depend on opening the panel. Host controls remain visible in the
 compact layout alongside the tier control. The session list uses cards below
 760 px container width, including a 1280 px viewport with the panel open;
-1366 px and 1440 px panel-open viewports retain the table. AEON-612 adds frozen token-estimate labels (for example `Fast ×2 · $2.40 at
-Default`), independent of the session's current tier. Mixed tiers name each
+1366 px and 1440 px panel-open viewports retain the table.
+
+AEON-612 adds frozen token-estimate labels (for example `Fast ×2 · $2.40 at Default`), independent of the session's current tier. Mixed tiers name each
 frozen multiplier. This is an estimate, never vendor billed cost. The tier API's
 bounded `history` records requests, approvals, declines, confirmations and both
 forms of Undo with the person's identity and agent attribution. Cancelling an

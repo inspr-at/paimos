@@ -275,12 +275,16 @@ let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
 let tierCatchUp = false
 function changed(event?: string) {
-  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled'].includes(event)) tierCatchUp = true
+  if (!event || ['harness.control_completed', 'harness.tier_changed', 'harness.tier_cancelled', 'harness.tier_requested', 'harness.tier_declined', 'harness.usage_reported', 'run.telemetry'].includes(event)) tierCatchUp = true
   if (document.visibilityState === 'hidden' || debounce) return
   // A fixed batch window cannot be starved by a stream of new worker events.
   debounce = setTimeout(() => {
     debounce = undefined
-    if (tierCatchUp) { tierCatchUp = false; serviceTiers.reconcile() }
+    if (tierCatchUp) {
+      tierCatchUp = false; serviceTiers.reconcile()
+      const session = selected.value?.session
+      if (session) void serviceTiers.load(session).catch(error => { serviceTiers.errors[session.id] = error instanceof Error ? error.message : 'Tier evidence unavailable.' })
+    }
     void agents.loadAll()
   }, 400)
 }

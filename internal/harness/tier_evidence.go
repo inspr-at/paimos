@@ -15,6 +15,7 @@ import (
 )
 
 type TierHistory struct {
+	Reason      *string   `json:"reason,omitempty"`
 	ID          int64     `json:"id"`
 	Action      string    `json:"action"`
 	From        *string   `json:"from_tier"`
@@ -63,10 +64,11 @@ func completeTierHistory(ctx context.Context, tx pgx.Tx, p tenant.Principal, s S
 	return err
 }
 func readTierHistory(ctx context.Context, tx pgx.Tx, s Session) ([]TierHistory, bool, error) {
-	rows, err := tx.Query(ctx, `SELECT h.id,h.action,h.from_tier,h.to_tier,h.actor_id::text,p.name,a.name,h.created_at
+	rows, err := tx.Query(ctx, `SELECT h.id,h.action,h.from_tier,h.to_tier,h.actor_id::text,p.name,a.name,h.created_at,c.reason
  FROM harness_tier_history h JOIN principals p ON p.tenant_id=h.tenant_id AND p.id=h.actor_id
  LEFT JOIN harness_tier_requests q ON q.tenant_id=h.tenant_id AND q.id=h.request_id
  LEFT JOIN principals a ON a.tenant_id=q.tenant_id AND a.id=q.requested_by_principal_id
+ LEFT JOIN harness_controls c ON c.tenant_id=h.tenant_id AND c.id=h.control_id
  WHERE h.session_id=$1 ORDER BY h.id DESC LIMIT 51`, s.ID)
 	if err != nil {
 		return nil, false, err
@@ -75,7 +77,7 @@ func readTierHistory(ctx context.Context, tx pgx.Tx, s Session) ([]TierHistory, 
 	out := []TierHistory{}
 	for rows.Next() {
 		var h TierHistory
-		if err = rows.Scan(&h.ID, &h.Action, &h.From, &h.To, &h.ActorID, &h.ActorName, &h.AskedByName, &h.At); err != nil {
+		if err = rows.Scan(&h.ID, &h.Action, &h.From, &h.To, &h.ActorID, &h.ActorName, &h.AskedByName, &h.At, &h.Reason); err != nil {
 			return nil, false, err
 		}
 		out = append(out, h)

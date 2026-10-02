@@ -113,10 +113,10 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <dialog ref="frame" class="tier-pop pop floating" :class="{ sheet: phone }" :style="phone ? undefined : position" aria-label="Change tier" @keydown="keys" @cancel.prevent="close()">
-      <header class="tp-head"><h2>{{ context.ask ? 'Ask for a tier' : 'Service tier' }}</h2><span>{{ context.name }}</span></header>
+      <header class="tp-head"><h2>{{ context.ask ? 'Ask for a tier' : 'Service tier' }}</h2><span>{{ context.name }}</span><small class="tp-est-header">Last run at it</small></header>
       <div class="tp-body">
         <div class="tp-list" role="radiogroup" aria-label="Service tier choices" :aria-busy="loading">
-          <button v-for="(option, i) in options" :key="option.tier" type="button" role="radio" class="tp-option" :data-option="option.tier" :aria-checked="choice === option.tier" :aria-disabled="loading || !offeredTier(option) || waiting" :tabindex="choice === option.tier && offeredTier(option) ? 0 : -1" :aria-label="`${option.name}: ${offeredTier(option) ? `${tierSpeed(option)} · ${tierPrice(option)}` : option.reason}`" @click="choose(option.tier)">
+          <button v-for="(option, i) in options" :key="option.tier" type="button" role="radio" class="tp-option" :data-option="option.tier" :aria-checked="choice === option.tier" :aria-disabled="loading || !offeredTier(option) || waiting" :tabindex="choice === option.tier && offeredTier(option) ? 0 : -1" :aria-label="`${option.name}: ${offeredTier(option) ? `${tierSpeed(option)} · ${tierPrice(option)}; last run ${estimateCostText(tierEstimate(snapshot, option.tier))}, ${estimateTimeText(tierEstimate(snapshot, option.tier))}` : option.reason}`" @click="choose(option.tier)">
             <span class="tp-radio" aria-hidden="true" /><TierGlyph :active="option.tier" :report="report" :count="!offeredTier(option) ? i + 1 : undefined" :faint="!offeredTier(option)" />
             <span class="tp-text"><strong>{{ option.name }}<small v-if="snapshot?.active_tier === option.tier"> now</small></strong><small>{{ loading ? 'Checking vendor report…' : offeredTier(option) ? `${tierSpeed(option)} · ${tierPrice(option)}` : option.reason }}</small></span>
             <span class="tp-estimate" :title="tierEstimate(snapshot, option.tier).basis"><template v-if="offeredTier(option)">{{ estimateCostText(tierEstimate(snapshot, option.tier)) }}<small>{{ estimateTimeText(tierEstimate(snapshot, option.tier)) }}</small></template><template v-else>Not offered</template></span>
@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
             <p v-if="choice === snapshot?.active_tier">This session runs at <b>{{ choice ? TIER_NAME[choice] : 'an unreported tier' }}</b>. Pick another tier above.</p>
             <p v-else>Applies from the <b>{{ report?.applies === 'next_turn' ? 'next turn' : 'next run' }}</b>. The current run keeps its tier and cost.</p>
             <p v-if="offeredTier(selected)"><b>{{ selected.name }} · {{ tierPrice(selected) }} per token.</b> {{ selected.usage_multiplier ? `Capacity consumption: ${selected.usage_multiplier} times standard.` : 'Capacity multiplier not published.' }}</p>
-            <p class="estimate-source" aria-label="Last-run estimate source">{{ tierEstimate(snapshot, choice || 'default').basis }}</p>
+            <p class="estimate-source" aria-label="Last-run estimate source">{{ tierEstimate(snapshot, choice || 'default').basis }}<template v-if="tierEstimate(snapshot, choice || 'default').run_id"> Run {{ tierEstimate(snapshot, choice || 'default').run_id }}.</template></p>
             <p>Same model and effort. Tools, tests and waits keep their time. Price scales cost; speed scales measured model time only.</p>
           </template>
         </div>
@@ -147,5 +147,5 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.tp-estimate{display:grid;gap:2px;text-align:right;font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}.tp-estimate small{font-size:9.5px;color:var(--ink-3)}
+.tp-est-header{flex:none;white-space:nowrap;font-size:9px;color:var(--ink-3);text-transform:uppercase}.tp-head>span{flex:1;min-width:0}.tp-estimate{display:grid;gap:2px;text-align:right;font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}.tp-estimate small{font-size:9.5px;color:var(--ink-3)}
 </style>

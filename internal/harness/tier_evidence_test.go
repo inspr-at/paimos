@@ -124,3 +124,43 @@ func TestTierEstimateHasSourceAndHonestEmptyTime(t *testing.T) {
 	in["model_time_ms"] = 599999
 	expect(t, f.call(f.agent, "POST", path+"/usage", in, lease), 409)
 }
+
+func TestTierHistoryExpiryAndBoundedRead(t *testing.T) {
+	f := fixture(t)
+	path, _, identity := tierSession(t, f)
+	seedSyntheticTierPrice(t, f, path)
+	w := f.call(f.person, "POST", path+"/tier", tierChangeBody(t, f, path, "fast", identity), "")
+	expect(t, w, 201)
+	control := decode(t, w)["pending"].(map[string]any)["id"].(string)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_controls SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, control)
+		return err
+	})
+	got := tierHistoryActions(t, f, path)
+	if !reflect.DeepEqual(got, []string{"rejected", "switch_requested"}) {
+		t.Fatal("expiry history missing", got)
+	}
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	if len(decode(t, w)["history"].([]any)) != 2 {
+		t.Fatal("expiry replay duplicated history")
+	}
+	sessionID := path[strings.LastIndex(path, "/")+1:]
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_tier_history(tenant_id,session_id,action,from_tier,to_tier,actor_id) SELECT $1,$2,'requested','default','fast',$3 FROM generate_series(1,55)`, f.person.TenantID, sessionID, f.agent.ID)
+		return err
+	})
+	w = f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, w, 200)
+	if len(decode(t, w)["history"].([]any)) != 50 || decode(t, w)["history_truncated"] != true {
+		t.Fatal("history unbounded or silent truncation")
+	}
+	f.tx(t, f.foreign, func(tx pgx.Tx) error {
+		var n int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_tier_history`).Scan(&n)
+		if n != 0 {
+			t.Fatal("cross-tenant tier history exposed")
+		}
+		return err
+	})
+}

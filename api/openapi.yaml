@@ -13240,6 +13240,7 @@ components:
         to_tier: {$ref: '#/components/schemas/ServiceTier'}
         actor_id: {type: string, format: uuid}
         actor_name: {type: string}
+        reason: {type: string, description: Completed control reason when available.}
         asked_by_name: {type: [string, 'null']}
         at: {type: string, format: date-time}
     ServiceTierRunCost:
@@ -13264,7 +13265,7 @@ components:
       required: [tier, n, basis, run_id, cost_usd, duration_ms]
       properties:
         tier: {$ref: '#/components/schemas/ServiceTier'}
-        n: {type: integer, minimum: 0, maximum: 1, description: One last completed matching run, never a sample average.}
+        n: {type: integer, minimum: 0, maximum: 1, description: 'One last completed matching run, never a sample average.'}
         basis: {type: string}
         run_id: {type: [string, 'null'], format: uuid}
         cost_usd: {type: [string, 'null']}

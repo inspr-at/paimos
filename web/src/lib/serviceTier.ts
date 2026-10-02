@@ -72,7 +72,7 @@ export function undoTierAllowed(current: TierState, receipt: { session: string; 
 }
 
 export interface TierHistory {
-  id: number; action: 'requested' | 'switch_requested' | 'approved' | 'declined' | 'changed' | 'cancelled' | 'undo_requested' | 'undone' | 'rejected'
+  reason?: string; id: number; action: 'requested' | 'switch_requested' | 'approved' | 'declined' | 'changed' | 'cancelled' | 'undo_requested' | 'undone' | 'rejected'
   from_tier: ServiceTier | null; to_tier: ServiceTier; actor_id: string; actor_name: string; asked_by_name: string | null; at: string
 }
 export interface TierRunCost {
@@ -98,7 +98,7 @@ export function tierHistoryText(h: TierHistory): string {
     case 'cancelled': return `Undo: cancelled switch from ${from} to ${to}${actor} · kept ${from}`
     case 'undo_requested': return `Undo requested: ${from} to ${to}${actor}`
     case 'undone': return `Tier ${from} to ${to}${actor} (undo)`
-    case 'rejected': return `Rejected switch from ${from} to ${to}${actor} · kept ${from}`
+    case 'rejected': return h.reason === 'outcome_unconfirmed' ? `Tier ${from} to ${to}${actor} · outcome unconfirmed` : `Rejected switch from ${from} to ${to}${actor}`
     case 'changed': return `Tier ${from} to ${to}${actor}${asked}`
   }
 }

@@ -285,7 +285,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="run.wait?.code === 'vendor' ? '' : RUN_OUTCOME[run.status].tone">{{ run.wait?.code === 'vendor' ? 'Throttled' : RUN_OUTCOME[run.status].label }}</span></div>
           <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
-          <div class="metric"><span class="metric-label">Cost</span><b>{{ runCost ? tierCostAmount(runCost) : cost(run.cost_micros) }}</b><small v-if="runCost" class="tier-cost">{{ tierRunCostLabel(runCost) }}</small><small v-if="runCost">{{ runCost.provisional ? 'Provisional token estimate' : 'Token estimate' }} · not billed cost</small></div>
+          <div class="metric"><span class="metric-label">Cost</span><b>{{ runCost ? tierCostAmount(runCost) : cost(run.cost_micros) }}</b><small v-if="runCost" class="tier-cost">{{ tierRunCostLabel(runCost) }}</small><small v-if="runCost">{{ runCost.provisional ? 'Provisional token estimate' : 'Token estimate' }} · not billed cost</small><small v-if="runCost && run.cost_micros > 0">Reported cost {{ cost(run.cost_micros) }}</small></div>
         </div>
       </section>
 

@@ -303,7 +303,16 @@ func (m *Module) changeTier(r *http.Request, tx pgx.Tx, p tenant.Principal, in t
 		if err = persistTierReceipt(r.Context(), tx, p, s, in, dg, "tier_cancelled_pending"); err != nil {
 			return nil, err
 		}
-		if err = appendTierHistory(r.Context(), tx, p, s, "cancelled", c.Value, "", in.RequestID, c.ID); err != nil {
+		var asked *string
+		err = tx.QueryRow(r.Context(), `SELECT request_id::text FROM harness_tier_history WHERE session_id=$1 AND control_id=$2 AND action IN ('approved','switch_requested') ORDER BY id DESC LIMIT 1`, s.ID, c.ID).Scan(&asked)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		originalRequest := ""
+		if asked != nil {
+			originalRequest = *asked
+		}
+		if err = appendTierHistory(r.Context(), tx, p, s, "cancelled", c.Value, originalRequest, in.RequestID, c.ID); err != nil {
 			return nil, err
 		}
 		if err = record(r.Context(), tx, p, s, "tier_cancelled", c, map[string]any{"control_id": c.ID}); err != nil {
