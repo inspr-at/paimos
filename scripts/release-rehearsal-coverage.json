@@ -137,6 +137,18 @@
       "step": "Validate inspr-calendar-v2 tag"
     },
     {
+      "counterpart": "TestHoldStateAndLaneFixtures",
+      "mode": "test",
+      "sha256": "13dad1aac8878a8b3a2893986ecabacc2181f3087a3243e10ae22717690781a7",
+      "step": "Record release CI lane"
+    },
+    {
+      "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "mode": "action",
+      "sha256": "95b43e5f79bec834aad5f7e15076ae809b544a7c3467e3585b4f4d85197ed655",
+      "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    },
+    {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
       "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
@@ -189,18 +201,6 @@
       "mode": "step",
       "sha256": "564610ea150063443f15d0d3e70f58638198cd7aa7d841fce7340840f95f0bd3",
       "step": "Verify pushed image attestation"
-    },
-    {
-      "counterpart": "TestHoldStateAndLaneFixtures",
-      "mode": "test",
-      "sha256": "13dad1aac8878a8b3a2893986ecabacc2181f3087a3243e10ae22717690781a7",
-      "step": "Record release CI lane"
-    },
-    {
-      "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-      "mode": "action",
-      "sha256": "95b43e5f79bec834aad5f7e15076ae809b544a7c3467e3585b4f4d85197ed655",
-      "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     },
     {
       "counterpart": "TestPinProposalFollowsVerificationWithoutWaitingForAssets",

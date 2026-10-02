@@ -229,7 +229,7 @@ jobs:
           test "${GO_TIMING}" = success
 
   web:
-    needs: ci-lane
+    needs: [ci-lane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -391,7 +391,7 @@ jobs:
 
   # AEON-515: footer integration checks run remotely; screenshots stay in artifacts.
   footer-ui:
-    needs: ci-lane
+    needs: [ci-lane]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -453,7 +453,7 @@ jobs:
           if-no-files-found: error
 
   status-help-ui:
-    needs: ci-lane
+    needs: [ci-lane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -521,7 +521,7 @@ jobs:
           go run ./scripts/ci-runner-guard
 
   e2e:
-    needs: ci-lane
+    needs: [ci-lane]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -595,7 +595,7 @@ jobs:
         run: node ../scripts/ci-lane.mjs playwright -- npm test -- tests/model-provider.spec.ts --workers=1
 
   status-autopilot-ui:
-    needs: ci-lane
+    needs: [ci-lane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

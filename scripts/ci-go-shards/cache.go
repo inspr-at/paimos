@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/ciproof"
 )
 
 // Reuse only byte-pinned, runtime-free audits from AEON-417. Tests that read
@@ -42,7 +44,7 @@ func auditedCachePackages(root string) map[string]bool {
 		valid := true
 		for _, file := range audit.Files {
 			bytes, err := os.ReadFile(filepath.Join(root, file.Path))
-			if err != nil || "sha256:"+fmt.Sprintf("%x", sha256.Sum256(bytes)) != file.Digest {
+			if err != nil || ciproof.Hash("blob", bytes) != file.Digest {
 				valid = false
 				break
 			}
