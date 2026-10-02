@@ -12,6 +12,7 @@ export function safeActivityText(text: string): boolean {
 }
 
 export function cleanActivityNote(raw: string | null | undefined): string {
-  const text = raw?.replace(/\p{Cc}/gu, '').trim() ?? ''
-  return text && [...text].length <= 120 && safeActivityText(text) ? text : ''
+  const withoutControls = raw?.replace(/\p{Cc}/gu, '') ?? ''
+  const text = withoutControls.trim()
+  return text && [...text].length <= 120 && safeActivityText(withoutControls) ? text : ''
 }

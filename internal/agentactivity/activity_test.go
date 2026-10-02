@@ -121,7 +121,7 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 }
 
 func TestLegacyNotePrivacy(t *testing.T) {
-	for _, text := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live", "Editing id-rsa.go", "abcdefghijklmnopqrstuvwx"} {
+	for _, text := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live", "Editing id-rsa.go", "abcdefghijklmnopqrstuvwx", "\ufeffWorking", "Working\ufeff"} {
 		if clean, valid := CleanNote(text); valid || clean != "" {
 			t.Fatalf("accepted unsafe legacy note %q", text)
 		}
