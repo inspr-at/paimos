@@ -166,6 +166,7 @@ func TestPreparationAutomaticEstimateAndPersonCriteriaGate(t *testing.T) {
 }
 func TestSchedulerOverlapPinWindowsAndRevocation(t *testing.T) {
 	f := setup(t)
+	f.owner = f.person(t, f.project, []string{"nodes.read", "nodes.write", "autopilot.read", "autopilot.manage", "autopilot.pause", "run.create", "work_orders.write", "work_orders.assign", "runs.write"})
 	l := f.activate(t, f.lane(t, f.project))
 	second := f.activate(t, f.lane(t, f.project))
 	f.call(t, f.owner, "PATCH", "/api/autopilot-lanes/"+second.ID, patchInput{ExpectedRevision: second.Revision, Priority: ptr(1)}, 200, &second)
@@ -246,23 +247,7 @@ func TestRacingCoordinatorAndSchedulerOneDispatchBarrier(t *testing.T) {
 	l := f.activate(t, f.lane(t, f.project))
 	id, _ := f.ticket(t, f.project, "ticket", readyFields())
 	f.queue(t, id)
-	agent := tenant.Principal{TenantID: f.owner.TenantID, Kind: tenant.Agent}
-	var profile string
-	f.tx(t, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Runner') RETURNING id::text`, agent.TenantID).Scan(&agent.ID); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'lane-race','1','codex','openai','test-model','high','strong') RETURNING id::text`, agent.TenantID).Scan(&profile); err != nil {
-			return err
-		}
-		var account string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,'lane-race','codex','daemon-race',$2,'Race account',1,clock_timestamp(),true,'generation-race') RETURNING id::text`, agent.TenantID, agent.ID).Scan(&account); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',1000000)`, agent.TenantID, account)
-		return err
-	})
-	dbtest.BindRole(t, f.d, agent.TenantID, agent.ID, "member")
+	agent, profile := f.runner(t)
 	// Prove the coordinator is usable before racing, without touching the ticket.
 	var coordinatable bool
 	f.tx(t, func(tx pgx.Tx) error {
@@ -360,4 +345,98 @@ func TestDependencyCycleTerminatesAndIndependentOrderStays(t *testing.T) {
 	if len(items) != 4 {
 		t.Fatal("cycle lost items")
 	}
+}
+
+func (f *fixture) runner(t *testing.T) (tenant.Principal, string) {
+	t.Helper()
+	agent := tenant.Principal{TenantID: f.owner.TenantID, Kind: tenant.Agent}
+	var profile string
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Runner') RETURNING id::text`, agent.TenantID).Scan(&agent.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'lane-race','1','codex','openai','test-model','high','strong') RETURNING id::text`, agent.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		var account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,'lane-race','codex','daemon-race',$2,'Race account',1,clock_timestamp(),true,'generation-race') RETURNING id::text`, agent.TenantID, agent.ID).Scan(&account); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',1000000)`, agent.TenantID, account)
+		return err
+	})
+	dbtest.BindRole(t, f.d, agent.TenantID, agent.ID, "member")
+	return agent, profile
+}
+
+func TestCoordinatorWinsOwnershipAndDirectLaneRunsStayFenced(t *testing.T) {
+	f := setup(t)
+	l := f.activate(t, f.lane(t, f.project))
+	agent, profile := f.runner(t)
+	first, _ := f.ticket(t, f.project, "ticket", readyFields())
+	f.queue(t, first)
+	var routed struct {
+		Entry *struct {
+			NodeID string `json:"node_id"`
+		} `json:"entry"`
+	}
+	f.call(t, f.owner, "POST", "/api/queue/next", map[string]string{"agent_principal_id": agent.ID, "model_profile_id": profile}, 200, &routed)
+	if routed.Entry == nil || routed.Entry.NodeID != first {
+		t.Fatal("coordinator not eligible in race fixture")
+	}
+	if out := f.scheduleOne(t, l); out.Dispatch != nil {
+		t.Fatalf("scheduler took coordinator work %+v", out)
+	}
+	second, _ := f.ticket(t, f.project, "ticket", readyFields())
+	f.queue(t, second)
+	out := f.scheduleOne(t, l)
+	if out.Dispatch == nil || out.Dispatch.TicketNodeID != second {
+		t.Fatalf("lane request %+v", out)
+	}
+	var order string
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM agent_runs WHERE queue_node_id=$1`, second).Scan(&order)
+	})
+	f.call(t, f.owner, "POST", "/api/work-orders/"+order+"/runs", map[string]string{"agent_principal_id": agent.ID, "model_profile_id": profile}, 409, nil)
+	f.tx(t, func(tx pgx.Tx) error {
+		owned, err := lanedispatch.OwnedOrder(t.Context(), tx, order)
+		if err == nil && !owned {
+			t.Fatal("claim fence lost lane ownership")
+		}
+		return err
+	})
+}
+func TestSchedulerContentFreeHiddenBlockerAndRecovery(t *testing.T) {
+	f := setup(t)
+	f.owner = f.person(t, f.project, []string{"nodes.read", "nodes.write", "autopilot.read", "autopilot.manage", "autopilot.pause", "run.create", "work_orders.write", "work_orders.assign", "runs.write"})
+	l := f.activate(t, f.lane(t, f.project))
+	blocked, _ := f.ticket(t, f.project, "ticket", readyFields())
+	f.queue(t, blocked)
+	hidden, _ := f.ticket(t, f.otherProject, "ticket", readyFields())
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'blocks')`, f.owner.TenantID, hidden, blocked)
+		return err
+	})
+	out := f.scheduleOne(t, l)
+	if out.Dispatch != nil || len(out.Skipped) != 1 || out.Skipped[0].Reason != "unresolved_blocker" {
+		t.Fatalf("hidden blocker %+v", out)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done',updated_at=clock_timestamp() WHERE id=$1`, hidden)
+		return err
+	})
+	tenantAfter, laneAfter := "", ""
+	if err := f.m.sweep(t.Context(), &tenantAfter, &laneAfter); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM lane_dispatches WHERE ticket_node_id=$1`, blocked).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Fatal("recovery did not schedule the owner-visible intake")
+		}
+		return nil
+	})
 }
