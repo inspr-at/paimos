@@ -168,6 +168,52 @@ func TestCandidateLaterTaggedBuild(t *testing.T) {
 	}
 }
 
+func TestCandidateCommittedCorrections(t *testing.T) {
+	dir, opts := candidateRepo(t)
+	pillEN, pillDE := "Reviewed fix", "Geprüfte Korrektur"
+	benefitEN, benefitDE := "Corrected captured benefit.", "Korrigierter erfasster Nutzen."
+	correction := NoteCorrection{Version: candidateVersion, Key: "AEON-427", SHA256: strings.Repeat("a", 64),
+		Reason: "Reviewed repair classification and wording.", Group: GroupFixes,
+		PillEN: &pillEN, PillDE: &pillDE, BenefitEN: &benefitEN, BenefitDE: &benefitDE}
+	layer := map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{correction}}
+	candidateWrite(t, dir, NoteCorrectionsPath, layer)
+	candidateGit(t, dir, "add", NoteCorrectionsPath)
+	candidateGit(t, dir, "commit", "-qm", "review captured notes")
+	first, err := Build(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := first.Releases[0].Notes
+	want := TicketNote{Key: correction.Key, Group: GroupFixes, PillEN: pillEN, PillDE: pillDE, BenefitEN: benefitEN, BenefitDE: benefitDE}
+	if notes.Source != ProductNotesSource || len(notes.PublicItems) != 2 || !reflect.DeepEqual(notes.PublicItems[0], want) ||
+		!reflect.DeepEqual(notes.Corrections, []NoteCorrection{correction}) || notes.SHA256 != correction.SHA256 ||
+		notes.PublicItems[1].PillEN != "Frozen fix" {
+		t.Fatalf("committed correction missing or original provenance lost: %+v", notes)
+	}
+	// A valid, uncommitted correction must not replace the reviewed record.
+	uncommitted := correction
+	uncommitted.Group = GroupFeatures
+	uncommitted.PillEN = new(string)
+	*uncommitted.PillEN = "Uncommitted wording"
+	candidateWrite(t, dir, NoteCorrectionsPath, map[string]any{"schema": "aeon.product-note-corrections.v1", "corrections": []NoteCorrection{uncommitted}})
+	dirty, err := Build(t.Context(), opts)
+	if err != nil || !reflect.DeepEqual(first.Releases[0].Notes, dirty.Releases[0].Notes) {
+		t.Fatalf("candidate followed uncommitted corrections: %v", err)
+	}
+	candidateWrite(t, dir, NoteCorrectionsPath, layer)
+	candidateGit(t, dir, "tag", "-a", "v"+candidateVersion, "-m", "PAIMOS AEON v"+candidateVersion+" · inspr-calendar-v2 · stable · release_sequence 3 · Real tag headline")
+	tagged, err := Build(t.Context(), opts)
+	if err != nil || !reflect.DeepEqual(notes, tagged.Releases[0].Notes) {
+		t.Fatalf("tagging the same commit changed corrected notes: %v", err)
+	}
+	baseline := opts
+	baseline.Candidate = ""
+	normal, err := Build(t.Context(), baseline)
+	if err != nil || !reflect.DeepEqual(tagged, normal) {
+		t.Fatalf("tagged candidate changed the normal manifest: %v", err)
+	}
+}
+
 func TestCandidateAlreadyTaggedWithNewerHistory(t *testing.T) {
 	dir := repo(t)
 	// Rebuilding an older version after another tag was fetched must keep the

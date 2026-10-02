@@ -2,7 +2,41 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestCandidateRunWorkflowNameBounds(t *testing.T) {
+	for _, test := range []struct {
+		name, workflow string
+		valid          bool
+	}{
+		{"255 bytes", strings.Repeat("a", 255), true},
+		{"256 bytes", strings.Repeat("a", 256), false},
+		{"255 UTF-8 bytes", strings.Repeat("é", 127) + "a", true},
+		{"256 UTF-8 bytes", strings.Repeat("é", 128), false},
+		{"newline", "Release\nrehearsal", false},
+		{"tab", "Release\trehearsal", false},
+		{"null", "Release\x00rehearsal", false},
+		{"delete", "Release\x7frehearsal", false},
+		{"Unicode control", "Release\u0085rehearsal", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := map[string]string{"GITHUB_RUN_ID": "42", "GITHUB_WORKFLOW": test.workflow}
+			run := candidateRun("inspr-at/paimos", func(key string) string { return values[key] })
+			if !test.valid {
+				if run != nil {
+					t.Fatal("invalid workflow name must leave CI pending")
+				}
+				return
+			}
+			if run == nil || run.Name != test.workflow || run.Status != "in_progress" || run.Conclusion != "" {
+				t.Fatalf("valid workflow identity lost: %+v", run)
+			}
+		})
+	}
+}
 
 func TestCandidateRunIsActualAndUnfinished(t *testing.T) {
 	values := map[string]string{"GITHUB_RUN_ID": "42", "GITHUB_WORKFLOW": "Release rehearsal"}
