@@ -99,6 +99,8 @@ class CoverageTests(unittest.TestCase):
     def test_original_coverage_gaps_are_owned(self):
         config = load(HERE / 'slices.json')
         expected = {'deploy/compose/compose.yaml': 'S7', 'embed.go': 'S1',
+                    'internal/accountprivacy/privacy.go': 'S1',
+                    'internal/accountprivacy/privacy_test.go': 'S1',
                     'web/embed.go': 'S9', 'web/vite.config.ts': 'S9',
                     'web/tsconfig.app.json': 'S9', 'web/e2e/smoke.spec.ts': 'S9',
                     'web/src/views/Test.vue': 'S8', 'web/src/lib/test.ts': 'S9'}
