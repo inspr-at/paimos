@@ -17,7 +17,7 @@ func (rt *runtime) cmdMCP() *Command {
 	return &Command{
 		Name:  "mcp",
 		Short: "MCP server over stdio",
-		Long:  "Exposes whoami and the issue, knowledge and search tools. Unimplemented tools report that they arrive in R1.",
+		Long:  "Exposes whoami, ask, ask_status and the issue, knowledge and search tools. Unimplemented tools report that they arrive in R1.",
 		Use:   "mcp",
 		run: func(args []string) error {
 			ctx, stop := signalContext()
@@ -33,6 +33,8 @@ func (rt *runtime) mcpServer() *mcp.Server {
 		Name:        "whoami",
 		Description: "Return the acting principal, tenant and identity (GET /api/me).",
 	}, rt.toolWhoami)
+	mcp.AddTool(s, &mcp.Tool{Name: "ask", Description: "Leave a durable question for a person; return immediately with ID, state and destination. Same scoped contract as HTTP and CLI; request_id is required for retries."}, rt.toolAsk)
+	mcp.AddTool(s, &mcp.Tool{Name: "ask_status", Description: "Read your authorized question, answer revision and delivery state without waiting."}, rt.toolAskStatus)
 	addR1Tool(s, "issue_list", "List issues.", issueListArgs{})
 	addR1Tool(s, "issue_get", "Fetch one issue by key.", issueRefArgs{})
 	addR1Tool(s, "issue_create", "Create an issue.", issueCreateArgs{})

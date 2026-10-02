@@ -213,6 +213,8 @@ jobs:
         run: node --test scripts/docker-web-inputs.test.mjs
       - working-directory: web
         run: npm ci
+      - name: Install shells used by command round-trip unit tests
+        run: sudo apt-get update && sudo apt-get install -y fish zsh
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
@@ -251,6 +253,11 @@ jobs:
           name: aeon-488-release-list-comparison
           path: ${{ runner.temp }}/aeon-release-list-shots
           if-no-files-found: error
+      - working-directory: web
+        run: npm run test:unit
+      - name: Browser runner safety (no browsers)
+        working-directory: web
+        run: npm run test:browser-safety
       - working-directory: web
         run: npm run build
       - name: Access scope and role helper tests
@@ -322,12 +329,19 @@ jobs:
       - name: Install browser for session linking regressions
         working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Controls stay put and affected dialog regressions (AEON-541)
+        working-directory: web
+        run: >-
+          npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure
+          tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts
+          tests/accounts-computers.spec.ts tests/agents-top.spec.ts
+          tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts
       - name: Session linking, approval and security regressions
         working-directory: web
         env:
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
           ATTACH_SHOTS: ${{ runner.temp }}/aeon-attach-shots
-        run: npx playwright test -c playwright.ui.config.ts tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
+        run: npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2
       - name: Preserve account linking screenshots and failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -508,7 +522,11 @@ jobs:
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Measure Chromium shell cleanup on success, failure and interruption
+        env:
+          AEON_BROWSER_LIFECYCLE: '1'
+        run: node --test --test-concurrency=1 scripts/playwright-safe.test.mjs
       - name: Start server and run smoke
         run: |
           set -euo pipefail
@@ -530,7 +548,7 @@ jobs:
           npm run e2e --prefix web
       - name: Test workspace model provider controls
         working-directory: web
-        run: npx playwright test -c playwright.ui.config.ts tests/model-provider.spec.ts --workers=1
+        run: npm test -- tests/model-provider.spec.ts --workers=1
 
   status-autopilot-ui:
     runs-on: ubuntu-latest

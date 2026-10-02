@@ -98,9 +98,9 @@ defineExpose({ open, close })
 </template>
 
 <style scoped>
-.filter-sheet { width: 100vw; max-width: none; height: auto; max-height: 88dvh; margin: auto 0 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.filter-sheet { width: 100vw; max-width: none; height: 100dvh; max-height: 100dvh; margin: auto 0 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .filter-sheet::backdrop { background: var(--scrim); }
-.sheet-card { display: flex; flex-direction: column; max-height: 88dvh; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35); }
+.sheet-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35); }
 .grabber { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 999px; background: var(--line-2); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 20px; }
 h2 { font-size: 19px; }
@@ -118,7 +118,7 @@ header .btn { height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }
 .chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }
 .chip-grid.presets { margin-top: 8px; }
-.choice { height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 14px; }
+.choice { height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 14px; font-weight: 600; }
 .choice[aria-checked="true"], .choice[aria-pressed="true"] { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
 .choice:focus-visible { box-shadow: var(--focus-ring); }
 footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }

@@ -241,6 +241,25 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+The ordinary activity tests check exact pagination through 240 same-ticket
+imported history snapshots and 30 Markdown comments alongside 27,422 unrelated
+imported events, plus the node index definition. They impose no latency budget.
+For a controlled performance check, use an idle dedicated test runner with local
+Postgres and run without the race detector:
+
+```sh
+AEON_TEST_DATABASE_URL="postgres://aeon:aeon@127.0.0.1:55432/aeon?sslmode=disable" \
+AEON_ACTIVITY_IMPORT_SCALE_PROBE=1 \
+go test -count=1 -run '^TestTimelineAtImportScaleLatency$' -v ./internal/activity
+```
+
+This opt-in probe uses the same synthetic fixture, excludes setup, warms up five
+first-page requests, and samples 30 sequential requests with a page size of 20.
+It measures the handler and JSON decoding; the nearest-rank p95 must be below
+100 ms. Median and maximum are logged for diagnosis. It does not measure full
+history traversal or guarantee production latency. Shared or loaded runners
+are unsuitable for interpreting this budget.
+
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
 `go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
@@ -344,6 +363,14 @@ Developer** (`/settings/developer#flow-controls`). This per-person, per-workspac
 preference reveals the footer flow pill, Journey tab, stages and release walker;
 it does not grant action permissions. Journey bookmarks explain the opt-in while
 it is off. Turning it off removes the flow UI again.
+
+Reserved, never-published versions are hidden in the release history by default.
+**Show reserved versions** under **Settings → Developer**
+(`/settings/developer#reserved-versions`) enables them for that person and
+workspace, including comparison choices and previous/next navigation. Statistics
+and result counts always include reservations; the footer's **N new** count
+includes only visible versions. A direct link still opens a hidden reservation
+with a quiet explanation of the setting.
 
 If a standing candidate or deployment gate expires or is revoked before
 deployment finishes, Journey offers renewal on the Deploy stage. An agent
@@ -1000,7 +1027,12 @@ native binding, give `harness run-heartbeat` that child's `--source-session UUID
 manual registration can use the child's native ID as its private session ref.
 Explicit vendor references remain unique among active generations per tenant and
 agent across all harnesses. Registration conflicts name the conflicting field
-without returning private values.
+without returning private values. Vendor binding conflicts also append
+`(sha256:<16 hex characters>)`, a fingerprint of the supplied reference using
+the first eight bytes of `SHA-256("aeon.harness.ref\0" + reference)`. The same
+reference has the same fingerprint on insertion and replay; the reference
+itself and worker lease remain private. Concurrent children use separate
+`--harness-session-file` and `--worker-lease-file` files.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**
@@ -1180,12 +1212,22 @@ token values in tenant configuration, API requests, logs or this repository.
 
 The dedicated `/api/rules` API stores layers, sets, rules and immutable version
 snapshots as nodes. Generic node/event APIs cannot read or mutate these resources.
+Single, batch and restored rule publications reject credential-shaped text in
+snapshot fields and publication notes with a generic `422 credential_text`.
+The detector is shared with knowledge learnings, whose existing explicit
+false-positive confirmation policy is unchanged.
 Git-backed doctrine rules (AEON-319) have **Propose change** when the server's
 GitHub App is enabled for the workspace. The editor creates a proposal branch
 and PR in the rule's owning public/private repo, changing its source and git
 TL;DR sidecar together. Public proposals run the `inspr-modules` leak patterns
 against only the changed rule, its TL;DR entry and PR explanation before any
-GitHub call or token mint. Comparison removes every Unicode default-ignorable
+GitHub call or token mint. Both public and private proposals also use the shared
+credential detector (provider/cloud keys, private keys, password assignments,
+Markdown labels, authorization values and URLs with passwords). It checks the
+edited fields and complete outgoing blobs and paths before GitHub receives
+anything; refusals never echo matched values. Raw and case-preserving Unicode
+compatibility checks retain token shapes alongside the existing skeleton check.
+Comparison removes every Unicode default-ignorable
 character, applies NFKD, drops combining marks, folds case and uses a vendored
 Unicode 17.0.0 UTS #39 skeleton. Named Latin small capitals are generated from
 UnicodeData as well; ambiguous compatibility/visual forms fail closed. The
@@ -1223,9 +1265,13 @@ form admits superscripts, fractions and the information symbol while other
 scripts/digits stay refused. Unchanged file content is excluded.
 
 Regenerate the pinned Unicode table with
-`python3 internal/rules/doctrine/unicodegen/generate.py`, then `gofmt` the output.
+`python3 internal/unicodeguard/unicodegen/generate.py`, then `gofmt` the output.
 The generator verifies immutable input digests; builds and runtime are offline.
 Credential-shaped text is refused for either repository, including private.
+The shared publication detector checks raw text, compatibility forms without
+format controls, and case-preserving confusable forms from the same pinned table.
+Rule snapshots (single, batch and restore) use these checks too. Credential
+range offsets for knowledge confirmation still refer to the original text.
 Git stays authoritative; the database holds request digests, PR references and
 audit metadata, never draft prose or credentials. Keep the same request UUID
 and input when retrying a lost response. Short transactions authorize and reserve
@@ -1336,6 +1382,10 @@ out-of-range totals return the stable `400 invalid_budget` error. Lowering a
 budget below published rules still fails with 422. The editor estimates tokens
 at full budget (bytes ÷ 4), adds nonblocking guidance above 64 KB and 128 KB,
 and offers a collapsible English/German Tip for keeping the kernel small.
+Budget fields and save/cancel controls precede expandable guidance, so warnings,
+validation messages and client details grow downward without moving them.
+Use ⌘↵ on macOS or Ctrl+↵ elsewhere to save from a field; Escape leaves the
+field first, then cancels editing on the next press. Browser shortcuts stay native.
 
 CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
 on registration and every heartbeat. The transport ceiling is 512,000 bytes,
@@ -1532,6 +1582,16 @@ user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
 
+Avatar uploads accept PNG, JPEG or WebP up to 8 MiB, 4,194,304 pixels and
+4096 pixels per side, with a square crop up to 2048 pixels. Attachment images
+accept up to 16,777,216 pixels and 8192 pixels per side, in addition to the
+configured file byte limit (50 MiB by default). Dimensions and avatar crops
+are checked before pixel decoding. Both paths share a 256 MiB budget for
+estimated live image work across tenants; queued work observes request
+cancellation. This is an image-processing budget, not a cap on total server
+memory. Avatar orientation and cropping use source views, and generated PNGs
+are stored without decoding them again.
+
 Settings → Workspace → Brand accepts static SVG logos and serves only the
 sanitized drawing. Non-drawing attributes (`role`, `aria-*`, `data-*`, `class`,
 `focusable`, `xml:space`, `enable-background`) and known editor metadata are
@@ -1609,11 +1669,89 @@ When Connect is disabled, its reason appears beside the button.
 ```sh
 cd web
 npm run test:unit
-npx playwright install chromium
-npm test
+npm run test:browser-safety # tiny Node process fixtures; no browser locally
+# Full UI suites: prefer CI; sharded UI jobs are tracked in AEON-410 (PR #29).
+# Prepared mbp2606 entry point (refuses until OPS-247 bootstrap is approved):
+AEON_REMOTE_CONTROL_DIR=/path/to/coordinator/aeon npm run test:remote
+# Locally, only one targeted file, one worker, when there is a technical reason:
+npm test -- tests/authz.spec.ts --workers=1
 ```
 
-The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
+`just ui-remote` is the same remote entry point from the repository root. It
+currently refuses with exit 3 before SSH or dependency installation: OPS-247
+owns the approved browser bootstrap and shared heavy-job launcher. Use hosted
+draft PR CI while that work is pending. No environment flag enables the lane;
+the coordinator must confirm the launcher contract and review a follow-up change
+to enable it. No browsers or Playwright were installed on mbp2606 for AEON-508.
+
+The prepared runner accepts extra arguments to select files or reporters. Set
+`AEON_REMOTE_CONTROL_DIR` to the existing
+coordinator directory containing `remote-test.sh` and its OPS hold controls. The
+runner respects holds and capture reservations, refuses an active builder pool,
+Mailina's console session, a non-ci console idle less than ten minutes, unknown
+presence/load, load above 18, or any existing heavy-run reservation. It reserves
+one remote browser lane before setup and checks presence/capacity again. Refusal
+or unreachability returns exit 3 and never starts a local suite. It streams only
+committed HEAD through `git archive` (no extra Git push), runs at one worker, and
+copies logs and test artifacts to `web/test-results/remote/<run>/`. The remote
+checkout and artifacts remain for inspection; no other worker's state is cleaned.
+After the gate is enabled, a missing pinned headless shell still refuses the run
+rather than installing one. When the approved shared lane launcher is available,
+`AEON_HEAVY_JOB_LANE=/absolute/launcher` wraps the job using `browser -- COMMAND ARGS`;
+the coordinator must confirm that adapter contract before enabling it.
+
+All three Playwright configs default to one worker locally; `PW_WORKERS` is an
+explicit positive-integer override. Local CLI `--workers` / `-j` values are
+ignored unless `PW_WORKERS` is set. Only the UI config opts into test-level
+parallelism in CI; smoke and performance keep their serial test behavior.
+CI's worker/shard budget remains owned by CI (AEON-410). Local UI runs use
+one project and Playwright's bundled [Chromium headless shell](https://playwright.dev/docs/browsers#chromium-headless-shell)
+with GPU disabled. Smoke and performance runs use the same browser policy.
+
+Use `npm test`, `npm run e2e`, or `npm run audit:ui` to keep the shared per-user
+host lock and process supervisor active, including across worktrees. Direct local
+`npx playwright test` is refused by global setup before browsers start. A second
+suite prints the lock path and owner PID and refuses to start. An interrupted or
+failed run terminates only its own process groups, checks that they are empty, and
+then releases the lock. `AEON_PW_PROCESSES` logs before/peak/after browser counts
+and wall time. A Node preload records detached browser groups when they spawn,
+preserving Playwright's normal browser shutdown behavior. The lock descriptor
+stays open throughout the run. Root and detached launches retry transient process-table
+misses; a live launch whose identity cannot be verified has its process group killed
+without appending an incomplete record. The root preload verifies its identity before
+executing suite code; an already-exited root keeps its original exit code.
+After forced supervisor termination (SIGKILL),
+the next run recovers a dead owner's lock under an exclusive recovery claim:
+it signals only journalled groups with matching process start identities,
+verifies that they have exited, and removes that owner's journal and lock before
+starting. Live owners and missing identities/journals refuse recovery. Reused
+group PIDs are never signalled and do not retain the lock after verified siblings
+are reaped. Unverified orphan groups and malformed journal rows retain the lock,
+but do not prevent verified sibling groups from being reaped.
+Metrics use stderr so JSON reporter stdout remains parseable. Never kill other
+workers' or desktop browsers.
+Recovery handles SIGINT, SIGTERM and SIGHUP before acquiring its claim, finishes
+verified cleanup and exits without starting a new suite. If the reaper is killed
+with SIGKILL, the next starter reclaims its `.guard` only after proving that the
+reaper PID is gone or its start identity has changed. A matching live reaper or
+an unknown identity still refuses recovery and prints the exact guard path.
+Claims are atomically published as nonempty directories containing a unique
+owner record, so competing reapers cannot remove a new owner's claim. Stale
+file-based claims from earlier versions are also recognized. Invalid claims and
+journals remain for operator inspection.
+
+When AEON-410's runner from PR #29 is integrated, use `npm run test:ui-shards --
+--shard=1/8` (or `node scripts/playwright-ui-shards-safe.mjs --shard=1/8` from
+the root) in place of calling `playwright-ui-shards.mjs` directly. This wrapper
+supervises the whole existing planner, JSON listing, selection verification and
+shard execution, without duplicating its sharding or compiled graph. It sets
+`AEON_PW_SHARD=1` and `PW_WORKERS=1`; keep `workers: 1` and
+`fullyParallel: false` **after** the policy spread in the merged UI config.
+The wrapper refuses before acquiring a lock when that runner is absent.
+
+The Playwright UI suite starts Vite on a stable port derived from its worktree
+path; `PLAYWRIGHT_PORT` overrides it. Set `PLAYWRIGHT_REUSE=1` only for a dev server
+already running from this same worktree. It intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
@@ -2221,3 +2359,36 @@ kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
 rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
+
+Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
+--option '["Title","Description","Answer"]' "Question"` stores a bounded,
+project-scoped question and returns immediately. Add `--ticket KEY`,
+`--context-file PATH`, `--recommend 1 --why "Reason"`, `--meanwhile parked`,
+`--meanwhile-text "Other work"`, `--keep once` or `--anyway "New evidence"`
+as needed. Retain the printed `--request-id UUID` and exact input for retries;
+`aeon ask status UUID` reads the durable question after the original session ends.
+`--session UUID` is a verified public harness generation, separate from the
+CLI's global attribution `--session-id`. Named project/ticket lookup uses the
+existing node read permissions; UUID addressing needs only the question scopes.
+The MCP `ask` tool accepts `{project, ticket?, input}` with the same typed HTTP
+input and mandatory request ID; `ask_status` accepts `{question_id}`.
+
+The additive API is documented in `api/openapi.yaml`: project question create/list,
+question get/status/person decision and a permission-filtered `/decision-desk`
+question projection. `questions.ask` and `questions.read` are explicit agent key
+scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
+three, viewer receives read, guest/customer receive none. Existing keys gain no
+new scopes. Agents read only questions they asked, with only their memberships.
+Generic node/knowledge CRUD cannot modify question/decision authority.
+
+Questions and immutable answer revisions use protected nodes plus tenant/project
+projections. Each asker retains input, principal, exact original session, source
+request, reply-root UUID and comment destination (ticket, or question node).
+The reply root is a reserved correlation identity, not yet a public inbox message:
+P3 must bind the answering person and materialize the inbox counterpart before
+using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
+P1 person answers support Once and record revision-bound pending inbox/comment/
+outcome effects with a database-clock ten-second deadline. They do not dispatch
+messages or claim successful delivery. Always/Requirement/Doctrine publication,
+verified handover sources and post-dispatch corrections require the later adapters;
+unsupported requests fail explicitly. Suggestions for all four outcomes are stored.

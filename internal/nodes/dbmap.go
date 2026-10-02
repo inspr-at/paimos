@@ -22,6 +22,11 @@ func mapDB(err error) *httpError {
 		return nil
 	}
 	switch pgErr.Code {
+	case "42501":
+		if pgErr.Message == "decision desk nodes require the question service" {
+			return &httpError{status: http.StatusForbidden, msg: "use the Decision Desk question API"}
+		}
+		return nil
 	case "40P01":
 		return conflictCoded("concurrent node update; retry request", "retryable_conflict")
 	case "23505":

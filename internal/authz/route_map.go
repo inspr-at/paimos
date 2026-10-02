@@ -34,6 +34,12 @@ var RoutePermissions = map[string]string{
 	"GET /api/phone-approvals/{kind}/{requestId}":                   "profile.read",
 	"POST /api/phone-approvals/{kind}/{requestId}/options":          "profile.write",
 	"POST /api/phone-approvals/{kind}/{requestId}/decision":         "profile.write",
+	"POST /api/projects/{projectId}/questions":                      "questions.ask",
+	"GET /api/projects/{projectId}/questions":                       "questions.read",
+	"GET /api/questions/{questionId}":                               "questions.read",
+	"GET /api/questions/{questionId}/status":                        "questions.read",
+	"POST /api/questions/{questionId}/decision":                     "questions.decide",
+	"GET /api/decision-desk":                                        "questions.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",

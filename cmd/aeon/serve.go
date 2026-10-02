@@ -68,6 +68,7 @@ import (
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
+	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -358,6 +359,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
 			phoneMod,
+			questions.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
 			pairingMod,
