@@ -181,20 +181,23 @@ it('a refresh after invalidate reads again instead of joining the dropped read',
   expect(read.data.value).toBe(2)
 })
 
-it('badge count uses canonical totals and drops a pre-write projection', async () => {
+it('badge counts the current panel while the future desk adapter drops stale reads', async () => {
   const { agents } = await writeDuringReads(async ({ agents }) => {
     server.desk = { ...server.desk, counts: { open: 6, held: 1, chores: 3 } }
     await agents.afterWrite()
   })
   expect(agents.pending).toHaveLength(0)
-  expect(agents.needsCount).toBe(6)
+  expect(agents.needsCount).toBe(0)
+  expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
+  expect(agents.deskProjection?.counts.open).toBe(6)
   expect(agents.deskProjection?.counts.chores).toBe(3)
 })
 
 it.each([['access revocation', clearPermissions], ['person change', resetPositions]])('%s clears desk counts and prevents an old read reviving them', async (_label, reset) => {
   const agents = useAgents()
   await agents.loadNeeds(true)
-  expect(agents.needsCount).toBe(8)
+  expect(agents.deskProjection?.counts.open).toBe(8)
+  expect(agents.needsCount).toBe(0)
   hold = true
   const old = agents.loadNeeds(true)
   expect(held).toHaveLength(1)
@@ -207,5 +210,6 @@ it.each([['access revocation', clearPermissions], ['person change', resetPositio
   hold = false
   server.desk = { ...server.desk, counts: { open: 2, held: 0, chores: 0 } }
   await agents.loadNeeds(true)
-  expect(agents.needsCount).toBe(2)
+  expect(agents.deskProjection?.counts.open).toBe(2)
+  expect(agents.needsCount).toBe(0)
 })

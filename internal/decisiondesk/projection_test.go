@@ -258,6 +258,11 @@ func TestRevocationDecisionExpiryAndFinishedWork(t *testing.T) {
 	if got := f.page(t, f.reader, 100, nil); got.Counts.Open != 0 {
 		t.Fatalf("expired/answered item survives: %+v", got)
 	}
+	visible := f.ask(t, f.project, "carries_on", nil)
+	before := f.page(t, f.reader, 100, nil)
+	if before.Counts.Open != 1 || len(before.Items) != 1 || before.Items[0].ID != visible.ID {
+		t.Fatal("revocation fixture must retain a readable open source")
+	}
 	f.exec(t, `DELETE FROM role_bindings WHERE principal_id=$1`, f.reader.ID)
 	if got := f.page(t, f.reader, 100, nil); got.Counts.Open != 0 || len(got.Items) != 0 {
 		t.Fatal("revoked reader received counts or links")

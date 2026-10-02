@@ -26,10 +26,10 @@ const flatten = (el: Node): Node[] => [el, ...el.children.flatMap(flatten)]
 const apps: Vue.App[] = []
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 
-async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean } = {}) {
+async function mount(options: { denied?: boolean; detailsFailure?: boolean; fullQueue?: boolean; pendingFailure?: boolean; noCost?: boolean; projectCost?: boolean; action?: string; autopilot?: boolean; autopilotFailure?: boolean; autopilotTruncated?: boolean; merge?: boolean; ticketLogFailure?: boolean; noDecide?: boolean; humanRequest?: boolean } = {}) {
   const paths: string[] = [], saves: Briefing.BriefingPreference[] = []
   const projects = ['allowed', 'guest'].map(id => ({ id, routeKey: id }))
-  const can = (permission: string, project?: string) => permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed')
+  const can = (permission: string, project?: string) => !(options.noDecide && permission === 'approvals.decide') && (permission !== 'harness.read' || !options.noCost && (!options.projectCost || project === 'allowed'))
   const pending = { id: 'approval', resource_kind: 'node', resource_id: 'ticket', scope: 'nodes.write', rationale: 'Review me', decision: null, expires_at: '2099-01-01T00:00:00Z' }
   const dashboard = usageDashboard('reported')
   dashboard.totals.cost_state = 'known'
@@ -42,9 +42,9 @@ async function mount(options: { denied?: boolean; detailsFailure?: boolean; full
     }
     if (path.startsWith('/approvals')) {
       if (options.pendingFailure) throw new APIError(500, 'failed')
-      return options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ ...pending, id: `approval-${i}` })) : []
+      return options.fullQueue || options.noDecide ? Array.from({ length: options.fullQueue ? 200 : 1 }, (_, i) => ({ ...pending, id: `approval-${i}` })) : []
     }
-    if (path.includes('/messages')) return { items: options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, is_action_request: true, human_resolution_outcome: null, body: 'A check' })) : [] }
+    if (path.includes('/messages')) return { items: options.humanRequest && path.includes('/allowed/') ? [{ id: 'held', is_action_request: true, human_resolution_outcome: null, body: 'Check the merge result' }] : options.fullQueue ? Array.from({ length: 200 }, (_, i) => ({ id: `m-${i}`, is_action_request: true, human_resolution_outcome: null, body: 'A check' })) : [] }
     if (path.includes('/journey')) {
       const next_action = { key: options.action ?? 'wait_for_build', label: options.action ?? 'Wait', available: true }
       return path.startsWith('/journey/next-actions') ? { items: projects.map(p => ({ project_node_id: p.id, next_action })) } : { next_action }
@@ -110,7 +110,7 @@ it('saves the database snapshot cutoff even when the browser clock is ahead', as
 it('advances completed logs even with 200 pending approvals and human requests', async () => {
   const { saves, paths } = await mount({ fullQueue: true })
   expect(saves).toHaveLength(1)
-  expect(paths.some(path => path.startsWith('/decision-desk/projection'))).toBe(true)
+  expect(paths.some(path => path.startsWith('/approvals?') && path.includes('pending=true'))).toBe(true)
 })
 it('keeps pending-source failure separate from a successfully read log window', async () => {
   expect((await mount({ pendingFailure: true })).saves).toHaveLength(1)
@@ -165,9 +165,24 @@ it('keeps a pending-only detail failure separate from completed logs', async () 
   expect((await mount({ fullQueue: true, detailsFailure: true })).saves).toHaveLength(1)
 })
 
-it('includes an ordinary question with the exact canonical count and source', async () => {
-  const { root } = await mount({ fullQueue: true })
-  expect(textOf(root)).toContain('Ordinary question')
-  expect(textOf(root)).toContain('401')
-  expect(flatten(root).find(el => el.tag === 'a' && el.props.href === '/api/questions/question')).toBeDefined()
+
+it('keeps unsupported questions out of the briefing until the desk cutover', async () => {
+ const { root, paths } = await mount({ fullQueue: true })
+ expect(textOf(root)).toContain('Needs you now')
+ expect(textOf(root)).toContain('Change tickets')
+ expect(textOf(root)).toContain('Review me')
+ expect(textOf(root)).not.toContain('Ordinary question')
+ expect(paths.some(path => path.startsWith('/decision-desk/projection'))).toBe(false)
+ expect(flatten(root).some(el => el.tag === 'a' && String(el.props.href).includes('/api/questions/'))).toBe(false)
+})
+it('never recommends a readable approval the person cannot decide', async () => {
+ const { root } = await mount({ noDecide: true })
+ expect(textOf(root)).not.toContain('Review me')
+ expect(flatten(root).some(el => el.props['aria-label'] === 'Recommended next step')).toBe(false)
+})
+it('preserves held request body, project label and an app Source link', async () => {
+ const { root } = await mount({ humanRequest: true })
+ expect(textOf(root)).toContain('Human check · allowed')
+ expect(textOf(root)).toContain('Check the merge result')
+ expect(flatten(root).filter(el => el.tag === 'a' && textOf(el) === 'Source').every(el => String(el.props.href).startsWith('/agents?needs='))).toBe(true)
 })
