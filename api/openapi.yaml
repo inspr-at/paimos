@@ -11,7 +11,11 @@ info:
     OwnerWorkstationStepUp (428) and accept the Aeon-Step-Up header. This exception
     never permits ownership.transfer, customer-portal permissions or deciding
     the acting agent's own approval requests. Marking itself requires an Owner
-    person session and matching Origin. Client confirmation is implemented in AEON-581.
+    person session and matching Origin. Member reactivation and project-member
+    replacement require the same step-up as deactivation and workspace-role changes.
+    Confirmation summaries include the canonical query and stored route-target and
+    query-selected role names; requests return 400 if the complete summary cannot
+    fit within 256 UTF-8 bytes. Client confirmation is implemented in AEON-581.
 servers:
   - url: /api
 paths:
@@ -3214,7 +3218,7 @@ paths:
                 additionalProperties: false
                 required: [summary, nonce, action_digest, expires_at, computer_id]
                 properties:
-                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action and escaped route with stored target names when available; at most 256 UTF-8 bytes, no control or format characters.'}
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action, escaped route, canonical query and stored target names including query-selected roles; at most 256 UTF-8 bytes, no control or format characters. Names and fields are never shortened or omitted to fit; an incomplete summary fails challenge creation with 400.'}
                   nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
                   action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
                   expires_at: {type: string, format: date-time}

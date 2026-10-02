@@ -90,9 +90,14 @@
 // using its exact paired runtime key plus Aeon-Computer-ID and Aeon-Device-Proof.
 // The requesting agent passes only the challenge ID to agentd; its forwarded
 // summary is never trusted for the Touch ID prompt. The server summary uses a
-// fixed action template, method, escaped route and stored member/key/role names
-// when identified by the route. Labels are quoted, stripped of control/format
-// characters and shortened as needed to fit the daemon's 256 UTF-8 byte limit.
+// fixed action template, method, escaped route, canonical query, conditional
+// headers and stored member/key/role/project names identified by the route or
+// role-deletion reassignment query. Repeated query values retain their order.
+// Labels are quoted and stripped of control/format characters. A summary that
+// cannot fit completely in the daemon's 256 UTF-8 byte limit fails with 400;
+// no name or field is shortened or omitted to fit. Reactivation and project
+// member replacement require step-up, like deactivation and workspace roles.
+// Mark/unmark locks tenant, pairing, sorted computers, then key; event is last.
 //
 // DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
 // metadata; workstation_computer_id is a personal device link, located by

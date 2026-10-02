@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,10 +21,10 @@ func TestWorkstationPromptShowsCanonicalQueryAndBothRoles(t *testing.T) {
 	f.enable(t)
 	var source, replacement string
 	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='member'`).Scan(&source); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'r3_source','Member') RETURNING id::text`, f.owner.TenantID).Scan(&source); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='viewer'`).Scan(&replacement)
+		return tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'r3_replacement','Viewer') RETURNING id::text`, f.owner.TenantID).Scan(&replacement)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +45,16 @@ func TestWorkstationPromptShowsCanonicalQueryAndBothRoles(t *testing.T) {
 	if !strings.Contains(c.Summary, "&x=2&x=1") {
 		t.Fatal("prompt dropped or reordered repeated query values")
 	}
+	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE roles SET name=$2 WHERE id=$1`, replacement, strings.Repeat("v", 80))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The base URI and source name fit, but the full replacement name does not.
+	if w := f.call(f.key.Token, "DELETE", path, "", ""); w.Code != 400 {
+		t.Fatalf("oversized replacement name was silently shortened or omitted: %d", w.Code)
+	}
 }
 
 func TestWorkstationPromptRejectsIncompleteTarget(t *testing.T) {
@@ -60,10 +71,11 @@ func TestWorkstationPromptRejectsIncompleteTarget(t *testing.T) {
 		"/api/roles/" + f.owner.ID + "?reassign_to=" + f.owner.ID + "&extra=" + strings.Repeat("x", 160),
 		"/api/roles/" + f.owner.ID + "?reassign_to=%zz",
 	} {
-		w := f.call(f.key.Token, "DELETE", path, "", "")
+		method := "DELETE"
 		if strings.Contains(path, "/deactivate") {
-			w = f.call(f.key.Token, "POST", path, "", "")
+			method = "POST"
 		}
+		w := f.call(f.key.Token, method, path, "", "")
 		if w.Code != 400 {
 			t.Errorf("incomplete or invalid prompt status: %d, want 400", w.Code)
 		}
@@ -97,7 +109,10 @@ func TestWorkstationMembershipAccessNeedsConfirmation(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE key='viewer'`).Scan(&viewer); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE key='member'`).Scan(&developer); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'r3_writer','Writer') RETURNING id::text`, f.owner.TenantID).Scan(&developer); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'nodes.write')`, f.owner.TenantID, developer); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.owner.TenantID, member, viewer, project)
@@ -223,8 +238,13 @@ func TestWorkstationMarkLocksPairingAndComputerBeforeKey(t *testing.T) {
 func TestWorkstationCanonicalQueryPreservesValueOrder(t *testing.T) {
 	r := httptest.NewRequest("DELETE", "/api/roles/fixture?z=last&a=first&a=second&blank=", nil)
 	r.Pattern = "DELETE /api/roles/{id}"
-	_, summary := workstationAction(workstationFixture{}.owner, r, nil)
+	r.Header.Set("If-Match", `"v1"`)
+	r.Header.Set("If-None-Match", `"v2"`)
+	_, summary := workstationAction(tenant.Principal{}, r, nil)
 	if !strings.Contains(summary, "?a=first&a=second&blank=&z=last") {
 		t.Fatal("query display is missing or not canonical")
+	}
+	if !strings.Contains(summary, `If-Match: "\"v1\""`) || !strings.Contains(summary, `If-None-Match: "\"v2\""`) {
+		t.Fatal("prompt omitted conditional action headers")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,6 +30,8 @@ import (
 )
 
 const workstationBodyLimit = 2 << 20
+
+var errWorkstationSummary = errors.New("complete action summary exceeds 256 bytes")
 
 type workstationDigestKey struct{}
 type workstationSignerKey struct{}
@@ -56,7 +59,7 @@ func workstationStepUp(r *http.Request) bool {
 	case "rules.publish", "keys.manage", "roles.manage", "settings.manage", "approvals.decide", "approvals.decide_high":
 		return true
 	case "members.manage":
-		return r.Method == http.MethodDelete || strings.HasSuffix(r.URL.Path, "/deactivate") || strings.HasSuffix(r.URL.Path, "/workspace-role") || strings.Contains(r.URL.Path, "/aliases")
+		return r.Method == http.MethodDelete || strings.HasSuffix(r.URL.Path, "/deactivate") || strings.HasSuffix(r.URL.Path, "/reactivate") || strings.HasSuffix(r.URL.Path, "/workspace-role") || strings.Contains(r.URL.Path, "/aliases") || r.Pattern == "PUT /api/projects/{projectId}/members/{principal_id}"
 	}
 	return false
 }
@@ -81,57 +84,86 @@ func workstationAction(p tenant.Principal, r *http.Request, body []byte) (string
 		action = "perform this governance action"
 	}
 	summary := "Allow the owner workstation agent to " + action + "? " + r.Method + " " + r.URL.EscapedPath()
+	// Canonicalize keys, preserving repeated values and their order (Get uses
+	// the first). Invalid query encodings are refused before issuing a challenge.
+	if query := r.URL.Query().Encode(); query != "" {
+		summary += "?" + query
+	}
+	for _, header := range []string{"If-Match", "If-None-Match"} {
+		if value := r.Header.Get(header); value != "" {
+			summary += " " + header + ": " + strconv.QuoteToASCII(value)
+		}
+	}
 	return hex.EncodeToString(digest[:]), summary
 }
 
-// Resolve only identifiers from the matched route, after the live permission
-// fence. Body text can never supply a confirmation label. The escaped route
-// remains intact even if a long stored name needs shortening.
+// Resolve identifiers from the matched route and effect-bearing query fields,
+// after the live permission fence. Submitted body text cannot supply a label.
+// A summary must fit in full: never shorten a name or silently omit a target.
 func workstationSummary(ctx context.Context, tx pgx.Tx, r *http.Request, summary string) (string, error) {
+	add := func(query, id, label string) error {
+		var name string
+		if err := tx.QueryRow(ctx, query, id).Scan(&name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil // The route/query retains the ID; the handler owns 404.
+			}
+			return err
+		}
+		// Read at most 257 characters, enough to detect any over-budget name
+		// without fetching an unbounded stored string or truncating its display.
+		if len(name) > 256 {
+			return errWorkstationSummary
+		}
+		name = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+				return -1
+			}
+			return r
+		}, name)
+		summary += " " + label + ": " + strconv.Quote(name)
+		if len(summary) > 256 {
+			return errWorkstationSummary
+		}
+		return nil
+	}
 	_, pattern, _ := strings.Cut(r.Pattern, " ")
 	parts, values := strings.Split(pattern, "/"), strings.Split(r.URL.Path, "/")
 	if len(parts) != len(values) {
 		return summary, nil
 	}
-	var query, id string
 	for i, part := range parts {
 		if !uuidRe.MatchString(values[i]) {
 			continue
 		}
+		var query string
+		label := "Target"
 		switch {
 		case part == "{principal_id}":
-			query, id = `SELECT left(name,256) FROM principals WHERE id=$1`, values[i]
+			query = `SELECT left(name,257) FROM principals WHERE id=$1`
+		case part == "{from_principal_id}":
+			query, label = `SELECT left(name,257) FROM principals WHERE id=$1`, "Alias"
+		case part == "{projectId}":
+			query, label = `SELECT left(title,257) FROM nodes WHERE id=$1`, "Project"
 		case part == "{id}" && strings.HasPrefix(pattern, "/api/agent-keys/"):
-			query, id = `SELECT left(name,256) FROM agent_keys WHERE id=$1`, values[i]
+			query = `SELECT left(name,257) FROM agent_keys WHERE id=$1`
 		case part == "{id}" && strings.HasPrefix(pattern, "/api/roles/"):
-			query, id = `SELECT left(name,256) FROM roles WHERE id=$1`, values[i]
+			query = `SELECT left(name,257) FROM roles WHERE id=$1`
+		}
+		if query != "" {
+			if err := add(query, values[i], label); err != nil {
+				return "", err
+			}
 		}
 	}
-	if query == "" {
-		return summary, nil
-	}
-	var name string
-	if err := tx.QueryRow(ctx, query, id).Scan(&name); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return summary, nil // The action handler owns missing-target errors.
+	if r.Pattern == "DELETE /api/roles/{id}" {
+		if id := r.URL.Query().Get("reassign_to"); uuidRe.MatchString(id) {
+			if err := add(`SELECT left(name,257) FROM roles WHERE id=$1`, id, "Reassign to"); err != nil {
+				return "", err
+			}
 		}
-		return "", err
 	}
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return -1
-		}
-		return r
-	}, name)
-	// Quote labels to distinguish stored data from the fixed action instruction.
-	label := strconv.Quote(name)
-	for len(summary)+len(" Target: ")+len(label) > 256 && len(name) > 0 {
-		runes := []rune(name)
-		name = string(runes[:len(runes)-1])
-		label = strconv.Quote(name + "…")
-	}
-	if name != "" {
-		summary += " Target: " + label
+	if len(summary) > 256 {
+		return "", errWorkstationSummary
 	}
 	return summary, nil
 }
@@ -227,6 +259,14 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			writeBadRequest(w, "action URI too long")
 			return
 		}
+		if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
+			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
+				writeInternal(w)
+				return
+			}
+			writeBadRequest(w, "invalid action query")
+			return
+		}
 		controller := http.NewResponseController(w)
 		_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, workstationBodyLimit))
@@ -298,7 +338,9 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			return err
 		})
 		outcome := "admitted"
-		if err != nil {
+		if errors.Is(err, errWorkstationSummary) {
+			outcome = "invalid_action"
+		} else if err != nil {
 			outcome = "proof_rejected"
 		} else if proof == "" {
 			outcome = "step_up_required"
@@ -312,6 +354,10 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 		}
 		if errors.Is(err, authz.ErrForbidden) {
 			writeForbidden(w)
+			return
+		}
+		if errors.Is(err, errWorkstationSummary) {
+			writeBadRequest(w, errWorkstationSummary.Error())
 			return
 		}
 		if err != nil {
@@ -386,6 +432,17 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		}
 		if effective.Workspace.Role == nil || effective.Workspace.Role.Key != "owner" {
 			return authz.ErrForbidden
+		}
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1::text,0))`, p.TenantID); err != nil {
+			return err
+		}
+		// Pairing lifecycle writes lock the computer before its keys. Include
+		// both the current binding (also for unmark) and any replacement, sorted.
+		// The tenant fence serializes designation changes while resolving IDs.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM agent_pairing_computers
+		 WHERE tenant_id=$1 AND (id=nullif($2,'')::uuid OR id=(SELECT workstation_computer_id FROM agent_keys WHERE id=$3))
+		 ORDER BY id FOR SHARE`, p.TenantID, body.Computer, id); err != nil {
+			return err
 		}
 		key, err := lockAgentKey(r.Context(), tx, id)
 		if err != nil {

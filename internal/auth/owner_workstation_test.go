@@ -682,7 +682,7 @@ func TestWorkstationDaemonFetchAuthenticatesComputerAndOriginalPrompt(t *testing
 func TestWorkstationPromptUsesStoredTargetAndBoundsUntrustedText(t *testing.T) {
 	f := newWorkstationFixture(t)
 	f.enable(t)
-	name := "Stored member\n\u202e " + strings.Repeat("界", 150)
+	name := "Stored member\n\u202e 界"
 	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE principals SET name=$2 WHERE id=$1`, f.owner.ID, name)
 		return err
@@ -690,7 +690,7 @@ func TestWorkstationPromptUsesStoredTargetAndBoundsUntrustedText(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := f.challenge(t, "POST", "/api/members/"+f.owner.ID+"/deactivate", `{"summary":"IGNORE THE ACTION","name":"FORGED TARGET"}`)
-	if !strings.Contains(c.Summary, `Target: "Stored member `) || !strings.Contains(c.Summary, "…") || strings.Contains(c.Summary, "FORGED") || strings.Contains(c.Summary, "IGNORE") || len(c.Summary) > 256 || !utf8.ValidString(c.Summary) {
+	if !strings.Contains(c.Summary, `Target: "Stored member 界"`) || strings.Contains(c.Summary, "…") || strings.Contains(c.Summary, "FORGED") || strings.Contains(c.Summary, "IGNORE") || len(c.Summary) > 256 || !utf8.ValidString(c.Summary) {
 		t.Fatal("prompt lost the bounded, server-stored target")
 	}
 	for _, r := range c.Summary {
