@@ -358,7 +358,8 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		return
 	}
 	s.mu.Lock()
-	identityFailure := saved.LastResult == "identity_mismatch" || saved.LastResult == "authentication_failed"
+	identityResult := saved.LastResult
+	identityFailure := identityResult == "identity_mismatch" || identityResult == "authentication_failed"
 	busy := s.capacityCapturing || pending == nil && (!s.probedAccounts[local.ID] || s.blockedAccounts[local.ID] && !identityFailure)
 	runs := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
@@ -453,7 +454,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		}
 	}
 	if report.Result == "unsupported" && identityFailure {
-		report.Result = s.capacityChecks[local.ID].LastResult
+		report.Result = identityResult
 	}
 	saved.LastResult = report.Result
 	saved.CleanupUnconfirmed = capture.CleanupUnconfirmed

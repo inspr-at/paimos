@@ -295,7 +295,7 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 				// A transport/measurement failure says nothing about the locally
 				// configured key's validity. Keep execution health independent;
 				// typed idle checks report the measurement failure separately.
-				if errors.Is(err, openrouter.ErrUnavailable) {
+				if errors.Is(err, openrouter.ErrUnavailable) && !errors.Is(err, openrouter.ErrProfile) {
 					err = nil
 				}
 			}

@@ -87,7 +87,7 @@ func (d Discovery) PrepareOpenRouter(ctx context.Context, root, key string, clie
 func OpenRouterCredits(ctx context.Context, home string, client openrouter.Client) (*openrouter.Credits, error) {
 	raw, err := ReadPrivateFile(filepath.Join(home, "auth.json"), 16<<10)
 	if err != nil {
-		return nil, openrouter.ErrUnavailable
+		return nil, errors.Join(openrouter.ErrUnavailable, openrouter.ErrProfile)
 	}
 	var auth struct {
 		OpenRouter struct {

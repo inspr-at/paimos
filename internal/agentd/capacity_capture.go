@@ -179,6 +179,9 @@ func (a *PiAdapter) CaptureCapacityResult(ctx context.Context, key string) Capac
 		return CapacityCapture{Result: "launch_failed"}
 	}
 	credits, err := agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+	if errors.Is(err, openrouter.ErrProfile) {
+		return CapacityCapture{Result: "launch_failed"}
+	}
 	if errors.Is(err, openrouter.ErrKey) {
 		return CapacityCapture{Result: "authentication_failed"}
 	}

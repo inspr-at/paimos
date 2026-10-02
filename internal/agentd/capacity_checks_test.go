@@ -472,3 +472,71 @@ func TestCapacityCheckRestartDoesNotReplayOldManualResult(t *testing.T) {
 		t.Fatal("retry store leaked diagnostic")
 	}
 }
+
+func TestCapacityCheckLoopStartsWithoutWaitingForTicker(t *testing.T) {
+	s, _, a, _ := checkFixture(t)
+	a.entered = make(chan struct{})
+	a.release = make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); s.RunCapacityCaptures(ctx) }()
+	select {
+	case <-a.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup check never reached capture")
+	}
+	close(a.release)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle loop did not join cancellation")
+	}
+	if a.calls != 1 {
+		t.Fatal("startup capture repeated")
+	}
+}
+
+func TestCapacityCheckInterruptedAttemptKeepsBackoffAfterRestart(t *testing.T) {
+	s, api, a, clock := checkFixture(t)
+	s.capacityChecks["account"] = capacityCheckState{Revision: 0, LastResult: "timeout", Failures: 2, NextAttempt: clock.Now().Add(2 * time.Minute)}
+	s.mu.Lock()
+	err := s.saveCapacityChecksLocked()
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, workspace, accounts := s.state.Path(), s.workspace, s.accounts
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: root, Workspace: workspace, DaemonID: "daemon", Accounts: accounts, Adapters: []Adapter{a}, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(t.Context())
+	restarted.probedAccounts["account"] = true
+	restarted.capacityProbeConnection("account", true)
+	tickChecks(t, restarted, clock)
+	if a.calls != 0 || restarted.capacityChecks["account"].Failures != 2 {
+		t.Fatal("reconnect erased interrupted attempt")
+	}
+}
+
+func TestCapacityCheckAuthenticationCauseSurvivesHealthProbe(t *testing.T) {
+	s, api, a, clock := checkFixture(t)
+	a.result = "identity_mismatch"
+	api.lost = true
+	tickChecks(t, s, clock)
+	_ = s.PollOnce(t.Context())
+	if !s.blockedAccounts["account"] || api.API.(*fakeAPI).claims != 0 {
+		t.Fatal("plain health probe cleared identity mismatch")
+	}
+	a.result = "unsupported"
+	clock.Add(time.Minute)
+	tickChecks(t, s, clock)
+	if s.capacityChecks["account"].LastResult != "identity_mismatch" || api.reports[len(api.reports)-1].Result != "identity_mismatch" {
+		t.Fatal("unsupported capture cleared identity stop")
+	}
+}

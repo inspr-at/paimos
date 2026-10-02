@@ -20,6 +20,7 @@ const BaseURL = "https://openrouter.ai/api/v1"
 
 var ErrUnavailable = errors.New("OpenRouter check unavailable; retry locally")
 var ErrKey = errors.New("OpenRouter key was not accepted; check the key locally")
+var ErrProfile = errors.New("OpenRouter local profile unavailable")
 var slugRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*/[a-zA-Z0-9][a-zA-Z0-9._-]*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$`)
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var nativeRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$`)
