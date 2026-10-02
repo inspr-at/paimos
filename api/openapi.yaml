@@ -1491,7 +1491,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -1523,7 +1523,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -1617,7 +1617,7 @@ paths:
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or a rule that copies git-backed doctrine (doctrine_duplicate; Propose a change)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "422": {"description":"Credential-shaped text in snapshot fields or notes is refused (credential_text, no matched values returned); otherwise: Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
         required: true
