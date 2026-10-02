@@ -20,6 +20,63 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Mandatory pre-tag rehearsal (AEON-531)
+
+Every release PR must pass **`release-rehearsal`** in
+`release-image-check.yml`. The coordinator treats it as a release-readiness
+requirement; this change does not alter repository rulesets. PR runs exercise
+the proposed code, but cannot authorize a tag. After merge, the workflow runs
+on the release commit on `main`; if the automatic path-filtered run did not
+start, dispatch it on `main` while that exact commit is the branch head.
+Do not tag until the main run completes successfully:
+
+```sh
+gh workflow run release-image-check.yml --ref main
+# After the run completes, from the exact main commit intended for release:
+node scripts/check-release-rehearsal.mjs --sha "$(git rev-parse HEAD)"
+# Only a successful check permits the coordinator's existing annotated-tag step.
+```
+
+The check reads the exact workflow identity, paginated runs, every job and step,
+and the unexpired receipt artifact for that SHA and run attempt. PR/fork/other
+branch runs, a different commit, a newer failed or pending attempt, a skipped
+platform or missing receipt all leave the gate closed. The tag workflow checks
+the same receipt before either native signing work or image publication can
+start. A merge/squash commit needs its own main rehearsal; an earlier PR receipt
+never carries over. Receipts expire after 14 days; rerun on the same main commit
+if needed. No tag, release, image or historic version is rewritten.
+
+The rehearsal validates `version.json`, the complete pinned presentation bundle
+and the release's own frozen notes; builds and smokes both native Linux images
+from the production Docker context and read-only caches; exports BuildKit
+provenance locally; builds both native Darwin agents with LocalAuthentication;
+executes the exact production asset assembly and verifies all eight checksums.
+It runs the production pin-bot in dry-run mode with fixture source/tag/attestation
+observations and a local pin snapshot. The index and draft shell bodies are read
+directly from `release.yml`: strict offline adapters exercise the index contract,
+and the installed `gh` parses the actual attestation and nine-asset draft argv
+against a closed loopback proxy, with an empty config and synthetic credential.
+This catches incompatible flags and missing assets without calling the forge or
+registry. Tap fixtures run without a live App. The receipt records the commit,
+version metadata, release-workflow digest and disabled operations.
+
+Rehearsal never signs, notarizes, pushes an image/cache, writes an attestation,
+creates a tag/release/pin/tap PR, publishes or deploys. Its native checks verify
+the unsigned daemon's embedded version and unsigned-image refusal. Real Apple
+credentials/notarization, live registry provenance, paired Keychain ACL and
+Touch ID qualification remain the existing post-tag gates; fixture success is
+not evidence for those controls.
+
+`scripts/release-rehearsal-coverage.json` binds every production release step to
+its rehearsal action, executable counterpart, regression fixture or explicitly
+disabled privileged operation. The workflow tests reject new jobs, new steps,
+changed step bodies/flags and missing counterparts. When a release step changes,
+implement its counterpart first, then review the updated fingerprint and run the
+negative drift fixtures. Do not regenerate fingerprints as a substitute for a
+counterpart. `docker-web-check.yml` separately builds the real Dockerfile `web`
+stage on PR changes to `web/**`, `internal/**/*.json` and its build inputs, so
+shared JSON imports are checked inside the production context before release.
+
 ### Cross-family verdict and merge queue (AEON-411)
 
 The required **`gate/cross-family`** is a commit status posted **outside

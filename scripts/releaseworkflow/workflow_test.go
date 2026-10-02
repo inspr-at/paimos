@@ -210,7 +210,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
 	}
-	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read"}) {
+	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read", "actions": "read"}) {
 		t.Fatal("darwin signing boundary changed")
 	}
 	if _, ok := dry.On["workflow_dispatch"]; !ok {
@@ -239,7 +239,7 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		}
 	}
 	for _, j := range dry.Jobs {
-		if len(j.Permissions) != 0 || j.Environment != "" {
+		if (len(j.Permissions) != 0 && !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"})) || j.Environment != "" {
 			t.Fatal("dry run acquires privileged tokens or environments")
 		}
 		for _, s := range j.Steps {
