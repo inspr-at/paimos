@@ -8,7 +8,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/attachwatch"
-	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -131,12 +130,21 @@ func TestAttachServerRestartLosesRegistrationBeforeEnrollmentCheck(t *testing.T)
 	f, key, in := leaseFixture(t)
 	// Rebuild the HTTP server/module over the same database, preserving the
 	// ordinary bearer/cookie authentication while discarding only process memory.
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
-	if err != nil {
+	f.rebuildHandler()
+	// The restarted fixture must retain account-link signing and all ordinary
+	// modules, not just the attach route and bearer/cookie middleware.
+	var account string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT account_id::text FROM agent_pairing_enrollments WHERE computer_id=$1`, in.ComputerID).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
-	f.pairing = agentpairing.New(f.db.App, origin, "pairtest")
-	f.h = (&httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, f.pairing}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}).Handler()
+	var link struct {
+		Code string `json:"user_code"`
+	}
+	decodeResult(t, f.call("POST", accountLinkPath, map[string]string{"operation": "offer", "account_id": account, "device_proof": in.DeviceProof}, false, key, 200), &link)
+	if len(link.Code) != 7 {
+		t.Fatal("restart lost account-link signing configuration")
+	}
+	f.call("GET", "/api/agent-accounts", nil, true, "", 200)
 	// Even with a connected enrollment, the first guard is the lost poll key.
 	for _, state := range []string{"connected", "draining"} {
 		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET state=$2 WHERE computer_id=$1`, in.ComputerID, state); err != nil {

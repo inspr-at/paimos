@@ -83,7 +83,7 @@ func TestAttachRefusalInventory(t *testing.T) {
 			})
 		}
 	}
-	for _, err := range []error{context.DeadlineExceeded, context.Canceled, errors.New("private partial body"), &url.Error{Op: "Post", URL: "https://private.invalid", Err: errors.New("private transport")}} {
+	for _, err := range []error{context.DeadlineExceeded, context.Canceled, fmt.Errorf("%w: %w", ErrAttachExchange, errors.New("private partial body")), &url.Error{Op: "Post", URL: "https://private.invalid", Err: errors.New("private transport")}} {
 		got := attachRefusal(err)
 		if !strings.HasPrefix(got.Error(), "attach_offline:") || strings.Contains(got.Error(), "private") {
 			t.Fatal("transport error leaked or lost its action", got)

@@ -49,6 +49,12 @@ func LocalAuthCapabilityReported(s string) bool {
 const MaxText = 16 << 10
 const Lease = 60 * time.Second
 
+// ComputerMax bounds pending, approved and active attaches on one computer.
+const ComputerMax = 8
+
+// AttemptWindow is the tenant attach/lookup attempt-counter lifetime.
+const AttemptWindow = 10 * time.Minute
+
 // LiveMax bounds the attach requests one person may have waiting or approved at
 // once (not yet a session, not expired). Admission enforces it and the pending
 // list returns up to exactly this many, so a request that waits is never hidden

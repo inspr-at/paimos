@@ -2187,6 +2187,13 @@ Owner refusal guidance distinguishes incompatible attach versions, a pairing
 that no longer authenticates, unavailable project/ticket access, draining or
 removed harness enrollment, an expired code, lost daemon registration, transport
 failures and the distinct computer, attempt, registration and approval limits.
+Local startup failures have separate guidance: a computer-wide disconnect needs
+settlement followed by fresh pairing, completed cleanup needs fresh pairing, and
+an origin or workspace mismatch needs the approved configuration or fresh pairing
+for the intended instance and workspace. Other local startup failures direct the
+owner to `aeon-agentd status`, the agentd log and a restart when owned work permits;
+they are not reported as connection failures. Admission and limit hints share the
+same per-computer cap and attempt window.
 Server errors preserve `code` and `error`
 and add `attach_refusal` only after checking the computer proof and principal
 (or the signed-in person owner). Fixed English/German hints name the next action;
@@ -2203,9 +2210,10 @@ report alone does not block attach: the attach manager does not use the supervis
 launch fence. A server-side draining or removed enrollment does block a fresh
 attach, including `--status-only` for an already running process. That operation
 creates new session/consent authority; draining preserves previously owned work
-for settlement, not new attachment authority. Check the computer's enrollments in
-Aeon and finish the disconnect before adding the harness again. Restarting agentd
-does not undo a server-side disconnect.
+for settlement, not new attachment authority. For a harness drain,
+`aeon-agentd add-harness` can create a new enrollment while the old one drains.
+For a computer drain, let owned work settle and pair the computer again.
+Restarting agentd does not undo a server-side disconnect.
 The paired computer's tenant-scoped workspace is the hard cwd allowlist; neither
 `AEON_URL` nor local request fields can override the paired origin. Same-user
 processes are not isolated by this feature.

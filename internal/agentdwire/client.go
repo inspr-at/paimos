@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +22,42 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
+
+// Fixed attach refusal codes admitted over the owner-only socket. Keep the
+// English and German inventories in sync; callers receive a copy.
+var attachRefusalCodes = []string{
+	"attach_live_limit",
+	"attach_pairing_revoked",
+	"attach_version_mismatch",
+	"attach_ticket_not_visible",
+	"attach_code_expired",
+	"attach_draining",
+	"attach_enrollment_unavailable",
+	"attach_registration_lost",
+	"attach_pairing_unavailable",
+	"attach_scope_changed",
+	"attach_computer_limit",
+	"attach_attempt_limit",
+	"attach_registration_limit",
+	"attach_poll_limit",
+	"attach_rate_limit",
+	"attach_snapshot_changed",
+	"attach_consent_required",
+	"attach_ended",
+	"attach_invalid_request",
+	"attach_offline",
+	"attach_server_unavailable",
+	"attach_unknown",
+	"attach_local_unavailable",
+	"attach_pairing_mismatch",
+}
+
+// AttachRefusalCodes lists the socket's attach refusal allowlist for parity.
+func AttachRefusalCodes() []string {
+	codes := slices.Clone(attachRefusalCodes)
+	slices.Sort(codes)
+	return codes
+}
 
 type Client struct {
 	Socket    string
@@ -137,9 +174,10 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 				var detail agentd.AttachLocalError
 				if json.Unmarshal(raw, &detail) == nil && validAttachDiagnostic(detail.Hint) {
 					switch detail.Code {
-					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported",
-						"attach_live_limit", "attach_pairing_revoked", "attach_version_mismatch", "attach_ticket_not_visible", "attach_code_expired",
-						"attach_draining", "attach_enrollment_unavailable", "attach_registration_lost", "attach_pairing_unavailable", "attach_scope_changed", "attach_computer_limit", "attach_attempt_limit", "attach_registration_limit", "attach_poll_limit", "attach_rate_limit", "attach_snapshot_changed", "attach_consent_required", "attach_ended", "attach_invalid_request", "attach_offline", "attach_server_unavailable", "attach_unknown":
+					case "harness_identity_mismatch", "harness_executable_unsafe", "harness_image_changed", "harness_identity_unavailable", "harness_identity_unsupported":
+						return &detail
+					}
+					if slices.Contains(attachRefusalCodes, detail.Code) {
 						return &detail
 					}
 				} else if hint := strings.TrimSpace(string(raw)); !strings.HasPrefix(hint, "{") && validAttachDiagnostic(hint) {

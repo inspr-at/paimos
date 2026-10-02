@@ -227,6 +227,8 @@ func TestAttachOwnerFailuresKeepTheirCauseInGerman(t *testing.T) {
 		"attach_offline":                "Verbindung",
 		"attach_server_unavailable":     "Serverprotokolle",
 		"attach_unknown":                "Serverprotokollen",
+		"attach_local_unavailable":      "agentd-Protokoll",
+		"attach_pairing_mismatch":       "Arbeitsordner",
 	} {
 		original := &agentd.AttachLocalError{Code: code, Hint: "English repair"}
 		if attachLocalizedFailure(original, "en") != original {

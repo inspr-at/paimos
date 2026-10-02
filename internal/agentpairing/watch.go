@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
@@ -108,8 +109,8 @@ func (m *Module) attachLimit(ctx context.Context, tenantID, bucket string, max i
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO harness_attach_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
  ON CONFLICT(tenant_id,bucket) DO UPDATE SET
- attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE harness_attach_limits.attempts+1 END,
- starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket).Scan(&n)
+ attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3 * interval '1 second') THEN 1 ELSE harness_attach_limits.attempts+1 END,
+ starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3 * interval '1 second') THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket, int(attachwatch.AttemptWindow/time.Second)).Scan(&n)
 	})
 	if err != nil {
 		return err
@@ -306,7 +307,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			if err = tx.QueryRow(ctx, `SELECT count(*) FROM harness_attach_requests WHERE computer_id=$1 AND ((state IN ('pending','approved') AND expires_at>clock_timestamp()) OR (state='active' AND lease_until>clock_timestamp()))`, in.ComputerID).Scan(&n); err != nil {
 				return err
 			}
-			if n >= 8 {
+			if n >= attachwatch.ComputerMax {
 				return fail(429, "rate_limited", "computer attach limit reached")
 			}
 			v, _, code, e := loadAttach(ctx, tx, in.RequestID)
