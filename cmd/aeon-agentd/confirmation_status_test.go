@@ -20,7 +20,11 @@ func TestConfirmationStatusPrintsReadinessAndUpgradeCommand(t *testing.T) {
 		if err := printSetupProgress(&out, false, p); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(out.String(), "Touch ID confirmation: "+confirmation+"\n") || (p.TouchIDUpgradeCommand != "" && !strings.Contains(out.String(), p.TouchIDUpgradeCommand)) {
+		line := "Touch ID confirmation: " + confirmation
+		if p.TouchIDUpgradeCommand != "" {
+			line += ": " + p.TouchIDUpgradeCommand
+		}
+		if !strings.Contains(out.String(), line+"\n") {
 			t.Fatal("status omitted confirmation prerequisite")
 		}
 		out.Reset()
