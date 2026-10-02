@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -37,6 +38,7 @@ type ReadinessFactWrite struct {
 }
 
 type ReadinessFact struct {
+	legacyReading *capacity.Reading // Original legacy bucket/duration; never serialized.
 	ReadinessFactWrite
 	ReadingError       string     `json:"reading_error,omitempty"`
 	ReadingAgeSeconds  *int64     `json:"reading_age_seconds"`
@@ -189,8 +191,12 @@ func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFa
         resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
         stop_kind=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.stop_kind ELSE EXCLUDED.stop_kind END,
         denial_reason=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.denial_reason ELSE EXCLUDED.denial_reason END,
-        wait_id=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)) THEN account_readiness_facts.wait_id ELSE EXCLUDED.wait_id END,
-        next_attempt_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)) THEN account_readiness_facts.next_attempt_at ELSE EXCLUDED.next_attempt_at END
+        wait_id=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.wait_id ELSE EXCLUDED.wait_id END,
+        next_attempt_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.next_attempt_at ELSE EXCLUDED.next_attempt_at END,
+        backoff_step=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.backoff_step ELSE 0 END,
+        early_recovery_used=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.early_recovery_used ELSE false END,
+        recovery_run_id=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.recovery_run_id ELSE NULL END,
+        recovery_check_id=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND (EXCLUDED.stop_kind='unnamed' OR (EXCLUDED.stop_kind='none' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)))) THEN account_readiness_facts.recovery_check_id ELSE NULL END
         WHERE EXCLUDED.observed_at>account_readiness_facts.observed_at`, aTenant(ctx), v.ResourceID, v.WindowKey, a.ID, a.LinkRevision, v.Source, v.ObservedAt, v.ResetsAt, v.ReadingAt, v.UsedPercent, v.CreditState, v.Remaining, v.StopKind, v.DenialReason, waitID, next, room)
 	return err
 }

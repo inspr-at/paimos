@@ -2,6 +2,8 @@
 package accountprivacy
 
 import (
+	"encoding/json"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"strings"
 	"testing"
 )
@@ -58,5 +60,23 @@ func TestEventSnapshotFailsClosedForUnidentifiedAndFutureDetails(t *testing.T) {
 	body, err = EventSnapshot([]byte(`{"quota_fingerprint":"private","reading_support":"none"}`), Policy{id: true}, "")
 	if err != nil || string(body) != "{}" {
 		t.Fatalf("unidentified historical event: %s %v", body, err)
+	}
+}
+
+func TestCatalogAndStrictCapacityScheduleRemainReadable(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := []byte(`{"hosts":[{"daemon_id":"local","harnesses":[{"accounts":[{"id":"` + id + `","registered_by_principal_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","available":true,"remaining_fraction":0.41,"windows":[]}]}]}]}`)
+	body, err := Redact(raw, Policy{}, "", false)
+	if err != nil || !strings.Contains(string(body), `"hosts":[`) || !strings.Contains(string(body), `"available":true`) || !strings.Contains(string(body), `"remaining_fraction":null`) {
+		t.Fatalf("catalog availability shape: %s %v", body, err)
+	}
+	raw = []byte(`{"account_id":"` + id + `","cost_limit_supported":true,"schedule":{"timezone":"Europe/Vienna","week":[]},"windows":[]}`)
+	body, err = Redact(raw, Policy{}, "", false)
+	var response struct {
+		Schedule        capacity.Schedule
+		DetailsRedacted bool `json:"details_redacted"`
+	}
+	if err != nil || json.Unmarshal(body, &response) != nil || response.Schedule.Validate() != nil || !response.DetailsRedacted {
+		t.Fatalf("strict schedule decoder: %s %v", body, err)
 	}
 }

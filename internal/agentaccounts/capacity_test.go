@@ -33,6 +33,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex","max_parallel_runs":2}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	r := capacity.Reading{WindowKind: "5h", Bucket: "codex", WindowMinutes: 300, UsedPercent: 41.2, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness", Phase: "start"}
@@ -162,6 +163,7 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	// The stale reading stays dispatchable inside the default 08:00–22:00 band.
 	// A wall clock outside that band waits on the schedule instead.
@@ -318,6 +320,7 @@ func TestCapacityPacingAtNightAndDay(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"clock","harness":"codex","daemon_id":"daemon-a","label":"Clock"}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	for _, date := range []struct {
 		month time.Month
 		day   int
@@ -384,6 +387,7 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Quota","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	path := "/api/agent-accounts/" + a.ID + "/readings"
 	report := func(rs ...capacity.Reading) {
@@ -507,6 +511,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"inherit","harness":"codex","daemon_id":"daemon-a","label":"Inherited"}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2`, person.ID, runner.ID); err != nil {
 			return err
@@ -567,6 +572,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"expired","harness":"codex","daemon_id":"daemon-a","label":"Expired","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Week = capacity.Preset(7)
@@ -603,6 +609,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	now := time.Now().UTC()
 	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 40, ResetsAt: now.Add(72 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)

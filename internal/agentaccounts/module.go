@@ -289,7 +289,7 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		reader := p
 		reader.Scopes = scopes
-		if !hasScope(scopes, "account.probe") {
+		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || !hasScope(scopes, "account.manage")) {
 			return fail(403, "account probe scope required")
 		}
 		// Existing opaque enrollments historically authorize probes by their

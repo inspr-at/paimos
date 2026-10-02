@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -138,7 +137,7 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 // Legacy readings remain readable during rollout. Selection is by the same
 // resource/window, never by a different bucket or allowance retirement bit.
 func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT window_kind,bucket,used_percent::float8,resets_at,read_at,source,ordinary_usage_allowed FROM (
+	rows, err := tx.Query(ctx, `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,ordinary_usage_allowed FROM (
         SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate'
         ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r ORDER BY window_kind,bucket LIMIT 33`, a.ID)
 	if err != nil {
@@ -149,9 +148,10 @@ func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Ti
 	for rows.Next() {
 		var kind, bucket, source string
 		var used float64
+		var minutes int
 		var reset, at time.Time
 		var allowed *bool
-		if err := rows.Scan(&kind, &bucket, &used, &reset, &at, &source, &allowed); err != nil {
+		if err := rows.Scan(&kind, &bucket, &minutes, &used, &reset, &at, &source, &allowed); err != nil {
 			return nil, err
 		}
 		age := max(int64(0), int64(now.Sub(at)/time.Second))
@@ -163,6 +163,7 @@ func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Ti
 				f.DenialReason = "quota_exhausted"
 			}
 		}
+		f.legacyReading = &capacity.Reading{WindowKind: kind, Bucket: bucket, WindowMinutes: minutes, UsedPercent: used, ResetsAt: reset, ReadAt: at, Source: source}
 		out = append(out, f)
 	}
 	if len(out) > 32 {
@@ -269,7 +270,7 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	}
 	for _, v := range legacy {
 		if v.ReadingAt != nil && now.Sub(*v.ReadingAt) <= 10*time.Minute && v.ResetsAt != nil && now.Before(*v.ResetsAt) {
-			reading := capacity.Reading{WindowKind: strings.SplitN(v.WindowKey, ":", 2)[0], WindowMinutes: int(v.ResetsAt.Sub(*v.ReadingAt) / time.Minute), ResetsAt: *v.ResetsAt, ReadAt: *v.ReadingAt, UsedPercent: *v.UsedPercent, Source: v.Source}
+			reading := *v.legacyReading
 			// Preserve the existing measured schedule/reserve path. Unknown
 			// measurements never enter it, so no invented reserve is enforced.
 			plan, _, err := readingPacing(ctx, tx, a.ID, reading, now, s)

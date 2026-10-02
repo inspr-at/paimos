@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -181,7 +182,7 @@ func mask(obj map[string]any) {
 			obj[key] = ""
 		}
 	}
-	for _, key := range []string{"openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "cost_limit_supported", "learning", "same_quota_as", "hosts", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
+	for _, key := range []string{"openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
 		delete(obj, key)
 	}
 	// Old account timestamps are nullable in the published contract.
@@ -224,6 +225,12 @@ func mask(obj map[string]any) {
 	if _, ok := obj["code"]; ok {
 		obj["code"] = "unavailable"
 	}
+	if _, accountProjection := obj["account_id"]; accountProjection {
+		delete(obj, "hosts")
+	}
+	if _, ok := obj["cost_limit_supported"]; ok {
+		obj["cost_limit_supported"] = false
+	}
 	// CapacitySchedule has required timezone/week. Keep a valid neutral
 	// placeholder and mark the containing projection, never expose its owner
 	// calendar/reserve. Consumers must ignore schedule when details are masked.
@@ -232,7 +239,12 @@ func mask(obj map[string]any) {
 		for i := range week {
 			week[i] = map[string]any{"on": true, "start": 0, "end": 24}
 		}
-		obj["schedule"] = map[string]any{"timezone": "UTC", "week": week}
+		neutral := capacity.DefaultSchedule("UTC")
+		raw, _ := json.Marshal(neutral)
+		var schedule map[string]any
+		_ = json.Unmarshal(raw, &schedule)
+		schedule["week"] = week
+		obj["schedule"] = schedule
 	}
 	if _, ok := obj["registered_by_principal_id"]; ok {
 		obj["details_redacted"] = true

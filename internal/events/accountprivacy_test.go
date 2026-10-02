@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -110,7 +111,11 @@ func TestAccountEventHistoryAndSSEUseCurrentOwnerSharing(t *testing.T) {
 		t.Fatalf("withdrawal not applied on replay: %+v %v", page.Items, err)
 	}
 	var original []byte
-	if err := d.Admin.QueryRow(t.Context(), `SELECT after FROM events WHERE tenant_id=$1 AND id=$2`, agent.TenantID, event.ID).Scan(&original); err != nil || !strings.Contains(string(original), `"remaining":17`) {
-		t.Fatalf("durable audit was mutated: %s %v", original, err)
+	if err := d.Admin.QueryRow(t.Context(), `SELECT after FROM events WHERE tenant_id=$1 AND id=$2`, agent.TenantID, event.ID).Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+	var persisted, initial any
+	if json.Unmarshal(original, &persisted) != nil || json.Unmarshal(event.After, &initial) != nil || !reflect.DeepEqual(persisted, initial) {
+		t.Fatalf("durable audit was mutated: %s", original)
 	}
 }

@@ -180,6 +180,9 @@
 // carry usage_unknown_reserve_not_enforceable and never impose a start budget.
 // Check requests express early-recovery intent only: package B consumes it
 // atomically with automatic recovery, and rechecks launch/admission authority.
+// account_readiness_check_waits freezes the resource/window/wait IDs at the
+// original click; a pending retry cannot authorize a later wait. B compares
+// that snapshot with the canonical fact wait and early_recovery_used marker.
 // Package C opts into GET /agent-accounts?include_checks=true with account.read
 // and account.probe, and reports through the existing scoped probe's optional
 // readiness object (check ID, binding revision, bounded result, at most 32 facts).

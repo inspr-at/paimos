@@ -388,7 +388,15 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		}
 		change.UndoOf = &id
 		result, err = Append(r.Context(), tx, p, change)
-		return err
+		if err != nil {
+			return err
+		}
+		items := []Event{result}
+		if err := redactAccountEvents(r.Context(), tx, p, items); err != nil {
+			return err
+		}
+		result = items[0]
+		return nil
 	})
 	if err != nil {
 		failure(w, err)

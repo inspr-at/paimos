@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -292,4 +293,120 @@ func TestReadinessRoutesAuthenticateAndBoundQuery(t *testing.T) {
 	if len(page.Items) != 1 || !page.Items[0].CanTry || page.Items[0].State != "unknown" || page.Items[0].DisplayReason != UsageUnknownReason {
 		t.Fatalf("unknown account readiness: %+v", page.Items)
 	}
+}
+
+func TestReadinessWaitSnapshotAndNewWaitReset(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "readiness-waits", now)
+	var resource string
+	if err := adminPool.QueryRow(t.Context(), `SELECT resource_id::text FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID).Scan(&resource); err != nil {
+		t.Fatal(err)
+	}
+	fact := ReadinessFactWrite{ResourceID: resource, WindowKey: "vendor", Source: "harness", ObservedAt: now, CreditState: "unknown", StopKind: "unnamed", DenialReason: "vendor_denied"}
+	report := ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{fact}}
+	probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &report}
+	path := "/api/agent-accounts/" + f.account.ID
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	var c AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("wait-click", 0), 202, &c)
+	if !c.EarlyRecoveryRequested || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_check_waits s JOIN account_readiness_facts f USING(tenant_id,resource_id,window_key,wait_id) WHERE s.check_id=$1`, c.ID) != 1 {
+		t.Fatal("click was not bound to the current wait")
+	}
+	// Simulate B consuming the marker; a repeated observation of this same
+	// stop must not create another early allowance or reset its durable backoff.
+	if _, err := adminPool.Exec(t.Context(), `UPDATE account_readiness_facts SET early_recovery_used=true,backoff_step=2 WHERE resource_id=$1 AND window_key='vendor'`, resource); err != nil {
+		t.Fatal(err)
+	}
+	fact.ObservedAt = now.Add(time.Second)
+	report.Facts = []ReadinessFactWrite{fact}
+	later := fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_check_waits s JOIN account_readiness_facts f USING(tenant_id,resource_id,window_key,wait_id) WHERE s.check_id=$1 AND f.early_recovery_used AND f.backoff_step=2`, c.ID) != 1 {
+		t.Fatal("repeated denial renewed a consumed wait")
+	}
+	used := 20.0
+	at := now.Add(2 * time.Second)
+	fact.ObservedAt = at
+	fact.ReadingAt = &at
+	fact.UsedPercent = &used
+	fact.StopKind = "none"
+	fact.DenialReason = ""
+	report.Facts = []ReadinessFactWrite{fact}
+	later = fixedClockModule{Module: New(appPool), at: at}
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='vendor' AND stop_kind='none' AND wait_id IS NULL AND next_attempt_at IS NULL AND NOT early_recovery_used AND backoff_step=0`, resource) != 1 {
+		t.Fatal("newer same-window room did not clear/reset quota wait")
+	}
+	fact.ObservedAt = now.Add(3 * time.Second)
+	fact.ReadingAt = nil
+	fact.UsedPercent = nil
+	fact.StopKind = "unnamed"
+	fact.DenialReason = "vendor_denied"
+	report.Facts = []ReadinessFactWrite{fact}
+	later = fixedClockModule{Module: New(appPool), at: fact.ObservedAt}
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_check_waits s JOIN account_readiness_facts f USING(tenant_id,resource_id,window_key,wait_id) WHERE s.check_id=$1`, c.ID) != 0 {
+		t.Fatal("old click authorized a later stop")
+	}
+	var replay AccountCheck
+	callStatus(t, later, &f.admin, "", "POST", path+"/check", requestBody("wait-retry", 0), 202, &replay)
+	if replay.ID != c.ID || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_check_waits WHERE check_id=$1`, c.ID) != 1 {
+		t.Fatal("coalesced retry changed the wait snapshot")
+	}
+}
+
+func TestReadinessDaemonPollScopesAndResourcePrivacy(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "readiness-poll", now)
+	token := issueKey(t, f.runner, []string{"account.read", "account.probe"})
+	var check AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("poll", 0), 202, &check)
+	var accounts []Account
+	callStatus(t, f.mod, &f.runner, token, "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
+	if len(accounts) != 1 || accounts[0].PendingCheck == nil || accounts[0].PendingCheck.ID != check.ID || len(accounts[0].ReadinessResources) != 1 {
+		t.Fatalf("scoped poll: %+v", accounts)
+	}
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
+	if accounts[0].PendingCheck != nil || len(accounts[0].ReadinessResources) != 0 {
+		t.Fatal("person received daemon-only poll fields")
+	}
+	callStatus(t, f.mod, &f.runner, issueKey(t, f.runner, []string{"account.read"}), "GET", "/api/agent-accounts?include_checks=true", "", 403, nil)
+	other := addPrincipal(t, f.admin.TenantID, "agent", "Other daemon", []string{"admin"})
+	callStatus(t, f.mod, &other, issueKey(t, other, []string{"account.read", "account.probe"}), "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
+	if len(accounts) != 0 {
+		t.Fatal("another daemon received the check")
+	}
+	// Two accounts consuming one resource do not disclose a private owner's
+	// quota merely because the other account is owned by the caller.
+	peer := addPrincipal(t, f.admin.TenantID, "person", "Private owner", []string{"admin"})
+	var sibling Account
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"sibling","harness":"codex","daemon_id":"daemon-a","label":"Other"}`, 201, &sibling)
+	ownFixtureAccount(t, peer, &sibling)
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision) SELECT tenant_id,$2,resource_id,0 FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID, sibling.ID); err != nil {
+		t.Fatal(err)
+	}
+	load := func() bool {
+		var allowed bool
+		err := db.InTenant(t.Context(), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			policy, err := accountprivacy.Load(t.Context(), tx, f.admin, []string{f.account.ID})
+			allowed = policy[f.account.ID]
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return allowed
+	}
+	if load() {
+		t.Fatal("shared resource bypassed other owner's privacy")
+	}
+	callStatus(t, f.mod, &peer, "", "PUT", "/api/agent-accounts/"+sibling.ID+"/sharing", `{"binding_revision":0,"share_usage":true}`, 204, nil)
+	if !load() {
+		t.Fatal("shared owner opt-in was not recognized")
+	}
+	// Current role/key revocation is checked within the report transaction.
+	if _, err := adminPool.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.runner.TenantID, f.runner.ID); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 403, nil)
 }
