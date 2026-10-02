@@ -235,3 +235,51 @@ func TestProjectAssignmentReadsRoleAfterAuthorityLock(t *testing.T) {
 		})
 	}
 }
+
+func TestLastOwnerFenceSerializesRemovalAndDeactivation(t *testing.T) {
+	f := newAuthorityFixture(t)
+	ctx := authorityDeadline(t)
+	if _, err := f.d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner')
+		WHERE tenant_id=$1 AND principal_id=$2;
+`, f.actor.TenantID, f.actor.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='owner'`, f.actor.TenantID, f.target); err != nil {
+		t.Fatal(err)
+	}
+	removal, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removal.Rollback(context.Background())
+	if _, err := removal.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.actor.TenantID, f.actor.ID); err != nil {
+		t.Fatal(err)
+	}
+	started, done := make(chan uint32, 1), make(chan error, 1)
+	go func() {
+		done <- db.InTenant(ctx, f.d.App, f.actor.TenantID, func(tx pgx.Tx) error {
+			started <- tx.Conn().PgConn().PID()
+			_, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE tenant_id=$1 AND id=$2`, f.actor.TenantID, f.target)
+			return err
+		})
+	}()
+	waitAuthorityBlock(t, ctx, f.d, <-started, removal.Conn().PgConn().PID(), done)
+	if err := removal.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var pe *pgconn.PgError
+	if err := <-done; !errors.As(err, &pe) || pe.Code != "23514" {
+		t.Fatalf("last owner deactivation after concurrent removal: %v", err)
+	}
+	var remaining int
+	if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM role_bindings b
+		JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+		JOIN principals p ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+		WHERE b.tenant_id=$1 AND b.scope_type='workspace' AND r.key='owner' AND p.status='active'`, f.actor.TenantID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 {
+		t.Fatalf("active owners after concurrent mutations: %d", remaining)
+	}
+}
