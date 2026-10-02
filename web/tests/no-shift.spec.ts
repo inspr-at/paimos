@@ -142,6 +142,35 @@ for (const width of [1440, 1024, 390]) {
   })
 }
 
+for (const width of [1440, 390]) {
+  test(`confirmation content grows away from its controls at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mockWork(page, fixtures())
+    await page.goto('/p/PHAROS')
+    await expect(page.locator('.confirm')).toHaveCount(1)
+    const open = (body: string) => page.evaluate(async body => {
+      const modulePath = '/src/lib/confirm.ts'
+      const { confirmAction } = await import(/* @vite-ignore */ modulePath)
+      void confirmAction({ title: 'Confirm change', body, confirmLabel: 'Accept', danger: true })
+    }, body)
+    await open('A short explanation.')
+    const dialog = page.locator('.confirm[open]')
+    await expect(dialog).toBeVisible()
+    const initial = await dialog.boundingBox()
+    if (width > 720) expect(initial!.height, 'short content has no padded body').toBeLessThan(240)
+    await expectStableControls({
+      controls: { title: dialog.locator('h2'), actions: dialog.locator('.actions'), accept: dialog.getByRole('button', { name: 'Accept' }), cancel: dialog.getByRole('button', { name: 'Cancel' }) },
+      scrollAreas: { body: dialog.locator('#confirm-body') },
+      interactions: [
+        { name: 'longer explanation', run: () => open('A much longer explanation that wraps. '.repeat(100)) },
+        { name: 'scroll explanation', run: () => dialog.locator('#confirm-body').evaluate(el => { el.scrollTop = 100 }) },
+        { name: 'short explanation again', run: () => open('A short explanation.') },
+      ],
+    })
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  })
+}
+
 test('saving a pacing option keeps keyboard focus for Escape', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   await setup(page)
