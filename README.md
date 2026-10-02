@@ -1173,11 +1173,23 @@ npx playwright install chromium
 npm test
 ```
 
-The Playwright suite starts Vite on port 5175, intercepts all `/api/*` calls,
+The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
+
+**Full UI QA** runs the complete `playwright.ui.config.ts` inventory in five
+hosted shards with one browser worker each and zero retries. It runs nightly on
+`main` at 02:37 UTC. To request a full QA, dispatch `full-ui-qa.yml` with an
+optional `ref` (branch, tag or commit; blank defaults to `main`), or add the
+`full-qa` label to a PR. Updates to a labeled PR run the suite again; unrelated
+label additions do not. PR runs test the merge commit. Every shard checks out
+the same resolved commit, including when a manual branch moves during the run.
+The `full-ui-qa` check and Actions summary report the batch result; shard JSON
+reports and failed traces are retained as artifacts for seven days. This is an
+optional QA check; existing required CI checks and PR test selection are unchanged.
+Scheduled/manual triggers become available after the workflow reaches `main`.
 
 Licence: AGPL-3.0-only.
 
