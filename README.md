@@ -1594,6 +1594,23 @@ Email comparisons fold only ASCII A-Z; Unicode characters remain distinct in
 bootstrap admin checks, development sign-in, invitation provisioning, imported
 profile matching and link suggestions. Classic principal backfills take the
 same tenant lock as invitation acceptance before repairing emails.
+Email-based OIDC bootstrap enrollment requires `email_verified: true`, just
+like invite enrollment, and can run only once. The first principal binding's
+append-only audit event closes bootstrap enrollment; subsequent claims to the
+same mailbox cannot create another admin, even when verified. Existing and
+operator-pinned issuer/subject memberships continue to sign in.
+Invite acceptance holds the tenant access lock through its binding inserts;
+linking takes that lock before the alias lock (seed 532) and principal rows.
+These access-write fences use `FOR NO KEY UPDATE` so they serialize with each
+other and membership changes while allowing event writers' tenant FK checks.
+The last-owner trigger uses the same fence during binding removal/deactivation.
+Project-role assignment and attachment writes lock the tree (seed 0), then the
+tenant, before reading current grants and resource rows. Attachment request
+bodies are read before these locks; the final transaction checks permission in
+the node's current project and commits metadata and audit events together.
+Attachment writes use a shared tenant lock: access edits are fenced while
+other resource writers can finish their tenant foreign-key checks. Retained
+principal import/backfill paths take tree, tenant, then alias locks in that order.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
