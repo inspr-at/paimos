@@ -32,6 +32,15 @@ func TestDeskChainPublishedAlwaysReuseDeliveryAndCorrection(t *testing.T) {
 	if asker.FromRecord == nil || asker.FromRecord.DecisionID != q.Answer.ID || asker.FromRecord.Revision != 2 || asker.RequestID != member.RequestID || asker.SessionID != f.otherSession || asker.ReplyRootID == q.Askers[0].ReplyRootID {
 		t.Fatal("reused membership lost immutable provenance or its own route")
 	}
+	// Matching uses the database clock. Sample it after the reuse transaction
+	// so slow execution cannot put immediate effects ahead of the injected clock.
+	var databaseNow time.Time
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
+		t.Fatal(err)
+	}
+	if databaseNow.UnixNano() > f.now.Load() {
+		f.now.Store(databaseNow.UnixNano())
+	}
 	effects := map[string]string{}
 	for _, e := range reused.Pending {
 		if e.Kind == "outcome" {
