@@ -94,6 +94,7 @@ type Record struct {
 
 type owned struct {
 	processStarted                                 time.Time
+	processCancel                                  context.CancelFunc
 	budgetMu                                       sync.Mutex
 	budgetProcess                                  Process
 	budgetTools                                    *managedToolServer
@@ -1132,17 +1133,20 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	launchedAt := time.Now()
 	startCtx := ctx
+	var startCancel context.CancelFunc
 	if !laneDeadline.IsZero() {
-		var cancel context.CancelFunc
-		startCtx, cancel = context.WithDeadline(ctx, laneDeadline)
-		defer cancel()
+		startCtx, startCancel = context.WithDeadline(ctx, laneDeadline)
 	}
 	entry.mu.Lock()
 	entry.processStarted = launchedAt
+	entry.processCancel = startCancel
 	entry.mu.Unlock()
 	proc, err := adapter.Start(startCtx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
+		if startCancel != nil {
+			startCancel()
+		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1377,9 +1381,13 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.mu.Lock()
 	proc := entry.process
 	done := entry.monitorDone
+	processCancel := entry.processCancel
 	entry.mu.Unlock()
 	if done != nil {
 		defer close(done)
+	}
+	if processCancel != nil {
+		defer processCancel()
 	}
 	if proc == nil {
 		return

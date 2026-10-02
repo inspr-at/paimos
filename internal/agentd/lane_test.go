@@ -46,13 +46,15 @@ func (a *laneTestAPI) ProjectForNode(context.Context, string) (string, error) {
 
 type laneTestAdapter struct {
 	fakeAdapter
-	request StartRequest
-	starts  int
+	request      StartRequest
+	startContext context.Context
+	starts       int
 }
 
 func (*laneTestAdapter) LaneExecutionSupported() bool { return true }
 func (a *laneTestAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
 	a.request = r
+	a.startContext = ctx
 	a.starts++
 	return a.fakeAdapter.Start(ctx, r, observe)
 }
@@ -118,6 +120,9 @@ func TestLaneStartGrantAndConfirmedSettlement(t *testing.T) {
 	if adapter.starts != 1 || adapter.request.Workspace == s.workspace || !strings.HasSuffix(adapter.request.Workspace, laneRunA) {
 		t.Fatalf("wrong workspace: %s", adapter.request.Workspace)
 	}
+	if _, ok := adapter.startContext.Deadline(); !ok || adapter.startContext.Err() != nil {
+		t.Fatal("lane process context must retain its grant after StartRun returns")
+	}
 	entry := s.runs[laneRunA]
 	entry.mu.Lock()
 	record, done := entry.record, entry.monitorDone
@@ -133,6 +138,9 @@ func TestLaneStartGrantAndConfirmedSettlement(t *testing.T) {
 	}
 	_ = adapter.proc.Stop(t.Context())
 	<-done
+	if adapter.startContext.Err() != context.Canceled {
+		t.Fatal("settled process context was not released")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	found := false
