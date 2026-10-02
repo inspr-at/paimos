@@ -8,6 +8,7 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/systemactor"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -20,6 +21,18 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 	ctx = db.AllProjects(ctx, "daily status autopilot")
 	serverMode, err := config.StatusAutopilotMode()
 	if err != nil || serverMode == "off" {
+		return err
+	}
+	// Creating the System principal takes the principal-link lock (532).
+	// Principal writers can hold that lock before inserting a node, which takes
+	// the tree lock. Commit first-use provisioning before taking any tree lock
+	// so startup cannot invert that order. Later batches only read this actor.
+	var actor tenant.Principal
+	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		actor, err = systemactor.Ensure(ctx, tx, tenantID)
+		return err
+	}); err != nil {
 		return err
 	}
 	for {
@@ -115,10 +128,6 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 			if err != nil {
 				return err
 			}
-			p, err := systemactor.Ensure(ctx, tx, tenantID)
-			if err != nil {
-				return err
-			}
 			candidates, err := loadCandidates(ctx, tx, ids, *running)
 			if err != nil {
 				return err
@@ -144,7 +153,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 					effective.Enabled = o.Effective
 				}
 				if d := evaluate(c, effective, *running); d != nil {
-					if err = enact(ctx, tx, p, c.Node, *d, mode); err != nil {
+					if err = enact(ctx, tx, actor, c.Node, *d, mode); err != nil {
 						return err
 					}
 				}

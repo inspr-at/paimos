@@ -41,16 +41,20 @@ func Digest(ctx context.Context, tx pgx.Tx, project string) (string, error) {
 		return "", err
 	}
 	var content string
-	err = tx.QueryRow(ctx, `SELECT jsonb_build_object(
- 'requirements',coalesce((SELECT jsonb_agg(jsonb_build_object('id',n.id,'kind',r.kind,'revision',r.revision,'title',n.title,'body',n.body,'fields',n.fields,'state',n.state,'origin',r.origin_draft_id,'accepted',EXISTS(SELECT 1 FROM intake_draft_acceptances a WHERE a.draft_id=r.origin_draft_id AND a.target_node_id=n.id),'suggestions',coalesce((SELECT jsonb_agg(jsonb_build_object('ordinal',s.ordinal,'title',s.title,'hours',s.estimated_hours,'later',s.later,'access',s.access_change) ORDER BY s.ordinal) FROM intake_draft_ticket_suggestions s WHERE s.draft_id=r.origin_draft_id),'[]'::jsonb)) ORDER BY n.id)
- FROM journey_requirements r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.requirement_node_id WHERE r.project_node_id=$1 AND r.status<>'superseded' AND n.deleted_at IS NULL),'[]'::jsonb),
- 'manual',coalesce((SELECT jsonb_agg(jsonb_build_object('id',n.id,'title',n.title,'body',n.body,'fields',n.fields,'feature',t.feature_node_id,'access_change',t.access_change,'estimated_hours',t.estimated_hours) ORDER BY n.id)
- FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.project_node_id=$1 AND t.source='manual' AND n.deleted_at IS NULL),'[]'::jsonb))::text`, project).Scan(&content)
+	err = tx.QueryRow(ctx, DigestContentSQL, project).Scan(&content)
 	if err != nil {
 		return "", err
 	}
 	return hash([]byte(content)), nil
 }
+
+// DigestContentSQL is the read-only content projection shared by snapshot
+// readers. Mutations still use Digest's scope-row locks before reading it.
+const DigestContentSQL = `SELECT jsonb_build_object(
+ 'requirements',coalesce((SELECT jsonb_agg(jsonb_build_object('id',n.id,'kind',r.kind,'revision',r.revision,'title',n.title,'body',n.body,'fields',n.fields,'state',n.state,'origin',r.origin_draft_id,'accepted',EXISTS(SELECT 1 FROM intake_draft_acceptances a WHERE a.draft_id=r.origin_draft_id AND a.target_node_id=n.id),'suggestions',coalesce((SELECT jsonb_agg(jsonb_build_object('ordinal',s.ordinal,'title',s.title,'hours',s.estimated_hours,'later',s.later,'access',s.access_change) ORDER BY s.ordinal) FROM intake_draft_ticket_suggestions s WHERE s.draft_id=r.origin_draft_id),'[]'::jsonb)) ORDER BY n.id)
+ FROM journey_requirements r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.requirement_node_id WHERE r.project_node_id=$1 AND r.status<>'superseded' AND n.deleted_at IS NULL),'[]'::jsonb),
+ 'manual',coalesce((SELECT jsonb_agg(jsonb_build_object('id',n.id,'title',n.title,'body',n.body,'fields',n.fields,'feature',t.feature_node_id,'access_change',t.access_change,'estimated_hours',t.estimated_hours) ORDER BY n.id)
+ FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.project_node_id=$1 AND t.source='manual' AND n.deleted_at IS NULL),'[]'::jsonb))::text`
 
 // ApprovalScope binds an R2 request to the exact project revision and Digest.
 // Agents propose this scope on resource_kind=node, resource_id=project ID;

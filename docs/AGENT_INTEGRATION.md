@@ -47,6 +47,71 @@ verification and managed reviews remain unavailable before vendor startup.
 Existing enrollments retain their local profile, but a successful version probe
 does not make them launchable or request another login as if sign-out were proven.
 
+ACP launcher checks retain bounded local failure reasons: `timeout`, `protocol`
+and `launch_failed`. A future qualified sign-in check can distinguish confirmed
+sign-out (`auth_failed`) from `identity_mismatch`; both block dispatch, while only
+confirmed sign-out asks for another login. A fresh qualified success clears prior
+failures and allows dispatch. The historical account-probe request keeps only
+`auth_failed` and `unavailable`: only confirmed sign-out maps to `auth_failed`;
+identity mismatch, measurement failures and unqualified checks map to `unavailable`.
+The bounded lifecycle reason remains `identity_mismatch`. Raw vendor output and
+identity are never uploaded. These classifications do **not** qualify a sign-in
+command.
+
+#### AEON-543 qualification attempt (2026-10-02)
+
+**Blocked; neither harness has a qualified sign-in probe.** No real-account
+sign-in, identity-mismatch, startup-hook or quota-neutral termination qualification
+was completed. Fixture outcomes exercise readiness/dispatch consumers, not vendor
+authentication. Release-note enablement remains with the coordinator after actual
+qualification.
+
+Read-only commands run against the approved offload host (no credential contents
+or resolved environments were read or printed):
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'hostname; command -v gemini; command -v opencode; command -v node; command -v go'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'ls /Users/mba/.local/bin /Users/mba/.nix-profile/bin /opt/homebrew/bin /usr/local/bin 2>/dev/null | rg "^(gemini|opencode|node|npm|go|aeon.*)$"; test -d /Users/mba/.gemini && echo gemini-profile-present; test -d /Users/mba/.local/share/opencode && echo opencode-profile-present; test -d /Users/mba/.config/opencode && echo opencode-config-present; sysctl -n vm.loadavg'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local bash -s <<'REMOTE'
+for vendor_root in /Users/* /Users/mba/.local/share /Users/mba/.config /Users/mba/.nix-profile/lib/node_modules /opt/homebrew/lib/node_modules /usr/local/lib/node_modules /Users/mba/.opencode/bin; do
+  test -d "$vendor_root" && printf 'directory %s\n' "$vendor_root"
+done
+for vendor_profile in /Users/mba/.gemini /Users/mba/.config/opencode /Users/mba/.local/share/opencode /Users/ci/.gemini /Users/ci/.config/opencode /Users/ci/.local/share/opencode; do
+  test -d "$vendor_profile" && printf 'vendor profile directory %s\n' "$vendor_profile"
+done
+for vendor_binary in /Users/mba/.nix-profile/bin/gemini /Users/mba/.nix-profile/bin/opencode /opt/homebrew/bin/gemini /opt/homebrew/bin/opencode /usr/local/bin/gemini /usr/local/bin/opencode /Users/mba/.opencode/bin/opencode; do
+  test -x "$vendor_binary" && printf 'vendor executable %s\n' "$vendor_binary"
+done
+exit 0
+REMOTE
+```
+
+Observed: `mbp2606` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
+Neither vendor was found on that SSH session's PATH or at the enumerated executable
+paths; none of the enumerated vendor profile directories existed. These checks do
+not inventory every installation or another person's account. No install or login
+was attempted. Qualification needs approved physical vendor/interpreter pins and
+explicitly paired profiles on this host.
+
+Source inspection explains why guessed commands are unsafe. At Gemini commit
+[`fb972b2f`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/config/config.ts),
+the registered commands do not include `auth status`; positional arguments enter
+the prompt path. Its
+[`initialize`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/acp/acpRpcDispatcher.ts)
+calls configuration initialization, and `authenticate` may initiate authentication
+or clear cached credentials when switching methods. Neither was run as a probe.
+OpenCode v1.14.48, commit
+[`4d8ac17c`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/cli/cmd/providers.ts),
+implements `auth list` as stored provider names and credential types, without
+identity/revocation verification. Its
+[`ACP initialize`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/acp/agent.ts)
+returns capabilities; `authenticate` is unimplemented, and session creation provides
+no authenticated identity receipt. Such responses are insufficient to qualify
+dispatch. Keep `sign_in_unverified` until exact-build, real-account evidence proves
+a quota-neutral identity check and bounded cleanup with inherited hooks/config.
+
 Gemini profiles pin the exact model and numeric thinking budget. The qualified
 2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
 `effort_level` on the common 0–5 scale: off/0, up to 1024, up to 4096, up to 16384,
@@ -361,6 +426,33 @@ estimate and names the short model without effort. Column fitting
 measures visible values, and the empty Cost note appears only while Cost is ticked. Cost and actual billing
 modes still require `harness.read` on both the row and usage source projects.
 
+The Display panel saves Effort meter On/Off (default On), Model names Full/Short
+(default Short) and Version Show/Hide (default Show) per person in `list:display`.
+The Model column defaults to 176px. Registry `display_name`, `short_name` and
+`model_version` are separate from the profile's revision `version`; alias versions
+stay unknown unless a new immutable profile explicitly supplies that metadata.
+Hovers, accessible names and model sorting retain the full name and model version.
+Registered aliases with different declared model versions remain separate used
+models. The planned/used comparison requires equal model versions when either
+side declares one; two omitted or empty versions retain legacy identity matching.
+The hover says “as used” only when every session’s effort also matches the plan.
+Sorting follows the leading actual model, then the work-start route or
+live route when no actual model is known.
+Migration 1074 stores model display metadata and effort levels in the immutable,
+tenant-isolated `model_profile_display` table without rewriting profile pins.
+Existing profiles are backfilled under each tenant’s RLS in the migration
+transaction; an insert trigger covers both current and previous-binary writers.
+The registry’s presentation `provider` is separate from its routing `family`: Pi
+profiles with explicit registered Gemini IDs retain family `unknown` and carry
+Google presentation metadata. Effort is one 0–5 scale: Codex minimal 0 through xhigh 4,
+Claude low 1 through max 5, Grok low 1 through xhigh 4; Gemini budgets use off/0,
+1024, 4096, 16384, 32768 and larger token buckets. A session meter uses its
+registered profile only when reported effort matches; unregistered, missing or
+unsupported effort stays null, hides the meter, and says “Effort not reported” in
+the hover and accessible name, including when the meter setting is Off. Raw
+effort words never imply a level. The largest measured session supplies the leading
+model's meter (session ID breaks ties); the hover describes every session.
+
 Usage is reported on each beat when a log is available. `--transcript` remains the Claude Code JSONL used for usage and the title. `--usage-source claude|codex|cursor|grok` selects the parser; the default is claude when `--transcript` is set, otherwise the `--harness` name when it is one of those four. `--usage-file PATH` is an explicit log. Credential names (`auth.json`, `credentials.json`, `.env`, `*.key`, `*.age`, `id_*`) are rejected. Without an explicit file, the helper locates a log from the session: Claude under `--claude-projects` by `--usage-id` or a UUID `--source-session`; Codex `rollout-*-<id>.jsonl` under `--codex-home` (`$CODEX_HOME` or `~/.codex`); Grok `usage.json` under `--grok-home` (`$GROK_HOME` or `~/.grok`) at `sessions/<encodeURIComponent(worktree)>/<id>/usage.json`; Cursor `<state-dir>/cursor.jsonl`. Without a vendor id, Codex discovery reads only the first `session_meta` line of allowed rollouts, matches its `payload.cwd` to the registered worktree exactly, and selects the newest `payload.timestamp` after registration. Grok matches the encoded worktree directory and selects the newest session whose fenced `summary.json` has `created_at` after registration; `usage.json.updatedAt` alone cannot prove that a session is new. Both searches are bounded at 4,000 entries and pin the first match in private heartbeat state, retaining the same log and cursor after a helper restart. Sessions missing creation metadata, a bound worktree, or a recorded start remain undiscovered; use an explicit id or file for them and for resumed sessions. Keep one discoverable new vendor session per registered worktree; pass an id/file when concurrent sessions share it. It does not scan `~/.cursor` or read vendor auth files. `--billing-mode unknown|api|subscription` defaults to unknown. `--subscription-label` is accepted only with `subscription`. Dollar estimates are applied only when billing mode is `api`.
 
 Codex discovery accepts a first metadata line up to 1 MiB, independently of the smaller title limit. If its directory walk exceeds the entry cap, it returns no match and leaves the generation unpinned for later discovery. Grok also leaves the generation unpinned when its worktree directory has more than 4,000 entries. For larger homes, Codex `--usage-id` searches date directories from newest backward within the same cap; Grok `--usage-id` resolves directly in the bound worktree. Use `--usage-file` when a bounded id search cannot reach the log. Grok snapshots are checked against the server's cumulative-counter rules before queuing. A snapshot with falling uncached input is skipped without blocking later valid reports.
@@ -467,6 +559,20 @@ address bar before anything else runs, so it never reaches a sign-in return addr
 or a report, and keeps it in memory only until the Agents page fills the lookup field
 with it (exactly nine digits, else ignored). A session that ended drops it, and opening
 the link looks up and approves nothing.
+
+The terminal's waiting block names the Decision Desk and the Attach session entry,
+prints the code in three space-separated groups, and makes the validated fragment
+link clickable with OSC 8. Ctrl-C cancels a waiting request; after activation it
+stops sharing. On today's /agents page, attach requests are approvals in **Needs you**,
+ordered with permission requests by expiry. Rows show the ticket, sharing mode and
+waiting terminal, never the code, and offer **Review…** only. Review opens a memo
+with unselected Allow/Decline choices; **Decide** submits the choice. The code entry
+step performs no lookup until **Find request**. Controls stay above the growing
+memo on desktop and in a pinned bottom bar in a full-height phone sheet.
+Single keys work outside text fields; from the code field use Command+Enter on
+macOS or Ctrl+Enter elsewhere. Escape leaves the field before closing the review.
+Allowed, expired and cancelled outcomes stay in place. Because the server combines
+cancellation and decline as detached, only the deciding tab says Declined.
 
 Attach reads and decisions stay with the tenant, person and authentication
 generation that started them. Each continuation checks that scope in the same
@@ -607,6 +713,10 @@ The server verifies possession of the browser-pinned key; this is not remote
 hardware attestation. A new pairing still needs the person to trust the installed
 daemon and review the requested computer. Automated tests use an injectable
 signer and cover server proof verification, migration and unsigned native denial.
+Concurrent submissions of one valid proof must activate exactly one session;
+incomplete proofs and a failed activation transaction must preserve the challenge
+without creating a session or lease. Native tests also check that a cancelled
+context stops key creation and signing before OS access.
 A memory-only SecItem fixture mirrors legacy attribute pruning and checks stored
 item readback, including preservation of the supplied ACL identity; it never
 accesses a real Keychain and does not qualify the native ACL.

@@ -141,6 +141,7 @@ type listQuery struct {
 	seen       assigneeSeen
 	leadYellow int
 	leadRed    int
+	modelNames json.RawMessage
 	planRates  json.RawMessage
 }
 type listCursor struct {
@@ -481,6 +482,11 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return dbErr("lead thresholds", err)
 			}
 			q.leadYellow, q.leadRed = yellow, red
+		}
+		if sortsBy(q, "model") {
+			if err := prepareModelNameSort(ctx, tx, &q); err != nil {
+				return dbErr("model name sort", err)
+			}
 		}
 		if sortsByPlanningValue(q) {
 			if err := preparePlanningSort(ctx, tx, &q); err != nil {
@@ -1133,8 +1139,8 @@ func listOrder(q listQuery) string {
 			// The number the cell shows: a finished ticket is 100, like its ETA view.
 			parts = append(parts, eta.ProgressSQL("eta", "fin")+" IS NULL ASC", eta.ProgressSQL("eta", "fin")+" "+dir)
 		case "model":
-			// The role's rung on the ladder, then the area; rows without a role last.
-			parts = append(parts, "route.rank IS NULL ASC", "route.rank "+dir, "route.area IS NULL ASC", "route.area "+dir)
+			// Full model name and version, independent of the person's display choices.
+			parts = append(parts, "route.name IS NULL ASC", "route.name "+dir)
 		case "tokens", "list_cost", "paid":
 			// The same integer the cell prints: spent micro-dollars, else the
 			// estimate. Rounded once in the CTE as numeric, then the id tiebreaker.
@@ -1192,19 +1198,25 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	estimateJoin, planningCTE, planningJoin := "", "", ""
 	if sortsBy(q, "model") {
-		planningJoin = ` LEFT JOIN LATERAL (
-            SELECT CASE rn.fields->>'route_role' WHEN 'scout' THEN 0 WHEN 'mechanical' THEN 1 WHEN 'build' THEN 2 WHEN 'build-hard' THEN 3 WHEN 'review-gate' THEN 4 END AS rank,
-                nullif(rn.fields->>'area','') AS area
-            FROM nodes rn WHERE rn.tenant_id=current_setting('aeon.tenant_id')::uuid AND rn.id=f.id
-        ) route ON true`
+		names := q.modelNames
+		if len(names) == 0 {
+			names = json.RawMessage(`{}`)
+		}
+		args = append(args, string(names))
+		planningCTE, planningJoin = modelNameSortSQL(fmt.Sprintf("$%d", len(args)))
 	}
+
 	if sortsByPlanningValue(q) {
 		rates := q.planRates
 		if len(rates) == 0 {
 			rates = json.RawMessage(`[]`)
 		}
 		args = append(args, string(rates))
-		planningCTE = planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg, false)
+		valueCTE := planningSortSQL(fmt.Sprintf("$%d", len(args)), harnessAll, projectArg, false)
+		if sortsBy(q, "model") {
+			valueCTE = strings.Replace(valueCTE, ", "+planningStatesCTE(), "", 1)
+		}
+		planningCTE += valueCTE
 		planningJoin += ` LEFT JOIN planning_values plan ON plan.id=f.id`
 	}
 	moneyJoin, moneyCols := "", ""
