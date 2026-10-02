@@ -426,7 +426,7 @@ func TestReadinessPairingRevocationInvalidatesPending(t *testing.T) {
 		t.Run(scope, func(t *testing.T) {
 			now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 			f := readinessWorld(t, "readiness-revoke-"+scope, now)
-			if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET harness='claude' WHERE id=$1`, f.account.ID); err != nil {
+			if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET harness='claude',max_parallel_runs=1 WHERE id=$1`, f.account.ID); err != nil {
 				t.Fatal(err)
 			}
 			f.account.Harness = "claude"
