@@ -634,6 +634,10 @@ The server verifies possession of the browser-pinned key; this is not remote
 hardware attestation. A new pairing still needs the person to trust the installed
 daemon and review the requested computer. Automated tests use an injectable
 signer and cover server proof verification, migration and unsigned native denial.
+Concurrent submissions of one valid proof must activate exactly one session;
+incomplete proofs and a failed activation transaction must preserve the challenge
+without creating a session or lease. Native tests also check that a cancelled
+context stops key creation and signing before OS access.
 A memory-only SecItem fixture mirrors legacy attribute pruning and checks stored
 item readback, including preservation of the supplied ACL identity; it never
 accesses a real Keychain and does not qualify the native ACL.
