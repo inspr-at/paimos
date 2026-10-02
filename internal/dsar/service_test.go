@@ -29,7 +29,7 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	var owner, subject, alias, other, admin, agent, foreign, identity, aliasIdentity string
-	if err := d.Admin.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name) VALUES('dsar-fixture','person','subject@example.test','Subject Identity') RETURNING id::text`).Scan(&identity); err != nil {
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name) VALUES('dsar-fixture','00000000-0000-0000-0000-000000000123','subject@example.test','Subject Identity') RETURNING id::text`).Scan(&identity); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Admin.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name) VALUES('dsar-alias-fixture','alias','alias@example.test','Alias Identity') RETURNING id::text`).Scan(&aliasIdentity); err != nil {
@@ -78,6 +78,10 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	// Fixture writers have system visibility, but this private table also
 	// requires the owning person. Seed through the test-only admin connection.
 	if _, err := d.Admin.Exec(ctx, `INSERT INTO person_host_labels(tenant_id,person_id,host,label) VALUES($1,$2,'host-fixture','My workstation')`, tid, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO aithema_deprovisioned_subjects(tenant_id,issuer,subject)
+		VALUES($1,'dsar-fixture','00000000-0000-0000-0000-000000000123'),($1,'different-issuer','00000000-0000-0000-0000-000000000123')`, tid); err != nil {
 		t.Fatal(err)
 	}
 	// Share the global identity across tenants: the other membership must never
@@ -132,6 +136,9 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if len(section(report, "inbox_messages").Records) != 1 || len(section(report, "agent_keys").Records) != 1 || len(section(report, "sessions").Records) != 1 {
 		t.Fatal("personal adapter missing")
 	}
+	if len(section(report, "aithema_deprovisioned_subjects").Records) != 1 {
+		t.Fatal("OIDC subject/issuer mapping was not exact")
+	}
 	nodeSection := section(report, "nodes")
 	if len(nodeSection.Records) != 1 || !strings.Contains(string(nodeSection.Records[0].Locator), visibleNode) {
 		t.Fatal("subject project visibility was not enforced")
@@ -176,6 +183,9 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 		if _, err := Collect(t.Context(), d.App, denied); err == nil {
 			t.Fatal("non-owner authorized")
 		}
+	}
+	if _, err := Collect(t.Context(), d.Admin, opts); err == nil || !strings.Contains(err.Error(), "cannot bypass") {
+		t.Fatal("superuser database connection accepted")
 	}
 	if _, err := Collect(tenant.WithPrincipal(t.Context(), tenant.Principal{ID: owner, TenantID: tid, Kind: tenant.Agent}), d.App, opts); err == nil {
 		t.Fatal("agent caller authorized")
@@ -230,6 +240,14 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	opts.Person = "subject@example.test"
 	if _, err := Collect(t.Context(), d.App, opts); err == nil || !strings.Contains(err.Error(), "multiple people") {
 		t.Fatalf("ambiguous email accepted: %v", err)
+	}
+	dbtest.BindRole(t, d, tid, other, "owner")
+	if _, err := d.Admin.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE id=$1::uuid`, owner); err != nil {
+		t.Fatal(err)
+	}
+	opts.Person = subject
+	if _, err := Collect(t.Context(), d.App, opts); err == nil {
+		t.Fatal("deactivated owner authorized")
 	}
 }
 

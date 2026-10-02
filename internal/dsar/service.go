@@ -77,6 +77,10 @@ func Collect(ctx context.Context, pool *pgxpool.Pool, opts Options) (Report, err
 		return report, errors.New("open DSAR read-only transaction failed")
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	var bypass bool
+	if err := tx.QueryRow(ctx, `SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user`).Scan(&bypass); err != nil || bypass {
+		return report, errors.New("DSAR requires a database role that cannot bypass row-level security")
+	}
 	var tenantID string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug=$1`, opts.Tenant).Scan(&tenantID); err != nil {
 		return report, errors.New("tenant not found")
@@ -123,6 +127,7 @@ func Collect(ctx context.Context, pool *pgxpool.Pool, opts Options) (Report, err
 		"Verify the requester's identity and document the request, lawful basis, deadline and delivery decision in a restricted case record.",
 		"This packet needs manual supplementation: review the listed free text, JSON, transcripts, messages, snapshots, file/avatar bytes and external identity-provider records. Never deliver credentials or third-party information the subject cannot see.",
 		"UUID/email mention matches are candidates, not confirmed ownership. Search for name-only references and tenant-defined field mappings too; absence of a match is not absence of personal data.",
+		"The _snapshot_row locator identifies a physical row only in this read snapshot. Re-resolve logical keys and ownership before any manual action; never use that locator as a later deletion instruction.",
 		"Record any statutory, litigation or contractual hold and its actual expiry before manual deletion/anonymisation. Financial records need a BAO section 132 assessment; audit immutability is a technical constraint, not a blanket statutory hold.",
 		"Global identities may serve other tenants. Preserve other memberships; review session/key revocation, retained event/snapshot copies, backups, file storage and integrations separately. This command changes none of them.",
 	}}

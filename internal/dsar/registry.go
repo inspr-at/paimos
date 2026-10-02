@@ -178,6 +178,16 @@ func ownership(d Domain, domains map[string]Domain, alias string, depth int) str
 		conditions = append(conditions, `EXISTS (SELECT 1 FROM crm_contact_principals cp WHERE cp.tenant_id=$1::uuid
 			AND cp.contact_node_id=`+column(alias, "id")+` AND cp.principal_id::text=ANY($2::text[]))`)
 	}
+	if d.Table == "aithema_host_sessions" || d.Table == "aithema_deprovisioned_subjects" {
+		subjectColumn := "requester"
+		if d.Table == "aithema_deprovisioned_subjects" {
+			subjectColumn = "subject"
+		}
+		// These UUIDs are issuer-scoped OIDC subjects, not Aeon principal IDs.
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM principals ap JOIN identities ai ON ai.id=ap.identity_id
+			WHERE ap.tenant_id=$1::uuid AND ap.id::text=ANY($2::text[]) AND ai.issuer=`+column(alias, "issuer")+
+			` AND ai.subject=`+column(alias, subjectColumn)+`::text)`)
+	}
 	if d.Parent != nil {
 		parentAlias := fmt.Sprintf("p%d", depth)
 		parent := domains[d.Parent.Table]
