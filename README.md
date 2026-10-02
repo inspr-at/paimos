@@ -2402,6 +2402,8 @@ and quotation checks run when deciding and applying. Expensive inbox preparation
 runs before the tenant mutation fence, then rechecks authority and cache versions
 inside the write. Transient failures retry with current permissions, including
 `stale_source` preparation races and an expired `public_main_unavailable` cache.
+Each transient failure schedules its next attempt 30 seconds later. A stale
+public-main cache keeps retrying until it is refreshed or the answer is replaced.
 Permanent conflicts expose `retryable: false` and require a reviewed new decision; failed
 outcome writes never appear applied. Encoded Doctrine inputs exceeding the
 4096-byte persistence bound return 422 and are stored only for Doctrine.
