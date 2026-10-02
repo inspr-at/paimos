@@ -24,6 +24,7 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",
 	"POST /api/agent-pairing/account-link/lookup":                             "profile.write",
 	"POST /api/agent-pairing/account-link/{requestId}/approve":                "profile.write",
@@ -168,6 +169,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/approvals":                                                     "approvals.read",
 	"GET /api/audit":                                                         "audit.read",
 	"GET /api/attachments/{id}/content":                                      "attachments.read",
+	"POST /api/attachments/{id}/preview":                                     "attachments.read",
 	"GET /api/auth/callback":                                                 "public",
 	"GET /api/auth/login":                                                    "public",
 	"GET /api/authz/permissions":                                             "roles.read",
@@ -187,6 +189,11 @@ var RoutePermissions = map[string]string{
 	"GET /api/events/stream":                                                 "events.read",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
+	"GET /api/me/agent-pause-settings":                                       "harness.read",
+	"PUT /api/me/agent-pause-settings":                                       "harness.read",
+	"GET /api/me/leaving-at":                                                 "harness.read",
+	"PUT /api/me/leaving-at":                                                 "harness.control",
+	"DELETE /api/me/leaving-at":                                              "harness.control",
 	"POST /api/harness-sessions/pause":                                       "harness.control",
 	"POST /api/harness-sessions/resume":                                      "harness.control",
 	"GET /api/harness-sessions/live":                                         "nodes.read",
@@ -533,6 +540,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/status-autopilot":                                            "nodes.read",
 	"PUT /api/projects/{projectId}/status-autopilot":                                            "settings.manage",
 	"GET /api/status-autopilot/changes":                                                         "nodes.read",
+	"GET /api/status-autopilot/proposals":                                                       "nodes.read",
+	"PUT /api/status-autopilot/proposals/{eventId}":                                             "settings.manage",
 	"GET /api/settings/agent-activity":                                                          "settings.manage",
 	"PUT /api/settings/agent-activity":                                                          "settings.manage",
 	"GET /api/settings/heartbeat-lost":                                                          "settings.manage",

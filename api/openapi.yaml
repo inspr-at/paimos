@@ -118,7 +118,7 @@ paths:
       security: [{session: []}, {agentKey: []}]
       responses:
         '200':
-          description: Default On; seven deterministic rules. Triage autopilot is separate.
+          description: Default On for new tenants; existing tenants suggest for 24 hours after upgrade or until owner confirmation. Server mode caps workspace and project policy. Triage autopilot is separate.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusAutopilotSettings'}
@@ -137,6 +137,7 @@ paths:
                   required: [expected_revision]
                   properties:
                     expected_revision: {type: integer, minimum: 0}
+                    confirm_upgrade: {type: boolean, default: false, description: Explicit owner confirmation ends the upgrade suggestion period; requires ownership.transfer and never overrides server mode.}
       responses:
         '200':
           description: Saved settings and new revision
@@ -204,6 +205,44 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/StatusAutopilotChange'}
+  /status-autopilot/proposals:
+    get:
+      operationId: listStatusAutopilotProposals
+      summary: Pending status proposals without ticket mutations
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: All pending visible proposals, including stale proposals that can only be dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/StatusAutopilotProposal'}}
+  /status-autopilot/proposals/{eventId}:
+    parameters:
+      - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
+    put:
+      operationId: resolveStatusAutopilotProposal
+      summary: Apply or dismiss a proposal as a workspace admin
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: {type: string, enum: [apply, dismiss]}
+      responses:
+        '200': {description: Applied or dismissed; returns an empty object}
+        '400': {description: Invalid proposal or action}
+        '403': {description: Person with settings.manage and nodes.write required; server Off forbids Apply}
+        '404': {description: Proposal not visible}
+        '409': {description: 'Proposal resolved or its ticket, rule or eligibility changed; reload'}
   /from-classic/api/{legacyPath}:
     servers:
       - url: /
@@ -3902,6 +3941,39 @@ paths:
       responses:
         '204': {description: Soft deleted}
         '404': {$ref: '#/components/responses/Error'}
+  /attachments/{id}/preview:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: createAttachmentPreview
+      summary: Mint a short-lived HTML preview capability for a browser session
+      description: |
+        Person session only; attachments.read and current node/project visibility are
+        checked at issuance and every content request. No request body. The capability
+        is bound to the session, tenant, project, node, attachment and immutable digest.
+        It is not an API credential. Do not persist, log, share or cache the returned URL.
+        Missing/unsafe sandbox configuration returns available=false; originals remain
+        downloadable. The sandbox origin serves no app/auth routes or cookies.
+        Use iframe sandbox="allow-scripts" and referrerpolicy="no-referrer".
+        Inline scripts/styles and data images/fonts only. Frame self-navigation remains
+        possible; this is an origin isolation boundary, not a network sandbox.
+      security: *auth
+      responses:
+        '200':
+          description: Private, no-store preview availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: {type: boolean}
+                  url: {type: string, format: uri}
+                  expires_at: {type: string, format: date-time}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /attachments/{id}/content:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     get:
@@ -4197,11 +4269,20 @@ paths:
   /events:
     get:
       operationId: listEvents
-      description: Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes.
+      description: >-
+        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a statement_timestamp() window in the same statement snapshot as the first page (commits after the snapshot are not consumed by its cutoff): since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: after, in: query, description: Exclusive event ID, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [id, time]}}
+        - {name: cursor, in: query, description: 'Opaque exclusive (at,id) cursor; requires from/to and enables order=time', schema: {type: string, maxLength: 256}}
+        - {name: briefing, in: query, schema: {type: boolean}, description: 'Establish the first briefing window; excludes from/to, after and cursor.'}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: Previous server cutoff; only with briefing=true.}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: Restrict to events attached to nodes in this visible project.}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: type, in: query, schema: {type: string, maxLength: 1031}, description: Comma-separated exact event types; at most eight names of 1–128 characters each.}
         - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
@@ -5000,6 +5081,51 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /me/agent-pause-settings:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's default pause level in this workspace
+      responses:
+        '200': {description: Personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Set this person's default pause level in this workspace
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+      responses:
+        '200': {description: Saved personal settings, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseSettings'}}}}
+  /me/leaving-at:
+    get:
+      tags: [Harness sessions]
+      summary: Read this person's durable leaving deadline and per-agent plans
+      responses:
+        '200': {description: Deadline and current plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+    put:
+      tags: [Harness sessions]
+      summary: Schedule selected running work to stop by a deadline
+      description: 'People with harness.control only. Selects owned sessions in authorized projects. Fresh finish estimates choose Wrap up first when under ten minutes and with one minute to spare. Otherwise Pause starts at T minus ten minutes; fresh handover and command timing choose Pause quickly when the full handover cannot fit. With missing timing, escalation starts two minutes before the level deadline. Current uninterruptible commands keep cooperative Pause. Pause and Wrap up have a ten-minute cap from their actual start; Pause quickly has a three-minute cap. Each deadline is the earlier of the leave instant and the level cap; Stop now is queued at that deadline through the existing generation-fenced stop channel. Agents without inbox support keep running until T. Repeating the same deadline and selection is idempotent. More than 200 eligible sessions returns 409 without partial scheduling. A changed deadline or selection replaces pending plans; already paused sessions stay paused. Host scope is stored for downstream launcher admission integration. No server-side process signal or closure is inferred from a stop request.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [deadline_at]
+              properties:
+                deadline_at: {type: string, format: date-time, description: 'Future UTC deadline within 24 hours, evaluated using the database clock.'}
+                reason: {type: string, maxLength: 240}
+                note: {type: string, maxLength: 2000}
+                hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+                agents: {type: array, maxItems: 200, items: {type: string, format: uuid}, description: 'Explicit session selection, independent of hosts; ended or unauthorized sessions are ignored. Omission selects running sessions on the chosen hosts.'}
+      responses:
+        '200': {description: Durable deadline and plans, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
+        '409': {description: Too many sessions or a stop already in flight}
+    delete:
+      tags: [Harness sessions]
+      summary: Turn off leaving mode and withdraw pending requests
+      description: Cancels only requests belonging to this person's current leaving deadline. Already paused sessions stay paused. A stop already claimed by its executor cannot be recalled and is reported in the result.
+      responses:
+        '200': {description: Cancelled deadline and preserved handovers, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessLeavingReport'}}}}
   /harness-sessions/pause:
     post:
       operationId: pauseAllHarnessSessions
@@ -5508,6 +5634,14 @@ paths:
                 doing: {type: string, minLength: 1, maxLength: 60, description: "Public agent summary without credentials, paths, URLs or command arguments. Collected only in agent_summary mode."}
                 doing_at: {type: string, format: date-time, description: "Optional observation time; defaults to server receipt. Older than ten minutes is ignored; future times beyond thirty seconds are rejected."}
                 tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+                step: {$ref: '#/components/schemas/HarnessPauseProgress/properties/step'}
+                next_point: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point'}
+                next_point_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/next_point_in_min'}
+                finish_in_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_in_min'}
+                finish_outcome: {$ref: '#/components/schemas/HarnessPauseProgress/properties/finish_outcome'}
+                interrupt: {$ref: '#/components/schemas/HarnessPauseProgress/properties/interrupt'}
+                command: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command'}
+                command_left_min: {$ref: '#/components/schemas/HarnessPauseProgress/properties/command_left_min'}
                 display_label: {type: [string, 'null'], maxLength: 128, description: Optional current session name; omission preserves the label; trimmed empty or null clears it; control characters rejected.}
                 model: {$ref: '#/components/schemas/HarnessModel'}
                 reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
@@ -6195,7 +6329,7 @@ paths:
       operationId: listApprovals
       description: Workspace readers see their tenant's approvals. Project-only readers see approvals in projects where they hold approvals.read; workspace-level approvals require a workspace binding. agent_name is conditional as documented on Approval.
       security: *auth
-      parameters: [{$ref: '#/components/parameters/Limit'}]
+      parameters: [{$ref: '#/components/parameters/Limit'}, {name: pending, in: query, schema: {type: boolean}, description: Only undecided unexpired requests; filtering precedes the limit.}]
       responses:
         '200': {description: Approval requests, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
     post:
@@ -6715,6 +6849,18 @@ paths:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /journey/next-actions:
+    get:
+      operationId: listJourneyNextActions
+      summary: Read derived next actions for a batch of projects
+      description: Person-only snapshot. Reads all projection inputs in one query and derives actions with the existing journey rules. Requires journey.read and journey.act in each project. Invisible or unauthorized projects are omitted. No initialization, mutations or approval decisions.
+      security: *auth
+      parameters:
+        - {name: project_ids, in: query, required: true, schema: {type: string}, description: 'Comma-separated unique project UUIDs; at most 100.'}
+      responses:
+        '200': {description: Current actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [project_node_id, next_action], properties: {project_node_id: {type: string, format: uuid}, next_action: {$ref: '#/components/schemas/JourneyNextAction'}}}}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey:
     get:
       operationId: getProjectJourney
@@ -8443,12 +8589,16 @@ paths:
     get:
       operationId: listOutcomes
       summary: List objective outcome events
-      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id or rules_version is required. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
+      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
         - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
         - {name: session_id, in: query, schema: {type: string, format: uuid}}
+        - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
         - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by this list; retain the same filters.}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
       responses:
         '200': {description: Newest outcomes first, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeList'}}}}
@@ -8487,7 +8637,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.2']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.4']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -8513,6 +8663,9 @@ components:
       properties:
         enabled: {type: boolean, default: true}
         revision: {type: integer, minimum: 0, readOnly: true}
+        server_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        effective_mode: {type: string, enum: [off, suggest, on], readOnly: true}
+        suggest_until: {type: [string, 'null'], format: date-time, readOnly: true, description: Upgrade grace deadline; null for new or owner-confirmed tenants.}
         rules:
           type: object
           additionalProperties: false
@@ -8549,6 +8702,21 @@ components:
         undone: {type: boolean}
         changed_since: {type: boolean, description: A later ticket edit made the original change stale}
         undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
+    StatusAutopilotProposal:
+      type: object
+      required: [event_id, node_id, key, title, rule, reason, from, to, at, changed_since, applicable]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string, description: Proposed status or attention flag}
+        at: {type: string, format: date-time}
+        changed_since: {type: boolean}
+        applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -12426,7 +12594,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, rename, model, effort]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -12473,6 +12641,13 @@ components:
       description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
       required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
       properties:
+        expected_generation: {type: string, format: uuid}
+        request_payload:
+          type: object
+          properties:
+            stop_now: {type: boolean}
+            level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+            note: {type: string, maxLength: 2000}
         id: {type: string, format: uuid}
         session_id: {type: string, format: uuid}
         kind: {type: string, description: 'steer, interrupt, stop, rename, model, effort, force_stop, rename_request or model_request.'}
@@ -12673,10 +12848,50 @@ components:
         agent_principal_id: {type: string, format: uuid}
         stopped_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}
+    HarnessPauseLevel:
+      type: string
+      enum: [stop_now, pause_quickly, pause, wrap_up]
+    HarnessPauseSettings:
+      type: object
+      additionalProperties: false
+      required: [default_level]
+      properties:
+        default_level: {$ref: '#/components/schemas/HarnessPauseLevel', default: pause}
+    HarnessWindDownHosts:
+      description: 'Host identities as reported by sessions, or all. Defaults to all. Stored separately from the explicit agents selected to wind down, for launcher admission integration.'
+      oneOf:
+        - {type: string, const: all}
+        - {type: array, maxItems: 200, items: {type: string, minLength: 1, maxLength: 128}}
+    HarnessPauseProgress:
+      type: object
+      description: 'Latest worker planning snapshot. Sending any planning field replaces the snapshot; omitted fields in that snapshot are unknown, null clears. Omitting all planning fields preserves its original report time. Estimates count down from reported_at and expire after two ETA intervals. Text must be public labels without credentials, paths or command arguments. The command here is the current operation, separate from a terminal session command label.'
+      required: [reported_at]
+      properties:
+        reported_at: {type: string, format: date-time, readOnly: true}
+        step: {type: [string, 'null'], maxLength: 240}
+        next_point: {type: [string, 'null'], maxLength: 240}
+        next_point_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_outcome: {type: [string, 'null'], maxLength: 240}
+        interrupt: {type: [boolean, 'null'], description: Whether the current operation can be interrupted; never grants signal authority.}
+        command: {type: [string, 'null'], maxLength: 240}
+        command_left_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+    HarnessLeavingReport:
+      type: object
+      required: [deadline_at, request_id, items, stop_in_flight]
+      properties:
+        deadline_at: {type: [string, 'null'], format: date-time}
+        request_id: {type: [string, 'null'], format: uuid}
+        items: {type: array, items: {$ref: '#/components/schemas/HarnessSession'}}
+        stop_in_flight: {type: boolean}
+        hosts: {$ref: '#/components/schemas/HarnessWindDownHosts'}
+        agents: {type: array, items: {type: string, format: uuid}}
     HarnessPauseRequest:
       type: object
       additionalProperties: false
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
         coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using X-Aeon-Worker-Lease.}
@@ -12684,6 +12899,8 @@ components:
       type: object
       additionalProperties: false
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
         reason: {type: string, maxLength: 240}
         deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
         coordinator_session_id: {type: string, format: uuid}
@@ -12728,12 +12945,22 @@ components:
       type: object
       required: [control_id, state, requested_by_principal_id, requested_at, reason, deadline_at]
       properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+        note: {type: string, maxLength: 2000}
+        starts_at: {type: string, format: date-time, description: Do not deliver or plan before this database-clock time.}
+        wake_in_ms: {type: integer, minimum: 1, maximum: 86400000, description: "Relative database-clock delay to the next scheduled transition. Anchor to monotonic request start. A wake hint grants no signal authority."}
+        leaving_request_id: {type: string, format: uuid}
+        stop_control_id: {type: string, format: uuid}
+        interrupt_control_id: {type: string, format: uuid}
+        stop_expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: "Heartbeat-only authorization lifetime for an owned unmanaged launcher. Anchor to monotonic request start, deduct round trip, and fail closed if absent or zero."}
+        stop_requested: {type: boolean, description: An immediate stop was queued; this does not confirm process exit.}
+        deliver: {type: boolean, description: Database-clock delivery eligibility. Old records without starts_at remain deliverable.}
         control_id: {type: string, format: uuid}
         state: {type: string, enum: [requested, planned, paused, resume_requested, resumed, cancelled]}
         requested_by_principal_id: {type: string, format: uuid}
         requested_at: {type: string, format: date-time}
         reason: {type: string}
-        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. An overdue requested or planned pause becomes cancelled and its control completes with reason pause_deadline_expired, allowing a new pause. Checked on heartbeat, session/control reads, new pause requests and the periodic sweep. Expiry never signals a process; a separate hard-stop executor must use the existing exact process ownership protocol.'}
+        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. Legacy records without a level cancel on expiry. Level-aware requests cancel the cooperative control and queue Stop now for the exact generation. Deadlines are checked on heartbeat, reads and the periodic sweep. Process exit is confirmed only by the owned executor.'}
         handover_point: {type: string}
         planned_at: {type: string, format: date-time}
         paused_at: {type: string, format: date-time}
@@ -12773,6 +13000,9 @@ components:
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
+        pause_can_interrupt: {type: boolean, description: 'Harness advertises cooperative interrupt support. Fresh pause_progress.interrupt describes the current operation; false means it reacts after the command.'}
+        pause_progress: {$ref: '#/components/schemas/HarnessPauseProgress'}
         pause: {$ref: '#/components/schemas/HarnessPause', description: Durable cooperative stop request and handover. Delivered on every heartbeat until closure.}
         continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:
@@ -12864,8 +13094,13 @@ components:
             label: {type: string, description: 'Display name such as "Codex astra · xhigh".'}
             profile: {type: string, description: Profile slug.}
             harness: {type: string}
+            provider: {type: string, description: Registry model provider used by the brand mark.}
             model: {type: string}
             effort: {type: string}
+            display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+            short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+            model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
             revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
         route_gap:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
@@ -12880,7 +13115,11 @@ components:
             properties:
               label: {type: string, description: Short model label without effort.}
               harness: {type: string}
+              provider: {type: string, description: Registry model provider used by the brand mark.}
               model: {type: string}
+              display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+              short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+              model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
               sessions:
                 type: array
                 items:
@@ -12891,6 +13130,7 @@ components:
                     profile_id: {type: string, format: uuid}
                     model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
                     effort: {type: string}
+                    effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, description: 'Resolved from model_profile_id and matching reported effort; null when unregistered or unknown.'}
                     role: {type: string}
                     running: {type: boolean}
                     tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
@@ -13431,6 +13671,9 @@ components:
         model: {type: string, minLength: 1, maxLength: 128}
         effort: {type: string, minLength: 1, maxLength: 32}
         tier: {type: string, enum: [fast, standard, strong, frontier]}
+        display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+        short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+        model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
     ModelProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfileWrite'}
@@ -13440,7 +13683,8 @@ components:
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
-            effort_level: {type: integer, minimum: 0, maximum: 5, description: "Normalized Gemini fixed thinking-budget bucket from the immutable effort pin; omitted when unknown."}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: "Shared effort scale from the immutable effort pin, including Gemini fixed thinking-budget buckets; unknown stays null."}
+            provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
     ModelRoute:
       type: object
       required: [role, priority, profile_id, state]
@@ -13884,7 +14128,7 @@ components:
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
         openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
-        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
+        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out; identity mismatch and every other failure are unavailable (the default when omitted). Only confirmed sign-out asks for another login. Bounded daemon lifecycle reasons may distinguish identity_mismatch, timeout, protocol and launch_failed, without changing these historical probe categories or uploading vendor identity or diagnostics. A version response alone never establishes signed-in readiness.'}
     AccountLimitProperties:
       type: object
       required: [amount, unit, period]
@@ -13984,6 +14228,7 @@ components:
       additionalProperties: false
       required: [outcomes]
       properties:
+        next_cursor: {type: [string, 'null'], description: Continue with the same filters; null at the end.}
         outcomes:
           type: array
           items: {$ref: '#/components/schemas/OutcomeEvent'}
@@ -14605,6 +14850,7 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         deleted_at: {type: [string, 'null'], format: date-time}
+        thumbnail_kind: {type: string, enum: [html-text], description: Bounded inert text rendition of HTML; not a browser screenshot. Available as variant=thumb.}
     StatusHelp:
       type: object
       required: [definitions, queued, autopilot, triage, limits_source]
@@ -15034,6 +15280,17 @@ components:
       type: object
       required: [items, next_after]
       properties:
+        next_cursor:
+          type: [string, 'null']
+          description: Exclusive time cursor for order=time or briefing=true pages.
+        window:
+          type: object
+          required: [from, to, first, capped]
+          properties:
+            from: {type: string, format: date-time}
+            to: {type: string, format: date-time}
+            first: {type: boolean}
+            capped: {type: boolean}
         items:
           type: array
           items:
@@ -15253,7 +15510,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (rung of the route role: scout, mechanical, build, build-hard, review-gate, then area; no role last), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

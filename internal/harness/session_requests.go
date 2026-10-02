@@ -17,6 +17,9 @@ import (
 )
 
 type SessionRequestPayload struct {
+	StopNow         bool   `json:"stop_now,omitempty"`
+	Level           string `json:"level,omitempty"`
+	Note            string `json:"note,omitempty"`
 	Pause           bool   `json:"pause,omitempty"`
 	DisplayLabel    string `json:"display_label,omitempty"`
 	Model           string `json:"model,omitempty"`

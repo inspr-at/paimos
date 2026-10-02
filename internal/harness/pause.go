@@ -23,18 +23,28 @@ import (
 // process ownership or permission to send a signal. The JSON lives in the
 // session row, so reads, heartbeat, reboot recovery and audit share one state.
 type Pause struct {
-	ControlID         string     `json:"control_id"`
-	State             string     `json:"state"`
-	RequestedBy       string     `json:"requested_by_principal_id"`
-	RequestedAt       time.Time  `json:"requested_at"`
-	Reason            string     `json:"reason"`
-	DeadlineAt        time.Time  `json:"deadline_at"`
-	HandoverPoint     string     `json:"handover_point,omitempty"`
-	PlannedAt         *time.Time `json:"planned_at,omitempty"`
-	PausedAt          *time.Time `json:"paused_at,omitempty"`
-	Handover          *Handover  `json:"handover,omitempty"`
-	ResumeRequestedAt *time.Time `json:"resume_requested_at,omitempty"`
-	SuccessorID       string     `json:"successor_session_id,omitempty"`
+	Level              string     `json:"level,omitempty"`
+	Note               string     `json:"note,omitempty"`
+	StartsAt           *time.Time `json:"starts_at,omitempty"`
+	LeavingID          string     `json:"leaving_request_id,omitempty"`
+	InterruptControlID string     `json:"interrupt_control_id,omitempty"`
+	WakeInMS           int64      `json:"wake_in_ms,omitempty"`
+	StopExpiresInMS    int64      `json:"stop_expires_in_ms,omitempty"`
+	StopControlID      string     `json:"stop_control_id,omitempty"`
+	StopRequested      bool       `json:"stop_requested,omitempty"`
+	Deliver            bool       `json:"deliver"`
+	ControlID          string     `json:"control_id"`
+	State              string     `json:"state"`
+	RequestedBy        string     `json:"requested_by_principal_id"`
+	RequestedAt        time.Time  `json:"requested_at"`
+	Reason             string     `json:"reason"`
+	DeadlineAt         time.Time  `json:"deadline_at"`
+	HandoverPoint      string     `json:"handover_point,omitempty"`
+	PlannedAt          *time.Time `json:"planned_at,omitempty"`
+	PausedAt           *time.Time `json:"paused_at,omitempty"`
+	Handover           *Handover  `json:"handover,omitempty"`
+	ResumeRequestedAt  *time.Time `json:"resume_requested_at,omitempty"`
+	SuccessorID        string     `json:"successor_session_id,omitempty"`
 }
 
 type Handover struct {
@@ -52,6 +62,11 @@ type Continuation struct {
 }
 
 type pauseRequest struct {
+	Level           string `json:"level"`
+	Note            string `json:"note"`
+	deadlineAt      *time.Time
+	startsAt        *time.Time
+	leavingID       string
 	Reason          string   `json:"reason"`
 	DeadlineMinutes int      `json:"deadline_minutes"`
 	CoordinatorID   string   `json:"coordinator_session_id"`
@@ -59,6 +74,9 @@ type pauseRequest struct {
 }
 
 func (in *pauseRequest) validate() error {
+	if in.Level != "" && !ValidPauseLevel(in.Level) || !utf8.ValidString(in.Note) || utf8.RuneCountInString(in.Note) > 2000 || strings.ContainsRune(in.Note, 0) {
+		return workorders.Fail(400, "valid pause level and note of at most 2000 characters required")
+	}
 	if !utf8.ValidString(in.Reason) || utf8.RuneCountInString(in.Reason) > 240 || strings.ContainsAny(in.Reason, "\x00\r\n") {
 		return workorders.Fail(400, "pause reason must be at most 240 characters on one line")
 	}
@@ -140,6 +158,9 @@ func (m *Module) requestPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if err := lockHierarchy(r.Context(), tx, r.PathValue("projectId")); err != nil {
 		return nil, err
 	}
+	if err := resolvePauseDefault(r.Context(), tx, p, &in); err != nil {
+		return nil, err
+	}
 	owner, admin, parent, err := pauseController(r, tx, p, in.CoordinatorID)
 	if err != nil {
 		return nil, err
@@ -160,15 +181,20 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	}
 	// agentd forwards cooperative text only on its advertised inbox path.
 	// Unmanaged workers receive the request directly in their CLI heartbeat.
-	if s.Management == "managed" && !has(s, "inbox") {
+	if !cooperativePause(s) && in.Level != "stop_now" {
 		return s, workorders.Fail(409, "pause requires harness inbox delivery")
 	}
 	var err error
 	if s, err = expirePause(ctx, tx, p, s); err != nil {
 		return s, err
 	}
-	if s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned") {
-		return s, nil
+	if s.Pause != nil && (s.Pause.State == "requested" || s.Pause.State == "planned" || s.Pause.StopRequested) {
+		if in.Level != "stop_now" || s.Pause.StopRequested {
+			return s, nil
+		}
+		if s, err = cancelPause(ctx, tx, p, s, "superseded_by_stop_now"); err != nil {
+			return s, err
+		}
 	}
 	var now time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
@@ -178,15 +204,37 @@ func requestPause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session,
 	if err := tx.QueryRow(ctx, `SELECT coalesce(max(sequence),0)+1 FROM harness_controls WHERE session_id=$1`, s.ID).Scan(&sequence); err != nil {
 		return s, err
 	}
+	payload, _ := json.Marshal(SessionRequestPayload{Pause: true, Level: in.Level, Note: in.Note})
 	c, err := scanControl(tx.QueryRow(ctx, `INSERT INTO harness_controls(tenant_id,session_id,kind,request_payload,sequence,requested_by_principal_id,expected_generation)
- VALUES($1,$2,'stop','{"pause":true}'::jsonb,$3,$4,$2) RETURNING `+controlColumns, p.TenantID, s.ID, sequence, p.ID))
+ VALUES($1,$2,'stop',$5::jsonb,$3,$4,$2) RETURNING `+controlColumns, p.TenantID, s.ID, sequence, p.ID, string(payload)))
 	if err != nil {
 		return s, err
 	}
 	if err = record(ctx, tx, p, s, "control_requested", nil, c); err != nil {
 		return s, err
 	}
-	return savePause(ctx, tx, p, s, Pause{ControlID: c.ID, State: "requested", RequestedBy: p.ID, RequestedAt: now, Reason: in.Reason, DeadlineAt: now.Add(time.Duration(in.DeadlineMinutes) * time.Minute)}, "pause_requested")
+	start := now
+	if in.startsAt != nil && in.startsAt.After(start) {
+		start = *in.startsAt
+	}
+	deadline := start.Add(time.Duration(in.DeadlineMinutes) * time.Minute)
+	if in.Level == "pause_quickly" {
+		deadline = minTime(deadline, start.Add(3*time.Minute))
+	} else if in.Level == "wrap_up" || in.Level == "pause" {
+		deadline = minTime(deadline, start.Add(10*time.Minute))
+	}
+	if in.deadlineAt != nil {
+		deadline = minTime(deadline, *in.deadlineAt)
+	}
+	next := Pause{ControlID: c.ID, State: "requested", RequestedBy: p.ID, RequestedAt: now, Reason: in.Reason, DeadlineAt: deadline, Level: in.Level, Note: in.Note, StartsAt: in.startsAt, LeavingID: in.leavingID}
+	s, err = savePause(ctx, tx, p, s, next, "pause_requested")
+	if err != nil {
+		return s, err
+	}
+	if in.Level == "stop_now" && (in.startsAt == nil || !in.startsAt.After(now)) {
+		return stopPausedWork(ctx, tx, p, s, "stop_now")
+	}
+	return advancePause(ctx, tx, p, s)
 }
 
 func pauseDeadlinePassed(ctx context.Context, tx pgx.Tx, pause *Pause) (bool, error) {
@@ -199,6 +247,11 @@ func pauseDeadlinePassed(ctx context.Context, tx pgx.Tx, pause *Pause) (bool, er
 // control, never the worker lease or process ownership. Paused handovers remain
 // resumable even when their original planning deadline is in the past.
 func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (Session, error) {
+	var err error
+	s, err = advancePause(ctx, tx, p, s)
+	if err != nil {
+		return s, err
+	}
 	if s.Pause == nil || (s.Pause.State != "requested" && s.Pause.State != "planned") {
 		return s, nil
 	}
@@ -221,7 +274,11 @@ func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) 
 	}
 	next := *s.Pause
 	next.State = "cancelled"
-	return savePause(ctx, tx, p, s, next, "pause_cancelled")
+	s, err = savePause(ctx, tx, p, s, next, "pause_cancelled")
+	if err != nil || next.Level == "" || s.StoppedAt != nil || s.ArchivedAt != nil {
+		return s, err
+	}
+	return stopPausedWork(ctx, tx, p, s, "pause_deadline")
 }
 
 // Reuse the tenant's periodic lost-contact runner, including for managed
@@ -229,8 +286,8 @@ func expirePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) 
 func sweepPauseDeadlines(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions
  WHERE archived_at IS NULL AND pause_record->>'state' IN ('requested','planned')
- AND (pause_record->>'deadline_at')::timestamptz<=clock_timestamp()
- ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, lostContactBatch)
+ AND ((pause_record->>'deadline_at')::timestamptz<=clock_timestamp()+interval '2 minutes' OR pause_record->>'leaving_request_id' IS NOT NULL)
+ ORDER BY (pause_record->>'deadline_at')::timestamptz,id LIMIT $1 FOR UPDATE SKIP LOCKED`, lostContactBatch)
 	if err != nil {
 		return err
 	}
@@ -283,13 +340,19 @@ func (m *Module) planPause(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, workorders.Fail(409, "pause deadline expired")
 	}
 	next := *s.Pause
+	var now time.Time
+	if err := tx.QueryRow(r.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return nil, err
+	}
+	if next.Level == "stop_now" || next.StopRequested || next.StartsAt != nil && next.StartsAt.After(now) {
+		return nil, workorders.Fail(409, "pause is not yet eligible for a cooperative handover")
+	}
 	if next.State == "planned" && next.HandoverPoint == in.Point {
 		return s, nil
 	}
 	if next.State != "requested" {
 		return nil, workorders.Fail(409, "pause must be requested before planning")
 	}
-	var now time.Time
 	if err = tx.QueryRow(r.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return nil, err
 	}
@@ -498,6 +561,11 @@ type pauseSkippedSession struct {
 }
 
 func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.Principal, resume bool, in pauseRequest, limit, skipLimit int) (any, error) {
+	if !resume {
+		if err := resolvePauseDefault(r.Context(), tx, p, &in); err != nil {
+			return nil, err
+		}
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
@@ -519,10 +587,10 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	selection := ` FROM harness_sessions WHERE project_id=$1 AND archived_at IS NULL AND ` + filter + `
  AND (owner_principal_id=$2::uuid OR $3 OR parent_id=$4::uuid) AND NOT(id=ANY($5::uuid[]))`
 	capable := ""
-	if !resume {
+	if !resume && in.Level != "stop_now" {
 		// Unsupported managed workers must not roll back other pauses or
 		// occupy the first page forever when the caller repeats a batch.
-		capable = ` AND (management<>'managed' OR 'inbox'=ANY(capabilities))`
+		capable = ` AND ('inbox'=ANY(capabilities) OR management='unmanaged' AND 'pause'=ANY(capabilities))`
 	}
 	rows, err := tx.Query(r.Context(), `SELECT `+sessionColumns+selection+capable+` ORDER BY id LIMIT $6 FOR UPDATE`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, limit+1)
 	if err != nil {
@@ -564,8 +632,12 @@ func (m *Module) transitionPauseBatchInput(r *http.Request, tx pgx.Tx, p tenant.
 	}
 	result := map[string]any{"items": items, "more": more}
 	if !resume {
+		unsupported := ` AND NOT('inbox'=ANY(capabilities) OR management='unmanaged' AND 'pause'=ANY(capabilities))`
+		if in.Level == "stop_now" {
+			unsupported = ` AND false`
+		}
 		rows, err := tx.Query(r.Context(), `SELECT id::text,project_id::text,display_label`+selection+`
- AND management='managed' AND NOT('inbox'=ANY(capabilities)) ORDER BY id LIMIT $6`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, skipLimit+1)
+ `+unsupported+` ORDER BY id LIMIT $6`, r.PathValue("projectId"), nullable(owner), admin, nullable(parent), in.Except, skipLimit+1)
 		if err != nil {
 			return nil, err
 		}

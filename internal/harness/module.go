@@ -97,6 +97,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
 		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
+		{"GET /api/me/agent-pause-settings", "harness.read", false, 200, m.getPauseSettings},
+		{"PUT /api/me/agent-pause-settings", "harness.read", false, 200, m.putPauseSettings},
+		{"GET /api/me/leaving-at", "harness.read", false, 200, m.getLeavingAt},
+		{"PUT /api/me/leaving-at", "harness.control", false, 200, m.putLeavingAt},
+		{"DELETE /api/me/leaving-at", "harness.control", false, 200, m.cancelLeavingAt},
 		{"POST /api/harness-sessions/pause", "harness.control", false, 200, m.pauseAll},
 		{"POST /api/harness-sessions/resume", "harness.control", false, 200, m.resumeAll},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
@@ -156,6 +161,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	SupportedPauseLevels    []string                 `json:"supported_pause_levels,omitempty"`
+	PauseCanInterrupt       *bool                    `json:"pause_can_interrupt,omitempty"`
+	PauseProgress           *PauseProgress           `json:"pause_progress,omitempty"`
 	Pause                   *Pause                   `json:"pause,omitempty"`
 	Continuation            *Continuation            `json:"continuation,omitempty"`
 	Generator               *string                  `json:"generator,omitempty"`
@@ -350,13 +358,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp()`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress)
 	if err != nil {
 		return s, err
 	}
@@ -366,6 +374,9 @@ func scanSession(row pgx.Row) (Session, error) {
 	}
 	projectActivity(&s, activityNow)
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
+	s.SupportedPauseLevels = supportedPauseLevels(s)
+	canInterrupt := cooperativePause(s) && has(s, "interrupt")
+	s.PauseCanInterrupt = &canInterrupt
 	return s, nil
 }
 func project(ctx context.Context, tx pgx.Tx, id string) error {
@@ -506,7 +517,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -1124,6 +1135,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
+		pauseProgressReport
 		rules.ClientReport
 		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
 		Phase            string                  `json:"phase"`
@@ -1261,9 +1273,6 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	if s, err = expirePause(ctx, tx, p, s); err != nil {
-		return nil, err
-	}
 	if err := recordMetadataChanges(ctx, tx, p.TenantID, before, s); err != nil {
 		return nil, err
 	}
@@ -1277,6 +1286,16 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	s, err = applyEstimate(ctx, tx, p, s, in.EtaReadyAt, in.EtaLiveAt, in.ProgressPct)
 	if err != nil {
+		return nil, err
+	}
+	s, err = reportPauseProgress(ctx, tx, s, in.pauseProgressReport)
+	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
+	if s, err = m.preparePauseStopHeartbeat(r, tx, p, s); err != nil {
 		return nil, err
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {

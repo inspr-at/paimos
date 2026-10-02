@@ -105,6 +105,7 @@ type owned struct {
 	record          Record
 	harness         HarnessSession
 	heartbeatSeq    int64
+	pauseWakeAt     time.Time
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
@@ -159,6 +160,7 @@ type Supervisor struct {
 	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired       map[string]bool
 	signInUnverified    map[string]bool
+	probeFailureReasons map[string]string // Bounded local causes, protected by mu.
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
 	harnessHolds        map[string]string
@@ -568,6 +570,16 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.signInUnverified = map[string]bool{}
 		}
 		s.signInUnverified[account.ID] = !status.OK && status.Failure == ProbeUnverified && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.probeFailureReasons == nil {
+			s.probeFailureReasons = map[string]string{}
+		}
+		delete(s.probeFailureReasons, account.ID)
+		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
+			switch status.Failure {
+			case ProbeIdentityMismatch, ProbeTimeout, ProbeProtocol, ProbeLaunchFailed:
+				s.probeFailureReasons[account.ID] = status.Failure
+			}
+		}
 		if s.harnessFailed == nil {
 			s.harnessFailed = map[string]bool{}
 		}
@@ -1147,6 +1159,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
+	wakeTimer := time.NewTimer(time.Hour)
+	if !wakeTimer.Stop() {
+		<-wakeTimer.C
+	}
+	defer wakeTimer.Stop()
 	var inboxTicks <-chan time.Time
 	if inbox {
 		inboxTicker := time.NewTicker(2 * time.Second)
@@ -1154,6 +1171,24 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		inboxTicks = inboxTicker.C
 	}
 	for {
+		entry.mu.Lock()
+		wake := entry.pauseWakeAt
+		entry.mu.Unlock()
+		var wakeTicks <-chan time.Time
+		if !wakeTimer.Stop() {
+			select {
+			case <-wakeTimer.C:
+			default:
+			}
+		}
+		if !wake.IsZero() {
+			delay := time.Until(wake)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			wakeTimer.Reset(delay)
+			wakeTicks = wakeTimer.C
+		}
 		beat := false
 		select {
 		case <-done:
@@ -1161,6 +1196,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 		case <-ticker.C:
 			beat = true
 		case <-inboxTicks:
+		case <-wakeTicks:
+			entry.mu.Lock()
+			entry.pauseWakeAt = time.Time{}
+			entry.mu.Unlock()
+			beat = true
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
@@ -1478,12 +1518,20 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 		for len(entry.pending) > 0 {
 			control := entry.pending[0]
 			outcome, reason := "applied", "agentd_applied"
-			if control.Kind == "force_stop" {
+			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
+			operation := control.Kind
+			if stopNow {
+				if control.ExpectedGeneration != entry.harness.ID {
+					return ErrGeneration
+				}
+				operation = "force_stop"
+			}
+			if operation == "force_stop" {
 				reason = "owned_group_signalled_root_exited"
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
-				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if entry.managedPolicy && control.Kind != "force_stop" {
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
+			if entry.managedPolicy && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -1944,6 +1992,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 		entry.mu.Unlock()
 		var pause *HarnessPause
 		var err error
+		beatStarted := time.Now()
 		if api, ok := s.api.(pauseHeartbeatAPI); ok {
 			pause, err = api.HeartbeatHarnessPause(ctx, session, phase)
 		} else {
@@ -1954,6 +2003,10 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 		}
 		entry.mu.Lock()
 		entry.heartbeatSeq = session.ActivitySequence
+		entry.pauseWakeAt = time.Time{}
+		if pause != nil && pause.WakeInMS > 0 && pause.WakeInMS <= 86400000 {
+			entry.pauseWakeAt = beatStarted.Add(time.Duration(pause.WakeInMS) * time.Millisecond)
+		}
 		for len(entry.metadataPending) > 0 && entry.metadataPending[0].seq <= change.seq {
 			entry.metadataPending = entry.metadataPending[1:]
 		}

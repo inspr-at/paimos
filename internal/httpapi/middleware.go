@@ -127,6 +127,28 @@ func aithemaViewPolicy(origin string, next http.Handler) http.Handler {
 	})
 }
 
+func attachmentViewPolicy(origin string, next http.Handler) http.Handler {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(origin, " ;\r\n\t") {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/portal" && !strings.HasPrefix(r.URL.Path, "/portal/") {
+			policy := strings.Split(w.Header().Get("Content-Security-Policy"), ";")
+			out := make([]string, 0, len(policy)+1)
+			for _, directive := range policy {
+				directive = strings.TrimSpace(directive)
+				if !strings.HasPrefix(directive, "frame-src ") && directive != "" {
+					out = append(out, directive)
+				}
+			}
+			out = append(out, "frame-src 'self' "+origin)
+			w.Header().Set("Content-Security-Policy", strings.Join(out, "; "))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Caller-supplied IDs can contain tokens. Generate our own trace value

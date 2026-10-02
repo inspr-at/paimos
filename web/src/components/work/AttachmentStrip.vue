@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, reactive, ref } from 'vue'
-import { contentUrl, fileKind, fileSize, isImage, type Attachment } from '../../lib/attachments'
+import { contentUrl, fileKind, fileSize, hasThumbnail, isImage, type Attachment } from '../../lib/attachments'
 import type { Upload } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
 
@@ -89,7 +89,7 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
           type="button" class="tile" :class="{ file: !isImage(item) || unreadable.has(item.id) }" :data-attachment-id="item.id"
           :aria-label="`Open ${item.caption || item.name}${canWrite ? '. Alt and arrows move it, Delete removes it' : ''}`" @click="emit('open', item.id)" @keydown="keydown($event, item, index)"
         >
-          <img v-if="isImage(item) && !unreadable.has(item.id)" :src="contentUrl(item.id, 'thumb')" :alt="item.caption || item.name" loading="lazy" decoding="async" draggable="false" @error="unreadable.add(item.id)" />
+          <img v-if="hasThumbnail(item) && !unreadable.has(item.id)" :src="contentUrl(item.id, 'thumb')" :alt="item.caption || item.name" loading="lazy" decoding="async" draggable="false" @error="unreadable.add(item.id)" />
           <span v-else class="file-card"><span class="badge">{{ fileKind(item) }}</span><span class="file-name">{{ item.name }}</span><span class="file-size">{{ unreadable.has(item.id) ? 'No preview' : fileSize(item.size) }}</span></span>
         </button>
         <button v-if="canWrite" type="button" class="remove" :aria-label="`Delete ${item.name}`" data-tip="Delete · you can undo" @click="emit('remove', item)"><AppIcon name="close" :size="11" /></button>
