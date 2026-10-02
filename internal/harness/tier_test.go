@@ -369,11 +369,7 @@ func TestTierAlreadyActiveRetainsIdempotencyReceipt(t *testing.T) {
 
 func TestUnmanagedCodexTierInstructions(t *testing.T) {
 	f := fixture(t)
-	path, _, _ := tierSession(t, f)
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged' WHERE id=$1`, path[strings.LastIndex(path, "/")+1:])
-		return err
-	})
+	path, _, _ := usageSession(t, f, "unmanaged")
 	w := f.call(f.person, "GET", path+"/tier", nil, "")
 	expect(t, w, 200)
 	state := decode(t, w)
