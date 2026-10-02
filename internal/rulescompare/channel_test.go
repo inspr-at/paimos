@@ -48,6 +48,19 @@ func TestDeliveryComparesIndexedSourceAndStrength(t *testing.T) {
 	}
 }
 
+func TestExampleSessionHeadingDoesNotEstablishDeliveryChannel(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Text: "Preserve safety."}}}
+	for _, example := range []string{"<!--\n# Aeon session rules\n-->", "~~~\n# Aeon session rules\n~~~", "> # Aeon session rules"} {
+		body := example + "\n\n- Preserve safety.\n"
+		if status, detail := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "ok" {
+			t.Fatalf("example established session channel: %s %s", status, detail)
+		}
+		if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Session: true, Text: example}}, nil, nil); status != "fail" {
+			t.Fatal("example verified a session file")
+		}
+	}
+}
+
 func TestDeliveryReportOneChannel(t *testing.T) {
 	const (
 		identity = "inspr-at/fixture-doctrine/docs/AGENTS-KERNEL.md#secrets"

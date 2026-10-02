@@ -81,7 +81,7 @@ func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []
 		}
 		if strings.TrimSpace(file.Text) == "" {
 			problems = append(problems, file.label()+": delivered file is empty")
-		} else if file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
+		} else if file.Session && !hasSessionHeading(file.Text) {
 			problems = append(problems, file.label()+": session file is unverified")
 		}
 		if !file.Session {
@@ -147,7 +147,7 @@ func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 // sessionDoubles reports doctrine text that was pasted into a session file
 // the harness is also loading. The doctrine file itself has no session header.
 func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
-	if !file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
+	if !file.Session && !hasSessionHeading(file.Text) {
 		return nil
 	}
 	var lines []string
@@ -194,6 +194,7 @@ func matchesInstruction(instructions map[string]bool, rule PinnedRule) bool {
 // surrounding a rule never constitutes evidence that the rule was delivered.
 func deliveredInstructions(file HarnessFile) map[string]bool {
 	raw, doc, _ := markdownsource.Document(file.Text)
+	session := file.Session || sessionHeading(raw, doc)
 	out := map[string]bool{}
 	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -209,7 +210,7 @@ func deliveredInstructions(file HarnessFile) map[string]bool {
 				body.Write(segment.Value(raw))
 			}
 			instruction := normalizedDeliveryText(body.String())
-			if file.Session || strings.Contains(file.Text, "# Aeon session rules") {
+			if session {
 				if rest, ok := strings.CutPrefix(instruction, "["); ok {
 					if id, text, ok := strings.Cut(rest, "] "); ok && id != "" && !strings.ContainsAny(id, " \t[]") {
 						instruction = text
@@ -222,4 +223,18 @@ func deliveredInstructions(file HarnessFile) map[string]bool {
 		return ast.WalkContinue, nil
 	})
 	return out
+}
+
+func hasSessionHeading(source string) bool {
+	raw, doc, _ := markdownsource.Document(source)
+	return sessionHeading(raw, doc)
+}
+
+func sessionHeading(raw []byte, doc ast.Node) bool {
+	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
+		if h, ok := n.(*ast.Heading); ok && h.Level == 1 && string(h.Text(raw)) == "Aeon session rules" {
+			return true
+		}
+	}
+	return false
 }
