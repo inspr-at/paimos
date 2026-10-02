@@ -60,11 +60,23 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, _ := authz.BuiltinPermissions("admin")
+	if !slices.Contains(admin, "recurrences.manage") {
+		t.Fatal("fixture requires the person Admin recurrence permission")
+	}
 	full := []string{}
 	for _, perm := range authz.Registry {
+		// Built-in agent roles require an explicit custom-role grant for
+		// recurrence automation (authz.readGrants), unlike person Admin.
+		if perm.Key == "recurrences.manage" {
+			continue
+		}
 		if perm.AgentGrantable && slices.Contains(admin, perm.Key) {
 			full = append(full, perm.Key)
 		}
+	}
+	view, err := m.agentKeyScopes(tenant.WithPrincipal(ctx, owner), owner, key.ID, nil)
+	if err != nil || !slices.Equal(view.Grantable, full) {
+		t.Fatal("Full access differs from the live built-in agent Admin ceiling")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -81,13 +93,31 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal("narrow key already has history access")
 	}
 	beforeKeys, beforeEvents := keyCounts(t, m, owner)
+	// Full access must not smuggle this custom-role-only scope through an
+	// expiry edit. The rejected combined write must leave the key intact.
+	deniedBody, _ := json.Marshal(map[string]any{"add": []string{"recurrences.manage"}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
+	if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
+		t.Fatalf("built-in agent recurrence grant status %d, want 403", w.Code)
+	}
+	view, err = m.agentKeyScopes(tenant.WithPrincipal(ctx, owner), owner, key.ID, nil)
+	if err != nil || view.Key.ID != key.ID || view.Key.Prefix != key.Prefix || view.Key.ExpiresAt != nil || view.Key.RevokedAt != nil || !slices.Equal(view.Key.Scopes, key.Scopes) {
+		t.Fatal("rejected recurrence grant changed the key")
+	}
+	if keys, events := keyCounts(t, m, owner); keys != beforeKeys || events != beforeEvents {
+		t.Fatal("rejected recurrence grant wrote a key or audit event")
+	}
 	for i, days := range []int{30, 90, 365, 0} {
 		var expiry *time.Time
 		if days > 0 {
 			at := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour).Truncate(time.Second)
 			expiry = &at
 		}
-		body, _ := json.Marshal(map[string]any{"add": full, "expires_at": expiry})
+		edit := map[string]any{"expires_at": expiry}
+		if i == 0 {
+			edit["add"] = full
+		}
+		// Once Full access is applied, change only expiry, including Never.
+		body, _ := json.Marshal(edit)
 		w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(body))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expiry edit status %d", w.Code)
@@ -104,7 +134,7 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		actual := slices.Clone(got.Scopes)
 		slices.Sort(actual)
 		if !slices.Equal(actual, want) {
-			t.Fatal("Full access differs from Admin intersected with agent-grantable")
+			t.Fatal("Full access differs from the built-in agent Admin ceiling intersected with agent-grantable")
 		}
 		if request() != http.StatusNoContent {
 			t.Fatal("original bearer did not work immediately after edit")
