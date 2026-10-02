@@ -284,6 +284,9 @@ export function listCostCell(row: PlanningRow): FigureCell {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(uncalibrated(row) ? uncalibratedLine(row) : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
+  if (est !== null && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
+    const basis = basisLine(row.planning.tokens, row); if (basis) lines.push(basis)
+  }
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')
   if (cost?.paid_unknown && spent !== null) lines.push('Part of this has no billing on record')
   return figure(row, spent, est, formatDollars, lines.filter(Boolean).join('\n'), '', subscriptionOnly)

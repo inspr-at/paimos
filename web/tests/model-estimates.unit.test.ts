@@ -53,6 +53,12 @@ describe('honest planning estimates', () => {
     expect(listCostCell(row).estimated).toBe('')
     expect(listCostCell(row).tip).toContain('Uncalibrated')
   })
+  it('names the calibration evidence when cost is shown without tokens', () => {
+    const copy = structuredClone(row)
+    copy.planning!.tokens.calibration = { basis: 'median', tickets: 12, tokens_per_hour: 800_000, level: 'cell', basis_text: measured.basis }
+    expect(tokensCell(copy).tip).toContain(measured.basis)
+    expect(listCostCell(copy).tip).toContain(measured.basis)
+  })
   it('shows model-adjusted hours and their speed sample count', () => {
     expect(modelCell(row).tip).toContain('~2.4 h (×1.2, n=12)')
     const copy = structuredClone(row)
