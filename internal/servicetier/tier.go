@@ -46,7 +46,8 @@ func number(n float64) *float64 { return &n }
 // qualify the launch mechanism; they do not assert account entitlement.
 func Advertised(harness, model, version string) Report {
 	r := Report{Harness: harness, Model: model, HarnessVersion: version, AdapterVersion: "aeon-service-tier-v1",
-		CheckedAt: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Source: "adapter default-only report", Applies: "next_run"}
+		CheckedAt: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), Source: "adapter default-only report", Applies: "next_run",
+		ChangeInstructions: "This adapter reports Default only; use the harness's own session controls for serving-speed changes"}
 	r.Tiers = []Tier{{Tier: "default", Name: "Default", Offered: true, SpeedFactor: number(1), PriceMultiplier: number(1), UsageMultiplier: number(1), Mechanism: "default"},
 		{Tier: "fast", Name: "Fast", Reason: "No published price and supported mechanism for this harness/model"},
 		{Tier: "fastest", Name: "Fastest", Reason: "No published price and supported mechanism for this harness/model"}}
