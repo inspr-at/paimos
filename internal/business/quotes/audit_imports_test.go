@@ -109,7 +109,7 @@ func TestAEON587IssuedImportNativeVerificationBranchAndAccept(t *testing.T) {
 }
 
 func TestAEON587HistoricalImporterV1BranchAndAccept(t *testing.T) {
-	for _, action := range []string{"branch", "accept", "tampered"} {
+	for _, action := range []string{"branch", "accept", "tampered", "tampered_sender"} {
 		t.Run(action, func(t *testing.T) {
 			f := newQuoteFixture(t, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "historical-import-v1")
 			ctx := t.Context()
@@ -140,6 +140,8 @@ func TestAEON587HistoricalImporterV1BranchAndAccept(t *testing.T) {
 			stored := raw
 			if action == "tampered" {
 				stored = []byte(strings.Replace(string(raw), "Historical importer quote", "Tampered title", 1))
+			} else if action == "tampered_sender" {
+				stored = []byte(strings.Replace(string(raw), "Example Street 1", "Example Street 2", 1))
 			}
 			actor := tenant.Principal{TenantID: f.tenantID, ID: f.ids["admin"], Kind: tenant.Person, Roles: []string{"admin"}}
 			// Seed an already-issued v1 row directly. Never update or relabel
@@ -172,6 +174,37 @@ func TestAEON587HistoricalImporterV1BranchAndAccept(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			// Use the persisted JSONB document, and prove that neither its
+			// sender order nor encoding/json's sorted map order matches the
+			// classic OfferSender struct order used to hash the fixture.
+			var persisted []byte
+			if err := f.database.Admin.QueryRow(ctx, `SELECT document FROM quote_version_snapshots WHERE quote_node_id=$1::uuid AND version=1`, id).Scan(&persisted); err != nil {
+				t.Fatal(err)
+			}
+			var source, snapshot struct {
+				Sender json.RawMessage `json:"sender"`
+			}
+			if err := json.Unmarshal(stored, &source); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(persisted, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			var compactSender bytes.Buffer
+			if err := json.Compact(&compactSender, snapshot.Sender); err != nil {
+				t.Fatal(err)
+			}
+			var senderFields map[string]json.RawMessage
+			if err := json.Unmarshal(snapshot.Sender, &senderFields); err != nil {
+				t.Fatal(err)
+			}
+			sortedSender, err := json.Marshal(senderFields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(senderFields) != 15 || bytes.Equal(source.Sender, compactSender.Bytes()) || bytes.Equal(source.Sender, sortedSender) {
+				t.Fatal("fixture did not exercise the lost classic sender order")
+			}
 			evidence := func() string {
 				t.Helper()
 				var value string
@@ -196,7 +229,7 @@ func TestAEON587HistoricalImporterV1BranchAndAccept(t *testing.T) {
 				_, err = branchQuoteDraft(ctx, tx, actor, id, q.Revision, 1, digest)
 				return err
 			})
-			if action == "tampered" {
+			if action == "tampered" || action == "tampered_sender" {
 				if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
 					t.Fatalf("tampered historical content accepted: %v", err)
 				}
@@ -207,7 +240,7 @@ func TestAEON587HistoricalImporterV1BranchAndAccept(t *testing.T) {
 				t.Fatal("historical digest or issue evidence was rewritten")
 			}
 			code, q := f.call("admin", "GET", "/api/quotes/"+id, "")
-			wantState := map[string]string{"branch": "draft", "accept": "accepted", "tampered": "issued"}[action]
+			wantState := map[string]string{"branch": "draft", "accept": "accepted", "tampered": "issued", "tampered_sender": "issued"}[action]
 			if code != 200 || q["state"] != wantState {
 				t.Fatalf("historical %s state: %d %v", action, code, q)
 			}
