@@ -40,6 +40,10 @@ func setup(t *testing.T) *fixture {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, f.p.TenantID).Scan(&f.p.ID)
 	})
 	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "owner")
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix) VALUES($1,'tag','Tag','TAG') ON CONFLICT DO NOTHING`, f.p.TenantID)
+		return err
+	})
 	f.project = f.node("project", nil, "Project")
 	f.parent = f.node("epic", &f.project, "Code health")
 	f.tx(func(tx pgx.Tx) error {
@@ -347,7 +351,7 @@ func TestPublicationEventsProductHistoryAndNoDowntimeBurst(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.p.TenantID, f.project); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,project_node_id,release_node_id,state,version,released_at) VALUES($1,$2,$3,'released','v2',$4)`, f.p.TenantID, f.project, release, f.now)
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,project_node_id,release_node_id,number,state,version_scheme,version,released_at) VALUES($1,$2,$3,1,'released','legacy','v2',$4)`, f.p.TenantID, f.project, release, f.now)
 		return err
 	})
 	f.run()
@@ -522,5 +526,111 @@ func TestRollbackUniqueKeyAndInvalidTarget(t *testing.T) {
 	skipped := f.manual(r.ID, "deleted")
 	if skipped.Reason != "target_unavailable" || skipped.NodeID != nil {
 		t.Fatalf("invalid target %+v", skipped)
+	}
+}
+
+func TestQueueFailureRollsBackOccurrenceAndAudit(t *testing.T) {
+	f := setup(t)
+	in := f.input()
+	in.QueueEach = true
+	r := f.create(in)
+	// A tenant kind rule refuses the work-order child after the ticket has been
+	// inserted. The entire composite occurrence, receipt and audit must roll back.
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=ARRAY[]::text[] WHERE slug='ticket'`)
+		return err
+	})
+	f.call(f.p, "POST", "/api/recurrences/"+r.ID+"/run-now", map[string]string{"idempotency_key": "queue-failed"}, 400)
+	if len(f.receipts(r.ID)) != 0 || f.get(r.ID).OccurrenceCount != 0 {
+		t.Fatal("queue failure left receipt")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type IN ('node.created','recurrence.occurred','queue.added') AND metadata->>'recurrence_id'=$1`, r.ID).Scan(&count)
+		if count != 0 {
+			t.Fatalf("queue failure left %d events", count)
+		}
+		return err
+	})
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=NULL WHERE slug='ticket'`)
+		return err
+	})
+	if got := f.manual(r.ID, "queue-failed"); got.Outcome != "created" || got.Number != 1 {
+		t.Fatalf("retry %+v", got)
+	}
+}
+func TestWriteAuthorizationAfterConcurrentDemotion(t *testing.T) {
+	f := setup(t)
+	r := f.create(f.input())
+	var memberID string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Member') RETURNING id::text`, f.p.TenantID).Scan(&memberID)
+	})
+	dbtest.BindRole(t, f.d, f.p.TenantID, memberID, "member")
+	member := tenant.Principal{ID: memberID, TenantID: f.p.TenantID, Kind: tenant.Person}
+	tx, err := f.d.App.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err = tx.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.visible_projects','*',true)`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest("POST", "/api/recurrences/"+r.ID+"/pause", strings.NewReader(`{"expected_revision":1}`))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), member))
+		out := httptest.NewRecorder()
+		close(started)
+		f.handler.ServeHTTP(out, req)
+		done <- out
+	}()
+	<-started
+	if _, err = tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, memberID); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	out := <-done
+	if out.Code != 403 {
+		t.Fatalf("demoted write %d %s", out.Code, out.Body.String())
+	}
+	if f.get(r.ID).Paused {
+		t.Fatal("demoted caller changed state")
+	}
+}
+func TestDefinitionEditsPreserveDueCursorAndPausedManualRun(t *testing.T) {
+	f := setup(t)
+	r := f.create(f.input())
+	original := *r.NextAt
+	f.now = f.now.Add(10 * 24 * time.Hour)
+	input := r.Input
+	input.Trigger.StartDate = ""
+	input.Template.Description = "Updated criteria context"
+	raw, _ := json.Marshal(input)
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	body["expected_revision"] = r.Revision
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
+	current := f.get(r.ID)
+	if !current.NextAt.Equal(original) {
+		t.Fatal("template edit discarded overdue work")
+	}
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 409)
+	f.call(f.p, "POST", "/api/recurrences/"+r.ID+"/pause", map[string]int64{"expected_revision": current.Revision}, 200)
+	paused := f.get(r.ID)
+	manual := f.manual(r.ID, "paused-manual")
+	if manual.Outcome != "created" {
+		t.Fatalf("paused manual %+v", manual)
+	}
+	after := f.get(r.ID)
+	if !after.Paused || !after.NextAt.Equal(*paused.NextAt) || after.EventCursor != paused.EventCursor {
+		t.Fatal("manual run moved schedule")
 	}
 }

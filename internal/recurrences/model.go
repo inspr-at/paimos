@@ -179,6 +179,13 @@ func scanRecurrence(row pgx.Row) (Recurrence, error) {
 	if err == nil {
 		err = json.Unmarshal(trigger, &r.Trigger)
 	}
+	if r.NextAt != nil {
+		at := r.NextAt.UTC()
+		r.NextAt = &at
+	}
+	r.ActiveSince = r.ActiveSince.UTC()
+	r.CreatedAt = r.CreatedAt.UTC()
+	r.UpdatedAt = r.UpdatedAt.UTC()
 	return r, err
 }
 func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Recurrence, error) {
@@ -194,5 +201,7 @@ const occurrenceColumns = `recurrence_id::text,occurrence_key,number,scheduled_a
 func scanOccurrence(row pgx.Row) (Occurrence, error) {
 	var o Occurrence
 	err := row.Scan(&o.RecurrenceID, &o.Key, &o.Number, &o.ScheduledAt, &o.NodeID, &o.SourceEventID, &o.Outcome, &o.Reason, &o.CreatedAt)
+	o.ScheduledAt = o.ScheduledAt.UTC()
+	o.CreatedAt = o.CreatedAt.UTC()
 	return o, err
 }

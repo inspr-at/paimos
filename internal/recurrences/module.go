@@ -281,8 +281,12 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if in.Trigger == before.Trigger {
-			in.Trigger.StartDate = before.Trigger.StartDate
+		comparable := in.Trigger
+		if comparable.StartDate == "" {
+			comparable.StartDate = before.Trigger.StartDate
+		}
+		if comparable == before.Trigger {
+			in.Trigger = before.Trigger
 		}
 		if err = in.Input.normalize(now); err != nil {
 			return workorders.Fail(400, err.Error())
