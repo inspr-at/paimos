@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -68,7 +69,19 @@ func workstationAction(p tenant.Principal, r *http.Request, body []byte) (string
 	input, _ := json.Marshal([]string{"aeon.owner-workstation.v1", p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID,
 		r.Method, r.URL.RequestURI(), r.Header.Get("Content-Type"), r.Header.Get("If-Match"), r.Header.Get("If-None-Match"), hex.EncodeToString(bodyDigest[:])})
 	digest := sha256.Sum256(input)
-	summary := r.Method + " " + r.URL.Path
+	action := map[string]string{
+		"keys.manage":           "create, rotate or change an agent key",
+		"roles.manage":          "change a role and its permissions",
+		"settings.manage":       "change workspace settings",
+		"rules.publish":         "publish or approve rules",
+		"approvals.decide":      "decide another agent's approval request",
+		"approvals.decide_high": "decide another agent's high-risk approval request",
+		"members.manage":        "remove, deactivate or change a member's access",
+	}[authz.RoutePermissions[r.Pattern]]
+	if action == "" {
+		action = "perform this governance action"
+	}
+	summary := "Allow the owner workstation agent to " + action + "? " + r.Method + " " + r.URL.EscapedPath()
 	return hex.EncodeToString(digest[:]), summary
 }
 
@@ -131,6 +144,11 @@ func (m *Module) auditWorkstation(r *http.Request, p tenant.Principal, step bool
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	digest, _ := ctx.Value(workstationDigestKey{}).(string)
+	route := r.URL.EscapedPath()
+	truncated := len(route) > 500
+	if truncated {
+		route = route[:500]
+	}
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 			return err
@@ -138,7 +156,7 @@ func (m *Module) auditWorkstation(r *http.Request, p tenant.Principal, step bool
 		_, err := events.Append(ctx, tx, p, events.Change{Type: "agent_key.governance_used", After: map[string]any{
 			"key_id": p.KeyID, "principal_id": p.ID, "computer_id": p.WorkstationComputerID,
 			"action": r.Pattern, "step_up": step, "outcome": outcome,
-			"route": r.URL.EscapedPath(), "action_digest": digest,
+			"route": route, "route_truncated": truncated, "action_digest": digest,
 		}})
 		return err
 	})
@@ -150,7 +168,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 	governance := workstationGovernance(r)
 	step := false
 	if governance && workstationStepUp(r) {
-		if len(r.URL.RequestURI()) > 2048 || len(r.URL.Path) > 500 {
+		if len(r.URL.RequestURI()) > 2048 || len(r.URL.EscapedPath()) > 500 {
 			if err := m.auditWorkstation(r, p, false, "invalid_action"); err != nil {
 				writeInternal(w)
 				return
@@ -190,10 +208,10 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 					return err
 				}
 				challenge = workstationChallenge{Code: "step_up_required", Nonce: hex.EncodeToString(nonce[:]), Digest: digest, Summary: summary}
-				return tx.QueryRow(r.Context(), `INSERT INTO owner_workstation_challenges(tenant_id,key_id,principal_id,computer_id,nonce,action_digest,public_key,expires_at)
-				 VALUES($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval '2 minutes')
-				 ON CONFLICT(tenant_id,key_id) DO UPDATE SET id=gen_random_uuid(),nonce=EXCLUDED.nonce,action_digest=EXCLUDED.action_digest,public_key=EXCLUDED.public_key,expires_at=EXCLUDED.expires_at
-				 RETURNING id::text,expires_at`, p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, challenge.Nonce, digest, public).Scan(&challenge.ID, &challenge.Expires)
+				return tx.QueryRow(r.Context(), `INSERT INTO owner_workstation_challenges(tenant_id,key_id,principal_id,computer_id,nonce,action_digest,public_key,summary,expires_at)
+				 VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+interval '2 minutes')
+				 ON CONFLICT(tenant_id,key_id) DO UPDATE SET id=gen_random_uuid(),nonce=EXCLUDED.nonce,action_digest=EXCLUDED.action_digest,public_key=EXCLUDED.public_key,summary=EXCLUDED.summary,expires_at=EXCLUDED.expires_at
+				 RETURNING id::text,expires_at`, p.TenantID, p.KeyID, p.ID, p.WorkstationComputerID, challenge.Nonce, digest, public, summary).Scan(&challenge.ID, &challenge.Expires)
 			}
 			id, signature, ok := strings.Cut(proof, ".")
 			if !ok || len(proof) > 181 || !uuidRe.MatchString(id) || len(r.Header.Values("Aeon-Step-Up")) != 1 {
@@ -355,5 +373,62 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		writeInternal(w)
 	default:
 		writeJSON(w, 200, keyJSON(out))
+	}
+}
+
+// The daemon authenticates this prompt at its pinned server origin. The agent
+// never supplies the display text or the computer's lifecycle proof to agentd.
+func (m *Module) handleWorkstationChallenge(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	p, ok := tenant.PrincipalFrom(r.Context())
+	computer, proof := r.Header.Get("Aeon-Computer-ID"), r.Header.Get("Aeon-Device-Proof")
+	id := r.PathValue("challenge_id")
+	if !ok || p.Kind != tenant.Agent || p.KeyID == "" || !uuidRe.MatchString(computer) || !uuidRe.MatchString(id) || !attachwatch.LocalAuthNonceValid(proof) || len(r.Header.Values("Aeon-Computer-ID")) != 1 || len(r.Header.Values("Aeon-Device-Proof")) != 1 {
+		writeForbidden(w)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var out struct {
+		Summary  string    `json:"summary"`
+		Nonce    string    `json:"nonce"`
+		Digest   string    `json:"action_digest"`
+		Expires  time.Time `json:"expires_at"`
+		Computer string    `json:"computer_id"`
+	}
+	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{}); err != nil {
+			return err
+		}
+		var hash string
+		err := tx.QueryRow(ctx, `SELECT d.summary,d.nonce,d.action_digest,d.expires_at,c.id::text,c.lifecycle_hash
+   FROM owner_workstation_challenges d
+   JOIN agent_keys k ON k.tenant_id=d.tenant_id AND k.id=d.key_id AND k.principal_id=d.principal_id
+   JOIN agent_pairing_computers c ON c.tenant_id=d.tenant_id AND c.id=d.computer_id AND c.principal_id=d.principal_id
+   JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+   JOIN agent_keys runtime ON runtime.tenant_id=c.tenant_id AND runtime.id=c.key_id AND runtime.principal_id=c.principal_id
+   WHERE d.tenant_id=$1 AND d.id=$2 AND c.id=$3 AND c.principal_id=$4 AND runtime.id=$5
+   AND d.expires_at>clock_timestamp() AND d.public_key=c.local_auth_public_key
+   AND c.state='connected' AND q.state='redeemed' AND c.local_auth_public_key<>''
+   AND k.owner_workstation AND k.workstation_computer_id=c.id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
+   AND runtime.revoked_at IS NULL AND (runtime.expires_at IS NULL OR runtime.expires_at>clock_timestamp())`, p.TenantID, id, computer, p.ID, p.KeyID).Scan(&out.Summary, &out.Nonce, &out.Digest, &out.Expires, &out.Computer, &hash)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256([]byte(proof))
+		if subtle.ConstantTimeCompare([]byte(hash), []byte(hex.EncodeToString(sum[:]))) != 1 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, authz.ErrForbidden):
+		writeForbidden(w)
+	case errors.Is(err, pgx.ErrNoRows):
+		writeJSON(w, 404, errorJSON{Error: "challenge unavailable"})
+	case err != nil:
+		writeInternal(w)
+	default:
+		writeJSON(w, 200, out)
 	}
 }

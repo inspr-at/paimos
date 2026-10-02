@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -571,5 +572,77 @@ func TestWorkstationProofCannotOutlivePinnedSigner(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatalf("pin replacement status: %d", w.Code)
+	}
+}
+
+func TestWorkstationDaemonFetchAuthenticatesComputerAndOriginalPrompt(t *testing.T) {
+	f := newWorkstationFixture(t)
+	// Designate a sibling key; the daemon still uses the original runtime key.
+	f.key, f.other = f.other, f.key
+	f.enable(t)
+	deviceProof := strings.Repeat("b", 64)
+	sum := sha256.Sum256([]byte(deviceProof))
+	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET lifecycle_hash=$2 WHERE id=$1`, f.computer, hex.EncodeToString(sum[:]))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"INNOCUOUS PROMPT SUBSTITUTION","permissions":["nodes.read"]}`
+	c := f.challenge(t, "POST", "/api/roles", body)
+	fetch := func(key, computer, proof, id string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/api/agentd/step-ups/"+id, nil)
+		r.Header.Set("Authorization", "Bearer "+key)
+		r.Header.Set("Aeon-Computer-ID", computer)
+		r.Header.Set("Aeon-Device-Proof", proof)
+		w := httptest.NewRecorder()
+		f.serve.ServeHTTP(w, r)
+		return w
+	}
+	w := fetch(f.other.Token, f.computer, deviceProof, c.ID)
+	var got map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil {
+		t.Fatalf("daemon fetch: %d", w.Code)
+	}
+	if len(got) != 5 || got["summary"] != c.Summary || got["nonce"] != c.Nonce || got["action_digest"] != c.Digest || got["computer_id"] != f.computer || strings.Contains(c.Summary, "INNOCUOUS") || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("daemon prompt is not the bounded original server challenge")
+	}
+	for _, tc := range []struct{ name, key, computer, proof string }{
+		{"sibling credential", f.key.Token, f.computer, deviceProof},
+		{"wrong proof", f.other.Token, f.computer, strings.Repeat("c", 64)},
+		{"missing proof", f.other.Token, f.computer, ""},
+		{"wrong computer", f.other.Token, f.owner.ID, deviceProof},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := fetch(tc.key, tc.computer, tc.proof, c.ID)
+			if w.Code != 403 && w.Code != 404 {
+				t.Fatalf("credential substitution: %d", w.Code)
+			}
+			if strings.Contains(w.Body.String(), c.Nonce) || strings.Contains(w.Body.String(), c.Digest) {
+				t.Fatal("refusal exposed a challenge")
+			}
+		})
+	}
+	foreign := newWorkstationFixture(t)
+	foreign.enable(t)
+	foreignChallenge := foreign.challenge(t, "POST", "/api/roles", body)
+	if w := fetch(f.other.Token, f.computer, deviceProof, foreignChallenge.ID); w.Code != 404 {
+		t.Fatalf("cross-tenant fetch: %d", w.Code)
+	}
+	if w := f.call(f.key.Token, "POST", "/api/roles", body, workstationProof(t, f.signer, c)); w.Code != 201 {
+		t.Fatalf("confirmed role creation: %d", w.Code)
+	}
+	if w := fetch(f.other.Token, f.computer, deviceProof, c.ID); w.Code != 404 {
+		t.Fatalf("consumed challenge visible: %d", w.Code)
+	}
+	c = f.challenge(t, "POST", "/api/roles", body)
+	if err := db.InTenant(t.Context(), f.m.pool, f.owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE owner_workstation_challenges SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, c.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := fetch(f.other.Token, f.computer, deviceProof, c.ID); w.Code != 404 {
+		t.Fatalf("expired challenge visible: %d", w.Code)
 	}
 }

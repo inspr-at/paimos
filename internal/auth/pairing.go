@@ -43,6 +43,10 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
 			}
+		case "agentd":
+			if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+				return nil // Handler requires the runtime key plus the computer lifecycle proof.
+			}
 		case "agent-pairing":
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
 				return nil // Handler binds the account and installation proof to this principal.

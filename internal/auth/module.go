@@ -90,6 +90,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PUT /api/agent-keys/{id}/owner-workstation", m.handleOwnerWorkstation)
+	mux.HandleFunc("GET /api/agentd/step-ups/{challenge_id}", m.handleWorkstationChallenge)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -501,6 +502,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "agentd":
+		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+			return "harness.worker", true
+		}
 	case "agent-pairing":
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
 			return "account.probe", true

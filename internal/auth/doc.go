@@ -84,13 +84,18 @@
 // conditional headers. One pending challenge per key bounds storage. Access
 // audit events record admission/denial, not a claim that the mutation succeeded.
 // Client/device prompting belongs to AEON-581; the backend never accepts boolean
-// consent, a request-supplied public key or person impersonation.
+// consent, a request-supplied public key or person impersonation. Agentd fetches
+// the stored server summary/nonce/digest through GET /api/agentd/step-ups/{id}
+// using its exact paired runtime key plus Aeon-Computer-ID and Aeon-Device-Proof.
+// The requesting agent passes only the challenge ID to agentd; its forwarded
+// summary is never trusted for the Touch ID prompt.
 //
 // DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
 // metadata; workstation_computer_id is a personal device link, located by
 // (tenant_id,principal_id,id). owner_workstation_challenges is tenant scoped;
 // key_id/principal_id/computer_id are personal links, nonce is a short-lived
-// secret, public_key/action_digest/id/expires_at are security metadata. No body,
+// secret, public_key/action_digest/id/expires_at/summary are security metadata (the summary
+// is a fixed action template and escaped route, never submitted prose). No body,
 // signature, Touch ID biometric or submitted prose is retained. Audit events
 // use the existing append-only events retention and principal locator.
 package auth

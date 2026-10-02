@@ -21,6 +21,7 @@ CREATE TABLE owner_workstation_challenges (
   nonce text NOT NULL CHECK (nonce ~ '^[0-9a-f]{64}$'),
   action_digest text NOT NULL CHECK (action_digest ~ '^[0-9a-f]{64}$'),
   public_key text NOT NULL,
+  summary text NOT NULL CHECK (length(summary)<=1024),
   expires_at timestamptz NOT NULL,
   PRIMARY KEY (tenant_id,id),
   UNIQUE (tenant_id,key_id),

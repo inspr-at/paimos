@@ -3188,6 +3188,39 @@ paths:
         '200': {description: PNG with strong ETag; immutable cache only with matching v hash query}
         '304': {description: ETag matched}
         '404': {description: Person or avatar missing}
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the original confirmation challenge through the paired daemon
+      description: >-
+        Requires the computer's exact paired runtime bearer key and lifecycle proof.
+        Agents pass only challenge_id to agentd. The daemon fetches this resource at
+        its pinned server origin and displays this server-generated summary; it must
+        never display a summary forwarded by the requesting agent. A sibling key,
+        another computer or tenant, an inactive pairing or a consumed, superseded,
+        expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent.}
+      responses:
+        '200':
+          description: Original challenge for this computer; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, nonce, action_digest, expires_at, computer_id]
+                properties:
+                  summary: {type: string, maxLength: 1024}
+                  nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  expires_at: {type: string, format: date-time}
+                  computer_id: {type: string, format: uuid}
+        '403': {description: Paired runtime and device proof required}
+        '404': {description: Challenge unavailable for this computer}
   /agent-keys/{id}/owner-workstation:
     put:
       operationId: setOwnerWorkstationKey
@@ -14525,13 +14558,16 @@ components:
         invalidates authority. All mutating keys, roles, settings, rules publication,
         approval decisions, member removal/deactivation and workspace role changes
         require step-up. All governance attempts are recorded in the access audit.
+        Agents must forward only challenge_id to agentd; agentd retrieves the original
+        challenge using GET /agentd/step-ups/{challenge_id} with its runtime bearer and
+        device proof. These response fields are not an authenticated prompt for agentd.
       required: [code, challenge_id, nonce, action_digest, summary, expires_at]
       properties:
         code: {type: string, const: step_up_required}
         challenge_id: {type: string, format: uuid}
         nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
         action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-        summary: {type: string, maxLength: 512}
+        summary: {type: string, maxLength: 1024}
         expires_at: {type: string, format: date-time}
     Me:
       type: object
