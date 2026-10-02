@@ -44,12 +44,15 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 		if err != nil {
 			return err
 		}
-		handled = true
 		if recipient != p.ID {
-			return missing()
+			return nil
 		}
 		for _, perm := range []string{"inbox.manage", "questions.decide", "questions.read"} {
 			if err := permit(r.Context(), tx, p, project, perm); err != nil {
+				var denied *apiError
+				if errors.As(err, &denied) && denied.status == http.StatusNotFound {
+					return nil
+				}
 				return err
 			}
 		}
@@ -59,13 +62,18 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 		} else {
 			// Accept only the sender's existing address/name, never another recipient.
 			err = tx.QueryRow(r.Context(), `SELECT id::text FROM principals WHERE tenant_id=$1 AND id=$2 AND split_part($3,':',2)=name`, p.TenantID, sender, in.To).Scan(&target)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
 			if err != nil {
-				return missing()
+				return err
 			}
 		}
 		if target != sender || in.RecipientSession != nil && *in.RecipientSession != session || in.SenderSession != nil || in.Thread != "" && in.Thread != thread {
-			return missing()
+			return nil
 		}
+		// Only an authorized counterpart may receive desk-specific responses.
+		handled = true
 		if hop >= 10 {
 			return fail(400, "reply_hop_limit", "message hop limit exceeded")
 		}

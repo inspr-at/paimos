@@ -2234,10 +2234,17 @@ outbox state `delivered` means dispatched, while `receipt_state` reports `queued
 `handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
 
 A signed-in addressed person with inbox management and question permissions can
-use `tell --reply-to` on a held request. This records the answer/outbox and settles
+use `tell --reply-to UUID --session-cookie-file PATH` on a held request. The
+file contains only the `aeon_session` cookie value; the command uses the selected
+instance URL (or `AEON_URL` / `PAIMOS_URL`), sends that cookie without an
+Authorization header, and ignores ambient agent keys and sender sessions.
+This records the answer/outbox and settles
 the request atomically, returning `status: pending`, a question ID, revision and
 deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
-permission approvals keep their existing immediate semantics.
+permission approvals keep their existing immediate semantics. Desk dispatch and
+ordinary replies reserve the obligation, message, delivery and receipt rows
+before appending events. Migration 1117 permits event references to be filled
+in within that transaction and rejects incomplete reservations at commit.
 
 The additive `harness-session/2.5` response contract adds optional `desk_answers`
 references; registration and heartbeat request requirements remain unchanged.

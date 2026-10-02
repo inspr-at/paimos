@@ -6317,7 +6317,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: sendProjectMessage
-      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent, so a reply to it is not found.
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent. An addressed person authenticated by session cookie, without Authorization or agent attribution, may answer it with inbox.manage, questions.read and questions.decide permission; this returns a pending Decision Desk answer. Every unauthorized or mismatched held reply uses the same not-found response as an unknown parent.
       requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
       responses:
         '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}

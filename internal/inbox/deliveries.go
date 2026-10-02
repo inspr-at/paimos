@@ -249,28 +249,30 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			thread = id
 		}
 		meta := map[string]any{"id": id, "project_id": project, "sender_principal_id": p.ID, "recipient_principal_id": recipient, "is_action_request": in.ActionRequest, "expects_reply": in.ExpectsReply}
-		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_sent", After: meta})
-		if err != nil {
-			return err
+		// Both ordinary and desk replies reserve the obligation before message
+		// rows. No existing row lock may be acquired after the first event.
+		if !in.ActionRequest && in.ReplyTo != nil {
+			if err := reserveReplyObligation(ctx, tx, p.TenantID, *in.ReplyTo); err != nil {
+				return err
+			}
 		}
+		var pending []events.Change
+		collect := func(c events.Change) error { pending = append(pending, c); return nil }
 		var inboxID *string
 		if !in.ActionRequest {
 			inboxID = &id
-			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,$9::uuid,$10)`, p.TenantID, id, p.ID, recipient, ev.ID, in.Body, "compat/"+id, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
-				return err
-			}
-			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}}); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::uuid,$9::uuid,$10)`, p.TenantID, id, p.ID, recipient, nil, in.Body, "compat/"+id, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12,$13,$14::uuid,$15,$16,$17,$18,$19::uuid,$20::uuid,$21)`, p.TenantID, id, project, p.ID, recipient, "paimos:"+p.Name, in.To, in.Body, key, digest, in.ReplyTo, thread, hop, inboxID, ev.ID, in.ActionRequest, in.ExpectsReply, in.Level, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_session_id,sender_label) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12,$13,$14::uuid,$15,$16,$17,$18,$19::uuid,$20::uuid,$21)`, p.TenantID, id, project, p.ID, recipient, "paimos:"+p.Name, in.To, in.Body, key, digest, in.ReplyTo, thread, hop, inboxID, nil, in.ActionRequest, in.ExpectsReply, in.Level, in.RecipientSessionID, in.SenderSessionID, senderLabel); err != nil {
 			return err
 		}
 		if in.ExpectsReply {
 			if _, err := tx.Exec(ctx, `INSERT INTO inbox_reply_obligations(tenant_id,message_id) VALUES($1::uuid,$2::uuid)`, p.TenantID, id); err != nil {
 				return err
 			}
-			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.reply_obligation_opened", After: map[string]string{"message_id": id}}); err != nil {
+			if err := collect(events.Change{Type: "inbox.reply_obligation_opened", After: map[string]string{"message_id": id}}); err != nil {
 				return err
 			}
 		}
@@ -280,21 +282,42 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 				return err
 			}
 			if tag.RowsAffected() > 0 {
-				if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.reply_obligation_closed", After: map[string]string{"message_id": *in.ReplyTo, "reply_message_id": id}}); err != nil {
+				if err := collect(events.Change{Type: "inbox.reply_obligation_closed", After: map[string]string{"message_id": *in.ReplyTo, "reply_message_id": id}}); err != nil {
 					return err
 				}
 			}
 		}
-		if err := queueCompatDelivery(ctx, tx, p, project, id, in); err != nil {
+		if err := queueCompatDeliveryWith(ctx, tx, p, project, id, in, collect); err != nil {
 			return err
 		}
 		if !in.ActionRequest {
-			if err := recordAcceptanceReceipt(ctx, tx, p, id); err != nil {
+			if err := recordAcceptanceReceiptWith(ctx, tx, p, id, collect); err != nil {
 				return err
 			}
 		}
 		if !in.ActionRequest && in.RecipientSessionID == nil {
-			if err := enqueueWakes(ctx, tx, p, Message{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}); err != nil {
+			if err := enqueueWakesWith(ctx, tx, p.TenantID, Message{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient}, collect); err != nil {
+				return err
+			}
+		}
+		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_sent", After: meta})
+		if err != nil {
+			return err
+		}
+		if err := bindMessageEvent(ctx, tx, p.TenantID, id, ev.ID, !in.ActionRequest); err != nil {
+			return err
+		}
+		if !in.ActionRequest {
+			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}}); err != nil {
+				return err
+			}
+		}
+		for _, change := range pending {
+			if wake, ok := change.After.(wakeMeta); ok {
+				wake.EventID = ev.ID
+				change.After = wake
+			}
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
 				return err
 			}
 		}
@@ -317,7 +340,7 @@ type MessageDelivery struct {
 	FallbackReason   string  `json:"fallback_reason"`
 }
 
-func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend) error {
+func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend, appendEvent func(events.Change) error) error {
 	var target, fallback *string
 	state, reason := "pending", ""
 	if in.ActionRequest {
@@ -337,8 +360,7 @@ func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 	if err != nil {
 		return err
 	}
-	_, err = events.Append(ctx, tx, p, events.Change{Type: "inbox.delivery_queued", After: d})
-	return err
+	return appendEvent(events.Change{Type: "inbox.delivery_queued", After: d})
 }
 func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := m.messagingPrincipal(w, r, true)

@@ -66,6 +66,7 @@ type runtime struct {
 	version            bool
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
+	personClient       *client.Client
 }
 
 func (rt *runtime) execute(args []string) error {

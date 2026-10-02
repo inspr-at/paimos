@@ -110,3 +110,31 @@ func TestDeskReplyReservesBeforeEventWithConcurrentSend(t *testing.T) {
 		t.Fatal(fmt.Sprintf("replies=%d receipts=%d closed=%d", replies, receipts, closed))
 	}
 }
+
+func TestMessageEventReservationCannotCommitIncomplete(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	parent := mustCompatSend(t, m, w.sender, project, compatInput(w.recipient.ID, "reservation-parent"))
+	for _, table := range []string{"inbox_messages", "inbox_compat_messages"} {
+		t.Run(table, func(t *testing.T) {
+			reachedCommit := false
+			err := db.InTenant(tenant.WithPrincipal(t.Context(), w.sender), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+				// A reservation may be transiently empty, but it must never persist.
+				if _, err := tx.Exec(t.Context(), `UPDATE `+table+` SET sent_event_id=NULL WHERE id=$1`, parent.ID); err != nil {
+					return err
+				}
+				reachedCommit = true
+				return nil
+			})
+			if !reachedCommit || err == nil {
+				t.Fatalf("deferred reservation guard: reached commit=%t err=%v", reachedCommit, err)
+			}
+			var valid bool
+			if err := w.db.Admin.QueryRow(t.Context(), `SELECT sent_event_id IS NOT NULL FROM `+table+` WHERE id=$1`, parent.ID).Scan(&valid); err != nil {
+				t.Fatal(err)
+			}
+			if !valid {
+				t.Fatal("incomplete event reservation persisted")
+			}
+		})
+	}
+}

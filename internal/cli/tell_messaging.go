@@ -18,7 +18,7 @@ import (
 
 // cmdMessagingTell is selected by the coordinator entry point RunMessaging.
 func (rt *runtime) cmdMessagingTell() *Command {
-	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession string
+	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession, sessionCookieFile string
 	var expectsReply, action bool
 	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
@@ -43,6 +43,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.string(&recipientSession, "recipient-session", 0, "exact recipient session UUID")
 			fs.string(&senderSession, "sender-session", 0, "your session UUID (defaults to the current Aeon or harness binding)")
 			fs.string(&reply, "reply-to", 0, "exact counterpart message UUID")
+			fs.string(&sessionCookieFile, "session-cookie-file", 0, "person session cookie file (requires --reply-to; omits bearer authentication)")
 			fs.string(&thread, "thread", 0, "conversation thread ID")
 			fs.string(&key, "idempotency-key", 0, "stable retry key (generated if omitted)")
 			fs.bool(&expectsReply, "expects-reply", 0, "keep a durable obligation until a counterpart reply")
@@ -77,6 +78,14 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if len(key) > 128 || strings.ContainsRune(key, 0) {
 				return usagef("invalid --idempotency-key")
 			}
+			if sessionCookieFile != "" {
+				if reply == "" || rt.agentName != "" {
+					return usagef("--session-cookie-file requires --reply-to without agent attribution")
+				}
+				if err := rt.usePersonSession(sessionCookieFile); err != nil {
+					return err
+				}
+			}
 			p, err := rt.projectNode(project)
 			if err != nil {
 				return err
@@ -86,7 +95,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				return err
 			}
 			explicitSenderSession := senderSession != ""
-			if !explicitSenderSession {
+			if !explicitSenderSession && rt.personClient == nil {
 				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID, me.Principal.ID)
 				if err != nil {
 					return rt.fail(err, "")
