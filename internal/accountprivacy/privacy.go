@@ -47,6 +47,29 @@ func Load(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) (Pol
 	return out, rows.Err()
 }
 
+// LoadControls authorizes only account-local check controls/results. Sharing a
+// resource never entitles its member to sibling measurements or diagnostics.
+func LoadControls(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) (Policy, error) {
+	if len(ids) > 1024 {
+		return nil, errors.New("too many account control targets")
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,COALESCE((owner_person_id=$2::uuid AND $3='person') OR (registered_by_principal_id=$2::uuid AND $3='agent'),false) FROM agent_accounts WHERE id=ANY($1::uuid[])`, ids, p.ID, string(p.Kind))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := Policy{}
+	for rows.Next() {
+		var id string
+		var allowed bool
+		if err := rows.Scan(&id, &allowed); err != nil {
+			return nil, err
+		}
+		out[id] = allowed
+	}
+	return out, rows.Err()
+}
+
 func IDs(raw json.RawMessage, fallback string) ([]string, error) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -125,6 +148,10 @@ func uuid(s string) bool {
 // availability projections carry details_redacted. History becomes an empty
 // array. The registering daemon's own scoped reports remain unaffected.
 func Redact(raw json.RawMessage, policy Policy, fallback string, history bool) (json.RawMessage, error) {
+	return RedactWithControls(raw, policy, nil, fallback, history)
+}
+
+func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback string, history bool) (json.RawMessage, error) {
 	if history && !policy[fallback] {
 		return json.RawMessage(`[]`), nil
 	}
@@ -150,15 +177,29 @@ func Redact(raw json.RawMessage, policy Policy, fallback string, history bool) (
 			if own := accountID(obj); own != "" {
 				id = own
 			}
-			if !policy[id] {
+			saved := map[string]any{}
+			if id != "" && !policy[id] {
+				if controls[id] {
+					for _, key := range []string{"pending_check", "readiness_resources", "check_result"} {
+						if child, ok := obj[key]; ok {
+							saved[key] = child
+						}
+					}
+				}
 				mask(obj)
 			}
 			for key, child := range obj {
+				if _, ok := saved[key]; ok {
+					continue
+				}
 				next, err := walk(child, id, depth+1)
 				if err != nil {
 					return nil, err
 				}
 				obj[key] = next
+			}
+			for key, child := range saved {
+				obj[key] = child
 			}
 		}
 		return v, nil
@@ -192,7 +233,7 @@ func mask(obj map[string]any) {
 	if _, ok := obj["unavailable_reasons"]; ok {
 		reasons := []string{}
 		if available, _ := obj["available"].(bool); !available {
-			reasons = append(reasons, "unavailable")
+			reasons = append(reasons, "state")
 		}
 		obj["unavailable_reasons"] = reasons
 	}
@@ -223,7 +264,7 @@ func mask(obj map[string]any) {
 		}
 	}
 	if _, ok := obj["code"]; ok {
-		obj["code"] = "unavailable"
+		obj["code"] = "state"
 	}
 	if _, accountProjection := obj["account_id"]; accountProjection {
 		delete(obj, "hosts")

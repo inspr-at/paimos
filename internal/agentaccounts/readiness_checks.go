@@ -19,6 +19,9 @@ import (
 
 const CheckGap = time.Minute
 
+// Pending captures have a bounded lifetime independent of coalesced retries.
+const CheckTTL = 5 * time.Minute
+
 type AccountCheck struct {
 	ID                     string    `json:"id"`
 	AccountID              string    `json:"account_id"`
@@ -27,6 +30,7 @@ type AccountCheck struct {
 	DaemonGeneration       *string   `json:"daemon_generation"`
 	State                  string    `json:"state"`
 	RequestedAt            time.Time `json:"requested_at"`
+	ExpiresAt              time.Time `json:"expires_at"`
 	RetryAt                time.Time `json:"retry_at"`
 	EarlyRecoveryRequested bool      `json:"early_recovery_requested"`
 	Result                 *string   `json:"result,omitempty"`
@@ -104,6 +108,7 @@ func scanCheck(row scanner) (AccountCheck, error) {
 	var c AccountCheck
 	err := row.Scan(&c.ID, &c.AccountID, &c.ActorPrincipalID, &c.BindingRevision, &c.DaemonGeneration, &c.State, &c.RequestedAt, &c.EarlyRecoveryRequested, &c.Result)
 	c.RetryAt = c.RequestedAt.Add(CheckGap)
+	c.ExpiresAt = c.RequestedAt.Add(CheckTTL)
 	return c, err
 }
 
@@ -121,12 +126,15 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 	}
 	c, err := scanCheck(tx.QueryRow(ctx, `SELECT `+checkColumns+` FROM account_readiness_checks WHERE id=(SELECT check_id FROM account_readiness_check_keys WHERE account_id=$1 AND idempotency_key=$2)`, id, in.IdempotencyKey))
 	if err == nil {
-		if c.BindingRevision != a.LinkRevision || c.State == "invalidated" {
+		if c.BindingRevision != a.LinkRevision || c.State == "invalidated" || c.State == "pending" && !now.Before(c.ExpiresAt) {
 			return c, &httpError{status: 409, code: "stale_binding", msg: "check binding changed"}
 		}
 		return c, nil
 	}
 	if !isNoRows(err) {
+		return c, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE account_readiness_checks SET state='invalidated' WHERE account_id=$1 AND state='pending' AND requested_at<=$2`, id, now.Add(-CheckTTL)); err != nil {
 		return c, err
 	}
 	// Coalesce before the gap check. A distinct key never creates a new

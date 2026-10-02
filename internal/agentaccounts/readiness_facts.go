@@ -130,7 +130,7 @@ func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessR
 }
 
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY f.resource_id,f.window_key LIMIT 33`, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func completeReadinessReport(ctx context.Context, tx pgx.Tx, a Account, generati
 		if err != nil {
 			return err
 		}
-		if c.BindingRevision != a.LinkRevision || c.State == "invalidated" || c.DaemonGeneration != nil && *c.DaemonGeneration != generation {
+		if c.BindingRevision != a.LinkRevision || c.State == "invalidated" || c.State == "pending" && !now.Before(c.ExpiresAt) || c.DaemonGeneration != nil && *c.DaemonGeneration != generation {
 			return &httpError{status: 409, code: "stale_binding", msg: "check binding changed"}
 		}
 		if c.State == "completed" {
@@ -282,11 +282,20 @@ func completeReadinessReport(ctx context.Context, tx pgx.Tx, a Account, generati
 	if readingError == "success" {
 		readingError = ""
 	}
+	local, err := localReadinessResource(ctx, tx, a)
+	if err != nil {
+		return err
+	}
+	// Capture failures belong to this account's local resource, never a shared
+	// balance or another account's local resource that B has pooled with it.
 	for _, resource := range resources {
+		if resource.ID != local {
+			continue
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO account_readiness_facts(tenant_id,resource_id,window_key,reported_by_account_id,binding_revision,source,observed_at,reading_error,failure_count,check_next_attempt_at)
             VALUES($1,$2,'check',$3,$4,'agentd',$5,$6,CASE WHEN $6='' THEN 0 ELSE 1 END,CASE WHEN $6='' OR $6='unsupported' THEN NULL ELSE $5::timestamptz+interval '1 minute' END)
-            ON CONFLICT(tenant_id,resource_id,window_key) DO UPDATE SET observed_at=EXCLUDED.observed_at,reading_error=EXCLUDED.reading_error,
-            failure_count=CASE WHEN $6='' THEN 0 ELSE least(account_readiness_facts.failure_count+1,1000000) END,
+            ON CONFLICT(tenant_id,resource_id,window_key) DO UPDATE SET observed_at=EXCLUDED.observed_at,reading_error=EXCLUDED.reading_error,reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,
+            failure_count=CASE WHEN $6='' THEN 0 WHEN account_readiness_facts.binding_revision<>EXCLUDED.binding_revision THEN 1 ELSE least(account_readiness_facts.failure_count+1,1000000) END,
             check_next_attempt_at=CASE WHEN $6='' OR $6='unsupported' THEN NULL ELSE $5::timestamptz+CASE account_readiness_facts.failure_count WHEN 0 THEN interval '1 minute' WHEN 1 THEN interval '2 minutes' WHEN 2 THEN interval '4 minutes' ELSE interval '30 minutes' END END`, aTenant(ctx), resource.ID, a.ID, a.LinkRevision, now, readingError)
 		if err != nil {
 			return err
@@ -315,4 +324,17 @@ func ensureLocalReadinessResource(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,account_id,resource_id) DO UPDATE SET binding_revision=EXCLUDED.binding_revision`, p.TenantID, a.ID, resource, a.LinkRevision)
 	return err
+}
+
+// The same canonical local membership is used for legacy observations and
+// per-account capture status; read paths never invent resource identifiers.
+func localReadinessResource(ctx context.Context, tx pgx.Tx, a Account) (string, error) {
+	kind := "subscription_quota"
+	if a.Harness == "pi" {
+		kind = "key_cap"
+	}
+	sum := sha256.Sum256([]byte("account:" + a.ID + ":" + kind))
+	var id string
+	err := tx.QueryRow(ctx, `SELECT r.id::text FROM account_readiness_memberships m JOIN account_readiness_resources r ON r.tenant_id=m.tenant_id AND r.id=m.resource_id WHERE m.account_id=$1 AND m.binding_revision=$2 AND r.identity_kind='account' AND r.kind=$3 AND r.identity_key=$4`, a.ID, a.LinkRevision, kind, hex.EncodeToString(sum[:])).Scan(&id)
+	return id, err
 }

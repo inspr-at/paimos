@@ -30,7 +30,7 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 		out := &privacyResponse{header: make(http.Header)}
 		next(out, r)
 		if out.overflow {
-			httpapi.WriteError(w, 503, "account response exceeds safe size")
+			privacyFailure(w, r, out.status, 503, "account response exceeds safe size")
 			return
 		}
 		if out.status == 0 {
@@ -41,7 +41,7 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 			fallback := r.PathValue("accountId")
 			ids, err := accountprivacy.IDs(body, fallback)
 			if err != nil {
-				httpapi.WriteError(w, 500, "account privacy failed")
+				privacyFailure(w, r, out.status, 500, "account privacy failed")
 				return
 			}
 			if len(ids) > 0 {
@@ -50,11 +50,15 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 					if err != nil {
 						return err
 					}
-					body, err = accountprivacy.Redact(body, policy, fallback, strings.HasSuffix(r.URL.Path, "/readings"))
+					controls, err := accountprivacy.LoadControls(r.Context(), tx, p, ids)
+					if err != nil {
+						return err
+					}
+					body, err = accountprivacy.RedactWithControls(body, policy, controls, fallback, strings.HasSuffix(r.URL.Path, "/readings"))
 					return err
 				})
 				if err != nil {
-					httpapi.WriteError(w, 500, "account privacy failed")
+					privacyFailure(w, r, out.status, 500, "account privacy failed")
 					return
 				}
 			}
@@ -91,4 +95,14 @@ func (w *privacyResponse) Write(body []byte) (int, error) {
 		return len(body), nil
 	}
 	return w.body.Write(body)
+}
+
+// A successful handler may already have committed. Never tell a caller the
+// write failed just because its response cannot be safely delivered.
+func privacyFailure(w http.ResponseWriter, r *http.Request, status, code int, message string) {
+	if !strings.HasSuffix(r.URL.Path, "/capacity/preview") && status >= 200 && status < 300 && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete) {
+		w.Header().Set("X-Aeon-Write-Committed", "true")
+		message = "write committed; " + message + "; read current state before retrying"
+	}
+	httpapi.WriteError(w, code, message)
 }

@@ -183,8 +183,8 @@ func (w *world) allowanceWindow(t *testing.T, key, label string, allowance, used
 	t.Helper()
 	var account, window string
 	w.tx(t, w.home, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label)
-			VALUES($1,$2,'codex','daemon-ud1',$3,$4) RETURNING id::text`, w.home.TenantID, key, w.agent, label).Scan(&account); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,share_usage)
+			VALUES($1,$2,'codex','daemon-ud1',$3,$4,$5,now(),true) RETURNING id::text`, w.home.TenantID, key, w.agent, label, w.home.ID).Scan(&account); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio)
@@ -587,7 +587,7 @@ func TestFix2AllowanceOwnerSharingBoundary(t *testing.T) {
 	dbtest.BindRole(t, w.db, w.home.TenantID, w.admin.ID, "admin")
 	account, _ := w.allowanceWindow(t, "fix2-private", "Private window", 917, 41, 7)
 	w.tx(t, w.home, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, account, w.home.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now(),share_usage=false WHERE id=$1`, account, w.home.ID)
 		return err
 	})
 	check := func(p tenant.Principal, visible bool) {

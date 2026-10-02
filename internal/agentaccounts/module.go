@@ -134,7 +134,11 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 						}
 						return err
 					}
-					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending'`, a.ID, a.LinkRevision))
+					now, err := dbNow(r.Context(), tx)
+					if err != nil {
+						return err
+					}
+					c, err := scanCheck(tx.QueryRow(r.Context(), `SELECT `+checkColumns+` FROM account_readiness_checks WHERE account_id=$1 AND binding_revision=$2 AND state='pending' AND requested_at>$3`, a.ID, a.LinkRevision, now.Add(-CheckTTL)))
 					if err != nil && !isNoRows(err) {
 						return err
 					}

@@ -352,7 +352,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		return Account{}, err
 	}
 	if in.Readiness != nil {
-		if before.daemonGeneration != nil && *before.daemonGeneration != generation {
+		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
 			return Account{}, fail(409, "readiness daemon generation changed")
 		}
 		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {

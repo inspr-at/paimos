@@ -87,6 +87,10 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 				out.NextAttemptAt = &t
 			}
 		}
+		// A positive ordinary-key cap says nothing about the provider balance.
+		if f.WindowKey == "key_cap" && f.CreditState == "unknown" {
+			unknownMeasurement = true
+		}
 		fresh := f.ReadingAt != nil && !in.Now.Before(*f.ReadingAt) && in.Now.Sub(*f.ReadingAt) <= 10*time.Minute && (f.ResetsAt == nil || in.Now.Before(*f.ResetsAt))
 		if f.WindowKey != "check" && (!fresh || f.UsedPercent == nil && f.Remaining == nil) {
 			unknownMeasurement = true
@@ -138,6 +142,10 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 // Legacy readings remain readable during rollout. Selection is by the same
 // resource/window, never by a different bucket or allowance retirement bit.
 func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
+	resource, err := localReadinessResource(ctx, tx, a)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,ordinary_usage_allowed FROM (
         SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate'
         ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r ORDER BY window_kind,bucket LIMIT 33`, a.ID)
@@ -156,7 +164,7 @@ func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Ti
 			return nil, err
 		}
 		age := max(int64(0), int64(now.Sub(at)/time.Second))
-		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: a.ID, WindowKey: kind + ":" + bucket, Source: source, ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: &used, CreditState: "unknown", StopKind: "none"}, ReadingAgeSeconds: &age}
+		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: kind + ":" + bucket, Source: source, ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: &used, CreditState: "unknown", StopKind: "none"}, ReadingAgeSeconds: &age}
 		if used >= 100 || allowed != nil && !*allowed {
 			f.StopKind = "named_reset"
 			f.DenialReason = "vendor_denied"
@@ -225,7 +233,11 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 		}
 	}
 	if c := a.OpenRouterCredits; c != nil {
-		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: a.ID, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.Remaining, StopKind: "none"}}
+		resource, err := localReadinessResource(ctx, tx, a)
+		if err != nil {
+			return AccountReadiness{}, err
+		}
+		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.Remaining, StopKind: "none"}}
 		if c.Remaining != nil && *c.Remaining == 0 {
 			f.CreditState = "exhausted"
 			f.StopKind = "unnamed"

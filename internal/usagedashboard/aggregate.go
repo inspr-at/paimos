@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -119,8 +120,17 @@ type UsageTicket struct {
 
 // AllowanceReport is pacing from registered windows, or an explicit withhold.
 type AllowanceReport struct {
-	State   string            `json:"state"`
-	Windows []AllowanceWindow `json:"windows"`
+	State    string             `json:"state"`
+	Windows  []AllowanceWindow  `json:"windows"`
+	Accounts []AllowanceAccount `json:"accounts"`
+}
+
+// AllowanceAccount retains identity and state without exposing quota windows.
+type AllowanceAccount struct {
+	AccountID    string `json:"account_id"`
+	Label        string `json:"label"`
+	Harness      string `json:"harness"`
+	AccountState string `json:"account_state"`
 }
 
 // AllowanceWindow is one open registered bound. It carries no account key.
@@ -704,7 +714,7 @@ func trendsOf(set map[string]*bucket) []UsageTrend {
 }
 
 func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.Time) (AllowanceReport, error) {
-	out := AllowanceReport{State: "withheld", Windows: []AllowanceWindow{}}
+	out := AllowanceReport{State: "withheld", Windows: []AllowanceWindow{}, Accounts: []AllowanceAccount{}}
 	if err := authz.RequireTx(ctx, tx, p, "account.read", authz.Scope{}); err != nil {
 		if errors.Is(err, authz.ErrForbidden) {
 			return out, nil
@@ -726,11 +736,14 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		  FROM account_allowance_windows w
 		  JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
 		 WHERE w.starts_at <= $1 AND w.ends_at > $1 AND w.removed_at IS NULL
-		 ORDER BY a.label, w.unit, w.id`, now)
+		 ORDER BY a.label, w.unit, w.id LIMIT 1025`, now)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
+	windows := []AllowanceWindow{}
+	ids := []string{}
+	seen := map[string]bool{}
 	for rows.Next() {
 		var w AllowanceWindow
 		var used int64
@@ -739,14 +752,32 @@ func loadAllowance(ctx context.Context, tx pgx.Tx, p tenant.Principal, now time.
 		}
 		w.StartsAt, w.EndsAt = w.StartsAt.UTC(), w.EndsAt.UTC()
 		applyMeasuredAvailability(&w, used, now)
-		out.Windows = append(out.Windows, w)
+		windows = append(windows, w)
+		if !seen[w.AccountID] {
+			seen[w.AccountID] = true
+			ids = append(ids, w.AccountID)
+			out.Accounts = append(out.Accounts, AllowanceAccount{w.AccountID, w.Label, w.Harness, w.AccountState})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	if len(out.Windows) == 0 {
+	rows.Close()
+	if len(windows) > 1024 {
+		return out, errors.New("too many allowance windows")
+	}
+	policy, err := accountprivacy.Load(ctx, tx, p, ids)
+	if err != nil {
+		return out, err
+	}
+	for _, window := range windows {
+		if policy[window.AccountID] {
+			out.Windows = append(out.Windows, window)
+		}
+	}
+	if len(windows) == 0 {
 		out.State = "none"
-	} else {
+	} else if len(out.Windows) > 0 {
 		out.State = "visible"
 	}
 	return out, nil

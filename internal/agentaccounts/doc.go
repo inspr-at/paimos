@@ -195,4 +195,19 @@
 // (empty windows/history, null timestamps); projections mark details_redacted.
 // This package supplies no daemon launch, admission permits, or UI. Existing
 // ledgers remain unchanged; rollback disables new callers and retains history.
+//
+// Pending captures expire after five minutes from their original requested_at;
+// aliases never renew them. Polling and reports reject expired captures, new
+// keys invalidate them and request fresh work, and old keys return 409.
+// Automatic restart reports may advance daemon generation while check-bound
+// completion remains fenced. Account-local capture errors never affect peers.
+// Owners/registered daemons retain their own check result/controls while
+// pooled quota detail remains withheld until all resource owners share it.
+// Legacy readings and key caps use the account's canonical local membership;
+// positive key caps with unknown total balance still carry UsageUnknownReason.
+// Availability-only advice uses historical state enums. Dashboard windows and
+// harness reset details use the same current accountprivacy policy. If a
+// successful mutation's response cannot be delivered safely, the error states
+// "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
+
 package agentaccounts
