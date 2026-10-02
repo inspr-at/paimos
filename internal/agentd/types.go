@@ -105,6 +105,10 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	ExpectedGeneration string `json:"expected_generation"`
+	RequestPayload     *struct {
+		StopNow bool `json:"stop_now"`
+	} `json:"request_payload,omitempty"`
 	// deadline is local, monotonic, and never serialized or persisted.
 	deadline          time.Time
 	ExpiresInMS       int64                  `json:"expires_in_ms"`
@@ -307,10 +311,11 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
-// ProbeStatus is an account probe with its cause. Failure is ProbeAuthFailed
-// only when the vendor's own status command ran and said this account is
-// signed out or signed in as someone else; errors, timeouts and unreadable
-// output are ProbeUnavailable. Vendor output never leaves the daemon.
+// ProbeStatus is an account probe with its bounded cause. Only ProbeAuthFailed
+// and ProbeIdentityMismatch describe confirmed authentication failures. Local
+// measurement failures never imply sign-out. The historical account-probe API
+// retains auth_failed/unavailable; lifecycle details can retain finer causes.
+// Vendor identity and output never leave the daemon.
 type ProbeStatus struct {
 	BillingMode       string
 	OpenRouterCredits *openrouter.Credits
@@ -319,8 +324,12 @@ type ProbeStatus struct {
 }
 
 const (
-	ProbeAuthFailed  = "auth_failed"
-	ProbeUnavailable = "unavailable"
+	ProbeAuthFailed       = "auth_failed"
+	ProbeUnavailable      = "unavailable"
+	ProbeIdentityMismatch = "identity_mismatch"
+	ProbeTimeout          = "timeout"
+	ProbeProtocol         = "protocol"
+	ProbeLaunchFailed     = "launch_failed"
 	// ProbeUnverified is local evidence, not a confirmed vendor sign-out.
 	ProbeUnverified = "sign_in_unverified"
 )

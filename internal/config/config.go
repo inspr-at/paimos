@@ -19,10 +19,11 @@ import (
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
-	Addr        string
-	DatabaseURL string
-	Env         string // "dev" or "prod"
-	PublicURL   string
+	Addr            string
+	DatabaseURL     string
+	Env             string // "dev" or "prod"
+	StatusAutopilot string // Deployment cap: "off", "suggest" or "on".
+	PublicURL       string
 	// Deployment-owned exact host:port exceptions for an operator-local
 	// Aithema service. Empty by default; never writable by tenants.
 	AithemaOperatorLocalServices []string
@@ -103,6 +104,11 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	var modeErr error
+	cfg.StatusAutopilot, modeErr = StatusAutopilotMode()
+	if modeErr != nil {
+		return Config{}, modeErr
+	}
 	if raw := os.Getenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES"); raw != "" {
 		cfg.AithemaOperatorLocalServices = strings.Split(raw, ",")
 	}
@@ -153,6 +159,18 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+// StatusAutopilotMode is also read by transactional publication hooks, which
+// share the deployment's process environment with the background worker.
+func StatusAutopilotMode() (string, error) {
+	mode := getenv("AEON_STATUS_AUTOPILOT", "on")
+	switch mode {
+	case "off", "suggest", "on":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("AEON_STATUS_AUTOPILOT must be off, suggest or on")
+	}
 }
 
 func doctrineBinaryAllowlist(raw string) (map[string]string, error) {

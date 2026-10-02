@@ -2,11 +2,13 @@
 package agentaccounts
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -190,32 +192,76 @@ func TestCapacityPreviewBounds(t *testing.T) {
 	busy.release()
 }
 
-// Re-review 1: a slow or unfinished body is read under the preview deadline and
-// before a slot is taken, so it cannot starve another person's preview.
+// previewStalledBody confirms that ServeHTTP has actually started reading,
+// then blocks until the test expires its deadline or releases the pipe.
+type previewStalledBody struct {
+	io.ReadCloser
+	started chan struct{}
+	once    sync.Once
+}
+
+func (b *previewStalledBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	return b.ReadCloser.Read(p)
+}
+
+// A slow or unfinished body is read under the preview deadline and before a
+// slot is taken. Control deadline expiry explicitly so scheduler load cannot
+// expire the second person's valid preview while proving that invariant.
 func TestCapacityPreviewSlowBodyHoldsNoSlot(t *testing.T) {
 	admin, _, _, _ := capacityWorld(t, "preview-slow", "codex")
 	other := addPrincipal(t, admin.TenantID, "person", "Second", []string{"admin"})
-	guard := newPreviewGuard(10, time.Minute, 1, previewBudget, 300*time.Millisecond)
+	guard := newPreviewGuard(10, time.Minute, 1, previewBudget, previewTimeout)
+	expire := make(chan context.CancelCauseFunc, 4)
+	guard.withTimeout = func(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+		if timeout != previewTimeout {
+			panic("preview timeout changed")
+		}
+		ctx, cancel := context.WithCancelCause(parent)
+		if p, _ := tenant.PrincipalFrom(parent); p.ID == admin.ID {
+			expire <- cancel
+		}
+		return ctx, func() { cancel(context.Canceled) }
+	}
 	mod := &Module{pool: appPool, preview: guard}
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	type slow struct {
-		rec  *httptest.ResponseRecorder
-		pipe *io.PipeWriter
-		done chan struct{}
+		rec    *httptest.ResponseRecorder
+		done   chan struct{}
+		expire context.CancelCauseFunc
 	}
 	var stalled []slow
 	for range 4 {
 		reader, writer := io.Pipe()
-		r := httptest.NewRequest("POST", "/api/agent-accounts/capacity/preview", reader)
+		body := &previewStalledBody{ReadCloser: reader, started: make(chan struct{})}
+		r := httptest.NewRequest("POST", "/api/agent-accounts/capacity/preview", body)
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), admin))
-		s := slow{httptest.NewRecorder(), writer, make(chan struct{})}
+		s := slow{rec: httptest.NewRecorder(), done: make(chan struct{})}
 		go func() { mux.ServeHTTP(s.rec, r); close(s.done) }()
+		t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+		select {
+		case s.expire = <-expire:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stalled request never established its deadline")
+		}
+		t.Cleanup(func() { s.expire(context.Canceled) })
+		select {
+		case <-body.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stalled request never started reading its body")
+		}
 		stalled = append(stalled, s)
 	}
 	body := encoded(t, map[string]any{"schedule": capacity.DefaultSchedule("Europe/Vienna")})
 	callStatus(t, mod, &other, "", "POST", "/api/agent-accounts/capacity/preview", body, 200, nil)
 	for _, s := range stalled {
+		select {
+		case <-s.done:
+			t.Fatal("stalled body finished before its deadline expired")
+		default:
+		}
+		s.expire(context.DeadlineExceeded)
 		select {
 		case <-s.done:
 		case <-time.After(5 * time.Second):
@@ -224,7 +270,6 @@ func TestCapacityPreviewSlowBodyHoldsNoSlot(t *testing.T) {
 		if s.rec.Code != http.StatusRequestTimeout {
 			t.Fatal("stalled body answered", s.rec.Code)
 		}
-		_ = s.pipe.Close()
 	}
 	if !guard.acquire() {
 		t.Fatal("a slot leaked")

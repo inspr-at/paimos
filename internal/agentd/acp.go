@@ -62,8 +62,17 @@ func (a *ACPAdapter) Probe(ctx context.Context, key string) bool {
 
 func (a *ACPAdapter) ProbeStatus(ctx context.Context, key string) ProbeStatus {
 	env, err := a.environment(key)
-	if err != nil || launcherReady(ctx, a.Path, a.Nodes[key].Path, env) != nil {
-		return ProbeStatus{Failure: ProbeUnavailable}
+	if err != nil || harnesslaunch.Validate(a.Path, a.Nodes[key].Path) != nil {
+		return ProbeStatus{Failure: ProbeLaunchFailed}
+	}
+	raw, code, err := probeRun(ctx, a.Path, env, "--version")
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return ProbeStatus{Failure: ProbeTimeout}
+	case errors.Is(err, harnesslaunch.ErrStart), code != 0:
+		return ProbeStatus{Failure: ProbeLaunchFailed}
+	case err != nil, strings.TrimSpace(string(raw)) == "":
+		return ProbeStatus{Failure: ProbeProtocol}
 	}
 	// Neither harness has a qualified quota-neutral sign-in probe. A version
 	// response proves no account identity, authentication or execution health.

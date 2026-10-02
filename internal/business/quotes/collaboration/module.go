@@ -47,6 +47,7 @@ var errInvalid = errors.New("invalid presence request")
 type Module struct {
 	pool     *pgxpool.Pool
 	registry *plugins.Registry
+	now      func() time.Time
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -63,7 +64,7 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry) (httpapi.Module, error)
 	if _, ok := registry.Lookup("business_quotes"); !ok {
 		return nil, errors.New("collaboration: quote manifest is not registered")
 	}
-	return &Module{pool: pool, registry: registry}, nil
+	return &Module{pool: pool, registry: registry, now: time.Now}, nil
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -438,7 +439,8 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		if owner != p.ID {
 			return errDenied
 		}
-		if time.Since(last) < 200*time.Millisecond {
+		now := m.now()
+		if now.Sub(last) < 200*time.Millisecond {
 			return errRate
 		}
 		a, e := validateAnchor(r.Context(), tx, id, in.Anchor)
@@ -454,7 +456,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 		interaction := in.Mode == "editing" && (in.Interacted || !jsonEqual(priorAnchor, payload))
 		mode := in.Mode
-		if mode == "editing" && !interaction && time.Since(lastInteraction) >= 60*time.Second {
+		if mode == "editing" && !interaction && now.Sub(lastInteraction) >= 60*time.Second {
 			mode = "idle"
 		}
 		_, e = tx.Exec(r.Context(), `UPDATE quote_presence SET mode=$1,anchor=$2::jsonb,observed_revision=$3,last_seen=clock_timestamp(),last_interaction=CASE WHEN $4 THEN clock_timestamp() ELSE last_interaction END,expires_at=clock_timestamp()+interval '45 seconds' WHERE quote_node_id=$5::uuid AND session_id=$6::uuid`, mode, payload, in.ObservedRevision, interaction, id, session)
