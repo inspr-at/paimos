@@ -140,7 +140,7 @@ func TestPlanningCalibrationSkipsIneligibleAndOtherRoutes(t *testing.T) {
 
 func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 	w := planningSetup(t)
-	// Both routes have prices, but only the high route has a 100M/h calibration.
+	// Both routes are calibrated; hidden defaults are tested separately.
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET profile_id=(SELECT id FROM model_profiles WHERE slug='codex-sol-xhigh') WHERE role='build'`)
 		return err
@@ -151,6 +151,10 @@ func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 	for i := range 5 {
 		n := w.node(t, fmt.Sprintf("TRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 100_000_000, 0, 0, "api", "")
+	}
+	for i := range 5 {
+		n := w.node(t, fmt.Sprintf("SOLTRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		w.session(t, n.ID, "codex", "gpt-6-sol", "xhigh", "gpt-6-sol", 60, 5_000_000, 0, 0, "api", "")
 	}
 	high := w.node(t, "SORT-1", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 1})
 	low := w.node(t, "SORT-2", "ticket", w.root.ID, "open", map[string]any{"route_role": "build", "area": "backend", "estimate_hours": 2})
@@ -306,6 +310,17 @@ func TestPlanningHugeUsageDoesNotBreakTheList(t *testing.T) {
 // A spent row of that same figure ties by id; the neighbouring boundaries do too.
 func TestPlanningCostMicrosAgree(t *testing.T) {
 	w := planningSetup(t)
+	// This rounding test needs a calibrated estimate, not a hidden default.
+	for i := range 5 {
+		n := w.node(t, fmt.Sprintf("MICROTRAIN-%d", i+1), "ticket", w.root.ID, "done", nil)
+		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 5_000_000, 0, 0, "api", "")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions s SET created_at='2026-09-01T12:00:00Z',stopped_at='2026-09-01T13:00:00Z' FROM nodes n WHERE s.ticket_node_id=n.id AND n.key LIKE 'MICROTRAIN-%'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// An api charge on this harness makes the paid estimate follow list price.
 	bill := w.node(t, "BILL-1", "ticket", w.root.ID, "open", nil)
 	w.session(t, bill.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 1000, 0, 0, "api", "")
