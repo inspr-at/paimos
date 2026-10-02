@@ -37,6 +37,30 @@ type importerV1Profile struct {
 	Definition json.RawMessage `json:"definition"`
 }
 
+// Classic Paimos at c1cdc9061927e9fd04b1185bb2eb02bb4e88ca65:
+// backend/handlers/offers.go:27-44 defines OfferSender in this field order;
+// lines 381 and 447 marshal OfferDocument with encoding/json. The importer
+// copied those sender bytes verbatim into document-v1 before JSONB reordered
+// them. RawMessage with omitempty preserves every present value (including
+// empty strings and null) and does not invent fields absent from older sources.
+type importerV1Sender struct {
+	Company       json.RawMessage `json:"company,omitempty"`
+	Street        json.RawMessage `json:"street,omitempty"`
+	PostalCode    json.RawMessage `json:"postal_code,omitempty"`
+	City          json.RawMessage `json:"city,omitempty"`
+	Country       json.RawMessage `json:"country,omitempty"`
+	RegisterNo    json.RawMessage `json:"register_no,omitempty"`
+	RegisterCourt json.RawMessage `json:"register_court,omitempty"`
+	Email         json.RawMessage `json:"email,omitempty"`
+	Phone         json.RawMessage `json:"phone,omitempty"`
+	Website       json.RawMessage `json:"website,omitempty"`
+	UID           json.RawMessage `json:"uid,omitempty"`
+	BankName      json.RawMessage `json:"bank_name,omitempty"`
+	IBAN          json.RawMessage `json:"iban,omitempty"`
+	BIC           json.RawMessage `json:"bic,omitempty"`
+	ContactPerson json.RawMessage `json:"contact_person,omitempty"`
+}
+
 type importerV1Section struct {
 	ID      string           `json:"id"`
 	Heading string           `json:"heading"`
@@ -72,19 +96,51 @@ func Verify(mode, id string, version int, offerNo, expected string, doc Document
 		return false, nil
 	}
 	// Recipient, legal/layout and prose were maps in the old writer. Sender
-	// was raw source JSON; support its stored order and the source's sorted object
-	// order without changing the frozen rest of the document.
-	for _, sortedSender := range []bool{false, true} {
-		if sortedSender {
-			var sender map[string]any
-			decoder := json.NewDecoder(bytes.NewReader(historical.Sender))
+	// was raw source JSON; retain the stored/sorted readers and reconstruct the
+	// classic struct order lost in JSONB, keeping all other historical bytes.
+	originalSender := historical.Sender
+	var senderFields map[string]any
+	for _, senderOrder := range []string{"stored", "sorted", "classic"} {
+		switch senderOrder {
+		case "sorted":
+			decoder := json.NewDecoder(bytes.NewReader(originalSender))
 			decoder.UseNumber()
-			if err := decoder.Decode(&sender); err != nil {
+			if err := decoder.Decode(&senderFields); err != nil {
 				return false, err
+			}
+			historical.Sender, err = json.Marshal(senderFields)
+			if err != nil {
+				return false, err
+			}
+		case "classic":
+			if senderFields == nil {
+				return false, nil
+			}
+			var sender importerV1Sender
+			decoder := json.NewDecoder(bytes.NewReader(originalSender))
+			// Dropping an unrecognised field would verify altered evidence.
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&sender); err != nil {
+				return false, nil
 			}
 			historical.Sender, err = json.Marshal(sender)
 			if err != nil {
 				return false, err
+			}
+			// encoding/json also matches struct fields without regard to
+			// case. Require the exact original keys so reconstruction cannot
+			// hide a renamed or duplicate differently-cased field.
+			var restoredFields map[string]json.RawMessage
+			if err := json.Unmarshal(historical.Sender, &restoredFields); err != nil {
+				return false, err
+			}
+			if len(restoredFields) != len(senderFields) {
+				return false, nil
+			}
+			for name := range senderFields {
+				if _, present := restoredFields[name]; !present {
+					return false, nil
+				}
 			}
 		}
 		payload := struct {
