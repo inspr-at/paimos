@@ -149,7 +149,7 @@ type Supervisor struct {
 	maxTokens, maxTurns int64
 	profilePermissions  map[string]bool
 	harnessFailed       map[string]bool
-	dispatchMu          sync.Mutex
+	dispatchMu          contextMutex
 	state               *agentsetup.Store
 	closing             bool
 	blockedAccounts     map[string]bool
@@ -661,7 +661,9 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
-	s.dispatchMu.Lock()
+	if err := s.dispatchMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer s.dispatchMu.Unlock()
 	s.mu.Lock()
 	capturing := s.capacityCapturing
@@ -1113,9 +1115,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
-	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+	// The accepted duration includes startup, before the monitor exists.
+	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
+	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
+	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+	cancelStart()
 	if err != nil {
+		cancelRun()
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1135,6 +1142,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.monitorDone = make(chan struct{})
 	done := entry.monitorDone
 	entry.mu.Unlock()
+	go func() { <-done; cancelRun() }()
 	entry.budgetMu.Lock()
 	entry.budgetProcess, entry.budgetTools = proc, entry.tools
 	entry.budgetMu.Unlock()
