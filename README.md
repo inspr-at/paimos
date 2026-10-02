@@ -328,17 +328,34 @@ frozen work placements. Fully reported worker runs with measured active time fee
 the newest 30 samples per model version, effort, kind and complexity bucket.
 Token rates back off from the exact cell to the same line across versions, the
 profile across kinds, then the existing harness/model/effort route and documented
-5M/h planning fallback. Every calibration names its basis and sample count;
-Live uncalibrated fallback tokens and costs are withheld in the UI and sort as missing; epics exclude those children and label the sum partial. Frozen fallback baselines remain visible with an uncalibrated label so work-start comparisons survive. Speed factors need
-five exact-cell samples with frozen positive size estimates: model-adjusted hours
-are size × median(active hours / size), while `estimate_hours` stays unchanged.
-Work-start snapshots freeze the adjusted estimate, its basis and explicit speed factor: tokens = rounded size hours × unscaled token rate × speed; list_per_hour is already speed-scaled. Snapshot history stays limited to its own project. Learning filters target profiles/lines and placements before a newest-12,000 candidate bound and expensive worker aggregation, then keeps 30 eligible samples per cell. Reaching the bound returns uncalibrated, history truncated. Sorted and unsorted lists share one learning read per request; SQL hint errors roll back a savepoint and leave work starts usable with history unavailable. The read-only
+5M/h planning fallback. Every calibration names its basis and sample count. Live
+uncalibrated fallback tokens and costs are withheld in the UI and sort as missing.
+Epics exclude those children and label the sum partial. Frozen fallback baselines
+remain visible with an uncalibrated label so work-start comparisons survive.
+
+Speed factors need five exact-cell samples with frozen positive size estimates:
+model-adjusted hours are size × median(active hours / size), while `estimate_hours`
+stays unchanged. Work-start snapshots freeze the adjusted estimate, its basis and
+explicit speed factor: tokens = rounded size hours × unscaled token rate × speed;
+`list_per_hour` is already speed-scaled. Snapshot history stays limited to its own
+project. Learning filters target profiles/lines and placements before a
+newest-12,000 candidate bound and expensive worker aggregation, then keeps 30
+eligible samples per cell. Reaching the bound returns uncalibrated, history
+truncated. Sorted and unsorted lists share one learning read per request. SQL
+hint errors roll back a savepoint and leave work starts usable with history
+unavailable.
+
+The read-only
 `GET /api/usage/model-estimates?profile_id=…&kind=…&bucket=normal|complex`
 endpoint requires `harness.read` and returns null hints below five samples.
 `ChoicePicker` supports this history through each choice's `estimate`, with
 `estimateKind` and `estimateBucket` selecting the context; its hint line reserves
-space while history loads or is absent. This is groundwork without an editor consumer or end-to-end picker release claim. The model preference editor is delivered
-separately; its caller must discard cancelled or stale-context history responses.
+space while history loads or is absent. This is groundwork without an editor
+consumer or end-to-end picker release claim. The model preference editor is
+delivered separately; its caller must discard cancelled or stale-context history
+responses. The isolated picker geometry tests use the shared stability guard for
+history arrivals, selection and absent hints; consumer response-race coverage
+belongs with the editor integration.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after
