@@ -33,6 +33,12 @@
       "reason": "The only non-allowlisted statement drops aithema_journal_records_original_bytes_check after a bounded replacement CHECK is installed NOT VALID. All other expansion statements in 1100 are allowlisted. Validation is isolated in 1101 after the exclusive lock is released; 1102 creates the unique content-address index concurrently. Logical content/snapshot documents are capped at 16 MiB and ordinary events at 1 MiB. This exact-byte exception requires coordinator review before merge/release; it does not grant acceptance or skip previous-binary compatibility probes."
     },
     {
+      "file": "1104_work_kinds.sql",
+      "sha256": "f9832b34fe476af2e6868e77687687900909a373af58fdab6a4fe6b74384a1e9",
+      "ticket": "AEON-502",
+      "reason": "Additive work-kind tables and tenant seed with an area-schema widening from the six existing strings to their slug-pattern superset. The classifier conservatively flags the tenant-loop DO backfill and CREATE OR REPLACE of the schema helper. Existing values, rows, and binary writes remain valid; Go area gates remain unchanged until 502c. Exact bytes are exposed in this draft PR for coordinator review; migration compatibility is measured in CI before any merge/release."
+    },
+    {
       "file": "1117_desk_delivery.sql",
       "sha256": "4eac5b9c842ae660571c645c99018e682dd7089b998b82def80415412838faac",
       "ticket": "AEON-564",
