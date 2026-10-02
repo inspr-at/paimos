@@ -1337,6 +1337,10 @@ out-of-range totals return the stable `400 invalid_budget` error. Lowering a
 budget below published rules still fails with 422. The editor estimates tokens
 at full budget (bytes ÷ 4), adds nonblocking guidance above 64 KB and 128 KB,
 and offers a collapsible English/German Tip for keeping the kernel small.
+Budget fields and save/cancel controls precede expandable guidance, so warnings,
+validation messages and client details grow downward without moving them.
+Use ⌘↵ on macOS or Ctrl+↵ elsewhere to save from a field; Escape leaves the
+field first, then cancels editing on the next press. Browser shortcuts stay native.
 
 CLI and agentd send optional `max_session_file_bytes` and `rules_client_version`
 on registration and every heartbeat. The transport ceiling is 512,000 bytes,
