@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest and every version
-// surface reveals them. Inside a control (the footer's history button, a release
-// row) the control's hover or keyboard focus reveals and its click still acts;
+// INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest. Release controls
+// reveal on hover or keyboard focus and their clicks still act. The footer
+// keeps its resting width and shows full seconds in a hover card (AEON-542);
 // standing alone the detail heading is the shared renderer's copy pill. The
 // history's status dock crossfades Pretty to canonical text. Reduced motion
 // switches at once in either presentation.
@@ -41,19 +41,30 @@ async function expectRest(scope: Locator) {
 }
 const away = (page: Page) => page.mouse.move(1, 1)
 
-test('footer pill: hover and keyboard focus reveal the seconds; a click still opens the history', async ({ page }) => {
+test('unnamed footer release: hover and keyboard focus show seconds in the card; a click opens history', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS')
   const button = pill(page)
+  const card = page.locator('.release-hover-card')
   await expect(version(button)).toBeVisible()
   await expectRest(button)
+  const before = await button.boundingBox()
   await button.hover()
-  await expectRevealed(button)
-  await away(page)
+  await expect(card).toBeVisible()
+  await expectRevealed(card)
   await expectRest(button)
+  expect(await button.boundingBox()).toEqual(before)
+  await away(page)
+  await expect(card).toHaveCount(0)
+  await expectRest(button)
+  await page.keyboard.press('Tab')
   await button.focus()
-  await expectRevealed(button)
+  await expect(card).toBeVisible()
+  await expectRevealed(card)
+  await expectRest(button)
+  expect(await button.boundingBox()).toEqual(before)
   await page.locator('body').click({ position: { x: 5, y: 300 } })
+  await expect(card).toHaveCount(0)
   await expectRest(button)
   // A click on the version itself reaches the button.
   await version(button).click()
@@ -170,12 +181,13 @@ test('journey Live heading: the standalone copy pill reveals on keyboard focus a
 
 test('reduced motion reveals at once, without a transition', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await setup(page)
-  await page.goto('/p/PHAROS')
-  const button = pill(page)
-  await expect(version(button)).toBeVisible()
-  await button.hover()
-  await expect(version(button)).toHaveAttribute('data-version-view', 'revealed')
-  expect(await seconds(button).evaluate(el => [el.style.transition, getComputedStyle(el).opacity])).toEqual(['none', '0.7'])
-  expect(await secondsWidth(button)).toBeGreaterThan(0)
+  const history = await setup(page)
+  await page.goto('/releases')
+  const heading = sheet(page).getByRole('heading', { level: 2, name: history.current })
+  const copy = heading.getByRole('button')
+  await expectRest(heading)
+  await copy.hover()
+  await expect(version(heading)).toHaveAttribute('data-version-view', 'revealed')
+  expect(await seconds(heading).evaluate(el => [el.style.transition, getComputedStyle(el).opacity])).toEqual(['none', '0.7'])
+  expect(await secondsWidth(heading)).toBeGreaterThan(0)
 })
