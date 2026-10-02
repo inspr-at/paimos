@@ -16,7 +16,7 @@ import (
 )
 
 // ProjectFilteredRoutes may be authorized by a permission held in any of the
-// caller's project bindings (Scope.AnyProject). Each one reads only rows that
+// caller's project bindings (Scope.AnyProject). Each one accesses only rows that
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
@@ -27,6 +27,7 @@ import (
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/features":                           true,
+	"GET /api/journey/next-actions":               true,
 	"GET /api/queue":                              true,
 	"GET /api/me/host-labels":                     true,
 	"PUT /api/me/host-labels":                     true,
@@ -34,9 +35,17 @@ var ProjectFilteredRoutes = map[string]bool{
 	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
+	"GET /api/me/agent-pause-settings":            true,
+	"PUT /api/me/agent-pause-settings":            true,
+	"GET /api/me/leaving-at":                      true,
+	"PUT /api/me/leaving-at":                      true,
+	"DELETE /api/me/leaving-at":                   true,
+	"POST /api/harness-sessions/pause":            true,
+	"POST /api/harness-sessions/resume":           true,
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/settings/status-autopilot":          true,
 	"GET /api/status-autopilot/changes":           true,
+	"GET /api/status-autopilot/proposals":         true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,

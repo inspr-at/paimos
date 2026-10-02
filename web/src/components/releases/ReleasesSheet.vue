@@ -625,7 +625,7 @@ const KINDS = [
 }
 .titles .eyebrow { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; font: 600 10.5px/1.4 var(--font); letter-spacing: .18em; overflow-wrap: anywhere; text-align: center; }
 .titles .eyebrow::before, .titles .eyebrow::after { content: ''; flex: 1; min-width: 16px; height: 1px; background: var(--line-2); }
-.hero { max-width: 100%; margin: 0; font: 300 clamp(28px, 3.4vw, 48px)/1.1 var(--serif); color: var(--ink); text-align: center; }
+.hero { max-width: 100%; margin: 0; font: 300 clamp(28px, 3.4vw, 48px)/1.1 var(--serif); color: var(--ink); text-align: center; overflow-wrap: anywhere; }
 .hero:not(.named) { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; }
 .status-dock { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 14px; max-width: 100%; min-height: 48px; padding: 6px 16px; border-radius: 24px; background: linear-gradient(135deg, var(--glass), var(--glass-2)); -webkit-backdrop-filter: blur(22px) saturate(1.4); backdrop-filter: blur(22px) saturate(1.4); box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 12px 28px -18px var(--line-2); }
 .dock-version { padding-left: 14px; border-left: 1px solid var(--line-2); }

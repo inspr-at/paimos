@@ -227,13 +227,14 @@ func saveCarried(ctx context.Context, tx pgx.Tx, tenantID, person string, next c
 // concurrency limit, a deadline and the aggregate integration work. The preview
 // is read-only but CPU-bound, so every editor keystroke must stay cheap.
 type previewGuard struct {
-	mu      sync.Mutex
-	hits    map[string][]time.Time
-	limit   int
-	window  time.Duration
-	slots   chan struct{}
-	budget  int
-	timeout time.Duration
+	mu          sync.Mutex
+	hits        map[string][]time.Time
+	limit       int
+	window      time.Duration
+	slots       chan struct{}
+	budget      int
+	timeout     time.Duration
+	withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 const (
@@ -247,7 +248,7 @@ const (
 )
 
 func newPreviewGuard(limit int, window time.Duration, slots, budget int, timeout time.Duration) *previewGuard {
-	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout}
+	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout, withTimeout: context.WithTimeout}
 }
 
 var defaultPreviewGuard = newPreviewGuard(previewRate, previewWindow, previewSlots, previewBudget, previewTimeout)
@@ -308,8 +309,10 @@ func previewSteps(start, reset time.Time) int {
 // connection gets a read deadline where the server supports it, and the handler
 // stops waiting at the deadline either way (408), so a stalled upload costs
 // neither a preview slot nor the caller's time.
-func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]byte, error) {
-	_ = http.NewResponseController(w).SetReadDeadline(deadline)
+func readBodyBy(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = http.NewResponseController(w).SetReadDeadline(deadline)
+	}
 	body := http.MaxBytesReader(w, r.Body, 1<<20)
 	type result struct {
 		raw []byte
@@ -320,8 +323,6 @@ func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]b
 		raw, err := io.ReadAll(body)
 		done <- result{raw, err}
 	}()
-	timer := time.NewTimer(time.Until(deadline))
-	defer timer.Stop()
 	select {
 	case got := <-done:
 		if got.err != nil {
@@ -332,10 +333,11 @@ func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]b
 			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
 		}
 		return got.raw, nil
-	case <-timer.C:
+	case <-ctx.Done():
 		_ = r.Body.Close()
-		return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-	case <-r.Context().Done():
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
+		}
 		return nil, fail(http.StatusRequestTimeout, "the preview request was cancelled")
 	}
 }

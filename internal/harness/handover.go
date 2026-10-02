@@ -36,10 +36,22 @@ func heartbeatExpired(ctx context.Context, tx pgx.Tx, s Session) (bool, error) {
 }
 
 func handoverPredecessor(ctx context.Context, tx pgx.Tx, projectID string, in registration, ref []byte) (*Session, error) {
-	if in.Role != "coordinator" {
-		if in.SucceedsID != nil {
-			return nil, workorders.Fail(400, "only coordinators can succeed a lead")
+	if in.SucceedsID != nil {
+		s, err := load(ctx, tx, projectID, *in.SucceedsID, true)
+		if err != nil {
+			return nil, err
 		}
+		if s.Pause != nil && s.StopReason != nil && *s.StopReason == "paused" {
+			if err = pausedPredecessor(s, in); err != nil {
+				return nil, err
+			}
+			return &s, nil
+		}
+		if in.Role != "coordinator" {
+			return nil, workorders.Fail(409, "worker predecessor must be paused")
+		}
+	}
+	if in.Role != "coordinator" {
 		return nil, nil
 	}
 	var s Session
@@ -54,6 +66,9 @@ func handoverPredecessor(ctx context.Context, tx pgx.Tx, projectID string, in re
 	}
 	if err != nil {
 		return nil, err
+	}
+	if s.StopReason != nil && *s.StopReason == "paused" {
+		return nil, workorders.Fail(409, "paused generations require an explicit succeeds_session_id and resume request")
 	}
 	if s.AgentPrincipalID != in.AgentPrincipalID || s.Role != "coordinator" || s.ArchivedAt != nil || s.HandedOverToID != nil {
 		if in.SucceedsID == nil {

@@ -187,6 +187,7 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	}
 	for _, s := range sessions {
 		stampSessionEta(s, interval, now)
+		*s = stampPause(*s, now)
 	}
 	if err := stampCoordinatorProgress(ctx, tx, sessions); err != nil {
 		return err

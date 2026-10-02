@@ -51,6 +51,10 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(op, path, args...)
+	// A launcher descendant must not keep its parent's output pipes open
+	// indefinitely after exit or cancellation. This does not qualify auth checks
+	// or authorize signaling any process beyond this command's own child.
+	cmd.WaitDelay = readerCleanupTimeout
 	if env != nil {
 		cmd.Env = env
 	}
@@ -69,7 +73,7 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 		if !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
 			// AEON-341: a launcher that cannot run or never answers failed to
 			// start; callers without start semantics still read it as unavailable.
-			return nil, 0, harnesslaunch.ErrStart
+			return nil, 0, errors.Join(harnesslaunch.ErrStart, op.Err())
 		}
 		code = exit.ExitCode()
 		if code == 126 || code == 127 {

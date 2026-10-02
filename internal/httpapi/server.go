@@ -50,6 +50,9 @@ type Server struct {
 	// documents, including documents that later navigate to the journey in
 	// Vue. Empty preserves the default policy everywhere.
 	AithemaOrigin string
+	// AttachmentSandboxOrigin is validated by attachments.NewSandbox. Only
+	// application documents may embed it; public portal policy stays unchanged.
+	AttachmentSandboxOrigin string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
@@ -129,10 +132,11 @@ func (s *Server) build() {
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(s.handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
 	// The catalog and roadmap HTML patterns are the public declarations for those pages.
-	spa := commonMiddleware(spaHandler(s.Web, s.brand()))
+	view := attachmentViewPolicy(s.AttachmentSandboxOrigin, spaHandler(s.Web, s.brand()))
 	if s.AithemaOrigin != "" {
-		spa = commonMiddleware(aithemaViewPolicy(s.AithemaOrigin, spaHandler(s.Web, s.brand())))
+		view = aithemaViewPolicy(s.AithemaOrigin, view)
 	}
+	spa := commonMiddleware(view)
 	if publicMounted {
 		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))

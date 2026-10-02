@@ -111,6 +111,9 @@ func SweepLostContact(ctx context.Context, pool *pgxpool.Pool, tenantID string) 
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,$2))`, "harness-lost-contact:"+tenantID, lostContactAdvisoryNamespace).Scan(&mine); err != nil || !mine {
 			return err
 		}
+		if err := sweepPauseDeadlines(ctx, tx, tenantID); err != nil {
+			return err
+		}
 		mins, err := heartbeatLostMinutes(ctx, tx)
 		if err != nil {
 			return err
@@ -153,14 +156,17 @@ func SweepLostContact(ctx context.Context, pool *pgxpool.Pool, tenantID string) 
 // RunLostContactSweeper sweeps every tenant once a minute until ctx ends.
 // A tenant created later is picked up on the next round.
 func RunLostContactSweeper(ctx context.Context, pool *pgxpool.Pool) {
-	ticker := time.NewTicker(LostContactSweepInterval)
-	defer ticker.Stop()
 	for {
 		sweepAllTenants(ctx, pool)
+		// Keep the ordinary lost-contact cadence, but wake at a durable pause
+		// escalation/deadline when it is sooner. Restart recovers from SQL;
+		// no volatile timer is the sole record of a leaving request.
+		timer := time.NewTimer(nextPauseSweepDelay(ctx, pool))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -202,4 +208,44 @@ func sweepAllTenants(ctx context.Context, pool *pgxpool.Pool) {
 			slog.Info("harness sessions lost contact", "tenant_id", id, "closed", n)
 		}
 	}
+}
+
+// The database returns a relative duration. Host clock skew cannot delay a
+// deadline, and a short floor prevents a hot loop at sub-millisecond boundaries.
+func nextPauseSweepDelay(ctx context.Context, pool *pgxpool.Pool) time.Duration {
+	delay := LostContactSweepInterval
+	var tenants []string
+	err := db.InTenant(db.NoProjects(ctx, "pause deadline tenant scan"), pool, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			tenants = append(tenants, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return delay
+	}
+	for _, id := range tenants {
+		var seconds *float64
+		err = db.InTenant(db.AllProjects(ctx, "pause deadline scheduling"), pool, id, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT extract(epoch FROM min(CASE
+ WHEN pause_record->>'level' IN ('pause','wrap_up') AND (pause_record->>'deadline_at')::timestamptz-interval '2 minutes'>clock_timestamp()
+ THEN (pause_record->>'deadline_at')::timestamptz-interval '2 minutes'
+ ELSE (pause_record->>'deadline_at')::timestamptz END)-clock_timestamp())::double precision
+ FROM harness_sessions WHERE archived_at IS NULL AND stopped_at IS NULL
+ AND pause_record->>'state' IN ('requested','planned') AND coalesce(pause_record->>'level','')<>''`).Scan(&seconds)
+		})
+		if err == nil && seconds != nil {
+			delay = min(delay, max(10*time.Millisecond, time.Duration(*seconds*float64(time.Second))))
+		}
+	}
+	return delay
 }
