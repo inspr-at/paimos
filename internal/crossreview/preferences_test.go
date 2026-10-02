@@ -17,6 +17,7 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 		wantComplex, security bool
 	}{
 		{name: "normal", c: "M", role: "build"}, {name: "large", c: "L", role: "build", wantComplex: true},
+		{name: "latest qualified", c: "L", role: "build", pin: "latest", wantComplex: true},
 		{name: "role fallback", role: "build-hard", wantComplex: true}, {name: "explicit small", c: "S", role: "build-hard"},
 		{name: "codex pin rejected", c: "L", role: "build", pin: "codex"},
 		{name: "author family rejected", c: "L", role: "build", pin: "author"},
@@ -53,8 +54,12 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='review'`).Scan(&kind); err != nil {
 					return err
 				}
+				complexCell := modelprefs.Cell{Mode: "pinned", ProfileID: pin}
+				if tc.pin == "latest" {
+					complexCell = modelprefs.Cell{Mode: "latest", Family: "anthropic", Line: "opus", Effort: "xhigh"}
+				}
 				if err := modelprefs.PutRow(t.Context(), tx, f.person, scope, kind, modelprefs.Row{Cells: map[string]modelprefs.Cell{
-					"normal": {Mode: "pinned", ProfileID: f.profile}, "complex": {Mode: "pinned", ProfileID: pin}}}); err != nil {
+					"normal": {Mode: "pinned", ProfileID: f.profile}, "complex": complexCell}}); err != nil {
 					return err
 				}
 				area := "backend"
