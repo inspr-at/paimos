@@ -8628,7 +8628,7 @@ components:
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
         event: {type: string, enum: [release.published], description: Event only; the project's journey publications and configured product release history. Historical publications before creation and those during pause are ignored.}
         event_start: {type: string, enum: [now, hour, morning], default: now, description: 'Event only; immediately, one hour later or next local morning at 06:00.'}
-        event_timezone: {type: string, maxLength: 128, description: Event only; IANA zone for next morning, default UTC.}
+        event_timezone: {type: string, maxLength: 128, description: 'Event only; IANA zone for next morning, default UTC.'}
     RecurrenceTemplate:
       type: object
       additionalProperties: false
