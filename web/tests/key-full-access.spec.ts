@@ -43,6 +43,8 @@ for (const role of ['admin', 'member'] as const) for (const mode of ['new', 'edi
     for (const key of expected) await expect(sheet.getByRole('checkbox', { name: new RegExp(key.replace('.', '\\.' )) })).toBeChecked()
     await expect(sheet).toContainText('Person-only: managing members, roles, keys and settings')
     await expect(sheet).toContainText('approval decisions; rule publishing; conversation watching')
+    await expect(sheet).toContainText('reading keys')
+    await expect(sheet).toContainText('harness force-stop and recovery; ownership transfer; the customer portal')
     const work = sheet.getByRole('group', { name: 'Work', exact: true })
     const workKeys = REGISTRY.filter(p => p.group === 'Work' && expected.includes(p.key)).map(p => p.key)
     await work.getByRole('button', { name: 'None', exact: true }).click()

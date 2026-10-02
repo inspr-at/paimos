@@ -387,7 +387,7 @@ func rotationProjectBinding(t *testing.T, m *Module, owner tenant.Principal, age
 	}
 }
 
-func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
+func TestRotationAcceptsProjectGrantsWithoutPromotingWorkspace(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		proposed []string
@@ -437,19 +437,41 @@ func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
 			if tc.proposed != nil {
 				body["rotation_scopes"] = tc.proposed
 			}
-			if w := keyRequest(m, editor, body); w.Code != http.StatusForbidden {
-				t.Fatalf("project/self permission promotion status = %d, want 403", w.Code)
-			}
+			next := decodeKey(t, keyRequest(m, editor, body))
 			if rotationAccessSnapshot(t, m, owner) != before {
-				t.Fatal("rejected rotation changed roles, permissions or bindings")
+				t.Fatal("rotation promoted project/self-service grants into the workspace role")
 			}
 			keys, events := keyCounts(t, m, owner)
-			if keys != beforeKeys || events != beforeEvents {
-				t.Fatal("rejected rotation left a replacement or audit event")
+			want := old.Scopes
+			if tc.proposed != nil {
+				want = tc.proposed
+			}
+			if keys != beforeKeys+1 || events != beforeEvents+2 || !slices.Equal(next.Scopes, want) || next.PrincipalID != old.PrincipalID {
+				t.Fatal("rotation did not commit only replacement and revocation with the requested scopes")
 			}
 			listed, err := m.listAgentKeys(ctx, owner.TenantID)
-			if err != nil || len(listed) != 1 || listed[0].RevokedAt != nil || !slices.Equal(listed[0].Scopes, old.Scopes) {
-				t.Fatal("rejected rotation changed or revoked the original key")
+			if err != nil || len(listed) != 2 {
+				t.Fatal("rotation lost a key record")
+			}
+			for _, key := range listed {
+				if key.ID == old.ID && (key.RevokedAt == nil || !slices.Equal(key.Scopes, old.Scopes)) {
+					t.Fatal("rotation did not revoke the original key intact")
+				}
+			}
+			if slices.Contains(next.Scopes, "nodes.write") {
+				if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+					p := tenant.Principal{ID: next.PrincipalID, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: next.Scopes, KeyCreatorID: editor.ID}
+					if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{}); !errors.Is(err, authz.ErrForbidden) {
+						return errors.New("project key scope granted workspace access")
+					}
+					var projectID string
+					if err := tx.QueryRow(ctx, `SELECT scope_id::text FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='project'`, p.ID).Scan(&projectID); err != nil {
+						return err
+					}
+					return authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: projectID})
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

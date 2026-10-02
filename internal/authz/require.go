@@ -4,6 +4,8 @@ package authz
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -372,15 +374,27 @@ func ProjectGrantable(key string) bool {
 	return false
 }
 
-// selfPermission names the workspace-only permissions a project role still
+// Project self-service permissions are the workspace-only permissions a role
 // needs to use its projects: the caller's own profile and effective access,
 // and reading node kinds (tenant configuration every node view renders).
-func selfPermission(key string) bool {
-	switch key {
-	case "authz.read", "profile.read", "profile.write", "profile.portal_read", "profile.portal_write", "kinds.read":
-		return true
+// The key dialogs import the same definition; agent-grantability still comes
+// from the registry, so customer-portal permissions remain person-only.
+//
+//go:embed project_self_permissions.json
+var projectSelfPermissionsJSON []byte
+
+var projectSelfPermissions = func() []string {
+	var definition struct {
+		Permissions []string `json:"permissions"`
 	}
-	return false
+	if err := json.Unmarshal(projectSelfPermissionsJSON, &definition); err != nil {
+		panic("invalid embedded project self-service permissions")
+	}
+	return definition.Permissions
+}()
+
+func selfPermission(key string) bool {
+	return contains(projectSelfPermissions, key)
 }
 
 func intersect(grants, ceiling []string) []string {

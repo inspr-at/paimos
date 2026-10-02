@@ -899,10 +899,9 @@ func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 		return err
 	}
 	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: actor.ID}
-	effective, err := authz.EffectiveTx(ctx, tx, agent, "")
-	if err != nil {
-		return err
-	}
+	// Use the same live workspace/project ceiling as creation and scope edits.
+	// A scope from a project binding never changes the workspace role; each
+	// request still checks that project's bindings and the creator's authority.
 	ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, agent)
 	if err != nil {
 		return err
@@ -910,12 +909,6 @@ func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 	for _, scope := range scopes {
 		permission, known := authz.Lookup(scope)
 		if !known || !permission.AgentGrantable || !slices.Contains(creator.Workspace.Permissions, scope) || !slices.Contains(ceiling, scope) {
-			return authz.ErrForbidden
-		}
-		// A generated workspace role has the same ceiling as a shared role.
-		// Project and self-service grants must never be promoted into it.
-		// Coordinator rules.read remains derived from live project access.
-		if effective.Workspace.Role != nil && workspaceRolePermission(scopes, scope) && !slices.Contains(effective.Workspace.Permissions, scope) {
 			return authz.ErrForbidden
 		}
 	}

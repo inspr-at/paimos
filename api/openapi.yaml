@@ -3212,7 +3212,7 @@ paths:
                   type: [array, "null"]
                   maxItems: 256
                   items: {type: string}
-                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. A workspace role caps workspace grants; project-only agents keep their project ceiling. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
+                  description: Optional explicitly selected scopes for the replacement. Requires rotate_key_id. Omitted or null preserves the old scopes; an empty array grants no access. Every rotation rechecks the actor's live permissions and the agent's existing role ceiling, including preserved scopes. As with key creation and editing, that ceiling combines workspace-role permissions with project-grantable and self-service permissions from the agent's project roles, restricted to agent_grantable permissions. Project permissions remain confined to the agent's bound projects on requests. Rotation never creates or changes roles, role permissions or bindings, and never adds implicit permissions.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label

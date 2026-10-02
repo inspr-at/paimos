@@ -1,0 +1,60 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "registry": [
+    { "key": "nodes.read", "grantable_at": ["workspace", "project"], "agent_grantable": true },
+    { "key": "nodes.write", "grantable_at": ["workspace", "project"], "agent_grantable": true },
+    { "key": "events.read", "grantable_at": ["workspace", "project"], "agent_grantable": true },
+    { "key": "authz.read", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "kinds.read", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "kinds.manage", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "profile.read", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "profile.write", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "profile.manage", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "models.manage", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "models.read", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "members.read", "grantable_at": ["workspace"], "agent_grantable": true },
+    { "key": "keys.manage", "grantable_at": ["workspace"], "agent_grantable": false },
+    { "key": "keys.read", "grantable_at": ["workspace"], "agent_grantable": false },
+    { "key": "ownership.transfer", "grantable_at": ["workspace"], "agent_grantable": false },
+    { "key": "profile.portal_read", "grantable_at": ["workspace"], "agent_grantable": false },
+    { "key": "rules.publish", "grantable_at": ["workspace", "project"], "agent_grantable": false }
+  ],
+  "cases": [
+    {
+      "name": "mixed roles with project self-service",
+      "workspace": ["nodes.read", "members.read", "keys.read", "ownership.transfer", "retired.scope"],
+      "projects": [["nodes.read", "nodes.write", "events.read", "kinds.read", "profile.read", "profile.write", "authz.read", "models.manage", "profile.manage", "keys.manage", "profile.portal_read", "rules.publish"]],
+      "want": ["authz.read", "events.read", "kinds.read", "members.read", "nodes.read", "nodes.write", "profile.read", "profile.write"]
+    },
+    {
+      "name": "project-only role union",
+      "workspace": null,
+      "projects": [["nodes.read", "kinds.read", "authz.read"], ["nodes.write", "profile.read", "profile.write", "keys.read", "models.manage"]],
+      "want": ["authz.read", "kinds.read", "nodes.read", "nodes.write", "profile.read", "profile.write"]
+    },
+    {
+      "name": "workspace-only grants and person-only exclusions",
+      "workspace": ["models.manage", "kinds.manage", "profile.manage", "keys.manage", "profile.portal_read"],
+      "projects": [],
+      "want": ["kinds.manage", "models.manage", "profile.manage"]
+    },
+    {
+      "name": "self-service is not implied by a project binding",
+      "workspace": null,
+      "projects": [["nodes.read"]],
+      "want": ["nodes.read"]
+    },
+    {
+      "name": "empty workspace role with project grants",
+      "workspace": [],
+      "projects": [["nodes.write", "kinds.read", "profile.manage"]],
+      "want": ["kinds.read", "nodes.write"]
+    },
+    {
+      "name": "unbound agent",
+      "workspace": null,
+      "projects": [],
+      "want": []
+    }
+  ]
+}

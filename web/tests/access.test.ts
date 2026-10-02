@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import ceilingParity from '../../internal/auth/testdata/key_scope_ceiling.json' with { type: 'json' }
 import {
-  AccessError, agentDeactivatePoints, agentDescription, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, grantablePresetScopes, groupPermissions, inviteRoles, KEY_SCOPE_PRESETS, matchesScope, presetScopes, selectScopeGroup, suggestAgentRole, TICKET_WORKER_SCOPES,
+  AccessError, agentDeactivatePoints, agentDescription, agentScopeCeiling, auditSentence, beyond, categoryOf, defaultProjectRole, defaultWorkspaceRole, diff, effectLine, grantablePresetScopes, groupPermissions, inviteRoles, KEY_SCOPE_PRESETS, matchesScope, PERSON_ONLY_KEY_NOTE, presetScopes, selectScopeGroup, suggestAgentRole, TICKET_WORKER_SCOPES,
   isLastOwner, permissionLabel, projectRolesOf, projectSummary, splitAgents, validEmail, workspaceRolesOf, type Agent, type Permission, type Role,
 } from '../src/lib/access.ts'
 
@@ -59,6 +60,31 @@ test('Full access includes mixed workspace/project role scopes without promoting
   assert.deepEqual([...ceiling], TICKET_WORKER_SCOPES)
   assert.deepEqual(grantablePresetScopes('all', ceiling, catalog), TICKET_WORKER_SCOPES)
   assert.ok(!ceiling.has('account.manage'))
+})
+
+// The Go test checks these same cases against live bindings, the real registry,
+// and create/edit/rotate. Changes on either side must satisfy this shared set.
+test('client/server scope ceiling parity, including project self-service and person-only exclusions', () => {
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  for (const fixture of ceilingParity.cases) {
+    const workspace = fixture.workspace === null ? null : role('workspace', 'workspace', fixture.workspace, false)
+    const projects = fixture.projects.map((permissions, i) => role(`project-${i}`, `project-${i}`, permissions, false))
+    const roles = [...(workspace ? [workspace] : []), ...projects]
+    const worker = agent('parity', { workspace_role: workspace, project_roles: projects.map(r => ({ project_id: r.id, project_key: r.id, project_title: r.name, role: r })) })
+    for (const respectPrivateRole of [false, true]) {
+      const ceiling = agentScopeCeiling(worker, roles, catalog, respectPrivateRole)
+      // Creation may configure an unbound agent; editing and rotation cannot.
+      if (!workspace && !projects.length && !respectPrivateRole) assert.equal(ceiling, null)
+      else assert.deepEqual([...ceiling!].sort(), fixture.want, fixture.name)
+      if (ceiling) assert.deepEqual(grantablePresetScopes('all', ceiling, catalog).sort(), fixture.want, fixture.name)
+    }
+  }
+})
+
+test('the Full access note names every person-only class', () => {
+  for (const phrase of ['members', 'roles', 'keys', 'settings', 'reading keys', 'access audit log', 'approval decisions', 'rule publishing', 'conversation watching', 'harness force-stop', 'recovery', 'ownership transfer', 'customer portal']) {
+    assert.ok(PERSON_ONLY_KEY_NOTE.includes(phrase), phrase)
+  }
 })
 
 test('Ticket worker presets are bounded by creator, role, project scope and agent-grantability', () => {

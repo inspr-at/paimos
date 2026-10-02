@@ -3,6 +3,7 @@
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
 import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
+import projectSelfPermissions from '../../../internal/authz/project_self_permissions.json' with { type: 'json' }
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
@@ -172,7 +173,7 @@ export function selectScopeGroup(selected: Set<string>, keys: string[], all: boo
   }
   return next
 }
-export const PERSON_ONLY_KEY_NOTE = 'Person-only: managing members, roles, keys and settings; the access audit log; approval decisions; rule publishing; conversation watching.'
+export const PERSON_ONLY_KEY_NOTE = 'Person-only: managing members, roles, keys and settings; reading keys; the access audit log; approval decisions; rule publishing; conversation watching; harness force-stop and recovery; ownership transfer; the customer portal.'
 export function matchesScope(permission: Permission, term: string): boolean {
   const needle = term.trim().toLowerCase()
   return !needle || `${permissionLabel(permission.key)} ${permission.key} ${permission.group} ${permission.description}`.toLowerCase().includes(needle)
@@ -188,14 +189,15 @@ export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefi
 // null means creation may configure a role; it never applies to rotation.
 export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role' | 'project_roles'>, roles: Role[], registry: Permission[] = [], respectPrivateRole = false): Set<string> | null {
   const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
-  const projectKeys = new Set(registry.filter(p => p.grantable_at.includes('project')).map(p => p.key))
+  const grantable = new Set(keyScopes(registry).map(p => p.key))
+  const projectKeys = new Set(keyScopes(registry).filter(p => p.grantable_at.includes('project') || projectSelfPermissions.permissions.includes(p.key)).map(p => p.key))
   const projectPermissions = (agent.project_roles ?? []).flatMap(pr => roles.find(r => r.id === pr.role.id)?.permissions ?? []).filter(k => projectKeys.has(k))
   if (!role && agent.project_roles?.length) return new Set(projectPermissions)
   if (!role) return agent.workspace_role || respectPrivateRole ? new Set() : null
   if (!respectPrivateRole && !role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
   // Like AgentKeyCeilingTx: project permissions may be key scopes too. Actual
   // requests still check the project's binding; this grants no workspace access.
-  return new Set([...role.permissions, ...projectPermissions])
+  return new Set([...role.permissions, ...projectPermissions].filter(key => grantable.has(key)))
 }
 
 // ---------- Permissions in words ----------
