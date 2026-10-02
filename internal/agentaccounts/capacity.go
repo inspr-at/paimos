@@ -36,11 +36,30 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
 			return err
 		}
-		return ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings)
+		if err := ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings); err != nil {
+			return err
+		}
+		a, err := getAccount(r.Context(), tx, r.PathValue("accountId"))
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		notices, err := prepareQuotaWarnings(r.Context(), tx, p, a, now)
+		if err != nil {
+			return err
+		}
+		system, err := quotaSystemActor(r.Context(), tx, p.TenantID, len(notices) > 0)
+		if err != nil {
+			return err
+		}
+		return flushQuotaNotices(r.Context(), tx, system, notices)
 	})
 	if err != nil {
 		writeErr(w, err)

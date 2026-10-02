@@ -38,6 +38,9 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	handle := func(pattern string, fn http.HandlerFunc) { mux.HandleFunc(pattern, m.privateResponse(fn)) }
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
+	handle("GET /api/agent-accounts/quota-warnings", m.warningSessions)
+	handle("GET /api/settings/quota-warnings", m.warningSettings)
+	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
 	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)

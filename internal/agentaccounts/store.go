@@ -375,7 +375,18 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 			return Account{}, err
 		}
 	}
+	notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+	if err != nil {
+		return Account{}, err
+	}
+	system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+	if err != nil {
+		return Account{}, err
+	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+		return Account{}, err
+	}
+	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 		return Account{}, err
 	}
 	return after, nil

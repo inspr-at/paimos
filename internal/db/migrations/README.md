@@ -204,3 +204,15 @@ transaction after 1100 releases its exclusive lock; 1102 builds the unique conte
 index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
+
+AEON-613 reserves **1136** for quota warning settings and durable receipts. The
+shared scratch ledger was read before reservation (highest reserved: 1135).
+The reservation is also recorded on AEON-613; the coordinator mirrors it to
+the shared ledger because workers may author only inside their own repository.
+
+DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
+Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
+Classify `account_quota_warnings` as personal quota telemetry (resource/window
+identity, reading time, remaining percentage, reset, threshold and recovery),
+located by `(tenant_id,id)`, when merging with the inventory branch. These
+records contain no credentials, local paths or raw vendor responses.
