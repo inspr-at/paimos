@@ -5,11 +5,16 @@ import { useSession } from '../../stores/session'
 import SettingsCard from './SettingsCard.vue'
 
 const session = useSession()
-const { showFlowControls, setShowFlowControls, saving, failed } = useDeveloperSettings()
+const { showFlowControls, setShowFlowControls, showReservedVersions, setShowReservedVersions, saving, failed } = useDeveloperSettings()
 async function change(event: Event) {
   const input = event.target as HTMLInputElement
   await setShowFlowControls(input.checked)
   input.checked = showFlowControls.value
+}
+async function changeReserved(event: Event) {
+  const input = event.target as HTMLInputElement
+  await setShowReservedVersions(input.checked)
+  input.checked = showReservedVersions.value
 }
 </script>
 
@@ -23,14 +28,21 @@ async function change(event: Event) {
         <span>Show the flow controls (not yet tested end to end)</span>
       </label>
       <p id="flow-controls-hint" class="hint">Reveals the footer flow control, the project Journey tab, its stages and the release walker. Off by default.</p>
+      <label id="reserved-versions" class="flow-choice reserved-choice">
+        <input type="checkbox" role="switch" :checked="showReservedVersions" :disabled="saving || session.identity?.principal.kind !== 'person'"
+          aria-describedby="reserved-versions-hint" @change="changeReserved" />
+        <span>Show reserved versions</span>
+      </label>
+      <p id="reserved-versions-hint" class="hint">Includes reserved, never-published versions in the release history. They always count in the statistics. Off by default.</p>
       <p v-if="saving" role="status" class="hint">Saving your preference…</p>
-      <p v-if="failed" role="alert" class="error-line">Your flow preference could not be saved. Please try the switch again.</p>
+      <p v-if="failed" role="alert" class="error-line">Your developer preference could not be saved. Please try the switch again.</p>
     </SettingsCard>
   </div>
 </template>
 
 <style scoped>
 .flow-choice { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.reserved-choice { margin-top: 18px; scroll-margin-top: 20px; }
 input { flex-shrink: 0; width: 18px; height: 18px; accent-color: var(--teal); }
 input:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
 .hint { margin-top: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }

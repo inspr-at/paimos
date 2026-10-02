@@ -10,11 +10,14 @@
     "typecheck": "vue-tsc -b --noEmit",
     "lint": "eslint src",
     "prebuild": "node ../scripts/verify-release.mjs",
-    "test": "playwright test -c playwright.ui.config.ts",
+    "test": "node ../scripts/playwright-safe.mjs -c playwright.ui.config.ts",
+    "test:remote": "node ../scripts/playwright-remote.mjs",
+    "test:ui-shards": "node ../scripts/playwright-ui-shards-safe.mjs",
+    "test:browser-safety": "node --test ../scripts/playwright-safe.test.mjs ../scripts/playwright-remote.test.mjs tests/playwright-policy.test.ts",
     "audit:ui": "node ../scripts/ui-audit/run.mjs",
     "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
-    "e2e": "playwright test"
+    "e2e": "node ../scripts/playwright-safe.mjs"
   },
   "dependencies": {
     "3d-force-graph": "1.80.0",

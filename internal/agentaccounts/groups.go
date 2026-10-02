@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -716,6 +717,25 @@ func setRunTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, acc
 		if !ok {
 			return fail(http.StatusBadRequest, "invalid account")
 		}
+		policy, err := modelprefs.RunRequirement(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		var profile string
+		if err := tx.QueryRow(ctx, `SELECT model_profile_id::text FROM agent_runs WHERE id=$1`, runID).Scan(&profile); err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		qualifies, err := AccountMeetsResidency(ctx, tx, accountID, profile, policy.Residency, now)
+		if err != nil {
+			return err
+		}
+		if !qualifies {
+			return &httpError{status: 409, code: "residency_unmet", msg: "account is outside the allowed providers"}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$2::uuid WHERE id=$1::uuid`, runID, accountID); err != nil {
 			return err
 		}
@@ -804,49 +824,66 @@ type groupFence struct {
 
 // narrowCandidates applies the project fence, then a run or ticket pin.
 // A pin never widens a fence. An empty result waits; it does not spill.
-func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string, accounts []Account) ([]Account, error) {
+func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string, accounts []Account) ([]Account, bool, error) {
 	if run.Purpose == "pairing_verification" {
-		return accounts, nil
+		return accounts, false, nil
 	}
 	projectID, err := runProjectID(ctx, tx, run.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	fences, err := loadFences(ctx, tx, harness)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	kept := applyFence(accounts, fences, projectID)
+	policy, err := modelprefs.RunRequirement(ctx, tx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	req := modelprefs.Strictest(policy.Residency, run.Residency)
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return nil, false, err
+	}
+	profile := ""
+	if run.ProfileID != nil {
+		profile = *run.ProfileID
+	}
+	kept, residencyEmptied, err := applyResidency(ctx, tx, kept, profile, req, now)
+	if err != nil {
+		return nil, false, err
+	}
 	if run.RequestedAccountID != nil && *run.RequestedAccountID != "" {
-		return keepAccount(kept, *run.RequestedAccountID), nil
+		return keepAccount(kept, *run.RequestedAccountID), residencyEmptied, nil
 	}
 	var target *string
 	err = tx.QueryRow(ctx, `SELECT group_id::text FROM account_run_targets WHERE run_id=$1::uuid`, run.ID).Scan(&target)
 	if err != nil && !isNoRows(err) {
-		return nil, err
+		return nil, false, err
 	}
 	if target != nil && *target != "" {
-		return keepGroup(kept, *target), nil
+		return keepGroup(kept, *target), residencyEmptied, nil
 	}
 	ticketID, err := runTicketID(ctx, tx, run.ID)
 	if err != nil || ticketID == "" {
-		return kept, err
+		return kept, residencyEmptied, err
 	}
 	var accountID, groupID *string
 	err = tx.QueryRow(ctx, `SELECT account_id::text, group_id::text FROM account_ticket_pins WHERE ticket_id=$1::uuid AND harness=$2`, ticketID, harness).Scan(&accountID, &groupID)
 	if isNoRows(err) {
-		return kept, nil
+		return kept, residencyEmptied, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if accountID != nil && *accountID != "" {
-		return keepAccount(kept, *accountID), nil
+		return keepAccount(kept, *accountID), residencyEmptied, nil
 	}
 	if groupID != nil && *groupID != "" {
-		return keepGroup(kept, *groupID), nil
+		return keepGroup(kept, *groupID), residencyEmptied, nil
 	}
-	return kept, nil
+	return kept, residencyEmptied, nil
 }
 
 // The routing agent often has no project grant. The fence still has to know

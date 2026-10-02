@@ -232,6 +232,11 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 }
 
 func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
+	_, err := r.HeartbeatHarnessPause(ctx, s, phase)
+	return err
+}
+
+func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
 	sequence := s.ActivitySequence
 	if sequence == 0 {
 		sequence = 1
@@ -266,7 +271,8 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 		}
 	}
 	var result struct {
-		Mode string `json:"agent_activity_mode"`
+		Mode  string        `json:"agent_activity_mode"`
+		Pause *HarnessPause `json:"pause"`
 	}
 	err := r.harnessWorker(ctx, s, "/heartbeat", body, &result)
 	if err == nil && agentactivity.Mode(result.Mode) {
@@ -277,7 +283,7 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 		r.activityModes[s.ID] = result.Mode
 		r.mu.Unlock()
 	}
-	return err
+	return result.Pause, err
 }
 
 func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {

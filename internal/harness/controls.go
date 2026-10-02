@@ -77,8 +77,11 @@ func (m *Module) requestControl(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 	return c, record(ctx, tx, p, s, "control_requested", nil, c)
 }
 func (m *Module) control(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
+	s, err := load(r.Context(), tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if err != nil {
+		return nil, err
+	}
+	if s, err = expirePause(r.Context(), tx, p, s); err != nil {
 		return nil, err
 	}
 	if err := expireSessionRequests(r.Context(), tx, p, s); err != nil {
@@ -108,13 +111,16 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if s.Management != "managed" {
 		return nil, workorders.Fail(409, "managed worker required")
 	}
+	if s, err = expirePause(ctx, tx, p, s); err != nil {
+		return nil, err
+	}
 	if err := expireSessionRequests(ctx, tx, p, s); err != nil {
 		return nil, err
 	}
 	if err := m.expireControls(r, tx, p, s); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' ORDER BY sequence FOR UPDATE`, s.ID)
+	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' AND NOT(kind='stop' AND coalesce(request_payload->>'pause','false')='true') AND (coalesce(request_payload->>'stop_now','false')<>'true' OR $2::jsonb IS NOT NULL) ORDER BY sequence FOR UPDATE`, s.ID, s.ProcessOwnership)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +145,7 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	claimed := []offered{}
 	for _, old := range pending {
-		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp() WHERE id=$1 RETURNING `+controlColumns, old.ID))
+		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN clock_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
 		if e != nil {
 			return nil, e
 		}
@@ -242,14 +248,20 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if err != nil {
 		return nil, err
 	}
+	if c.Kind == "stop" && c.RequestPayload != nil && c.RequestPayload.Pause {
+		return nil, workorders.Fail(409, "pause completes only with a planned handover and stop reason paused")
+	}
 	if sessionRequest(c.Kind) && (c.ExpectedGeneration == nil || *c.ExpectedGeneration != s.ID) {
 		return nil, workorders.Fail(409, "wrong request generation")
 	}
 	if sessionRequest(c.Kind) && c.Reason != nil && *c.Reason == "request_expired" {
 		return c, nil
 	}
-	if c.Kind == "force_stop" && in.Outcome == "applied" && in.Reason != "owned_group_signalled_root_exited" {
-		return nil, workorders.Fail(400, "verified force-stop result required")
+	if c.RequestPayload != nil && c.RequestPayload.StopNow && (c.ExpectedGeneration == nil || *c.ExpectedGeneration != s.ID || c.State != "claimed" && c.State != "completed") {
+		return nil, workorders.Fail(409, "stop now requires the claimed exact generation")
+	}
+	if (c.Kind == "force_stop" || c.RequestPayload != nil && c.RequestPayload.StopNow) && in.Outcome == "applied" && in.Reason != "owned_group_signalled_root_exited" {
+		return nil, workorders.Fail(400, "verified owned-process stop result required")
 	}
 	if c.State == "completed" {
 		if c.Outcome != nil && c.Reason != nil && *c.Outcome == in.Outcome && *c.Reason == in.Reason {
