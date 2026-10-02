@@ -189,11 +189,20 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		}
 		notices = append(notices, pending...)
 	}
+	if len(notices) == 0 {
+		return notices, nil
+	}
 	err = withQuotaNoticeVisibility(ctx, tx, func() error {
 		// Pre-lock FK parents in sorted batches before any event counter.
 		for _, target := range []struct{ column, table string }{{"project", "nodes"}, {"recipient", "principals"}, {"session", "harness_sessions"}} {
 			ids := []string{}
 			seen := map[string]bool{}
+			if target.column == "recipient" {
+				// Creating System can append an event itself. Fence the probe's
+				// actor too before that first event-counter acquisition.
+				ids = append(ids, p.ID)
+				seen[p.ID] = true
+			}
 			for _, n := range notices {
 				id := n.project
 				if target.column == "recipient" {
