@@ -20,7 +20,7 @@ import TicketChips from './TicketChips.vue'
 const props = defineProps<{
   release: Release; repository: string; current: boolean; rollback: boolean; fresh: boolean
   liveSince: string | null; now: number; query: string; evidence: boolean
-  lang: ReleaseLang; view: ReleaseView
+  lang: ReleaseLang; view: ReleaseView; hiddenInHistory?: boolean
 }>()
 const locale = computed(() => props.lang)
 const details = computed(() => props.view === 'details')
@@ -95,6 +95,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       </div>
     </div>
     <h2 id="release-detail-title" ref="heading" class="version" :class="{ named: !!release.codename }" tabindex="-1"><ReleaseCodename :version="release.version" :name="release.codename" :quiet="reserved"><template v-for="(p, i) in parts(release.codename ?? '')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></ReleaseCodename></h2>
+    <p v-if="reserved && hiddenInHistory" class="none hidden-history">Hidden in the history. Show reserved versions in Developer settings.</p>
     <p v-if="liveLine" class="when live-line" :data-tip="liveSince ? `Live on this server since ${absoluteTime(liveSince)}` : undefined">{{ liveLine }}</p>
     <p v-else-if="at" class="when">
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>

@@ -92,10 +92,10 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
           <AppIcon v-if="view.id === defaultId" name="star" :size="12" class="lead star" />
           <span class="name">{{ view.name }}</span>
           <AppIcon v-if="view.shared" name="users" :size="12" class="shared" />
-          <span v-if="view.id === activeId && dirty" class="dirty" role="img" aria-label="changed since saved" />
+          <span :style="{ visibility: view.id === activeId && dirty ? 'visible' : 'hidden' }" class="dirty" role="img" aria-label="changed since saved" />
         </a>
         <button
-          v-if="view.id === activeId" type="button" class="tab-menu" :aria-label="`Options for view ${view.name}`" aria-haspopup="menu" :aria-expanded="menu?.view.id === view.id"
+          :style="{ visibility: view.id === activeId ? 'visible' : 'hidden' }" :tabindex="view.id === activeId ? 0 : -1" type="button" class="tab-menu" :aria-label="`Options for view ${view.name}`" aria-haspopup="menu" :aria-expanded="menu?.view.id === view.id"
           @click="openMenu(view, $event.currentTarget as HTMLElement)"
         ><AppIcon name="chevron" :size="12" /></button>
       </span>
@@ -141,7 +141,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .strip.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
 .strip.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .tab { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 999px; }
-.view-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.view-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .view-tab .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .view-tab:hover { color: var(--ink); background: var(--row-hover); }
 .view-tab:focus-visible, .tab-menu:focus-visible { box-shadow: var(--focus-ring); }
@@ -174,9 +174,9 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 @media (max-width: 600px) {
   .view-bar { gap: 6px; padding: 0 0 8px; }
   .strip { gap: 6px; }
-  .view-tab { position: relative; height: 40px; padding: 0 14px; font-size: 14px; }
+  .view-tab { position: relative; height: 40px; padding: 0 4px 0 14px; font-size: 14px; }
   .view-tab::after { content: ''; position: absolute; inset: -2px 0; border-radius: inherit; }
-  .tab.active .view-tab { padding-right: 2px; }
+  .tab.active .view-tab { padding-right: 4px; }
   .tab-menu { position: relative; width: 40px; height: 40px; margin-right: 0; }
   .tab-menu::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; }
   .changes .reset { display: none; }

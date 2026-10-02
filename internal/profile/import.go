@@ -248,27 +248,14 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				size = cfg.Height
 			}
 			crop := Crop{X: (cfg.Width - size) / 2, Y: (cfg.Height - size) / 2, Size: size}
-			original, variants, err := ProcessAvatar(body, crop)
+			staged, err = stageAvatarData(ctx, job.Store, tenantID, body, crop)
 			if err != nil {
 				return report, err
 			}
-			store := job.Store
-			store.MaxSize = 0
-			saved, err := store.Stage(ctx, tenantID, bytes.NewReader(original))
-			if err != nil {
-				return report, err
-			}
-			staged = append(staged, saved)
-			after.AvatarOriginalHash = saved.SHA256
+			after.AvatarOriginalHash = staged[0].SHA256
 			after.AvatarHashes = map[string]string{}
-			for size, b := range variants {
-				saved, err := store.Stage(ctx, tenantID, bytes.NewReader(b))
-				if err != nil {
-					closeStaged()
-					return report, err
-				}
-				staged = append(staged, saved)
-				after.AvatarHashes[fmt.Sprint(size)] = saved.SHA256
+			for i, size := range []int{32, 64, 128, 256} {
+				after.AvatarHashes[fmt.Sprint(size)] = staged[i+1].SHA256
 			}
 		}
 		// Serialize target writes, re-read and apply the classic snapshot only to

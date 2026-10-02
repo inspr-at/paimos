@@ -17,6 +17,7 @@ jobs:
   agentd-darwin:
     permissions:
       contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +41,13 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Require exact-SHA release rehearsal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-release-rehearsal.mjs --sha "$GITHUB_SHA"
       - name: Build darwin paimos-agentd with LocalAuthentication
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
@@ -163,6 +171,11 @@ jobs:
             echo 'Release tags must be annotated: git tag -a "$tag" -m "Release $tag"' >&2
             exit 1
           fi
+
+      - name: Require exact-SHA release rehearsal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-release-rehearsal.mjs --sha "$GITHUB_SHA"
 
       - name: Release checks
         run: node scripts/verify-release.mjs --release

@@ -97,7 +97,7 @@ test('a failed save keeps the preference off and offers a visible retry', async 
   await page.goto('/settings/developer')
   const toggle = page.getByRole('switch', { name: switchName })
   await toggle.click()
-  await expect(page.getByRole('alert')).toContainText('Your flow preference could not be saved')
+  await expect(page.getByRole('alert')).toContainText('Your developer preference could not be saved')
   await expect(toggle).not.toBeChecked()
   expect(data.preferences['developer-ui']).toBeUndefined()
   fail = false

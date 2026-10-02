@@ -47,7 +47,7 @@ func TestACPVersionOnlyProbeNeverEstablishesReadiness(t *testing.T) {
 				}
 			}
 			a.Path = filepath.Join(t.TempDir(), "missing")
-			if got := probeAccount(t.Context(), a, "local"); got.OK || got.Failure != ProbeUnavailable {
+			if got := probeAccount(t.Context(), a, "local"); got.OK || got.Failure != ProbeLaunchFailed {
 				t.Errorf("missing launcher: %+v", got)
 			}
 		})

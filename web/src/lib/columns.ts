@@ -27,8 +27,8 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
   { id: 'estimate', label: 'Estimate', sort: 'estimate', width: 96, min: 72, max: 180, end: true },
-  // Short model name, brand mark, measured check and +N fit 156px.
-  { id: 'model', label: 'Model', sort: 'model', width: 156, min: 96, max: 260 },
+  // Model name and version, brand mark, effort meter, measured check and +N.
+  { id: 'model', label: 'Model', sort: 'model', width: 176, min: 96, max: 260 },
   { id: 'suggested', label: 'Suggested release', sort: null, width: 152, min: 120, max: 260 },
   // Fixed measured slot follows the value; running estimates carry "~".
   { id: 'tokens', label: 'Tokens', sort: 'tokens', width: 118, min: 84, max: 180, end: true },

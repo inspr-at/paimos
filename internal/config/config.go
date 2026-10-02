@@ -40,6 +40,9 @@ type Config struct {
 	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
+	// HTMLSandboxOrigin is a dedicated HTTPS origin on a different registrable
+	// domain. Empty/unsafe values disable live HTML previews, not downloads.
+	HTMLSandboxOrigin string
 	// DoctrineCredentialsDir holds host-provisioned doctrine read tokens and App
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
@@ -82,6 +85,7 @@ func FromEnv() (Config, error) {
 		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
 		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
 		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
+		HTMLSandboxOrigin:   os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
 		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
 		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),

@@ -18,7 +18,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/imagework"
 	"github.com/jackc/pgx/v5"
+
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -124,20 +126,22 @@ func (s *Staged) Close() error {
 }
 
 // Stage reads and validates the request before opening a database transaction.
-func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (_ *Staged, err error) {
+func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (*Staged, error) {
+	return s.StageNamed(ctx, tenant, src, "")
+}
+
+// StageNamed accepts HTML fragments that sniff as plain text only when their
+// filename explicitly selects HTML. A supplied MIME header is never authority.
+func (s Store) StageNamed(ctx context.Context, tenant string, src io.Reader, name string) (_ *Staged, err error) {
 	if !validTenant(tenant) {
 		return nil, errors.New("invalid tenant")
 	}
 	// Spool to a private file, then sniff and address by the computed digest.
-	spoolDir := filepath.Join(s.root(), tenant, "incoming")
-	if err := os.MkdirAll(spoolDir, 0700); err != nil {
-		return nil, err
-	}
-	tmp, err := os.CreateTemp(spoolDir, "upload-*")
+	staged, err := s.stageFile(tenant)
 	if err != nil {
 		return nil, err
 	}
-	staged := &Staged{store: s, tenant: tenant, original: tmp, variants: map[string][]byte{}}
+	tmp := staged.original
 	defer func() {
 		if err != nil {
 			_ = staged.Close()
@@ -172,11 +176,15 @@ func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (_ *Stag
 	}
 	if strings.HasPrefix(ct, "text/plain") {
 		ct = "text/plain; charset=utf-8"
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".html" || ext == ".htm" {
+			ct = "text/html; charset=utf-8"
+		}
 	}
 	// Unknown binaries (logs, exports, office files that don't sniff as zip)
 	// are stored too; they are only ever served as a download with nosniff
 	// and a sandboxing CSP, never inline.
-	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream"
+	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream" || isHTML(ct)
 	if !allowed {
 		return nil, fmt.Errorf("%w %s", ErrUnsupportedType, ct)
 	}
@@ -186,14 +194,14 @@ func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (_ *Stag
 	out := Prepared{SHA256: hex.EncodeToString(h.Sum(nil)), ContentType: ct, Size: n}
 	if strings.HasPrefix(ct, "image/") {
 		cfg, format, err := image.DecodeConfig(tmp)
-		if err != nil || cfg.Width < 1 || cfg.Height < 1 || int64(cfg.Width)*int64(cfg.Height) > 100_000_000 {
+		if err != nil || imagework.Attachment.Check(cfg.Width, cfg.Height) != nil {
 			return nil, errors.New("invalid or oversized image")
 		}
 		if map[string]string{"image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", "image/webp": "webp"}[ct] != format {
 			return nil, errors.New("image signature mismatch")
 		}
 		out.Width, out.Height, out.Image = cfg.Width, cfg.Height, true
-	} else if ct == "text/plain; charset=utf-8" {
+	} else if ct == "text/plain; charset=utf-8" || isHTML(ct) {
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
@@ -207,6 +215,11 @@ func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (_ *Stag
 	}
 
 	if out.Image {
+		release, err := imagework.Attachment.Acquire(ctx, out.Width, out.Height)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
@@ -214,19 +227,106 @@ func (s Store) Stage(ctx context.Context, tenant string, src io.Reader) (_ *Stag
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range []struct {
-			name string
-			max  int
-		}{{"thumb", 320}, {"preview", 1600}} {
-			var buf bytes.Buffer
-			if err := png.Encode(&buf, resize(img, v.max)); err != nil {
-				return nil, err
-			}
-			staged.variants[v.name] = buf.Bytes()
+		// GIF's first frame can be smaller than its logical screen. Keep that
+		// supported while rejecting any frame that exceeds the reserved bounds.
+		if img.Bounds().Dx() > out.Width || img.Bounds().Dy() > out.Height {
+			return nil, errors.New("image dimensions differ from header")
+		}
+		if err := stageImageVariants(ctx, staged, img); err != nil {
+			return nil, err
 		}
 	}
+	if isHTML(ct) {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		thumb, err := htmlTextThumbnail(ctx, tmp)
+		if err != nil {
+			return nil, err
+		}
+		staged.variants["thumb"] = thumb
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	staged.Prepared = out
 	return staged, nil
+}
+
+// StageGeneratedPNG prepares an already decoded, server-generated avatar and
+// its normal attachment variants without another decode. The caller must hold
+// imagework.Avatar admission through this call, including all PNG encoding.
+// Untrusted upload bytes must go through Stage. Publish installs the bytes only
+// inside the transaction that writes the avatar reference.
+func (s Store) StageGeneratedPNG(ctx context.Context, tenant string, img image.Image) (_ *Staged, err error) {
+	if !validTenant(tenant) {
+		return nil, errors.New("invalid tenant")
+	}
+	b := img.Bounds()
+	if err := imagework.Avatar.Check(b.Dx(), b.Dy()); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	staged, err := s.stageFile(tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = staged.Close()
+		}
+	}()
+	staged.Prepared = Prepared{SHA256: hex.EncodeToString(sum[:]), ContentType: "image/png", Size: int64(buf.Len()), Width: b.Dx(), Height: b.Dy(), Image: true}
+	if _, err := io.Copy(staged.original, &buf); err != nil {
+		return nil, err
+	}
+	if err := staged.original.Sync(); err != nil {
+		return nil, err
+	}
+	if err := stageImageVariants(ctx, staged, img); err != nil {
+		return nil, err
+	}
+	return staged, nil
+}
+
+func (s Store) stageFile(tenant string) (*Staged, error) {
+	spoolDir := filepath.Join(s.root(), tenant, "incoming")
+	if err := os.MkdirAll(spoolDir, 0700); err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(spoolDir, "upload-*")
+	if err != nil {
+		return nil, err
+	}
+	return &Staged{store: s, tenant: tenant, original: tmp, variants: map[string][]byte{}}, nil
+}
+
+func stageImageVariants(ctx context.Context, staged *Staged, img image.Image) error {
+	for _, v := range []struct {
+		name string
+		max  int
+	}{{"thumb", 320}, {"preview", 1600}} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, resize(img, v.max)); err != nil {
+			return err
+		}
+		staged.variants[v.name] = buf.Bytes()
+	}
+	return ctx.Err()
 }
 
 // Publish takes all lifetime locks in a stable order before installing bytes.
