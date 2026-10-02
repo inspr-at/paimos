@@ -107,7 +107,7 @@ func TestPooledSiblingLocalRecoveryThroughClaim(t *testing.T) {
 				return err
 			})
 			// Actual routing acquires recovery from the sibling's local resource.
-			f.call(t, f.agent, "POST", "/api/agent-accounts/route", map[string]any{"run_id": run.ID, "daemon_id": "daemon-test", "account_ids": []string{account}, "estimates": map[string]int64{"cost_micros": 100}}, 200, nil)
+			f.call(t, f.agent, "POST", "/api/agent-accounts/route", map[string]any{"run_id": run.ID, "daemon_id": "daemon-test", "account_ids": []string{account}, "estimated_units": map[string]int64{"cost_micros": 100}}, 200, nil)
 			if f.count(t, f.person, `SELECT count(*) FROM account_readiness_memberships WHERE account_id=$1 AND resource_id=$2`, account, resource) != 0 ||
 				f.count(t, f.person, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND recovery_run_id=$2`, resource, run.ID) != 1 {
 				t.Fatal("fixture did not reserve a sibling-local recovery permit")
