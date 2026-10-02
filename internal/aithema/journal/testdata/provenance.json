@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/inspr-at/aithema",
-  "revision": "06cc4ab94fd21181a024cc819dd4680b751dcaaf",
-  "note": "Binding host contracts and unchanged Go test vectors copied read-only from aithema-public for AEON-361.",
+  "revision": "b73faac0768e733bb6dafb46399baccfec2e0ec0",
+  "note": "Binding host contracts and Go test vectors copied read-only via gh api from Aithema main after AIT-89 (AEON-483).",
   "files": [
     {
       "path": "contracts/common.schema.json",
@@ -11,12 +11,12 @@
     {
       "path": "contracts/journal-record.schema.json",
       "source": "contracts/journal-record.schema.json",
-      "sha256": "23ea3bc1abd5104e21cf6b662464416b44264509b6beb3f426a0ce429a7e118e"
+      "sha256": "8f5183eb1ea24fddcfaf1ad5efa09ee015d6fddeeefc3412a7214b81bda36f61"
     },
     {
       "path": "contracts/spec-snapshot.schema.json",
       "source": "contracts/spec-snapshot.schema.json",
-      "sha256": "b471f1dbfddc50c0c24c98c00d4853a0fecc0487e6237ebb42635bdb594a4ff9"
+      "sha256": "b5e2ccab3b1736231762d8252dc712f09c19689c4d7bb8589f91540c9a3a2954"
     },
     {
       "path": "contracts/working-item.schema.json",
@@ -41,7 +41,7 @@
     {
       "path": "contracts/record-writers.json",
       "source": "contracts/record-writers.json",
-      "sha256": "8fd88c7324c4f0b543c441f87e7141917753e2e29c3829cfd5b24603d1b23f93"
+      "sha256": "094a5f1d02a973438f95adc7a79fe6a35c7ad56ba3a4cea0adbb7b506f13b14d"
     },
     {
       "path": "contracts/transitions.json",
@@ -547,6 +547,21 @@
       "path": "testdata/canonical/rfc8785-golden.json",
       "source": "contracts/fixtures/canonical/rfc8785-golden.json",
       "sha256": "d40f1ed836d9b286ee03b94c56fe410922fa92019aeaf018357f0d362337cb3a"
+    },
+    {
+      "path": "contracts/pending-op-content.schema.json",
+      "source": "contracts/pending-op-content.schema.json",
+      "sha256": "c1fa8c62de12ec78abace147698e0e459100d3053935defc7f19a98f1d7aebae"
+    },
+    {
+      "path": "contracts/index.json",
+      "source": "contracts/index.json",
+      "sha256": "1f2ad04b7212ba7ef1f1b638431a4af23bbe3e880be5bea6374b77d759e13a86"
+    },
+    {
+      "path": "testdata/valid/record.pending-content.json",
+      "source": "contracts/fixtures/valid/record.pending-content.json",
+      "sha256": "4cdcc31e485b1f0dbda2b50f06b40715c7935dfddb89f59d7397f96ecc4557f3"
     }
   ]
 }
