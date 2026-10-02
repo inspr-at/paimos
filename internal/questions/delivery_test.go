@@ -115,6 +115,10 @@ func TestDeliveryGraceEditRestartAndCorrections(t *testing.T) {
 	if n := f.count(t, `SELECT count(*) FROM events WHERE type='comment.created' AND node_id=$1 AND after->>'answer_id'=$2`, f.ticket, q.Answer.ID); n != 1 {
 		t.Fatal("ticket comment missing")
 	}
+	if n := f.count(t, `SELECT count(*) FROM inbox_compat_messages c WHERE c.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=c.tenant_id AND e.node_id=c.project_id AND e.type='inbox.action_resolved' AND e.after->>'message_id'=c.id::text)`); n != 0 {
+		t.Fatal("synthetic reply root became an unanswered action request")
+	}
+
 	f.dispatch(t)
 	if n := f.count(t, `SELECT count(*) FROM inbox_messages`); n != 1 {
 		t.Fatal("retry duplicated inbox")
@@ -294,6 +298,10 @@ func (f *deliveryFixture) held(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO inbox_reply_obligations(tenant_id,message_id) VALUES($1,$2)`, f.person.TenantID, id); err != nil {
+		t.Fatal(err)
+	}
+
 	return id
 }
 func TestHeldPersonReplyBridgeAndReplay(t *testing.T) {
@@ -342,6 +350,10 @@ func TestHeldPersonReplyBridgeAndReplay(t *testing.T) {
 	if n := f.count(t, `SELECT count(*) FROM inbox_compat_messages WHERE id=$1 AND is_action_request AND inbox_message_id IS NULL`, parent); n != 1 {
 		t.Fatal("parent released")
 	}
+	if n := f.count(t, `SELECT count(*) FROM inbox_reply_obligations WHERE message_id=$1 AND reply_message_id IS NOT NULL AND closed_at IS NOT NULL`, parent); n != 1 {
+		t.Fatal("correlated reply left obligation open")
+	}
+
 	f.expectEffects(t, f.status(t, sent.QuestionID), "delivered")
 }
 func TestDeliveryRevocationStopsOnlyUnauthorizedEffect(t *testing.T) {

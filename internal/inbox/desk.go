@@ -45,6 +45,12 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages WHERE tenant_id=$1 AND id=$2)`, p.TenantID, in.RootID).Scan(&rootExists); err != nil {
 		return err
 	}
+	// Take the existing reply obligation before the event counter. A reply
+	// closes it only once its correlated message is durably recorded below.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_reply_obligations WHERE tenant_id=$1 AND message_id=$2 FOR UPDATE`, p.TenantID, in.ReplyToID); err != nil {
+		return err
+	}
+
 	meta := map[string]string{"id": in.ID, "question_reply_root_id": in.RootID, "reply_to_id": in.ReplyToID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: "inbox.compat_sent", After: meta})
 	if err != nil {
@@ -61,16 +67,32 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 		if err != nil {
 			return err
 		}
+		// Synthetic correlation roots are already answered. Keep them out of the
+		// unresolved held-request projection without releasing their held row.
+		if _, err = events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: resolutionEvent, After: HeldResolution{MessageID: in.RootID, Decision: "resolved", CreatedAt: ev.At}}); err != nil {
+			return err
+		}
+
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, in.ID, p.ID, in.RecipientID, ev.ID, in.Body, "desk/"+in.ID, deskNullable(in.RecipientSessionID), p.Name)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_label)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,c.thread_id,LEAST(c.hop+1,10),$2,$11,false,false,'simple',$12,$13 FROM inbox_compat_messages c WHERE c.tenant_id=$1 AND c.id=$10`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, "paimos:"+p.Name, "paimos:"+in.RecipientName, in.Body, "desk/"+in.ID, in.ReplyToID, ev.ID, deskNullable(in.RecipientSessionID), p.Name)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,c.thread_id,c.hop+1,$2,$11,false,false,'simple',$12,$13 FROM inbox_compat_messages c WHERE c.tenant_id=$1 AND c.id=$10`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, "paimos:"+p.Name, "paimos:"+in.RecipientName, in.Body, "desk/"+in.ID, in.ReplyToID, ev.ID, deskNullable(in.RecipientSessionID), p.Name)
 	if err != nil {
 		return err
 	}
+	tag, err := tx.Exec(ctx, `UPDATE inbox_reply_obligations SET reply_message_id=$3,closed_at=clock_timestamp() WHERE tenant_id=$1 AND message_id=$2 AND closed_at IS NULL`, p.TenantID, in.ReplyToID, in.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: "inbox.reply_obligation_closed", After: map[string]string{"message_id": in.ReplyToID, "reply_message_id": in.ID}}); err != nil {
+			return err
+		}
+	}
+
 	// Exact sessions pull their own generation. Unbound answers are readable but
 	// intentionally get no process wake or arbitrary address resolution.
 	_, err = tx.Exec(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,state,reason) VALUES($1,$2,'pending','')`, p.TenantID, in.ID)

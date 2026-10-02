@@ -66,6 +66,9 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 		if target != sender || in.RecipientSession != nil && *in.RecipientSession != session || in.SenderSession != nil || in.Thread != "" && in.Thread != thread {
 			return missing()
 		}
+		if hop >= 10 {
+			return fail(400, "reply_hop_limit", "message hop limit exceeded")
+		}
 		if in.Action || in.ExpectsReply || in.Level != "simple" || !bounded(in.Body, 8000, true) {
 			return fail(400, "invalid_request", "held replies require a bounded simple answer")
 		}
