@@ -209,7 +209,7 @@ function modelDurationLine(row: PlanningRow): string {
   const history = row.planning?.estimate_snapshot?.model_estimate ?? row.planning?.model_estimate
   if (!history) return ''
   if (history.hours === null || history.speed_factor === null || history.speed_tickets < 5) return `Model-adjusted hours: uncalibrated (n=${history.speed_tickets})`
-  return `~${Number(history.hours.toFixed(1))} h (×${Number(history.speed_factor.toFixed(2))}, n=${history.speed_tickets}) · ${history.basis}`
+  return `~${Number(history.hours.toFixed(1))} h (time factor ${Number(history.speed_factor.toFixed(2))}, n=${history.speed_tickets}) · ${history.basis}`
 }
 function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const snap = row.planning?.estimate_snapshot

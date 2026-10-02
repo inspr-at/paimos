@@ -60,10 +60,10 @@ describe('honest planning estimates', () => {
     expect(listCostCell(copy).tip).toContain(measured.basis)
   })
   it('shows model-adjusted hours and their speed sample count', () => {
-    expect(modelCell(row).tip).toContain('~2.4 h (×1.2, n=12)')
+    expect(modelCell(row).tip).toContain('~2.4 h (time factor 1.2, n=12)')
     const copy = structuredClone(row)
     copy.planning!.model_estimate = { ...measured, hours: null, speed_factor: null, speed_tickets: 4 }
     expect(modelCell(copy).tip).toContain('Model-adjusted hours: uncalibrated (n=4)')
-    expect(modelCell(copy).tip).not.toContain('×')
+    expect(modelCell(copy).tip).not.toContain('time factor')
   })
 })
