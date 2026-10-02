@@ -119,14 +119,17 @@ func TestPooledSiblingLocalRecoveryThroughClaim(t *testing.T) {
 						// Normal relinking renews local memberships via the DB
 						// trigger. Keep this membership at its obsolete revision
 						// to test the current-authority fence itself.
-						query = `UPDATE account_readiness_memberships SET binding_revision=binding_revision+1 WHERE account_id=$1 AND resource_id=$2`
+						if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET link_revision=link_revision+1 WHERE id=$1`, sibling); err != nil {
+							return err
+						}
+						query = `UPDATE account_readiness_memberships SET binding_revision=binding_revision-1 WHERE account_id=$1 AND resource_id=$2`
 						_, err := tx.Exec(t.Context(), query, sibling, resource)
 						return err
 					}
 					_, err := tx.Exec(t.Context(), query, sibling)
 					return err
 				})
-				if change == "stale_revision" && f.count(t, f.person, `SELECT count(*) FROM account_readiness_memberships m JOIN agent_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND m.resource_id=$2 AND m.binding_revision<>a.link_revision`, sibling, resource) != 1 {
+				if change == "stale_revision" && f.count(t, f.person, `SELECT count(*) FROM account_readiness_memberships m JOIN agent_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND m.resource_id=$2 AND m.binding_revision<a.link_revision`, sibling, resource) != 1 {
 					t.Fatal("fixture renewed the membership revision being fenced")
 				}
 				f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 409, nil)
