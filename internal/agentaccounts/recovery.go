@@ -213,8 +213,8 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
  WHERE w.resource_id=$1 AND w.window_key=$2 AND w.wait_id=$3 AND c.early_recovery_requested
  AND c.state IN ('pending','completed') AND c.binding_revision=a.link_revision
  AND c.daemon_generation IS NOT DISTINCT FROM a.last_daemon_generation
- AND c.actor_principal_id=a.owner_person_id AND c.expires_at>$4
- ORDER BY c.requested_at,c.id LIMIT 1`, f.ResourceID, f.WindowKey, *f.WaitID, now).Scan(&check)
+ AND c.actor_principal_id=a.owner_person_id AND c.requested_at>$4
+ ORDER BY c.requested_at,c.id LIMIT 1`, f.ResourceID, f.WindowKey, *f.WaitID, now.Add(-CheckTTL)).Scan(&check)
 					if err != nil && !isNoRows(err) {
 						return nil, nil, err
 					}

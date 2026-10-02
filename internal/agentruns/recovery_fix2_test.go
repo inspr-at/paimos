@@ -28,7 +28,7 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET unit='percent',allowance=1,reserved=1,capacity_bucket='unknown:'||$1::text,
- capacity_kind='blind',capacity_source='estimate',capacity_allowed=true,capacity_read_at=clock_timestamp()-interval '2 minutes',capacity_refresh_run=$1,
+ capacity_kind='blind',capacity_source='estimate',capacity_allowed=true,capacity_read_at=clock_timestamp()-interval '2 minutes',capacity_refresh_run=$1::uuid,
  starts_at=clock_timestamp()-interval '2 hours',ends_at=clock_timestamp()+CASE $2 WHEN 'expired' THEN interval '-1 minute' ELSE interval '5 minutes' END
  WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1)`, run.ID, age); err != nil {
 					return err
@@ -38,9 +38,9 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
 				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO account_reservations(tenant_id,id,run_id,window_id,reserved_units)
  WITH w AS (INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,reserved,capacity_kind,capacity_bucket,capacity_read_at,capacity_source,capacity_allowed,capacity_refresh_run)
- SELECT w.tenant_id,w.account_id,w.starts_at,w.ends_at,'percent',1,1,'blind','unknown:'||$3::text,w.capacity_read_at,'estimate',true,$3
+ SELECT w.tenant_id,w.account_id,w.starts_at,w.ends_at,'percent',1,1,'blind','unknown:'||$3::text,w.capacity_read_at,'estimate',true,$3::uuid
  FROM account_allowance_windows w JOIN account_reservations r ON r.window_id=w.id WHERE r.run_id=$1 RETURNING tenant_id,id)
- SELECT tenant_id,$2,$3,id,1 FROM w`, run.ID, siblingReservation, sibling.ID); err != nil {
+ SELECT tenant_id,$2::uuid,$3::uuid,id,1 FROM w`, run.ID, siblingReservation, sibling.ID); err != nil {
 					return err
 				}
 				// Advance the persisted wait deadline, never sleep for expiry.
