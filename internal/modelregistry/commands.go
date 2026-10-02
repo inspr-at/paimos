@@ -39,6 +39,9 @@ func harnessShapes(harness string) (run, review string, err error) {
 	case "cursor":
 		run = "cursor-agent --trust --model {model} -p"
 		review = "cursor-agent --trust --mode ask --model {model} -p"
+	case "gemini", "opencode":
+		run = "paimos harness invoke --harness " + harness + " --model {model} --effort {effort} --"
+		review = "paimos harness invoke --harness " + harness + " --model {model} --effort {effort} --review --"
 	default:
 		return "", "", fmt.Errorf("unsupported command harness %q", harness)
 	}

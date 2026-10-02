@@ -25,6 +25,14 @@ const AuthenticatedRoute = "authenticated"
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
 	"GET /api/journey/next-actions":                                           "journey.read",
+	"GET /api/queue/{nodeId}/readiness":                                       "nodes.read",
+	"POST /api/queue/{nodeId}/estimate":                                       "nodes.read",
+	"GET /api/queue":                                                          "nodes.read",
+	"POST /api/queue":                                                         "nodes.read",
+	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
+	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
+	"POST /api/queue/reset":                                                   "nodes.read",
+	"POST /api/queue/next":                                                    "nodes.read",
 	"GET /api/plugins/aithema/settings":                                       "plugins.manage",
 	"PUT /api/plugins/aithema/settings":                                       "plugins.manage",
 	"POST /api/projects/{projectId}/aithema/sessions":                         "intake.write",

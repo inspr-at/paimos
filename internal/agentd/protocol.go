@@ -226,7 +226,7 @@ func (p *wireProcess) read(src io.Reader) {
 			break
 		}
 		id := strings.Trim(string(frame.ID), "\"")
-		if id != "" && (p.protocol != "pi" || frame.Type == "response") {
+		if id != "" && (p.protocol == "pi" && frame.Type == "response" || p.protocol != "pi" && frame.Method == "") {
 			p.mu.Lock()
 			ch := p.pending[id]
 			if ch != nil {

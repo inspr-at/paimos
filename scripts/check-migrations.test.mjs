@@ -291,13 +291,15 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.equal(manifest.exceptions.length, 3);
-  const [entry] = manifest.exceptions;
+  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
+  assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
-  const runKinds = manifest.exceptions[1];
+  const runKinds = manifest.exceptions.find(entry => entry.file === '1066_run_kinds.sql');
+  assert.ok(runKinds);
   assert.equal(runKinds.file, '1066_run_kinds.sql');
   assert.equal(runKinds.ticket, 'AEON-501');
-  const briefing = manifest.exceptions[2];
+  const briefing = manifest.exceptions.find(entry => entry.file === '1087_briefing_autopilot_visibility.sql');
+  assert.ok(briefing);
   assert.equal(briefing.file, '1087_briefing_autopilot_visibility.sql');
   assert.equal(briefing.ticket, 'AEON-454');
   const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
@@ -313,7 +315,7 @@ test('integration exceptions pin the merged contract, run-kind and briefing expa
   assert.equal(destructive(source), true);
 });
 
-test('the current tree requires all three exact-byte contract exceptions', () => {
+test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
@@ -321,10 +323,8 @@ test('the current tree requires all three exact-byte contract exceptions', () =>
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.equal(withoutException.length, 3);
-  assert.match(withoutException[0], /^1054_confirmed_quota_pools.sql: non-allowlisted/);
-  assert.match(withoutException[1], /^1066_run_kinds.sql: non-allowlisted/);
-  assert.match(withoutException[2], /^1087_briefing_autopilot_visibility.sql: non-allowlisted/);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql']);
+  for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
 test('briefing visibility expansion preserves every existing restriction', () => {
@@ -342,4 +342,20 @@ test('briefing visibility expansion preserves every existing restriction', () =>
   const files = new Map(exceptions.exceptions.map(e => [e.file, readFileSync(new URL(`../internal/db/migrations/${e.file}`, import.meta.url), 'utf8')]));
   files.set(name, expanded.replace(addition, "OR type LIKE 'status_autopilot.%'"));
   assert.match(checkMigrations(files, new Map(), null, {exceptions}).join('\n'), /1087_briefing_autopilot_visibility.sql: exception migration changed/);
+});
+
+test('1088 stages every widened check before definition-selected drops', () => {
+  const sql = readFileSync(new URL('../internal/db/migrations/1088_more_harnesses.sql', import.meta.url), 'utf8');
+  const adds = [...sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+CHECK ([\s\S]*?);/g)];
+  assert.equal(adds.length, 10);
+  for (const [, table, constraint, check] of adds) {
+    assert.match(check, /NOT VALID$/);
+    const validate = `ALTER TABLE ${table} VALIDATE CONSTRAINT ${constraint};`;
+    assert.ok(sql.includes(validate), `missing ${validate}`);
+    assert.ok(sql.indexOf(validate) < sql.indexOf('DROP CONSTRAINT'), 'drop before validation');
+  }
+  assert.match(sql, /pg_get_constraintdef/);
+  assert.doesNotMatch(sql, /DROP CONSTRAINT work_order_reviews_check/);
+  assert.match(sql, /reviewer_profile_id IS NULL/);
+  assert.match(sql, /reviewer_family IS NULL/);
 });

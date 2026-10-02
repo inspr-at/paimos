@@ -16,6 +16,8 @@ func NormalizeAuthorFamily(author string) (string, error) {
 		return "anthropic", nil
 	case "codex":
 		return "openai", nil
+	case "gemini":
+		return "google", nil
 	case "grok":
 		return "xai", nil
 	case "":
@@ -24,8 +26,8 @@ func NormalizeAuthorFamily(author string) (string, error) {
 	if validFamily(author) {
 		return author, nil
 	}
-	const accepted = "use openai, anthropic, xai or cursor (aliases: codex, claude, grok)"
-	if author == "pi" {
+	const accepted = "use openai, anthropic, xai, cursor, google or local (aliases: codex, claude, grok, gemini)"
+	if author == "pi" || author == "opencode" {
 		return "", fmt.Errorf("author family %q is ambiguous: pass the model family; %s", author, accepted)
 	}
 	return "", fmt.Errorf("unknown author family %q: %s", author, accepted)

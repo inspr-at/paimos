@@ -37,6 +37,8 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	codexNodes, cursorNodes := map[string]harnesslaunch.Node{}, map[string]harnesslaunch.Node{}
 	grokBindings := map[string]agentd.GrokBinding{}
 	grokHomes, cursorHomes := map[string]string{}, map[string]string{}
+	acpHomes := map[string]map[string]string{agentd.Gemini: {}, agentd.OpenCode: {}}
+	acpNodes := map[string]map[string]harnesslaunch.Node{agentd.Gemini: {}, agentd.OpenCode: {}}
 	paths := map[string]string{}
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
@@ -63,6 +65,9 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 				cursorHomes[a.Key] = a.Home
 			}
 			cursorNodes[a.Key] = a.Node
+		case agentd.Gemini, agentd.OpenCode:
+			acpHomes[a.Harness][a.Key] = a.Home
+			acpNodes[a.Harness][a.Key] = a.Node
 		case agentd.Pi:
 			if !piprobe.ValidProvider(a.Identity) || !filepath.IsAbs(a.Home) {
 				return nil, nil, errors.New("pi private provider binding unavailable")
@@ -112,6 +117,13 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 		grok := agentd.NewGrokAdapter(grokBindings)
 		grok.Homes = grokHomes
 		adapters = append(adapters, grok)
+	}
+	for _, name := range []string{agentd.Gemini, agentd.OpenCode} {
+		if path := paths[name]; path != "" {
+			a := agentd.NewGeminiAdapter(path, acpHomes[name])
+			a.Harness, a.Nodes = name, acpNodes[name]
+			adapters = append(adapters, a)
+		}
 	}
 	return accounts, adapters, nil
 }

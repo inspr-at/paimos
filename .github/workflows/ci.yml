@@ -256,6 +256,10 @@ jobs:
       - name: Morning briefing unit checks
         working-directory: web
         run: npx vitest run tests/morning-briefing.unit.test.ts tests/ticket-outcomes.unit.test.ts --maxWorkers=1
+
+      - name: Additional harness brands and pairing vocabulary
+        working-directory: web
+        run: node --experimental-strip-types --test tests/brandMarks.test.ts tests/agent-pairing.test.ts
       - name: Scope code wire and ceiling checks
         working-directory: web
         run: node --experimental-strip-types --test tests/scope-code.test.ts tests/access.test.ts
