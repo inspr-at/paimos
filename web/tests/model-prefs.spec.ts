@@ -8,7 +8,7 @@ import { prefsDocument, prefsFixture, PREF_MODELS, prefScope, customKind } from 
 import type { ModelPreferences, PrefLevel, PrefRow } from '../src/lib/modelPrefs'
 import { expectStableControls } from './helpers/stable'
 
-async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; rejectWrite?: boolean; runningOutside?: string[]; beforeWrite?: () => Promise<void>; truncated?: boolean } = {}) {
+async function setup(page: Page, options: { mode?: ModelPreferences['residency_lock_mode']; readOnly?: boolean; conflict?: boolean; rejectWrite?: boolean; rejectMessage?: string; runningOutside?: string[]; beforeWrite?: () => Promise<void>; truncated?: boolean } = {}) {
   const data = fixtures()
   data.preferences['list:p-pharos'] = { visible: ['status', 'model'] }
   const ticket = data.nodes.find(n => n.key === 'PHAROS-11')!
@@ -35,7 +35,7 @@ async function setup(page: Page, options: { mode?: ModelPreferences['residency_l
     const body = method === 'PUT' ? route.request().postDataJSON() : undefined
     calls.push({ method, path, body })
     await options.beforeWrite?.()
-    if (options.rejectWrite) return route.fulfill({ status: 422, json: { error: 'This preference is locked above', code: 'locked_above' } })
+    if (options.rejectWrite) return route.fulfill({ status: 422, json: { error: options.rejectMessage ?? 'This preference is locked above', code: 'locked_above' } })
     if (conflict) { conflict = false; state.levels.person!.revision++; return route.fulfill({ status: 409, json: { error: 'stale_revision', code: 'stale_revision' } }) }
     const level = path.split('/')[4] as PrefLevel, kind = path.split('/')[6], scope = state.levels[level]!
     const revision = method === 'PUT' ? body.revision : Number(url.searchParams.get('revision'))
@@ -449,4 +449,108 @@ test('keyboard kind removal restores focus to the Everything else model chip', a
   await expect(chip).toBeFocused()
   await chip.press('Enter')
   await expect(page.getByRole('dialog', { name: 'Everything else · Normally', exact: true })).toBeVisible()
+})
+
+
+for (const width of [1440, 1024, 390]) test(`footer wraps a long notice without moving controls at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+  const message = 'Saved, but the refreshed view could not be loaded. Refresh before editing again.'
+  await setup(page, { rejectWrite: true, rejectMessage: message }); await open(page)
+  const modal = dialog(page), footer = modal.locator('.prefs-footer'), summary = footer.locator('.summary')
+  const radio = modal.getByRole('radio', { name: /EU-hosted only/ })
+  await expectStableControls({ controls: { summary, done: footer.locator('.done'), reset: footer.locator('.reset-all'), tabs: modal.getByRole('tablist'), providers: modal.getByRole('radiogroup'), clicked: radio, frame: modal.locator(':scope > .card') }, scrollAreas: { body: modal.locator(':scope > .card > .body'), footer }, interactions: [
+    { name: 'show the complete long notice', run: async () => {
+      await radio.press('Space'); await expect(summary).toHaveText(message)
+      await expect(summary).toBeInViewport()
+      const layout = await summary.evaluate(el => {
+        const range = document.createRange(); range.selectNodeContents(el)
+        const bounds = el.getBoundingClientRect(), lines = Array.from(range.getClientRects()).filter(r => r.width > 0)
+        return { height: el.clientHeight, lineHeight: parseFloat(getComputedStyle(el).lineHeight), fullTextVisible: lines.length > 0 && lines.every(r => r.left >= bounds.left && r.right <= bounds.right + 0.5 && r.top >= bounds.top && r.bottom <= bounds.bottom + 0.5) }
+      })
+      expect(layout.fullTextVisible).toBe(true)
+      expect(layout.height).toBe(layout.lineHeight * 2)
+      await summary.focus(); await expect(summary).toBeFocused()
+    } },
+  ] })
+})
+
+test('footer lets keyboard and touch users scroll notices longer than two lines', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const message = 'This change could not be saved. '.repeat(12) + 'Ask the workspace admin to unlock this preference.'
+  await setup(page, { rejectWrite: true, rejectMessage: message }); await open(page)
+  const modal = dialog(page), summary = modal.locator('.summary')
+  await modal.getByRole('radio', { name: /EU-hosted only/ }).press('Space')
+  await expect(summary).toHaveText(message)
+  await expect(summary).toHaveAttribute('tabindex', '0')
+  expect(await summary.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')).toBe(true)
+  await summary.focus(); await summary.press('End')
+  await expect.poll(() => summary.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+  await summary.evaluate(el => { el.scrollTop = el.scrollHeight })
+  expect(await summary.evaluate(el => {
+    const text = el.querySelector('.save-status')!.firstChild!, range = document.createRange()
+    range.setStart(text, text.textContent!.length - 49); range.setEnd(text, text.textContent!.length)
+    const rect = range.getBoundingClientRect(), bounds = el.getBoundingClientRect()
+    return rect.top >= bounds.top && rect.bottom <= bounds.bottom + 0.5
+  })).toBe(true)
+})
+
+for (const level of ['person', 'default'] as const) test(`reset confirmation replaces a stale notice in a live region at ${level}`, async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { state } = await setup(page, { rejectWrite: true })
+  state.levels[level]!.residency = 'eu'
+  await open(page)
+  const modal = dialog(page), footer = modal.locator('.prefs-footer'), summary = footer.locator('.summary')
+  if (level === 'default') await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+  await modal.getByRole('radio', { name: /Local only/ }).press('Space')
+  await expect(summary).toHaveText('This preference is locked above')
+  const confirmation = level === 'default' ? 'Every default goes back to Automatic and Any provider.' : 'Remove 1 change?'
+  await expectStableControls({ controls: { summary, reset: footer.locator('.reset-all'), finalAction: footer.locator('.done'), tabs: modal.getByRole('tablist'), frame: modal.locator(':scope > .card') }, scrollAreas: { body: modal.locator(':scope > .card > .body'), footer }, interactions: [
+    { name: 'open fresh reset confirmation', run: async () => {
+      await footer.locator('.reset-all').press('Enter')
+      await expect(summary).toHaveText(confirmation); await expect(summary).toBeInViewport()
+      await expect(summary).toHaveAttribute('role', 'status'); await expect(summary).toHaveAttribute('aria-atomic', 'true')
+      await expect(footer.getByRole('button', { name: 'Keep', exact: true })).toBeFocused()
+    } },
+    { name: 'return to the current summary', run: async () => {
+      await footer.getByRole('button', { name: 'Keep', exact: true }).press('Enter')
+      await expect(summary).not.toContainText('This preference is locked above')
+      await expect(summary).toHaveText(level === 'person' ? '1 change on your level.' : 'You are editing the default for everyone.')
+      await expect(footer.locator('.reset-all')).toBeFocused()
+    } },
+  ] })
+})
+
+for (const from of ['field', 'button'] as const) test(`add-kind ${from} retains focus while saving and returns to its opener`, async ({ page }) => {
+  let release!: () => void
+  const held = new Promise<void>(done => { release = done })
+  const { state } = await setup(page)
+  let writes = 0
+  await page.route('**/api/work-kinds', async route => {
+    expect(route.request().method()).toBe('POST'); writes++
+    const body = route.request().postDataJSON()
+    await held
+    const kind = customKind('new-kind', body.label); state.kinds.push(kind)
+    await route.fulfill({ status: 201, json: kind })
+  })
+  try {
+    await open(page)
+    const modal = dialog(page)
+    await modal.getByRole('tab', { name: 'Default', exact: true }).click()
+    const opener = modal.getByRole('button', { name: /Add a kind/ })
+    await opener.click()
+    const field = modal.getByRole('textbox', { name: 'Name', exact: true }), button = modal.locator('.add-form button')
+    await field.fill('Data science')
+    const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+    const target = from === 'field' ? field : button, key = from === 'field' ? mac ? 'Meta+Enter' : 'Control+Enter' : 'Enter'
+    await target.focus(); await target.press(key)
+    await expect.poll(() => writes).toBe(1)
+    await expect(target).toBeFocused(); await expect(target).toHaveAttribute('aria-disabled', 'true')
+    await expect(field).toHaveAttribute('readonly', '')
+    await target.press(key); expect(writes).toBe(1); await expect(target).toBeFocused()
+    await opener.dispatchEvent('click'); await expect(field).toBeVisible()
+    release()
+    await expect(row(page, 'data-science')).toBeVisible(); await expect(field).toHaveCount(0)
+    await expect(opener).toBeFocused(); expect(writes).toBe(1)
+    await opener.press('Enter'); await expect(modal.getByRole('textbox', { name: 'Name', exact: true })).toBeFocused()
+  } finally { release() }
 })
