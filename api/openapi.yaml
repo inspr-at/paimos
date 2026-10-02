@@ -3214,7 +3214,7 @@ paths:
                 additionalProperties: false
                 required: [summary, nonce, action_digest, expires_at, computer_id]
                 properties:
-                  summary: {type: string, minLength: 1, maxLength: 256, description: Server-authored action and escaped route with stored target names when available; at most 256 UTF-8 bytes, no control or format characters.}
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action and escaped route with stored target names when available; at most 256 UTF-8 bytes, no control or format characters.'}
                   nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
                   action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
                   expires_at: {type: string, format: date-time}
