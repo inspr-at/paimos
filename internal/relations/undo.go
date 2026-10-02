@@ -41,6 +41,9 @@ func undoCreated(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 	if err != nil {
 		return events.Change{}, err
 	}
+	if err := lockGraph(ctx, tx, p.TenantID, original.Type); err != nil {
+		return events.Change{}, err
+	}
 	current, err := scanRelation(tx.QueryRow(ctx, `SELECT id::text,source_node_id::text,target_node_id::text,type,created_at
   FROM node_relations WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, p.TenantID, original.ID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -66,6 +69,9 @@ func undoCreated(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 func undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	original, err := decodeSnapshot(e.Before)
 	if err != nil {
+		return events.Change{}, err
+	}
+	if err := lockGraph(ctx, tx, p.TenantID, original.Type); err != nil {
 		return events.Change{}, err
 	}
 	if err := lockNodes(ctx, tx, p, original.SourceNodeID, original.TargetNodeID); err != nil {
