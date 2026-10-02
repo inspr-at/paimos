@@ -21,7 +21,9 @@ func TestCatalogRejectsLegacyFamilyAndAcceptsAllAuthors(t *testing.T) {
 	admin := makePrincipal(t, "family-catalog", "person", "Fixture", []string{"admin"})
 	mod := accountsMod()
 	for _, family := range []string{"openai", "anthropic", "xai", "cursor", "google", "local"} {
-		callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog?role=review-gate&author_family="+family, "", 200, nil)
+		t.Run(family, func(t *testing.T) {
+			callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog?role=review-gate&author_family="+family, "", 200, nil)
+		})
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		var id string

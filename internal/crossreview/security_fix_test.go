@@ -21,12 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/workorders"
-	"github.com/jackc/pgx/v5"
 )
 
 type blockingPublisher struct {
@@ -92,7 +93,7 @@ func TestWebhookAuthenticationReplayAndFailedRevocation(t *testing.T) {
 	s.f.m.reportStatuses(t.Context())
 	secret := []byte("synthetic-webhook-fixture-32-bytes")
 	s.f.m.ConfigureWebhook(secret)
-	authMod, err := auth.New(auth.Config{Env: "dev"}, s.f.d.App)
+	authMod, err := auth.New(auth.Config{Env: "dev", SessionKey: []byte(strings.Repeat("fixture", 8))}, s.f.d.App)
 	if err != nil {
 		t.Fatal(err)
 	}

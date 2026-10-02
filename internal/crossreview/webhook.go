@@ -13,9 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/reviewgate"
-	"github.com/jackc/pgx/v5"
 )
 
 type pullChange struct {
