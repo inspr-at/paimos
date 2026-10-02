@@ -209,4 +209,7 @@
 // Unnamed vendor and provider 402 waits grant one durable resource-scoped
 // recovery at expiry or on a current owner check. Failed inference advances
 // 1/2/4/8-hour backoff; only evidenced successful inference clears a 402.
+// A restarted heartbeat survives rejection of an obsolete pending check. The
+// 409 response identifies the committed heartbeat; stale facts are discarded,
+// polling stops offering the old check, and old receipts cannot rewind it.
 package agentaccounts

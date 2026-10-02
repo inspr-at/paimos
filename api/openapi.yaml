@@ -7091,6 +7091,11 @@ paths:
         '200': {description: Account availability, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: Stale check or binding. A valid restarted daemon heartbeat may commit while obsolete check facts are discarded; X-Aeon-Write-Committed identifies that partial result.
+          headers:
+            X-Aeon-Write-Committed: {schema: {type: boolean}, description: True only when the heartbeat was recorded despite a stale-check conflict.}
+          content: {application/json: {schema: {$ref: '#/components/schemas/ApiError'}}}
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount

@@ -297,6 +297,10 @@ type probeWrite struct {
 	Failure string `json:"failure,omitempty"`
 }
 
+// A restart heartbeat can commit while the obsolete check result is rejected.
+// The HTTP wrapper must report that partial result after the transaction commits.
+type probeHeartbeatCommitted struct{ error }
+
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
 		return Account{}, fail(http.StatusNotFound, "account not found")
@@ -347,6 +351,34 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	}
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
+	}
+	if report := in.Readiness; report != nil && uuidRE.MatchString(report.CheckID) &&
+		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
+		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
+		before.daemonGeneration != nil && *before.daemonGeneration != generation {
+		c, err := scanCheck(tx.QueryRow(ctx, `SELECT `+checkColumns+` FROM account_readiness_checks WHERE id=$1 AND account_id=$2`, report.CheckID, accountID))
+		if err != nil && !isNoRows(err) {
+			return Account{}, err
+		}
+		// Only a currently pending check may announce the restart. Replaying a
+		// receipt from an older generation cannot move the heartbeat backwards.
+		if err == nil && c.State == "pending" && c.BindingRevision == before.LinkRevision &&
+			c.DaemonGeneration != nil && *c.DaemonGeneration == *before.daemonGeneration && now.Before(c.ExpiresAt) {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=$3,last_probe_failure=$4,last_daemon_generation=$5 WHERE id=$1`, accountID, now, in.Available, failure, generation); err != nil {
+				return Account{}, err
+			}
+			after, err := getAccount(ctx, tx, accountID)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := learnOnline(ctx, tx, after, now); err != nil {
+				return Account{}, err
+			}
+			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+				return Account{}, err
+			}
+			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
+		}
 	}
 	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
 		return Account{}, err
