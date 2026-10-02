@@ -10158,7 +10158,7 @@ components:
         tag: {type: string}
         release_channel: {type: string}
         release_sequence: {type: integer}
-        codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
+        codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence and on unpublished/withdrawn attempts."}
         state: {type: string, enum: [published, reserved, withdrawn], description: HTTP release lists and details include published entries only. Offline diagnostics retain reserved and withdrawn entries; withdrawn entries have sequence zero and no codename.}
         reserved_at: {type: [string, 'null'], format: date-time}
         tagged_at: {type: [string, 'null'], format: date-time}

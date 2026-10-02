@@ -23,7 +23,7 @@ export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
   // The release's sci-fi codename from its sequence (AEON-430), English in
-  // both languages. Absent on a reservation whose sequence another release took.
+  // both languages. Failed attempts have no public name.
   codename?: string
   version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'withdrawn'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string

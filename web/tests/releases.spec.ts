@@ -184,17 +184,17 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(page).toHaveURL(new RegExp(`/releases/${escaped(history.releases[1].version)}(?:$|\\?)`))
   await expect.poll(() => navigations).toBe(0)
   await expect(compare).toBeVisible()
-  await expect(compare.locator('.facts')).toContainText('2 releases')
-  await expect(compare.locator('.facts')).toContainText('3 tickets')
+  await expect(compare.locator('.facts')).toContainText('3 releases')
+  await expect(compare.locator('.facts')).toContainText('4 tickets')
   await expect(compare.locator('.changes')).toContainText('Other changes')
   // AEON-305: no tag message outside Evidence; without a theme or benefit a
   // release shows its version and, since AEON-430, its codename.
   const included = compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')
-  await expect(included).toHaveCount(2)
+  await expect(included).toHaveCount(3)
   await expect(included).not.toContainText(['Wide lists and columns', 'Retry a busy BEGIN in release acceptance'])
-  await expect(included.locator('.rn-name')).toHaveText([history.releases[1].codename!, history.releases[2].codename!])
+  await expect(included.locator('.rn-name')).toHaveText([history.releases[1].codename!, history.releases[2].codename!, history.releases[3].codename!])
   await compare.getByRole('button', { name: 'Swap' }).click()
-  await expect(compare.locator('.facts')).toContainText('2 releases')
+  await expect(compare.locator('.facts')).toContainText('3 releases')
   await page.keyboard.press('Escape')
   await expect(compare).toHaveCount(0)
   await page.keyboard.press('Escape')
@@ -370,13 +370,16 @@ test('ticket keys link to the tickets this workspace has; others stay plain', as
   await expect(tickets.getByText('AEON-74')).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
 })
 
-test('unpublished and withdrawn coordinates are absent from public history', async ({ page }) => {
+for (const state of ['reserved', 'withdrawn']) test(`${state} coordinates are absent from public history`, async ({ page }) => {
   const { history } = await setup(page)
-  const failed = releaseHistory().releases.find(r => r.state === 'reserved')!
+  const raw = releaseHistory()
+  const failed = raw.releases.find(r => r.state === 'reserved')!
+  Object.assign(failed, { state, codename: 'Failed Attempt' })
+  await mockReleases(page, raw)
   await page.goto(`/releases/${failed.version}`)
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(sheet(page)).not.toContainText('Reserved, never published')
-  await expect(sheet(page).locator('.detail')).toHaveCount(0)
+  await expect(sheet(page)).not.toContainText('Failed Attempt')
   await expect(sheet(page).getByText(/not in this build/)).toBeVisible()
 })
 
