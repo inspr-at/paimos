@@ -79,7 +79,7 @@ them. Ticket revisions use the existing node `updated_at` timestamp; lane policy
 revisions are integers. Lane audit uses `node.autopilot_*` events so existing
 project event visibility rules apply without broadening event RLS. Subscription
 agent-hours are a policy ceiling per work-window instance,
-not measured usage. Existing criteria require person acceptance when absent;
+not measured usage. Missing criteria require person acceptance of a draft;
 when criteria exist, estimates may be automatic. Window end permits only the
 current already reserved attempt to finish, and Aeon retains coordinator review.
 No Status autopilot setting, queue contract, worker launch, merge or deploy gate
