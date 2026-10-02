@@ -26,7 +26,8 @@ import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import LiveWatch from './LiveWatch.vue'
-import { activityOf, currentStep } from './activity'
+import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
+import { cleanActivityNote } from '../../lib/activityPrivacy'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
 import EtaCell from '../work/EtaCell.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
@@ -89,11 +90,15 @@ const reported = computed(() => s.value)
 // A watched session has no Messages tab, so it always shows the overview with the live view.
 const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
-const timeline = computed(() => activity.value?.activity_history ?? [])
+const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : (activity.value?.activity_history ?? []).flatMap(item => {
+  const note = cleanActivityNote(item.note)
+  return note ? [{ ...item, note }] : []
+}))
+const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
 const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
 const step = computed(() => {
   if (!props.view) return ''
-  return props.view.status.reasons?.length ? currentStep(props.view) : activity.value?.activity_note || currentStep(props.view)
+  return currentActivity(props.view, props.now) || currentStep(props.view)
 })
 const setupLine = computed(() => {
   const r = reported.value
@@ -220,7 +225,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
         <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
-        <ol v-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
+        <ol v-if="currentTimeline.length" class="activity-timeline" aria-label="Current activity history">
+          <li v-for="(item, index) in currentTimeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at" :title="absoluteTime(item.at)">{{ item.duration }}</time><span>{{ item.text }}</span></li>
+        </ol>
+        <ol v-else-if="timeline.length" class="activity-timeline" aria-label="Recent activity">
           <li v-for="(item, index) in timeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.note }}</span></li>
         </ol>
         <DeliveryRating v-if="s && s.phase === 'stopped'" :session-id="s.id" />

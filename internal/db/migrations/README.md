@@ -87,7 +87,7 @@ history for this read-only verification. Record the expansion/backfill and the
 old binary's removed dependency on that ticket. The marker declares the phase; it never
 bypasses runtime compatibility checks.
 
-The allowlist covers `CREATE TABLE`, `CREATE INDEX` (including `CONCURRENTLY`),
+The allowlist covers `CREATE TABLE`, `CREATE INDEX` (including `UNIQUE` and `CONCURRENTLY`),
 `CREATE TYPE`, `CREATE FUNCTION`, `CREATE POLICY`, `CREATE TRIGGER`, nullable
 `ADD COLUMN` or one with a constant non-null default, `ADD CONSTRAINT … NOT
 VALID`, `VALIDATE CONSTRAINT`, `COMMENT ON`, `GRANT`, `INSERT INTO` / `UPDATE`
@@ -177,3 +177,12 @@ static guard on the combined `merge_group` checkout is the merge-time duplicate
 number guarantee once that check is required; queue candidates containing both
 files fail. This worker does not change protection settings. Existing required
 checks and the AEON-438/459 runner routing are unchanged.
+
+AEON-483 uses three branch-only migrations: 1100 adds a nullable content address,
+installs the replacement byte check `NOT VALID`, creates digest-only alias receipts
+and durable chunk tables, and drops the old byte check in an isolated statement.
+That drop is its only policy exception. 1101 validates the check in a separate
+transaction after 1100 releases its exclusive lock; 1102 builds the unique content
+index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
+one concurrent index statement per marked file, including unique indexes, and
+checks uniqueness before reusing a valid unrecorded index.

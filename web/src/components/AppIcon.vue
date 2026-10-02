@@ -2,6 +2,7 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
+  | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
@@ -20,7 +21,12 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <template v-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
+    <path v-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
+    <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />
+    <path v-else-if="name === 'queue-on'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.6 11.6l1.9 1.9 3.6-3.9" />
+    <path v-else-if="name === 'queue-off'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.9 11.5h5.4" />
+    <path v-else-if="name === 'to-top'" d="M3.2 2.6h9.6M8 13.4V5.8M4.6 9.2 8 5.8l3.4 3.4" />
+    <template v-else-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
     <path v-else-if="name === 'moon'" d="M13.6 9.6A5.9 5.9 0 0 1 6.4 2.4a6 6 0 1 0 7.2 7.2Z" />
     <template v-else-if="name === 'users'"><circle cx="6.2" cy="5.6" r="2.4" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2s4.4 1.6 4.4 4.2M10.4 3.4a2.1 2.1 0 1 1 .9 4M12 9.6c1.4.4 2.4 1.6 2.4 3.6" /></template>
     <template v-else-if="name === 'person-check'"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></template>

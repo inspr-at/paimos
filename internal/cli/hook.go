@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/inbox"
 )
 
@@ -25,10 +26,12 @@ const hookBudget = 2500 * time.Millisecond
 func inboxHookEvents() []string { return []string{"PostToolUse", "UserPromptSubmit", "Stop"} }
 
 type harnessHookInput struct {
-	Event      string  `json:"hook_event_name"`
-	Session    string  `json:"session_id"`
-	AgentID    *string `json:"agent_id"`
-	StopActive bool    `json:"stop_hook_active"`
+	Event      string          `json:"hook_event_name"`
+	Session    string          `json:"session_id"`
+	AgentID    *string         `json:"agent_id"`
+	StopActive bool            `json:"stop_hook_active"`
+	ToolName   string          `json:"tool_name"`
+	ToolInput  json.RawMessage `json:"tool_input"`
 }
 
 func (rt *runtime) cmdHook() *Command {
@@ -79,6 +82,9 @@ func (rt *runtime) runInboxHook(ctx context.Context, event string) error {
 	}
 	if session == "" {
 		return nil
+	}
+	if event == "PostToolUse" {
+		writeHookActivity(input.Session, session, agentactivity.FromInput(input.ToolName, input.ToolInput))
 	}
 	// exact_session (AEON-280) makes the server return only rows bound to this
 	// generation; the client-side check below stays as defense in depth.

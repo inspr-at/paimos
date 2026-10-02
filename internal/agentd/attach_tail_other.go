@@ -3,11 +3,18 @@
 
 package agentd
 
-import "errors"
+import (
+	"errors"
+	"github.com/inspr-at/paimos/internal/agentactivity"
+)
 
 var errAttachTranscript = errors.New("pinned attach transcripts unsupported on this platform")
 
-type attachTail struct{ id string }
+type attachTail struct {
+	id              string
+	activityEnabled bool
+	activity        *agentactivity.Activity
+}
 
 func openAttachTail(string, int) (*attachTail, error) { return nil, errAttachTranscript }
 func (*attachTail) close()                            {}

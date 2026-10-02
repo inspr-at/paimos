@@ -222,3 +222,6 @@
 @media (max-width: 600px) { :root { --footer-h: 44px; } }
 /* Registered, so the phone footer can fold away smoothly on scroll. */
 @property --footer-h { syntax: '<length>'; inherits: true; initial-value: 40px; }
+
+/* AEON-522: full amber tint and hairline for capacity/blocker waits. */
+:root { --queue-wait-ink: color-mix(in srgb, var(--warn-ink) 75%, var(--ink) 25%); --queue-wait-bg: color-mix(in srgb, var(--gold) 12%, transparent); --queue-wait-line: color-mix(in srgb, var(--gold) 42%, transparent); }

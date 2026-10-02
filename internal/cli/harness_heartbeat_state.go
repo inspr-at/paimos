@@ -20,6 +20,7 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
 	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
 	AppliedModelSequence  int64                   `json:"applied_model_sequence,omitempty"`
@@ -116,7 +117,7 @@ type heartbeatSession struct {
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock":
+	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
 		return true
 	default:
 		return false
