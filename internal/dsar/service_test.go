@@ -114,6 +114,57 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Recent migrations add person-owned accounts, activity and journal chunks.
+	// The subject owns these through an alias or issuer-scoped host session;
+	// their free text, verification hash and raw bytes must remain excluded.
+	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		var account, session, sid string
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at)
+			VALUES($1,'dsar-linked-account','codex','dsar-daemon',$2,'fixture',$3,now()) RETURNING id::text`, tid, agent, alias).Scan(&account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO account_person_link_requests(tenant_id,account_id,user_code_hash,account_revision)
+			VALUES($1,$2,repeat('e',64),0)`, tid, account); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,ref_digest,lease_digest,doing,doing_at,tool_activity,tool_activity_at)
+			VALUES($1,$2,$3,$4,'codex','fixture','unmanaged','worker','fixture-ref','fixture-lease','PRIVATE_ACTIVITY_TEXT',now(),'PRIVATE_TOOL_TEXT',now()) RETURNING id::text`, tid, visibleProject, agent, alias).Scan(&session); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO harness_current_activity(tenant_id,session_id,text,source,at)
+			VALUES($1,$2,'PRIVATE_ACTIVITY_HISTORY','agent',now())`, tid, session); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO aithema_sessions(tenant_id,sid,project_id,plugin_principal,authorization_bytes,worker_generation,auth_epoch,host_mode,currency,evidence,session_cap)
+			VALUES($1,gen_random_uuid(),'fixture','fixture','PRIVATE_AUTH_BYTES',1,1,'review','EUR',false,100) RETURNING sid::text`, tid).Scan(&sid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO aithema_host_sessions(tenant_id,sid,issuer,requester)
+			VALUES($1,$2,'dsar-fixture','00000000-0000-0000-0000-000000000123')`, tid, sid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_records(tenant_id,sid,seq,client_event_id,contract,kind,original_bytes,document,content_sha256)
+			VALUES($1,$2,1,gen_random_uuid(),'aithema.journal.record','pending_op.content','PRIVATE_RECORD_BYTES','PRIVATE_DOCUMENT_BYTES',repeat('f',64))`, tid, sid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_content_events(tenant_id,sid,seq,client_event_id,wire_sha256)
+			VALUES($1,$2,1,gen_random_uuid(),repeat('f',64))`, tid, sid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_record_chunks(tenant_id,sid,seq,chunk_offset,bytes)
+			VALUES($1,$2,1,0,'PRIVATE_RECORD_CHUNK_BYTES')`, tid, sid); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_uploads(tenant_id,sid,worker_generation,auth_epoch,action,wire_sha256,total,next_offset)
+			VALUES($1,$2,1,1,'records',repeat('f',64),1048577,0)`, tid, sid); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO aithema_journal_upload_chunks(tenant_id,sid,worker_generation,auth_epoch,action,wire_sha256,chunk_offset,bytes)
+			VALUES($1,$2,1,1,'records',repeat('f',64),0,'PRIVATE_UPLOAD_CHUNK_BYTES')`, tid, sid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	countState := func() string {
 		var state string
 		if err := d.Admin.QueryRow(ctx, `SELECT jsonb_build_array((SELECT count(*) FROM principals),(SELECT count(*) FROM identities),(SELECT count(*) FROM schema_migrations),(SELECT count(*) FROM sessions),(SELECT count(*) FROM agent_keys),(SELECT sum(revision) FROM personal_profiles))::text`).Scan(&state); err != nil {
@@ -147,6 +198,11 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if len(section(report, "aithema_deprovisioned_subjects").Records) != 1 {
 		t.Fatal("OIDC subject/issuer mapping was not exact")
 	}
+	for _, table := range []string{"agent_accounts", "account_person_link_requests", "harness_sessions", "harness_current_activity", "aithema_journal_content_events", "aithema_journal_record_chunks", "aithema_journal_uploads", "aithema_journal_upload_chunks"} {
+		if len(section(report, table).Records) != 1 || section(report, table).Records[0].Match != "subject-reference" {
+			t.Fatalf("new personal domain missing alias/issuer ownership: %s", table)
+		}
+	}
 	oidc := section(report, "aithema_deprovisioned_subjects")
 	var locator map[string]string
 	if err := json.Unmarshal(oidc.Records[0].Locator, &locator); err != nil || locator["issuer"] != "dsar-fixture" || locator["subject"] != "00000000-0000-0000-0000-000000000123" || !contains(strings.Join(oidc.ReviewColumns, " "), "subject") {
@@ -160,7 +216,7 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"OTHER_PERSON_PRIVATE", "OTHER_PROFILE_PRIVATE", "FOREIGN_PRIVATE_NAME", foreign, "SECRET_IN_ARBITRARY_JSON", "THIRD_PARTY_MESSAGE_SECRET", "PRIVATE_FREE_TEXT", strings.Repeat("c", 64), strings.Repeat("d", 64), hiddenNode} {
+	for _, private := range []string{"OTHER_PERSON_PRIVATE", "OTHER_PROFILE_PRIVATE", "FOREIGN_PRIVATE_NAME", foreign, "SECRET_IN_ARBITRARY_JSON", "THIRD_PARTY_MESSAGE_SECRET", "PRIVATE_FREE_TEXT", "PRIVATE_ACTIVITY_TEXT", "PRIVATE_TOOL_TEXT", "PRIVATE_ACTIVITY_HISTORY", "PRIVATE_AUTH_BYTES", "PRIVATE_RECORD_BYTES", "PRIVATE_DOCUMENT_BYTES", "PRIVATE_RECORD_CHUNK_BYTES", "PRIVATE_UPLOAD_CHUNK_BYTES", strings.Repeat("c", 64), strings.Repeat("d", 64), strings.Repeat("e", 64), hiddenNode} {
 		if bytes.Contains(raw, []byte(private)) {
 			t.Fatal("packet disclosed an excluded value")
 		}
@@ -185,6 +241,9 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	}
 	if !contains(strings.Join(section(plan, "aithema_deprovisioned_subjects").TouchColumns, " "), "subject") {
 		t.Fatal("OIDC subject missing from erase review")
+	}
+	if !contains(strings.Join(section(plan, "agent_accounts").TouchColumns, " "), "owner_person_id") || !contains(strings.Join(section(plan, "harness_sessions").TouchColumns, " "), "doing") || section(plan, "aithema_journal_record_chunks").Hold != "audit-review" {
+		t.Fatal("new ownership/activity columns or journal hold missing from erase review")
 	}
 	for _, s := range plan.Sections {
 		for _, r := range s.Records {
