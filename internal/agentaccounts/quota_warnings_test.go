@@ -127,6 +127,13 @@ func TestQuotaWarningDedupeRecoveryAndReset(t *testing.T) {
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE NOT suppressed AND recovered_at IS NULL`); n != 1 {
 		t.Fatal("stale recovery cleared warning")
 	}
+	var expired struct {
+		Items []QuotaWarningSession `json:"items"`
+	}
+	callStatus(t, fixedClockModule{Module: New(appPool), at: reset}, &f.admin, "", "GET", "/api/agent-accounts/quota-warnings", "", 200, &expired)
+	if len(expired.Items) != 0 {
+		t.Fatal("reset-passed readings must be withheld")
+	}
 	// Reset passing without a fresh reading cannot write recovery evidence.
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE NOT suppressed AND recovered_at IS NULL`); n != 1 {
 		t.Fatal("timer passage changed durable receipt")
@@ -197,6 +204,7 @@ func TestQuotaWarningsSharedComputersPrivacyAndProjectInbox(t *testing.T) {
 	second := f
 	second.account = sibling
 	quotaReport(t, second, fact, at)
+	f.mod = fixedClockModule{Module: New(appPool), at: at}
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE NOT suppressed`); n != 1 {
 		t.Fatalf("two computers duplicated warning: %d", n)
 	}

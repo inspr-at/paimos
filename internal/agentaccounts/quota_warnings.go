@@ -314,10 +314,10 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		// Select the most urgent applicable binding window per session. RLS
 		// limits both sessions and runs to projects visible to the caller.
-		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(s.id) s.id::text,s.project_id::text,a.id::text,q.severity,q.remaining_percent,q.threshold_percent,q.window_key,q.resets_at
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(s.id) s.id::text,s.project_id::text,a.id::text,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN 'urgent' ELSE 'early' END,q.remaining_percent,CASE WHEN q.remaining_percent<=coalesce((SELECT urgent_percent FROM quota_warning_settings),3) THEN coalesce((SELECT urgent_percent FROM quota_warning_settings),3) ELSE coalesce((SELECT early_percent FROM quota_warning_settings),10) END,q.window_key,q.resets_at
           FROM harness_sessions s JOIN agent_runs run ON run.tenant_id=s.tenant_id AND run.id=s.run_id JOIN agent_accounts a ON a.tenant_id=run.tenant_id AND a.id=run.account_id
           JOIN account_quota_warnings q ON q.tenant_id=a.tenant_id AND EXISTS(SELECT 1 FROM account_readiness_memberships member JOIN agent_accounts origin ON origin.tenant_id=member.tenant_id AND origin.id=member.account_id AND origin.link_revision=member.binding_revision WHERE member.resource_id=q.resource_id AND (member.account_id=a.id OR (a.quota_pool_fingerprint<>'' AND a.quota_pool_fingerprint=origin.quota_pool_fingerprint AND a.harness=origin.harness)))
-          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.reading_at BETWEEN $2-interval '10 minutes' AND $2 AND (q.resets_at IS NULL OR q.resets_at>$2) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
+          WHERE s.stopped_at IS NULL AND s.archived_at IS NULL AND q.recovered_at IS NULL AND NOT q.suppressed AND q.reading_at BETWEEN $2::timestamptz-interval '10 minutes' AND $2::timestamptz AND (q.resets_at IS NULL OR q.resets_at>$2::timestamptz) AND ($1::uuid IS NULL OR s.id>$1) AND ($3='person' OR a.registered_by_principal_id=$4)
           ORDER BY s.id,q.remaining_percent,q.id LIMIT $5`, nullableUUID(after), now, string(p.Kind), p.ID, limit+1)
 		if err != nil {
 			return err

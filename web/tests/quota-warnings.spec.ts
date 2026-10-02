@@ -36,8 +36,10 @@ for (const width of [390, 1440]) {
         { name: 'urgent cannot equal early', run: async () => { await urgent.fill('10'); await expect(save).toBeDisabled() } },
         { name: 'fraction cannot save', run: async () => { await early.fill('10.5'); await expect(save).toBeDisabled() } },
         { name: 'valid custom thresholds', run: async () => { await early.fill('20'); await urgent.fill('5'); await expect(save).toBeEnabled() } },
+        { name: 'Enter stays in the field', run: async () => { await urgent.press('Enter'); await expect(urgent).toBeFocused() } },
+        { name: 'Escape leaves the field', run: async () => { await urgent.press('Escape'); await expect(urgent).not.toBeFocused() } },
         { name: 'failed save stays honest', run: async () => { await save.click(); await expect(card.getByRole('status')).toHaveText('Could not save thresholds. Try again.'); await expect(save).toBeEnabled() } },
-        { name: 'durable successful save', run: async () => { fail = false; await save.click(); await expect(card.getByRole('status')).toHaveText('Thresholds saved.'); await expect(save).toBeEnabled() } },
+        { name: 'durable successful save', run: async () => { fail = false; const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)); await urgent.press(mac ? 'Meta+Enter' : 'Control+Enter'); await expect(card.getByRole('status')).toHaveText('Thresholds saved.'); await expect(save).toBeEnabled() } },
       ],
     })
     expect(writes).toEqual([{ early_percent: 20, urgent_percent: 5 }, { early_percent: 20, urgent_percent: 5 }])
