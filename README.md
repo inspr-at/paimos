@@ -10,6 +10,127 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Recurring work
+
+`aeon recur create|list|get|update|pause|resume|run-now|preview` manages
+server-owned schedules. Create reads a JSON definition from stdin or
+`--body-file`; update takes the recurrence UUID and a full definition with
+`expected_revision`. Pause/resume accept `--revision`, or read the current
+revision before writing. Run now requires `--idempotency-key` so retries return
+the original occurrence receipt. Named instances and `--json` work as usual.
+Create and update also accept repeatable `--tag NAME|UUID`, resolved in the
+target project or workspace and added to the JSON template's tags.
+`--description-file FILE` replaces the template description;
+`--criteria-file FILE` replaces its criteria with one nonblank criterion per
+line. Other template fields remain as supplied in JSON. Only one input can
+read stdin (`-`). For example:
+
+```sh
+aeon recur create --body-file audit.json --tag website-audit \
+  --description-file playbook.txt --criteria-file checklist.txt
+```
+
+A definition names a project and an immutable parent, a ticket/task template,
+and a trigger. Time triggers accept `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,FR`, or
+`FREQ=MONTHLY;BYMONTHDAY=1,-1`, plus `time_of_day` (`HH:MM`), an IANA `timezone`,
+and an optional `start_date` (defaults to today's local date). Omitted weekday
+or month-day comes from that start date. Monthly rules also allow `INTERVAL=1`,
+`2`, `3` or `6` (default `1`), stepping from the month of `start_date`; daily
+and weekly rules reject `INTERVAL`. For example,
+`FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1` runs on the last day every three months.
+Other RRULE parts are rejected. Invalid
+month dates and spring gaps are skipped; a repeated fall time uses its first
+instant. Preview uses the same calendar and returns UTC timestamps without
+writing anything, including while paused. Event triggers use
+`{"kind":"event","event":"release.published"}`; future publication dates
+cannot be previewed.
+
+For example, a weekly tool sweep under the code-health epic can be created with
+this body (replace project/parent UUIDs with the intended existing nodes):
+
+```json
+{
+  "project_id": "<project UUID>",
+  "parent_id": "<code-health epic UUID>",
+  "template": {
+    "title": "Weekly tool sweep {{date}} (#{{occurrence}})",
+    "description": "Run lint, gosec, govulncheck, semgrep and npm audit; compare the stored baseline and verify new findings.",
+    "acceptance_criteria": ["Compare the baseline", "Verify and deduplicate new findings"],
+    "estimate_hours": 0.34,
+    "priority": "high",
+    "type": "ticket"
+  },
+  "trigger": {"kind":"time","rrule":"FREQ=WEEKLY;BYDAY=MO","time_of_day":"09:00","timezone":"Europe/Vienna"},
+  "queue_each": true,
+  "overlap_policy": "skip",
+  "catch_up_policy": "one"
+}
+```
+
+The rolling deep read uses the same weekly trigger with its own template and
+3-hour estimate. A per-release delta audit uses the event trigger and a template
+such as `Delta audit {{release_name}} ({{release_version}})`, with a 1-hour
+estimate. These are configuration examples; installing a release creates no
+production audit schedules automatically. Template variables also work in
+descriptions and criteria. `tags` contains existing tag-node UUIDs; occurrence
+creation resolves their current names into ordinary ticket `fields.tags`.
+
+The server uses the database clock and tenant/tree claims, with durable unique
+occurrence keys. Each pass consumes at most the latest missed time or release
+per recurrence, avoiding a downtime burst. `overlap_policy=skip` suppresses work
+while any earlier live occurrence ticket remains nonterminal; `create` allows
+concurrent occurrences. Created and skipped attempts both increment the
+occurrence number. Resume discards work accumulated while paused; manual run
+now is allowed while paused and does not move the schedule. Queueing reuses
+queue readiness, work orders and the inert queue holder, awaiting coordinator
+routing. It requires a positive estimate and acceptance criteria.
+Each tenant pass attempts at most 50 due rows. A failing row rolls back,
+records a `recurrence.failed` audit event when its claim is available, and is
+excluded for the rest of that pass so later rows can run. The pass reports
+the accumulated failures. Its original cursor remains available for retry
+on the next pass; failed attempts do not increment the occurrence number.
+
+Journey publications and the configured product's immutable release history
+produce tenant/project-scoped `release.published` events; the same project and
+version are deduplicated across sources. Newly configured schedules ignore
+publications from before their creation. Occurrence tickets and their node,
+queue and recurrence audit events use the keyless system actor **Recurring
+work**. Occurrence receipts link each ticket back to its recurrence. Management
+requires `recurrences.manage`; agents need an explicit custom-role grant plus
+a key scope, even when bound to Owner/Admin. Saving a definition also requires
+`nodes.write`; `queue_each` adds `run.create` and `work_orders.write`.
+
+The recurrence tests cover calendar/DST edges, preview, replica and foreground
+claim barriers, restart recovery, overlap/catch-up, publication deduplication,
+queue/provenance, transaction rollback, tenant/project RLS and permission
+changes during a write. They use an injected database clock and channels rather
+than sleeps. Regression coverage includes monthly intervals across short months,
+gaps and folds, tree-writer lock barriers, CLI template files/project tags, and
+persistent schedule/publication/queue failures followed by valid due work.
+The full Go suite validates the shared authorization, work-order,
+queue, server and OpenAPI integration alongside this package.
+
+AEON-573 fix-round evidence: the full Go suite passed at `2f00b466` on the
+approved offload host with `GOMAXPROCS=6 go test -p 4 -timeout 30m ./...`.
+Overlaying only the new test files on `a2bd6890` reproduces both tree-writer
+deadlocks (`40P01`), rejects the tenant FK key-share fence (`NOWAIT`), rejects
+monthly intervals and both CLI template writes, and starves the later valid
+row for each persistent cursor, publication and queue failure. The fixed
+regressions pass, including denial after the barrier-controlled member
+demotion. Source transfer used Git archives over SSH, without pushing a ref.
+
+DSAR integration note (AEON-490): the inventory is absent from this branch and
+its `origin/main` baseline. Migration 1115 introduces `recurrences` and
+`recurrence_occurrences`, both tenant-scoped with forced RLS and project
+visibility. Classify `recurrences.template` and `created_by_principal_id` as
+personal; other definition, schedule and cursor columns as metadata. Locate a
+recurrence by `(tenant_id,id)`. Classify the user-supplied occurrence key as
+personal and other occurrence receipt columns as metadata,
+located by `(tenant_id,recurrence_id,occurrence_key)`; linked ticket contents and
+actor identity remain personal data in the existing nodes/principals/events
+inventory. The coordinator must add these entries when merging onto the DSAR
+inventory. No new secret storage is introduced.
+
 ## HTML attachment previews
 
 HTML uploaded with `aeon attach` or the attachment picker remains an original
@@ -542,6 +663,12 @@ Focus preserves the graph's reduced-motion preference.
 
 `paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
 
+CLI issue and knowledge updates, estimate plans, project-tag attachment and
+declarative plan updates send the revision of the node they read. A concurrent
+edit returns a conflict instead of replacing newer fields; read the current
+node before retrying. If a tag was created but could not be attached, the error
+names that retained tag. A failed plan leaves earlier successful writes applied.
+
 ```sh
 paimos auth login --url https://aeon.example --name default --key-file ./agent.key
 paimos whoami
@@ -654,9 +781,11 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Classic colleagues without a sign-in identity can join through **Settings → Access → People → Imported from classic → Invite this person**. The invite starts with their email and imported access; the administrator confirms roles they may grant. On acceptance, one active, unlinked imported account with exactly the same verified email (case-insensitive) in this workspace becomes an alias of the new person, with an audited reason. Classic identities and history remain intact. Multiple unlinked matches require manual **Link to person**, including inactive records or records that already have aliases; already linked, deactivated or existing link-target accounts are never automatically linked. A token alone cannot link an account. Invited access stays authoritative even for project-only invites; sign-in and later imports never restore workspace access from the alias's classic roles.
 
-Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet previews **Ticket worker** and **Coordinator** scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. The same previews and search are available when editing scopes; rotation previews keep every original scope. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
 
-People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
+Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
+
+People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
@@ -1067,7 +1196,7 @@ The ticket-worker set is `nodes.read`, `nodes.write`, `comments.read`, `comments
 aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d
 ```
 
-Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. It never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. Creation, editing and rotation use the same role ceiling: workspace-role permissions plus project-grantable and self-service permissions (`kinds.read`, `profile.read`, `profile.write`, `authz.read`) held through project roles, intersected with the agent-grantable registry. A scope from a project role still requires that project's binding on each request; it grants no workspace access. Rotation never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
 
 For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
 
@@ -1118,6 +1247,16 @@ even when another writer keeps the pipe open. Cleanup suppresses further stream
 callbacks and bounds the wait for an in-flight callback; local closure never proves EOF
 for a final Codex receipt. `Stop` keeps its process-only role so an observer can
 call it without waiting on itself.
+Protocol writes, including startup and control frames, have a 20-second maximum
+and honor shorter caller deadlines while queued or blocked in the pipe. A canceled
+partial write closes the transport and cleans up its owned process group. Account
+probes also clean up their own descendants and bound inherited-pipe waits. Vendor
+launches bound stderr draining to two seconds after leader exit, including failed
+ownership checks; cleanup signals the launch group before reaping its leader.
+Codex quota capture applies its three-second budget to every protocol write. The
+native Grok proxy rejects headers beyond 4096 bytes before buffering more input.
+The local `run-agent` runner shares the accepted run deadline across the agent
+and `--test-exec`; Stop cancels both phases and waits for owned process cleanup.
 The reporter retains bounded normalized state in memory, never raw output or
 worker leases on disk. Restart/crash recovery and external worker capture remain
 separate work; an unavailable endpoint can leave the last snapshot provisional.
@@ -1584,10 +1723,31 @@ Login navigates to
 sign-out posts to `/api/auth/logout` before routing to `/signin`. API calls use
 same-origin credentials, a ten-second timeout, and no browser response cache.
 The backend owns authentication cookies and the configured OIDC authentication redirect.
+OIDC discovery has a five-second deadline and shares one in-flight attempt without
+holding the sign-in mutex over network I/O. Canceled callers can leave immediately;
+failed discovery remains retryable. Discovery and signing-key responses are capped
+at 1 MiB before decoding.
 Email comparisons fold only ASCII A-Z; Unicode characters remain distinct in
 bootstrap admin checks, development sign-in, invitation provisioning, imported
 profile matching and link suggestions. Classic principal backfills take the
 same tenant lock as invitation acceptance before repairing emails.
+Email-based OIDC bootstrap enrollment requires `email_verified: true`, just
+like invite enrollment, and can run only once. The first principal binding's
+append-only audit event closes bootstrap enrollment; subsequent claims to the
+same mailbox cannot create another admin, even when verified. Existing and
+operator-pinned issuer/subject memberships continue to sign in.
+Invite acceptance holds the tenant access lock through its binding inserts;
+linking takes that lock before the alias lock (seed 532) and principal rows.
+These access-write fences use `FOR NO KEY UPDATE` so they serialize with each
+other and membership changes while allowing event writers' tenant FK checks.
+The last-owner trigger uses the same fence during binding removal/deactivation.
+Project-role assignment and attachment writes lock the tree (seed 0), then the
+tenant, before reading current grants and resource rows. Attachment request
+bodies are read before these locks; the final transaction checks permission in
+the node's current project and commits metadata and audit events together.
+Attachment writes use a shared tenant lock: access edits are fenced while
+other resource writers can finish their tenant foreign-key checks. Retained
+principal import/backfill paths take tree, tenant, then alias locks in that order.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty

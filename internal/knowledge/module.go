@@ -422,6 +422,9 @@ func parseCreate(raw map[string]json.RawMessage) (createInput, error) {
 }
 
 func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) (Entry, error) {
+	if err := lockKnowledgeTree(ctx, tx); err != nil {
+		return Entry{}, err
+	}
 	// A new entry is decided in the project it joins (ADR-003 P2).
 	if !validUUID(in.ProjectID) || authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: in.ProjectID}) != nil {
 		return Entry{}, fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
@@ -434,7 +437,7 @@ func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) 
 	if !projectOK {
 		return Entry{}, fail(http.StatusNotFound, "project_not_found", "project not found")
 	}
-	kindID, prefix, err := ensureKind(ctx, tx, p, in.Spec)
+	kindID, prefix, kindEvent, err := ensureKind(ctx, tx, p, in.Spec)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -472,6 +475,11 @@ func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) 
 	if err != nil {
 		return Entry{}, err
 	}
+	if kindEvent != nil {
+		if _, err := events.Append(ctx, tx, p, *kindEvent); err != nil {
+			return Entry{}, err
+		}
+	}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &node.ID, Type: evCreated, After: node})
 	if err != nil {
 		return Entry{}, err
@@ -484,15 +492,16 @@ func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) 
 	return entry, nil
 }
 
-// ensureKind returns the tenant's kind for s, creating it (with kind.created) when missing.
-func ensureKind(ctx context.Context, tx pgx.Tx, p tenant.Principal, s spec) (string, string, error) {
+// ensureKind returns the tenant's kind for s and its pending creation event.
+// The caller appends after taking the slug and node-key locks, counter last.
+func ensureKind(ctx context.Context, tx pgx.Tx, p tenant.Principal, s spec) (string, string, *events.Change, error) {
 	var id, prefix string
 	err := tx.QueryRow(ctx, `SELECT id::text, short_prefix FROM node_kinds WHERE tenant_id=$1 AND slug=$2`, p.TenantID, s.Kind).Scan(&id, &prefix)
 	if err == nil {
-		return id, prefix, nil
+		return id, prefix, nil, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", "", err
+		return "", "", nil, err
 	}
 	type kindSnap struct {
 		ID                string          `json:"id"`
@@ -510,15 +519,12 @@ func ensureKind(ctx context.Context, tx pgx.Tx, p tenant.Principal, s spec) (str
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Created concurrently: use theirs.
 		err = tx.QueryRow(ctx, `SELECT id::text, short_prefix FROM node_kinds WHERE tenant_id=$1 AND slug=$2`, p.TenantID, s.Kind).Scan(&id, &prefix)
-		return id, prefix, err
+		return id, prefix, nil, err
 	}
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	if _, err := events.Append(ctx, tx, p, events.Change{Type: "kind.created", After: k}); err != nil {
-		return "", "", err
-	}
-	return k.ID, k.ShortPrefix, nil
+	return k.ID, k.ShortPrefix, &events.Change{Type: "kind.created", After: k}, nil
 }
 
 // ---------- Update ----------
@@ -639,6 +645,9 @@ var errStale = errors.New("stale")
 func (m *module) update(ctx context.Context, p tenant.Principal, id string, in patchInput, expected *time.Time) (Entry, error) {
 	var entry Entry
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockKnowledgeTree(ctx, tx); err != nil {
+			return err
+		}
 		if !canWrite(ctx, tx, p, "knowledge.write") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
@@ -747,6 +756,9 @@ func (m *module) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	var eventID int64
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockKnowledgeTree(r.Context(), tx); err != nil {
+			return err
+		}
 		if !canWrite(r.Context(), tx, p, "knowledge.delete") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
@@ -765,7 +777,7 @@ func (m *module) handleDelete(w http.ResponseWriter, r *http.Request) {
 			return fail(http.StatusConflict, "has_children", "move or delete what sits under this entry first")
 		}
 		deleted, err := scanSnap(tx.QueryRow(r.Context(), `UPDATE nodes SET deleted_at=clock_timestamp(), updated_at=`+bumpUpdated+`
-		  WHERE tenant_id=$1 AND id=$2::uuid RETURNING `+nodeReturning, p.TenantID, id))
+		  WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL RETURNING `+nodeReturning, p.TenantID, id))
 		if err != nil {
 			return err
 		}

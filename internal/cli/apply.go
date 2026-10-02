@@ -153,7 +153,8 @@ func (rt *runtime) cmdApply() *Command {
 				}
 			}
 			body["fields"] = fields
-			if err := rt.do(http.MethodPatch, "/api/nodes/"+n.ID, body, nil); err != nil {
+			if err := rt.patchNode(n, body, nil); err != nil {
+				fmt.Fprintf(rt.stderr, "plan stopped at %s; earlier successful changes remain applied\n", u.Ref)
 				return err
 			}
 		}
