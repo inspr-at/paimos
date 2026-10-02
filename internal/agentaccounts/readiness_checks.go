@@ -171,6 +171,14 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 		return c, err
 	}
 	if fresh {
+		// Freeze a telemetry-only denial into its original canonical wait too;
+		// the owner's check can then request the same bounded early recovery.
+		if err := reconcileReadinessResources(ctx, tx, a); err != nil {
+			return c, err
+		}
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return c, err
+		}
 		tag, err := tx.Exec(ctx, `INSERT INTO account_readiness_check_waits(tenant_id,check_id,resource_id,window_key,wait_id)
             SELECT f.tenant_id,$1,f.resource_id,f.window_key,f.wait_id FROM account_readiness_facts f
             JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id

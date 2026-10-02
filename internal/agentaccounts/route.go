@@ -289,6 +289,11 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	}
 	var recovery []recoveryPermit
 	if run.Purpose != "pairing_verification" {
+		// Existing queued holds can predate the fact store. Preserve the
+		// telemetry's original wait before binding its canonical recovery permit.
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return err
+		}
 		used, err := occupancy(ctx, tx)
 		if err != nil {
 			return err
