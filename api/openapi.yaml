@@ -13784,7 +13784,7 @@ components:
         available: {type: boolean}
         host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
         openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
-        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out or signed in as another identity; every other failure is unavailable (the default when omitted).'}
+        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out; identity mismatch and every other failure are unavailable (the default when omitted). Only confirmed sign-out asks for another login. Bounded daemon lifecycle reasons may distinguish identity_mismatch, timeout, protocol and launch_failed, without changing these historical probe categories or uploading vendor identity or diagnostics. A version response alone never establishes signed-in readiness.'}
     AccountLimitProperties:
       type: object
       required: [amount, unit, period]

@@ -47,6 +47,71 @@ verification and managed reviews remain unavailable before vendor startup.
 Existing enrollments retain their local profile, but a successful version probe
 does not make them launchable or request another login as if sign-out were proven.
 
+ACP launcher checks retain bounded local failure reasons: `timeout`, `protocol`
+and `launch_failed`. A future qualified sign-in check can distinguish confirmed
+sign-out (`auth_failed`) from `identity_mismatch`; both block dispatch, while only
+confirmed sign-out asks for another login. A fresh qualified success clears prior
+failures and allows dispatch. The historical account-probe request keeps only
+`auth_failed` and `unavailable`: only confirmed sign-out maps to `auth_failed`;
+identity mismatch, measurement failures and unqualified checks map to `unavailable`.
+The bounded lifecycle reason remains `identity_mismatch`. Raw vendor output and
+identity are never uploaded. These classifications do **not** qualify a sign-in
+command.
+
+#### AEON-543 qualification attempt (2026-10-02)
+
+**Blocked; neither harness has a qualified sign-in probe.** No real-account
+sign-in, identity-mismatch, startup-hook or quota-neutral termination qualification
+was completed. Fixture outcomes exercise readiness/dispatch consumers, not vendor
+authentication. Release-note enablement remains with the coordinator after actual
+qualification.
+
+Read-only commands run against the approved offload host (no credential contents
+or resolved environments were read or printed):
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'hostname; command -v gemini; command -v opencode; command -v node; command -v go'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local \
+  'ls /Users/mba/.local/bin /Users/mba/.nix-profile/bin /opt/homebrew/bin /usr/local/bin 2>/dev/null | rg "^(gemini|opencode|node|npm|go|aeon.*)$"; test -d /Users/mba/.gemini && echo gemini-profile-present; test -d /Users/mba/.local/share/opencode && echo opencode-profile-present; test -d /Users/mba/.config/opencode && echo opencode-config-present; sysctl -n vm.loadavg'
+ssh -o BatchMode=yes -o ConnectTimeout=8 mba@mbp2606.local bash -s <<'REMOTE'
+for vendor_root in /Users/* /Users/mba/.local/share /Users/mba/.config /Users/mba/.nix-profile/lib/node_modules /opt/homebrew/lib/node_modules /usr/local/lib/node_modules /Users/mba/.opencode/bin; do
+  test -d "$vendor_root" && printf 'directory %s\n' "$vendor_root"
+done
+for vendor_profile in /Users/mba/.gemini /Users/mba/.config/opencode /Users/mba/.local/share/opencode /Users/ci/.gemini /Users/ci/.config/opencode /Users/ci/.local/share/opencode; do
+  test -d "$vendor_profile" && printf 'vendor profile directory %s\n' "$vendor_profile"
+done
+for vendor_binary in /Users/mba/.nix-profile/bin/gemini /Users/mba/.nix-profile/bin/opencode /opt/homebrew/bin/gemini /opt/homebrew/bin/opencode /usr/local/bin/gemini /usr/local/bin/opencode /Users/mba/.opencode/bin/opencode; do
+  test -x "$vendor_binary" && printf 'vendor executable %s\n' "$vendor_binary"
+done
+exit 0
+REMOTE
+```
+
+Observed: `mbp2606` answered; Node exists at `/Users/mba/.nix-profile/bin/node`.
+Neither vendor was found on that SSH session's PATH or at the enumerated executable
+paths; none of the enumerated vendor profile directories existed. These checks do
+not inventory every installation or another person's account. No install or login
+was attempted. Qualification needs approved physical vendor/interpreter pins and
+explicitly paired profiles on this host.
+
+Source inspection explains why guessed commands are unsafe. At Gemini commit
+[`fb972b2f`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/config/config.ts),
+the registered commands do not include `auth status`; positional arguments enter
+the prompt path. Its
+[`initialize`](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/cli/src/acp/acpRpcDispatcher.ts)
+calls configuration initialization, and `authenticate` may initiate authentication
+or clear cached credentials when switching methods. Neither was run as a probe.
+OpenCode v1.14.48, commit
+[`4d8ac17c`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/cli/cmd/providers.ts),
+implements `auth list` as stored provider names and credential types, without
+identity/revocation verification. Its
+[`ACP initialize`](https://github.com/anomalyco/opencode/blob/4d8ac17c263c0e58fb99c25cc636684dffb45a50/packages/opencode/src/acp/agent.ts)
+returns capabilities; `authenticate` is unimplemented, and session creation provides
+no authenticated identity receipt. Such responses are insufficient to qualify
+dispatch. Keep `sign_in_unverified` until exact-build, real-account evidence proves
+a quota-neutral identity check and bounded cleanup with inherited hooks/config.
+
 Gemini profiles pin the exact model and numeric thinking budget. The qualified
 2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
 `effort_level` on the common 0–5 scale: off/0, up to 1024, up to 4096, up to 16384,

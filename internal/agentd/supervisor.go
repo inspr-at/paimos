@@ -159,6 +159,7 @@ type Supervisor struct {
 	pollDiagnosticLast  map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
 	loginRequired       map[string]bool
 	signInUnverified    map[string]bool
+	probeFailureReasons map[string]string // Bounded local causes, protected by mu.
 	harnessHoldReasons  map[string]string
 	dependencyReasons   map[string]string
 	harnessHolds        map[string]string
@@ -568,6 +569,16 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			s.signInUnverified = map[string]bool{}
 		}
 		s.signInUnverified[account.ID] = !status.OK && status.Failure == ProbeUnverified && hold == "" && dependencyErr == nil && probeErr == nil
+		if s.probeFailureReasons == nil {
+			s.probeFailureReasons = map[string]string{}
+		}
+		delete(s.probeFailureReasons, account.ID)
+		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
+			switch status.Failure {
+			case ProbeIdentityMismatch, ProbeTimeout, ProbeProtocol, ProbeLaunchFailed:
+				s.probeFailureReasons[account.ID] = status.Failure
+			}
+		}
 		if s.harnessFailed == nil {
 			s.harnessFailed = map[string]bool{}
 		}
