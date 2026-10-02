@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -371,6 +372,19 @@ func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, 
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
 	}, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return err
+}
+
+// ClaimLane returns the exact grant instead of discarding the claim response.
+func (r *Remote) ClaimLane(ctx context.Context, runID, daemonID, generation string, reservations []string, workspaceID string) (Run, error) {
+	r.mu.Lock()
+	r.daemonID, r.generation = daemonID, generation
+	r.mu.Unlock()
+	var run Run
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
+		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
+		"lane_capability": laneprotocol.Capability, "lane_workspace_id": workspaceID,
+	}, &run, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	return run, err
 }
 
 // ErrTelemetryProtocol means the server rejected the telemetry itself. It does

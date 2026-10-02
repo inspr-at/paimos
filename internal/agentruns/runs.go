@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/lanecontrol"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -22,6 +23,9 @@ import (
 )
 
 type Run struct {
+	LaneEnvelopeID            *string                     `json:"lane_envelope_id,omitempty"`
+	LaneProjectID             *string                     `json:"lane_project_id,omitempty"`
+	LaneGrant                 *lanecontrol.Grant          `json:"lane_grant,omitempty"`
 	Trace                     json.RawMessage             `json:"trace,omitempty"`
 	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
@@ -134,11 +138,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,lane_envelope_id::text,(SELECT e.project_id::text FROM lane_budget_envelopes e WHERE e.id=agent_runs.lane_envelope_id)`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.LaneEnvelopeID, &v.LaneProjectID)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
@@ -374,10 +378,12 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Daemon       string   `json:"daemon_id"`
-		Generation   string   `json:"daemon_generation"`
-		Reservations []string `json:"reservation_ids"`
-		Refusal      string   `json:"verification_unavailable"`
+		Daemon          string   `json:"daemon_id"`
+		Generation      string   `json:"daemon_generation"`
+		Reservations    []string `json:"reservation_ids"`
+		LaneCapability  string   `json:"lane_capability"`
+		LaneWorkspaceID string   `json:"lane_workspace_id"`
+		Refusal         string   `json:"verification_unavailable"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -399,6 +405,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
+	}
+	if err = lanecontrol.GuardRunTx(ctx, tx, v.ID); err != nil {
+		return nil, err
+	}
+	if v.LaneEnvelopeID != nil && (in.LaneCapability != lanecontrol.Capability || !workorders.UUID(in.LaneWorkspaceID)) {
+		return nil, workorders.Fail(409, "lane-capable daemon and isolated workspace required")
 	}
 	if err = queueClaimable(ctx, tx, v); err != nil {
 		return nil, err
@@ -487,7 +499,8 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if v.Status != "queued" {
 		if v.DaemonID != nil && v.Generation != nil {
-			return v, nil
+			v.LaneGrant, err = lanecontrol.ClaimTx(ctx, tx, p, v.ID, in.LaneCapability, in.LaneWorkspaceID, in.Daemon, in.Generation, time.Now())
+			return v, err
 		}
 		return nil, workorders.Fail(409, "run cannot be claimed")
 	}
@@ -509,11 +522,16 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = agentpairing.RunFence(ctx, tx, *v.AccountID, v.ID, true); err != nil {
 		return nil, err
 	}
+	grant, err := lanecontrol.ClaimTx(ctx, tx, p, v.ID, in.LaneCapability, in.LaneWorkspaceID, in.Daemon, in.Generation, time.Now())
+	if err != nil {
+		return nil, err
+	}
 	before := v
 	v, err = scan(tx.QueryRow(ctx, `UPDATE agent_runs SET status='starting',daemon_id=$2,daemon_generation=$3,started_at=clock_timestamp() WHERE id=$1 RETURNING `+columns, v.ID, in.Daemon, in.Generation))
 	if err != nil {
 		return nil, err
 	}
+	v.LaneGrant = grant
 	if v.QueueNodeID != nil {
 		if err := queuePickup(ctx, tx, p, *v.QueueNodeID, v.ID); err != nil {
 			return nil, err

@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/laneprotocol"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -31,6 +32,7 @@ import (
 )
 
 type Config struct {
+	LaneRepositories  map[string]LaneRepository
 	MaxTokens         int64
 	MaxTurns          int64
 	API               API
@@ -58,6 +60,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	LaneEnvelopeID        string `json:"lane_envelope_id,omitempty"`
 	AutomaticReview       bool   `json:"automatic_review,omitempty"`
 	VerificationReason    string `json:"verification_reason,omitempty"`
 	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
@@ -90,6 +93,7 @@ type Record struct {
 }
 
 type owned struct {
+	processStarted                                 time.Time
 	budgetMu                                       sync.Mutex
 	budgetProcess                                  Process
 	budgetTools                                    *managedToolServer
@@ -132,6 +136,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	laneRepositories    map[string]LaneRepository
 	startedAt           time.Time
 	capacityStartedAt   time.Time
 	capacityAccountID   string
@@ -327,7 +332,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{laneRepositories: c.LaneRepositories, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
 	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
@@ -818,9 +823,19 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	for _, criterion := range order.Criteria {
 		prompt += "\n- " + criterion.ID + ": " + criterion.Description
 	}
+	runWorkspace := s.workspace
 	branch := ""
+	if run.LaneEnvelopeID != "" {
+		if verification || review || run.CapacityHandoff {
+			return errors.New("lane lifecycle must explicitly qualify this attempt mode")
+		}
+		runWorkspace, branch, err = s.laneWorkspace(ctx, run, adapter, entry)
+		if err != nil {
+			return err
+		}
+	}
 	if !verification && !review {
-		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
+		if output, branchErr := exec.CommandContext(ctx, "git", "-C", runWorkspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
 		if run.CapacityHandoff {
@@ -834,7 +849,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if verification {
 		prompt = VerificationTask
 	}
-	runWorkspace := s.workspace
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
@@ -863,6 +877,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err != nil {
 			return err
 		}
+	}
+	if run.LaneEnvelopeID != "" && route.BillingMode != "subscription" {
+		return errors.New("lane requires known subscription billing")
 	}
 	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID || run.RequestedAccountID != "" && route.AccountID != run.RequestedAccountID {
 		return errors.New("account route is not bound to daemon")
@@ -894,7 +911,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	if entry == nil {
-		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		rec := Record{LaneEnvelopeID: run.LaneEnvelopeID, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "claim_pending", Controls: map[string]replay{}}
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
@@ -913,9 +930,22 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.record = next
 		entry.mu.Unlock()
 	}
-	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
+	var laneDeadline time.Time
+	claimSent := time.Now()
+	if run.LaneEnvelopeID != "" {
+		claimed, claimErr := s.api.(laneClaimAPI).ClaimLane(ctx, run.ID, s.daemonID, s.generation, ids, run.ID)
+		if claimErr != nil {
+			return errors.Join(claimErr, s.reconcileUnlaunched(ctx, entry))
+		}
+		run.LaneGrant = claimed.LaneGrant
+		laneDeadline, err = grantDeadline(run.LaneGrant, run, s.daemonID, s.generation, run.ID, claimSent)
+	} else {
+		err = s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids)
+	}
+	if err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
+
 	// Every error before launch intent must settle this claimed, never-launched
 	// run. A failed report stays in the durable outbox with the same sequence.
 	defer func() {
@@ -943,6 +973,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	projectID, err := s.api.ProjectForNode(ctx, node.Key)
 	if err != nil {
 		return err
+	}
+	if run.LaneEnvelopeID != "" && projectID != run.LaneProjectID {
+		return ErrScope
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" || len(host) > 128 {
@@ -1049,7 +1082,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return mode, true
 			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1076,13 +1109,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	// unconfirmed, even if no PID was subsequently persisted.
 	var launchRev, launchDefault string
 	if !verification && !review {
-		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
+		launchRev, launchDefault = workspaceHEAD(ctx, runWorkspace), launchDefaultRev(ctx, runWorkspace)
+	}
+	if !laneDeadline.IsZero() && !time.Now().Before(laneDeadline) {
+		return errors.New("lane grant expired before launch")
 	}
 	entry.mu.Lock()
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
 	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
-	intent.AutomaticReview = order.Kind == "build"
+	intent.AutomaticReview = order.Kind == "build" && run.LaneEnvelopeID == ""
 	intent.LaunchBranch = branch
 	err = s.journal.Put(intent)
 	if err == nil {
@@ -1095,7 +1131,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	launchedAt := time.Now()
-	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+	startCtx := ctx
+	if !laneDeadline.IsZero() {
+		var cancel context.CancelFunc
+		startCtx, cancel = context.WithDeadline(ctx, laneDeadline)
+		defer cancel()
+	}
+	entry.mu.Lock()
+	entry.processStarted = launchedAt
+	entry.mu.Unlock()
+	proc, err := adapter.Start(startCtx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	if err != nil {
 		_ = entry.tools.Close()
@@ -1121,7 +1166,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.budgetProcess, entry.budgetTools = proc, entry.tools
 	entry.budgetMu.Unlock()
 	s.observeBudget(entry, AdapterEvent{})
-	go s.runDeadline(entry, proc, done, time.Until(launchedAt.Add(duration)))
+	deadline := launchedAt.Add(duration)
+	if !laneDeadline.IsZero() && laneDeadline.Before(deadline) {
+		deadline = laneDeadline
+	}
+	go s.runDeadline(entry, proc, done, time.Until(deadline))
 	var startedErr error
 	if saveErr == nil {
 		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})
@@ -1337,6 +1386,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	processExitedAt := time.Now()
 	entry.mu.Lock()
 	entry.record.BudgetStopReason = entry.budgetStopReason()
 	entry.record.ExitObserved = err == nil
@@ -1408,11 +1458,17 @@ func (s *Supervisor) monitor(entry *owned) {
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
 	automaticReview := entry.record.AutomaticReview
+	workspace := entry.record.Workspace
+	var laneSettlement *laneprotocol.Settlement
+	if entry.record.LaneEnvelopeID != "" && !entry.processStarted.IsZero() {
+		elapsed := processExitedAt.Sub(entry.processStarted)
+		laneSettlement = &laneprotocol.Settlement{ElapsedMS: int64((elapsed + time.Millisecond - 1) / time.Millisecond), ExitConfirmed: entry.record.ExitObserved}
+	}
 	entry.mu.Unlock()
 	s.flushCapacity(ctx, entry)
-	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, LaneSettlement: laneSettlement, GitCommits: runCommits(ctx, workspace, launchRev, launchDefault)}
 	if automaticReview && status == "completed" && len(final.GitCommits) > 0 && launchRev != "" {
-		final.ReviewRange = completedReviewRange(ctx, s.workspace, launchRev)
+		final.ReviewRange = completedReviewRange(ctx, workspace, launchRev)
 	}
 	if code == "vendor_limit" {
 		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt

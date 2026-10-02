@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/lanecontrol"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -23,23 +24,24 @@ const GenerationHeader = "X-Aeon-Daemon-Generation"
 
 // Telemetry contains only bounded identifiers and counters, never vendor text.
 type Telemetry struct {
-	ReviewRange   *reviewgate.CommitRange `json:"review_range,omitempty"`
-	LimitWindow   string                  `json:"limit_window,omitempty"`
-	LimitResetsAt *time.Time              `json:"limit_resets_at,omitempty"`
-	Sequence      int64                   `json:"sequence"`
-	Kind          string                  `json:"kind"`
-	Status        string                  `json:"status,omitempty"`
-	Input         int64                   `json:"input_tokens_delta"`
-	Output        int64                   `json:"output_tokens_delta"`
-	Cached        int64                   `json:"cached_input_tokens_delta"`
-	Reasoning     int64                   `json:"reasoning_tokens_delta"`
-	Cost          int64                   `json:"cost_micros_delta"`
-	Tools         int32                   `json:"tool_count_delta"`
-	Turns         int32                   `json:"turn_count_delta"`
-	Model         string                  `json:"effective_model,omitempty"`
-	Evidence      string                  `json:"model_evidence,omitempty"`
-	ErrorCode     string                  `json:"error_code,omitempty"`
-	GitCommits    []GitCommit             `json:"git_commits,omitempty"`
+	LaneSettlement *lanecontrol.Settlement `json:"lane_settlement,omitempty"`
+	ReviewRange    *reviewgate.CommitRange `json:"review_range,omitempty"`
+	LimitWindow    string                  `json:"limit_window,omitempty"`
+	LimitResetsAt  *time.Time              `json:"limit_resets_at,omitempty"`
+	Sequence       int64                   `json:"sequence"`
+	Kind           string                  `json:"kind"`
+	Status         string                  `json:"status,omitempty"`
+	Input          int64                   `json:"input_tokens_delta"`
+	Output         int64                   `json:"output_tokens_delta"`
+	Cached         int64                   `json:"cached_input_tokens_delta"`
+	Reasoning      int64                   `json:"reasoning_tokens_delta"`
+	Cost           int64                   `json:"cost_micros_delta"`
+	Tools          int32                   `json:"tool_count_delta"`
+	Turns          int32                   `json:"turn_count_delta"`
+	Model          string                  `json:"effective_model,omitempty"`
+	Evidence       string                  `json:"model_evidence,omitempty"`
+	ErrorCode      string                  `json:"error_code,omitempty"`
+	GitCommits     []GitCommit             `json:"git_commits,omitempty"`
 }
 
 // GitCommit is one commit this run introduced after its launch revision.
@@ -69,6 +71,9 @@ func terminal(s string) bool {
 	return false
 }
 func (t Telemetry) validate() error {
+	if t.LaneSettlement != nil && (t.Kind != "finished" || t.LaneSettlement.ElapsedMS < 0) {
+		return workorders.Fail(400, "lane settlement requires finished telemetry and nonnegative elapsed time")
+	}
 	if t.Sequence < 1 || t.Input < 0 || t.Output < 0 || t.Cached < 0 || t.Reasoning < 0 || t.Cost < 0 || t.Tools < 0 || t.Turns < 0 ||
 		t.Cached > 1_000_000_000_000 || t.Reasoning > 1_000_000_000_000 {
 		return workorders.Fail(400, "positive sequence and nonnegative counters required")
@@ -130,6 +135,9 @@ func (t Telemetry) validate() error {
 }
 
 func sameTelemetry(a, b Telemetry) bool {
+	if (a.LaneSettlement == nil) != (b.LaneSettlement == nil) || a.LaneSettlement != nil && *a.LaneSettlement != *b.LaneSettlement {
+		return false
+	}
 	if (a.ReviewRange == nil) != (b.ReviewRange == nil) || a.ReviewRange != nil && *a.ReviewRange != *b.ReviewRange {
 		return false
 	}
@@ -256,6 +264,13 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = applyRunUsage(ctx, tx, &v, t); err != nil {
 		return nil, err
 	}
+	if t.Kind == "finished" && v.LaneEnvelopeID != nil {
+		if err = lanecontrol.SettleTx(ctx, tx, v.ID, t.LaneSettlement); err != nil {
+			return nil, err
+		}
+	} else if t.LaneSettlement != nil {
+		return nil, workorders.Fail(400, "settlement requires a lane run")
+	}
 	if m.usage != nil {
 		if err = m.usage(ctx, tx, p, v, t); err != nil {
 			return nil, err
@@ -272,7 +287,7 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.BlockBudget(ctx, tx, p, o); err != nil {
 		return nil, err
 	}
-	if t.ReviewRange != nil && m.reviews != nil {
+	if t.ReviewRange != nil && m.reviews != nil && v.LaneEnvelopeID == nil {
 		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange); err != nil {
 			return nil, err
 		}
