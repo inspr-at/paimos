@@ -133,6 +133,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
+	if req.Header.Get(stepup.Header) != "" {
+		proofHTTP := *hc
+		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &proofHTTP
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		request := req.Clone(ctx)
 		if req.GetBody != nil {

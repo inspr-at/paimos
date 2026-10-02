@@ -537,7 +537,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 </template>
 
 <style scoped>
-.computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--text-muted); font-size: 12px; }
+.computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--ink-2); font-size: 12px; }
 .ac { position: relative; display: grid; gap: 14px; min-width: 0; z-index: 3; container: ac / inline-size; }
 .ac-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
 .ac-title { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }

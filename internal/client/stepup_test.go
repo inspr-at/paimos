@@ -184,3 +184,28 @@ func TestOrdinaryResponseNeverAsksAgentd(t *testing.T) {
 		srv.Close()
 	}
 }
+
+func TestSuppliedStepUpProofIsNeverRedirectedOrReconfirmed(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPreconditionRequired} {
+		leaked := false
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked = true }))
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if status == http.StatusPreconditionRequired {
+				writeChallenge(w)
+				return
+			}
+			http.Redirect(w, r, target.URL, status)
+		}))
+		c := New(srv.URL, "synthetic")
+		c.ConfirmStepUp = func(context.Context, string) (string, error) {
+			t.Error("existing proof prompted again")
+			return testSignature, nil
+		}
+		err := c.DoWithHeaders(t.Context(), "POST", "/api/keys", nil, nil, map[string]string{stepup.Header: testChallengeID + "." + testSignature})
+		if err == nil || leaked {
+			t.Error("existing proof redirected or silently accepted")
+		}
+		srv.Close()
+		target.Close()
+	}
+}
