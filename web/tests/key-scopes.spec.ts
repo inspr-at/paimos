@@ -150,8 +150,9 @@ test('people without keys.manage have no scope edit action', async ({ page }) =>
   await expect(page.getByRole('button', { name: /^Edit scopes/ })).toHaveCount(0)
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 1440, 390]) {
-  test(`scopes fit ${width}px in ${theme} with keyboard access`, async ({ page }, testInfo) => {
+const scopeLayouts = [{ width: 1600 }, { width: 1440 }, { width: 390 }, { width: 390, wideFont: true }]
+for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } of scopeLayouts) {
+  test(`scopes fit ${width}px in ${theme} with keyboard access${wideFont ? ' (wide system font)' : ''}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const errors = watchErrors(page)
@@ -162,6 +163,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 1440,
     await page.screenshot({ path: join(dir, `keys-${width}-${theme}.png`), fullPage: true })
     await edit(page)
     const dialog = sheet(page)
+    // OS font metrics differ; a wider font must not expand the action on role confirmation.
+    if (wideFont) await page.addStyleTag({ content: '.actions .btn { font-family: monospace; }' })
     const scope = dialog.getByRole('checkbox', { name: /nodes\.write/ })
     await expectStableControls({
       controls: {
