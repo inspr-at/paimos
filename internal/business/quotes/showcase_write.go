@@ -249,6 +249,16 @@ func createCustomerQuote(ctx context.Context, tx pgx.Tx, p tenant.Principal, tit
 	if settings.Revision == 0 && projectID == "" {
 		return out, bad("quote settings must be configured for a customer-only draft")
 	}
+	var profile *documentProfileSnapshot
+	if settings.Revision > 0 {
+		if profileID == "" {
+			profileID = settings.DefaultProfileID
+		}
+		profile, err = readProfileSnapshot(ctx, tx, profileID)
+		if err != nil {
+			return out, err
+		}
+	}
 	var offerNo, customerNo string
 	var day time.Time
 	if settings.Revision > 0 {
@@ -287,13 +297,7 @@ func createCustomerQuote(ctx context.Context, tx pgx.Tx, p tenant.Principal, tit
 		if err != nil {
 			return out, err
 		}
-		if profileID == "" {
-			profileID = settings.DefaultProfileID
-		}
-		doc.Profile, err = readProfileSnapshot(ctx, tx, profileID)
-		if err != nil {
-			return out, err
-		}
+		doc.Profile = profile
 		raw, err := marshalDraft(doc)
 		if err != nil {
 			return out, err

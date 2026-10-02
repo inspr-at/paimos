@@ -776,6 +776,12 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	var out draftRow
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
+		// Bundle refresh takes profile, quote, then draft. Take the snapshot
+		// first, including when this selection will later fail its revision.
+		profile, err := readProfileSnapshot(r.Context(), tx, in.ProfileID)
+		if err != nil {
+			return err
+		}
 		q, err := readQuote(r.Context(), tx, id, true)
 		if err != nil {
 			return err
@@ -789,10 +795,6 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		if current.DraftRevision != in.ExpectedDraftRevision {
 			return conflict("draft revision is stale")
-		}
-		profile, err := readProfileSnapshot(r.Context(), tx, in.ProfileID)
-		if err != nil {
-			return err
 		}
 		doc, err := decodeDocument(current.Document)
 		if err != nil {
