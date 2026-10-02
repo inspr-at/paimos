@@ -137,18 +137,35 @@ test('missing release is planned read-only; opt-in creates a draft and all nine 
   assert.equal(writes(f).length, count);
 });
 
-test('partial draft reuses the original signed bytes and adds only missing assets', () => {
-  const name = BINARIES[0], f = fixture([name]);
+for (const name of BINARIES.filter(name => !STATIC_BINARIES.includes(name))) test(`partial draft restores verified original ${name} bytes and adds only missing assets`, () => {
+  const f = fixture([name]);
   const original = Buffer.from(f.bytes.get(name));
   writeFileSync(join(f.dir, name), 'new nondeterministic signature');
   assert.equal(restore(release, name, f.dir, f.run), true);
   assert.ok(readFileSync(join(f.dir, name)).equals(original));
-  writeFileSync(join(f.dir, name), 'rebuilt differently');
   complete(release, f.dir, { write: true }, f.run);
   assert.ok(f.bytes.get(name).equals(original));
   assert.equal(writes(f).length, 8);
   assert.ok(writes(f).every(call => call[2] === 'upload' && !call.includes('--clobber') && !call[4].endsWith(`/${name}`)));
 });
+
+for (const name of BINARIES.filter(name => !STATIC_BINARIES.includes(name))) {
+  for (const withChecksum of [false, true]) test(`pre-seeded ${name} differing from verified dist is refused${withChecksum ? ' even with matching uploaded checksums' : ''}`, () => {
+    const f = fixture(withChecksum ? [name, 'SHA256SUMS'] : [name]);
+    // Plant different release bytes after restore/signature/team/version verification.
+    f.bytes.set(name, Buffer.from(`pre-seeded unverified Darwin binary: ${name}`));
+    f.bytes.set('SHA256SUMS', Buffer.from(BINARIES.map(binary => `${sha(f.bytes.get(binary))}  ${binary}\n`).join('')));
+    for (const asset of f.state.assets) {
+      asset.size = f.bytes.get(asset.name).length;
+      asset.digest = `sha256:${sha(f.bytes.get(asset.name))}`;
+    }
+    const verified = readFileSync(join(f.dir, name));
+    assert.throws(() => complete(release, f.dir, { write: true }, f.run), /existing Darwin asset differs from verified dist/);
+    assert.deepEqual(writes(f), []);
+    assert.equal(existsSync(join(f.dir, 'SHA256SUMS')), false);
+    assert.ok(readFileSync(join(f.dir, name)).equals(verified));
+  });
+}
 
 for (const name of STATIC_BINARIES) {
   for (const withChecksum of [false, true]) test(`pre-seeded ${name} differing from tagged rebuild is refused${withChecksum ? ' even with matching uploaded checksums' : ''}`, () => {

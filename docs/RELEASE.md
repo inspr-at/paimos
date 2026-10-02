@@ -533,7 +533,9 @@ available. Before any upload or checksum write, all six existing static Linux
 tagged source (`CGO_ENABLED=0`, `-trimpath`, the same `-X` version). Restored
 Darwin agents must pass strict codesign verification, team P66J39QV6V and an
 exact `--version` match to the release coordinate before artifact upload; a
-valid signature from another coordinate is refused. It then verifies all eight
+valid signature from another coordinate is refused. Before any upload or
+checksum write, each existing Darwin agent must also byte-match the verified
+dist artifact; different bytes uploaded after restore fail closed. It then verifies all eight
 binaries against `SHA256SUMS`. Without an
 existing checksum file it computes one over the preserved original bytes plus
 new missing binaries. With a checksum file already uploaded, missing rebuilt

@@ -153,7 +153,14 @@ export function complete(release, directory, { write = false, pinEvidence = '' }
     if (bytes.has(name) && !bytes.get(name).equals(rebuilt)) fail(`existing static asset differs from tagged rebuild: ${name}; reserve a new coordinate`);
     if (!bytes.has(name)) bytes.set(name, rebuilt);
   }
-  for (const name of BINARIES) if (!bytes.has(name)) bytes.set(name, readFileSync(join(directory, name)));
+  // Bind existing Darwin bytes to the artifact that passed signature/team/version
+  // verification, including assets uploaded after the restore gate.
+  for (const name of BINARIES) {
+    if (STATIC_BINARIES.includes(name)) continue;
+    const verified = readFileSync(join(directory, name));
+    if (bytes.has(name) && !bytes.get(name).equals(verified)) fail(`existing Darwin asset differs from verified dist: ${name}; reserve a new coordinate`);
+    if (!bytes.has(name)) bytes.set(name, verified);
+  }
   if (!bytes.has('SHA256SUMS')) bytes.set('SHA256SUMS', Buffer.from(BINARIES.map(name => `${hash(bytes.get(name))}  ${name}\n`).join('')));
   const sums = checksumMap(bytes.get('SHA256SUMS').toString());
   for (const name of BINARIES) {
