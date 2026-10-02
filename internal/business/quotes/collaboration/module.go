@@ -45,9 +45,10 @@ var errRate = errors.New("presence updates are too frequent")
 var errInvalid = errors.New("invalid presence request")
 
 type Module struct {
-	pool     *pgxpool.Pool
-	registry *plugins.Registry
-	now      func() time.Time
+	pool        *pgxpool.Pool
+	registry    *plugins.Registry
+	now         func() time.Time
+	streamTicks func() (<-chan time.Time, func())
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -592,14 +593,21 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lastPresence, _ := json.Marshal(first)
-	lastKeepalive := time.Now()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	lastKeepalive := m.now()
+	var ticks <-chan time.Time
+	var stop func()
+	if m.streamTicks != nil {
+		ticks, stop = m.streamTicks()
+	} else {
+		ticker := time.NewTicker(time.Second)
+		ticks, stop = ticker.C, ticker.Stop
+	}
+	defer stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case now := <-ticks:
 			var s snapshot
 			var notices []durableNotice
 			err = m.inQuote(r.Context(), p, id, false, func(tx pgx.Tx) error {
@@ -627,12 +635,12 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				lastPresence = current
-				lastKeepalive = time.Now()
-			} else if time.Since(lastKeepalive) >= 15*time.Second {
+				lastKeepalive = now
+			} else if now.Sub(lastKeepalive) >= 15*time.Second {
 				if _, err = fmt.Fprint(w, ": keepalive\n\n"); err != nil || rc.Flush() != nil {
 					return
 				}
-				lastKeepalive = time.Now()
+				lastKeepalive = now
 			}
 		}
 	}
