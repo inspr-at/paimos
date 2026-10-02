@@ -52,9 +52,11 @@ and `launch_failed`. A future qualified sign-in check can distinguish confirmed
 sign-out (`auth_failed`) from `identity_mismatch`; both block dispatch, while only
 confirmed sign-out asks for another login. A fresh qualified success clears prior
 failures and allows dispatch. The historical account-probe request keeps only
-`auth_failed` and `unavailable`: identity mismatch maps to the former, measurement
-failures and unqualified checks to the latter. Raw vendor output and identity are
-never uploaded. These classifications do **not** qualify a sign-in command.
+`auth_failed` and `unavailable`: only confirmed sign-out maps to `auth_failed`;
+identity mismatch, measurement failures and unqualified checks map to `unavailable`.
+The bounded lifecycle reason remains `identity_mismatch`. Raw vendor output and
+identity are never uploaded. These classifications do **not** qualify a sign-in
+command.
 
 #### AEON-543 qualification attempt (2026-10-02)
 

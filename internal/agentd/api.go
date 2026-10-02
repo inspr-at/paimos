@@ -447,7 +447,7 @@ func (r *Remote) ProbeStatus(ctx context.Context, accountID, daemonID, generatio
 	// travel in lifecycle details, never with vendor output or identity.
 	if !status.OK {
 		switch status.Failure {
-		case ProbeAuthFailed, ProbeIdentityMismatch:
+		case ProbeAuthFailed:
 			status.Failure = ProbeAuthFailed
 		default:
 			status.Failure = ProbeUnavailable

@@ -163,7 +163,9 @@ func TestACPProbeOutcomesGateDispatchAndRecover(t *testing.T) {
 func TestACPFailureReportsPreserveHistoricalContract(t *testing.T) {
 	for _, tc := range []struct{ failure, wire string }{
 		{ProbeAuthFailed, ProbeAuthFailed},
-		{ProbeIdentityMismatch, ProbeAuthFailed},
+		// Identity mismatch needs attention, not another sign-in. Only a
+		// confirmed sign-out may use the historical auth_failed category.
+		{ProbeIdentityMismatch, ProbeUnavailable},
 		{ProbeTimeout, ProbeUnavailable},
 		{ProbeProtocol, ProbeUnavailable},
 		{ProbeLaunchFailed, ProbeUnavailable},
