@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -30,6 +30,7 @@ func (e prefsEvidence) ResidencyClass(_ context.Context, _ pgx.Tx, a agentaccoun
 }
 func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 	f := setup(t)
+	f.tx(t, f.person, func(tx pgx.Tx) error { return modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID) })
 	modelregistry.New(f.d.App).Mount(f.mux)
 	agentaccounts.New(f.d.App).Mount(f.mux)
 	alias := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}

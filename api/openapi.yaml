@@ -14071,7 +14071,7 @@ components:
     ModelPreferenceLevelWrite:
       type: object
       additionalProperties: false
-      required: [revision, residency, residency_locked, prefs_locked]
+      required: [revision]
       properties:
         revision: {type: integer, format: int64, minimum: 0}
         residency: {type: [string, 'null'], enum: [any, eu, local, null]}
@@ -14266,6 +14266,7 @@ components:
       properties:
         role: {type: string}
         project_id: {type: string, format: uuid}
+        selector: {$ref: '#/components/schemas/ModelSelector'}
         ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:

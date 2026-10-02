@@ -30,8 +30,8 @@ func TestModelTicketResolveAndReadOnlyPrefs(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	t.Setenv("PAIMOS_URL", server.URL)
-	t.Setenv("PAIMOS_API_KEY", testKey)
+	t.Setenv("AEON_URL", server.URL)
+	t.Setenv("AEON_API_KEY", testKey)
 	base := []string{"aeon", "--config", filepath.Join(t.TempDir(), "missing")}
 	code, out, errout := runCLI(append(base, "model", "resolve", "--ticket", "AEON-123"), "")
 	if code != 0 || errout != "" || !strings.Contains(out, "Why: backend · complex · set by person") || !strings.Contains(out, "loosens a provider lock") {

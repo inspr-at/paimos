@@ -115,12 +115,18 @@ func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]str
 		return 0, err
 	}
 	count := 0
+	byHarness := map[string][]Account{}
 	for profileID, harness := range profiles {
-		fs, err := loadFences(ctx, tx, harness)
-		if err != nil {
-			return 0, err
+		candidates, loaded := byHarness[harness]
+		if !loaded {
+			fs, err := loadFences(ctx, tx, harness)
+			if err != nil {
+				return 0, err
+			}
+			candidates = applyFence(accounts, fs, projectID)
+			byHarness[harness] = candidates
 		}
-		for _, a := range applyFence(accounts, fs, projectID) {
+		for _, a := range candidates {
 			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
 				continue
 			}

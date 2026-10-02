@@ -100,6 +100,18 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if out.Trace.Kind == "" {
+			kind, fallback, err := modelprefs.LookupKind(ctx, tx, q.Area, q.ProjectID)
+			if err != nil {
+				return err
+			}
+			out.Trace.Kind = kind.Slug
+			out.Trace.KindSource = "ticket"
+			if fallback {
+				out.Trace.KindSource = "fallback"
+			}
+		}
+		out.Trace.Hard = append(out.Trace.Hard, "residency")
 		out.Trace.Role = out.Role
 		out.Trace.ProjectID = q.ProjectID
 		out.Trace.TicketRequirement = modelprefs.NormalizeResidency(q.TicketResidency)

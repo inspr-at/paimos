@@ -22,6 +22,9 @@ import (
 )
 
 func prefDoc(t *testing.T, p tenant.Principal) preferenceDocument {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { return modelprefs.SeedKinds(t.Context(), tx, p.TenantID) }); err != nil {
+		t.Fatal(err)
+	}
 	return decode[preferenceDocument](t, &p, "GET", "/api/model-preferences", "", 200)
 }
 func prefRowBody(revision int64, normal, complex modelprefs.Cell, locked bool) string {
