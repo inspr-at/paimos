@@ -31,7 +31,7 @@ type wireProcess struct {
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
 	stdout      io.ReadCloser
-	writeMu     sync.Mutex
+	writeMu     contextMutex
 	mu          sync.Mutex
 	eventMu     sync.Mutex
 	pending     map[string]chan json.RawMessage
@@ -115,7 +115,14 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	p := &wireProcess{cmd: cmd, stdin: stdin, stdout: stdout, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
 	p.identity = ownedprocess.Identity{ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: time.Now().UTC()}
 	p.lifetime = ownedprocess.Track(cmd)
-	go func() { p.waitErr = p.lifetime.Wait(); close(p.waitDone) }()
+	if err := p.lifetime.Verify(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = p.lifetime.Wait()
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, err
+	}
+	go func() { p.waitErr = p.lifetime.WaitGroup(); _ = stdin.Close(); close(p.waitDone) }()
 	go p.read(stdout)
 	return p, nil
 }
@@ -176,14 +183,13 @@ func (p *wireProcess) finishReader() error {
 // reader itself, including when Stop finds the root already reaped.
 func (p *wireProcess) failStart(err error) (Process, error) {
 	p.closeReader()
-	_ = p.Stop(context.Background())
-	_ = p.finishReader()
+	cleanupErr := errors.Join(p.Stop(context.Background()), p.finishReader())
 	// A vendor refusal is a settled run only when the owned child exit is proven.
 	// Return that process to the supervisor for normal vendor_limit telemetry.
-	if p.vendorLimited.Load() && p.ProcessExited() {
+	if cleanupErr == nil && p.vendorLimited.Load() && p.ProcessExited() {
 		return &refusedProcess{p}, nil
 	}
-	return nil, err
+	return nil, errors.Join(err, cleanupErr)
 }
 
 // A refused startup exposes exit evidence and no controls.
@@ -268,6 +274,11 @@ func (p *wireProcess) send(v any) error {
 }
 
 func (p *wireProcess) sendContext(ctx context.Context, v any) error {
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -277,7 +288,9 @@ func (p *wireProcess) sendContext(ctx context.Context, v any) error {
 	if len(data) > 8<<20 {
 		return errors.New("adapter request exceeds bound")
 	}
-	p.writeMu.Lock()
+	if err := p.writeMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer p.writeMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -285,7 +298,42 @@ func (p *wireProcess) sendContext(ctx context.Context, v any) error {
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 0 {
 		return context.DeadlineExceeded
 	}
+	// Closing the owned pipe interrupts a blocked Write. Never leave an
+	// asynchronous writer that could deliver an expired frame later. A partial
+	// frame poisons the stream, so cancellation also ends the owned child.
+	closed := make(chan struct{})
+	closeInput := func() {
+		_ = p.stdin.Close()
+		p.closeReader()
+		if p.lifetime != nil {
+			_ = p.lifetime.Signal(true)
+		}
+	}
+	stopClose := context.AfterFunc(ctx, func() {
+		closeInput()
+		close(closed)
+	})
 	_, err = p.stdin.Write(append(data, '\n'))
+	stopped := stopClose()
+	if !stopped {
+		<-closed
+	}
+	if ctx.Err() != nil {
+		if stopped {
+			closeInput()
+		}
+		// Await the retained root's cleanup, not a numeric PID lookup. Do not
+		// join the reader here: an event callback may itself be this writer.
+		if p.waitDone != nil {
+			select {
+			case <-p.waitDone:
+				return errors.Join(ctx.Err(), p.cleanupResult())
+			case <-time.After(readerCleanupTimeout):
+				return errors.Join(ctx.Err(), errors.New("adapter child cleanup unconfirmed"))
+			}
+		}
+		return ctx.Err()
+	}
 	if err != nil {
 		return errors.New("adapter input unavailable")
 	}
@@ -329,7 +377,7 @@ func (p *wireProcess) request(ctx context.Context, protocol, method string, para
 	} else {
 		frame = map[string]any{"jsonrpc": "2.0", "id": number, "method": method, "params": params}
 	}
-	if err := p.send(frame); err != nil {
+	if err := p.sendContext(ctx, frame); err != nil {
 		return nil, err
 	}
 	var raw json.RawMessage
@@ -409,7 +457,7 @@ func (p *wireProcess) Stop(ctx context.Context) error {
 	if err := p.lifetime.Verify(); err != nil {
 		select {
 		case <-p.waitDone:
-			return nil
+			return p.cleanupResult()
 		default:
 			return ErrNotOwned
 		}
@@ -419,15 +467,29 @@ func (p *wireProcess) Stop(ctx context.Context) error {
 	}
 	select {
 	case <-p.waitDone:
-		return nil
+		return p.cleanupResult()
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(2 * time.Second):
-		if err := p.lifetime.Verify(); err == nil {
-			return p.lifetime.Signal(true)
+		// WaitGroup may already own final signaling. In either case observe
+		// cleanup before reporting that this owned process has stopped.
+		_ = p.lifetime.Signal(true)
+		select {
+		case <-p.waitDone:
+			return p.cleanupResult()
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(readerCleanupTimeout):
+			return ErrForceExitUnconfirmed
 		}
-		return nil
 	}
+}
+
+func (p *wireProcess) cleanupResult() error {
+	if errors.Is(p.waitErr, ownedprocess.ErrCleanupUnconfirmed) {
+		return ownedprocess.ErrCleanupUnconfirmed
+	}
+	return nil
 }
 
 // Ownership is available only while this exact, unreaped group leader is owned.

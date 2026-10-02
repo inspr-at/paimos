@@ -61,15 +61,17 @@ func (p *grokProxy) accept() {
 
 func (p *grokProxy) handle(client net.Conn) {
 	_ = client.SetDeadline(time.Now().Add(180 * time.Second))
-	reader := bufio.NewReaderSize(client, 4096)
+	// The sentinel byte detects overflow before an unterminated line can
+	// allocate or consume more than the total header budget.
+	reader := bufio.NewReaderSize(io.LimitReader(client, 4097), 4096)
 	var head []byte
 	for len(head) <= 4096 {
-		part, err := reader.ReadBytes('\n')
-		head = append(head, part...)
-		if err != nil || len(head) > 4096 {
+		part, err := reader.ReadSlice('\n')
+		if err != nil || len(part) > 4096-len(head) {
 			p.violation.Store(true)
 			return
 		}
+		head = append(head, part...)
 		if bytes.HasSuffix(head, []byte("\r\n\r\n")) {
 			break
 		}
@@ -101,7 +103,8 @@ func (p *grokProxy) handle(client net.Conn) {
 	wait.Add(1)
 	go func() {
 		defer wait.Done()
-		_, copyErr := io.CopyN(upstream, reader, 10<<20+1)
+		// Drain any read-ahead, then continue beyond the header-only limit.
+		_, copyErr := io.CopyN(upstream, io.MultiReader(reader, client), 10<<20+1)
 		if copyErr == nil {
 			p.violation.Store(true)
 		}
