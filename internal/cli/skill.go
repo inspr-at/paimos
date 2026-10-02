@@ -97,7 +97,7 @@ func (rt *runtime) cmdSkillRender() *Command {
 			if checkOnly {
 				return rt.checkRendered(target, rendered.Body)
 			}
-			if err := writeRendered(target, rendered.Body); err != nil {
+			if err := writeRenderedInWorkspace(root, target, rendered.Body); err != nil {
 				return err
 			}
 			rel := target
@@ -659,6 +659,18 @@ func resolveSkillPath(out, root, suggested string) (string, error) {
 	return filepath.Join(root, suggested), nil
 }
 
+func writeRenderedInWorkspace(workspace, path, body string) error {
+	rel, err := filepath.Rel(workspace, path)
+	if err != nil {
+		return fmt.Errorf("render path relative to workspace: %w", err)
+	}
+	if !filepath.IsLocal(rel) {
+		// An explicit --out may point outside the workspace.
+		return writeRendered(path, body)
+	}
+	return writeRenderedRelative(workspace, rel, body)
+}
+
 func writeRendered(path, body string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -682,6 +694,16 @@ func writeRendered(path, body string) error {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
+	if err := fillRenderedTemp(f, path, body); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}
+
+func fillRenderedTemp(f *os.File, path, body string) error {
 	if _, err := f.WriteString(body); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
@@ -690,9 +712,6 @@ func writeRendered(path, body string) error {
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", path, err)
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
-		return fmt.Errorf("rename %s: %w", path, err)
 	}
 	return nil
 }

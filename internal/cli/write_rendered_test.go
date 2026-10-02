@@ -33,7 +33,7 @@ func TestWriteRenderedIgnoresPlantedTemp(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := writeRendered(path, "new body"); err != nil {
+			if err := writeRenderedInWorkspace(dir, path, "new body"); err != nil {
 				t.Fatal(err)
 			}
 			assertRenderedFile(t, path, "new body")
@@ -80,7 +80,7 @@ func TestWriteRenderedRefusesSymlinkDestination(t *testing.T) {
 			if err := os.Symlink(link, path); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeRendered(path, "replacement"); err == nil || !strings.Contains(err.Error(), "symlink destination") {
+			if err := writeRenderedInWorkspace(base, path, "replacement"); err == nil || !strings.Contains(err.Error(), "symlink destination") {
 				t.Fatalf("expected symlink refusal, got %v", err)
 			}
 			if got, err := os.Readlink(path); err != nil || got != link {
@@ -107,7 +107,7 @@ func TestWriteRenderedConcurrentAtomicReplacement(t *testing.T) {
 	for i := range writers {
 		bodies[strings.Repeat(fmt.Sprintf("writer %02d\n", i), 2048)] = true
 	}
-	if err := writeRendered(path, "initial"); err != nil {
+	if err := writeRenderedInWorkspace(dir, path, "initial"); err != nil {
 		t.Fatal(err)
 	}
 	start := make(chan struct{})
@@ -140,7 +140,7 @@ func TestWriteRenderedConcurrentAtomicReplacement(t *testing.T) {
 		go func() {
 			ready <- struct{}{}
 			<-start
-			results <- writeRendered(path, body)
+			results <- writeRenderedInWorkspace(dir, path, body)
 		}()
 	}
 	for range writers {
@@ -165,15 +165,16 @@ func TestWriteRenderedConcurrentAtomicReplacement(t *testing.T) {
 }
 
 func TestWriteRenderedCreatesParentsAndReplacesPrivately(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "output", "rendered")
-	if err := writeRendered(path, "first"); err != nil {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "nested", "output", "rendered")
+	if err := writeRenderedInWorkspace(workspace, path, "first"); err != nil {
 		t.Fatal(err)
 	}
 	assertRenderedFile(t, path, "first")
 	if err := os.Chmod(path, 0o666); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeRendered(path, "second"); err != nil {
+	if err := writeRenderedInWorkspace(workspace, path, "second"); err != nil {
 		t.Fatal(err)
 	}
 	assertRenderedFile(t, path, "second")
@@ -186,13 +187,100 @@ func TestWriteRenderedCleansUpOnRenameFailure(t *testing.T) {
 	if err := os.Mkdir(path, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeRendered(path, "body"); err == nil || !strings.Contains(err.Error(), "rename") {
+	if err := writeRenderedInWorkspace(dir, path, "body"); err == nil || !strings.Contains(err.Error(), "rename") {
 		t.Fatalf("expected rename failure, got %v", err)
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
 		t.Fatalf("destination directory changed: %v", err)
 	}
 	assertNoRenderedTemps(t, dir)
+}
+
+func TestWriteRenderedRefusesAncestorSymlink(t *testing.T) {
+	for _, ancestor := range []string{".agents", filepath.Join(".agents", "skills", "ops")} {
+		for _, target := range []string{"existing", "missing-parents", "dangling"} {
+			t.Run(ancestor+"/"+target, func(t *testing.T) {
+				workspace, outside := t.TempDir(), t.TempDir()
+				link := filepath.Join(workspace, ancestor)
+				if err := os.MkdirAll(filepath.Dir(link), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				victim := filepath.Join(outside, "rendered")
+				if err := os.WriteFile(victim, []byte("original"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				linkTarget := outside
+				if target == "dangling" {
+					linkTarget = filepath.Join(outside, "missing")
+				}
+				if err := os.Symlink(linkTarget, link); err != nil {
+					t.Fatal(err)
+				}
+				suffix := "rendered"
+				if target == "missing-parents" {
+					suffix = filepath.Join("new", "nested", "rendered")
+				}
+				path, err := resolveSkillPath("", workspace, filepath.Join(ancestor, suffix))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := writeRenderedInWorkspace(workspace, path, "replacement"); err == nil || !strings.Contains(err.Error(), "without following symlinks") {
+					t.Errorf("expected ancestor symlink refusal, got %v", err)
+				}
+				assertRenderedFile(t, victim, "original")
+				entries, err := os.ReadDir(outside)
+				if err != nil || len(entries) != 1 || entries[0].Name() != "rendered" {
+					t.Fatalf("outside directory changed: %v, %v", entries, err)
+				}
+				if got, err := os.Readlink(link); err != nil || got != linkTarget {
+					t.Fatalf("ancestor symlink changed: %q, %v", got, err)
+				}
+			})
+		}
+	}
+}
+
+func TestWriteRenderedIndexRefusesAncestorSymlink(t *testing.T) {
+	workspace, outside := t.TempDir(), t.TempDir()
+	const original = `{"schema_version":"1","entries":[]}`
+	victim := filepath.Join(outside, "rendered-skills.json")
+	if err := os.WriteFile(victim, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace, ".paimos")); err != nil {
+		t.Fatal(err)
+	}
+	err := upsertRenderedSkill(workspace, renderedSkillEntry{Project: "AEON", Agent: "ops", Harness: "codex", Path: ".agents/skills/ops/SKILL.md"})
+	if err == nil || !strings.Contains(err.Error(), "without following symlinks") {
+		t.Errorf("expected index ancestor symlink refusal, got %v", err)
+	}
+	assertRenderedFile(t, victim, original)
+	assertNoRenderedTemps(t, outside)
+}
+
+func TestWriteRenderedExplicitOutsideWorkspace(t *testing.T) {
+	workspace, outside := t.TempDir(), t.TempDir()
+	for _, relative := range []bool{false, true} {
+		t.Run(fmt.Sprintf("relative=%t", relative), func(t *testing.T) {
+			out := filepath.Join(outside, "nested", "rendered")
+			if relative {
+				var err error
+				out, err = filepath.Rel(workspace, out)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			path, err := resolveSkillPath(out, workspace, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeRenderedInWorkspace(workspace, path, "explicit output"); err != nil {
+				t.Fatal(err)
+			}
+			assertRenderedFile(t, path, "explicit output")
+			assertNoRenderedTemps(t, filepath.Dir(path))
+		})
+	}
 }
 
 func assertRenderedFile(t *testing.T, path, want string) {
