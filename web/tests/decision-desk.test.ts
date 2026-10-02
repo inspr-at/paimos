@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { loadDeskProjection, type DeskItem, type DeskProjection } from '../src/lib/decisionDesk.ts'
+import { readDeskProjection, loadDeskProjection, type DeskItem, type DeskProjection } from '../src/lib/decisionDesk.ts'
 
 const item = (id: string, held = false): DeskItem => ({ id, kind: 'question', revision: 1, title: id, held, created_at: '', href: `/agents?needs=q:${id}`, source: `/api/questions/${id}` })
 const page = (items: DeskItem[], next?: string, open = 3): DeskProjection => ({ items, counts: { open, held: 1, chores: 2 }, has_more: !!next, next_cursor: next, as_of: '2026-10-02T12:00:00Z' })
@@ -24,4 +24,25 @@ test('bounded or changing coverage stays explicit while the count stays server-d
   assert.equal(bounded.truncated, true)
   const changed = await loadDeskProjection(undefined, async () => page([item('one')], undefined, 2))
   assert.equal(changed.truncated, true)
+})
+
+test('projection reader bounds streamed bytes before JSON decoding', async () => {
+  const original = globalThis.fetch
+  let cancelled = false
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1)) },
+    cancel() { cancelled = true },
+  }))
+  try {
+    await assert.rejects(readDeskProjection(), /too large/)
+    assert.equal(cancelled, true)
+  } finally { globalThis.fetch = original }
+})
+test('invalid page bounds fail before starting a request', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('unexpected request') }
+  try {
+    await assert.rejects(readDeskProjection(101), /Invalid Decision Desk page/)
+    await assert.rejects(readDeskProjection(10, 'x'.repeat(513)), /Invalid Decision Desk page/)
+  } finally { globalThis.fetch = original }
 })

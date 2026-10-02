@@ -16,11 +16,12 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NearExpiry is shared with the phone worker's existing 30-second scan. A
-// deadline warning never overrides quiet hours or recipient escalation.
+// NearExpiry is the proposed warning window for the existing phone worker's
+// 30-second scan. Scheduler integration must retain quiet hours and escalation.
 const NearExpiry = 15 * time.Minute
 
 type Item struct {
@@ -129,10 +130,15 @@ func decodeCursor(raw string) (*cursor, error) {
 		return nil, err
 	}
 	var c cursor
-	if json.Unmarshal(b, &c) != nil || c.Bucket < 0 || c.Bucket > 2 || c.At.IsZero() || len(c.ID) != 36 || !validKind(c.Kind) {
+	if json.Unmarshal(b, &c) != nil || c.Bucket < 0 || c.Bucket > 2 || c.At.IsZero() || !validID(c.ID) || !validKind(c.Kind) {
 		return nil, errors.New("invalid cursor")
 	}
 	return &c, nil
+}
+
+func validID(id string) bool {
+	var uuid pgtype.UUID
+	return len(id) == 36 && uuid.Scan(id) == nil && uuid.Valid
 }
 
 func validKind(kind string) bool {

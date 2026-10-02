@@ -23,7 +23,11 @@ func NoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int) ([
 // CurrentTx rechecks access, source state, revision and held-work links directly
 // before transport. The caller reuses phone preferences and subscription checks.
 func CurrentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
-	page, err := readProjection(ctx, tx, p, 1, nil, true, false, item.ID, item.Kind)
+	return currentTx(ctx, tx, p, item, false)
+}
+
+func currentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, unclaimed bool) (bool, error) {
+	page, err := readProjection(ctx, tx, p, 1, nil, true, unclaimed, item.ID, item.Kind)
 	if err != nil {
 		return false, err
 	}
@@ -82,7 +86,7 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (boo
 		}
 		return false, err
 	}
-	current, err := CurrentTx(ctx, tx, p, item)
+	current, err := currentTx(ctx, tx, p, item, true)
 	if err != nil || !current {
 		return false, err
 	}
@@ -115,7 +119,7 @@ func FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, sta
 // Payload never includes title, question, rationale, context, findings or an
 // answer. Opening a pointer performs the source's normal authorization again.
 func Payload(item Item) ([]byte, error) {
-	if !validKind(item.Kind) || item.Kind == "doctrine" || len(item.ID) != 36 || item.Revision < 1 {
+	if !validKind(item.Kind) || item.Kind == "doctrine" || !validID(item.ID) || item.Revision < 1 {
 		return nil, errors.New("invalid desk pointer")
 	}
 	prefix := map[string]string{"question": "q:", "action_request": "m:"}[item.Kind]

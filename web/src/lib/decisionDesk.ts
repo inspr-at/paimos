@@ -11,11 +11,28 @@ export interface DeskProjection {
 }
 
 export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || (cursor?.length ?? 0) > 512) throw new Error('Invalid Decision Desk page.')
   const params = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : {}) })
   const response = await api(`/decision-desk/projection?${params}`, { signal })
   if (!response.ok) throw new APIError(response.status, `Decision Desk could not be read (${response.status}).`)
-  const page: DeskProjection = await response.json()
-  if (!Array.isArray(page.items) || page.items.length > 100 || !page.counts ||
+  // Bound bytes before decoding. The API timeout also covers its response body.
+  const maxBytes = 2 * 1024 * 1024
+  if (Number(response.headers.get('Content-Length')) > maxBytes) { await response.body?.cancel(); throw new Error('Decision Desk page is too large.') }
+  if (!response.body) throw new Error('Decision Desk returned an empty projection.')
+  const reader = response.body.getReader(), decoder = new TextDecoder()
+  let bytes = 0, body = ''
+  try {
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      bytes += chunk.value.byteLength
+      if (bytes > maxBytes) { await reader.cancel(); throw new Error('Decision Desk page is too large.') }
+      body += decoder.decode(chunk.value, { stream: true })
+    }
+    body += decoder.decode()
+  } finally { reader.releaseLock() }
+  const page: DeskProjection = JSON.parse(body)
+  if (!Array.isArray(page.items) || page.items.length > limit || !page.counts ||
     ![page.counts.open, page.counts.held, page.counts.chores].every(n => Number.isSafeInteger(n) && n >= 0) || typeof page.has_more !== 'boolean') {
     throw new Error('Decision Desk returned an invalid projection. Try again.')
   }

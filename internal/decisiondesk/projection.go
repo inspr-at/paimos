@@ -22,13 +22,19 @@ questions AS (
  SELECT q.node_id::text AS id,'question'::text AS kind,q.project_id::text AS project_id,q.revision,
  q.input->>'question' AS title,q.created_at,NULL::timestamptz AS expires_at,
  EXISTS(SELECT 1 FROM desk_askers a
-  CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(a.input->'blocked_node_ids','[]'::jsonb)) blocked(id)
-  JOIN nodes work ON work.tenant_id=a.tenant_id AND work.id::text=blocked.id AND work.project_id=a.project_id
-  JOIN node_kinds wk ON wk.tenant_id=work.tenant_id AND wk.id=work.kind_id
   WHERE a.tenant_id=q.tenant_id AND a.question_id=q.node_id
   AND a.input->>'meanwhile' IN ('parked','paused','stopped')
-  AND work.deleted_at IS NULL AND coalesce(work.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
-  AND (wk.slug IN ('ticket','task','epic','work_order') OR wk.field_schema->>'issue_family'='true')) AS held,
+  AND (EXISTS(SELECT 1
+   FROM jsonb_array_elements_text(coalesce(a.input->'blocked_node_ids','[]'::jsonb)) blocked(id)
+   JOIN nodes work ON work.tenant_id=a.tenant_id AND work.id::text=blocked.id AND work.project_id=a.project_id
+   JOIN node_kinds wk ON wk.tenant_id=work.tenant_id AND wk.id=work.kind_id
+   LEFT JOIN work_orders wo ON wo.tenant_id=work.tenant_id AND wo.node_id=work.id
+   WHERE (wo.node_id IS NULL OR wo.status NOT IN ('done','cancelled')) AND work.deleted_at IS NULL AND coalesce(work.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
+   AND (wk.slug IN ('ticket','task','epic','work_order') OR wk.field_schema->>'issue_family'='true'))
+   OR EXISTS(SELECT 1 FROM inbox_compat_messages held
+    WHERE held.tenant_id=a.tenant_id AND held.project_id=a.project_id AND held.id=a.source_request_id AND held.is_action_request
+    AND NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=held.tenant_id AND e.node_id=held.project_id
+     AND e.type='inbox.action_resolved' AND e.after->>'message_id'=held.id::text)))) AS held,
  '/api/questions/'||q.node_id AS source
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
@@ -37,13 +43,22 @@ questions AS (
 ), approvals AS (
  SELECT r.id::text,'approval'::text,coalesce(n.project_id,wn.project_id)::text,1::bigint,
  'Approval'::text,r.proposed_at,r.expires_at,
- (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed'))
- OR (ar.id IS NOT NULL AND ar.status='waiting') AS held,
- '/api/phone-approvals/approval/'||r.id
+ (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
+  AND (nw.node_id IS NULL OR nw.status NOT IN ('done','cancelled'))
+  AND (nk.slug IN ('ticket','task','epic','work_order') OR nk.field_schema->>'issue_family'='true'))
+ OR (ar.id IS NOT NULL AND ar.status='waiting' AND aw.status NOT IN ('done','cancelled'))
+ OR (rr.id IS NOT NULL AND rr.status='waiting' AND rw.status NOT IN ('done','cancelled') AND rn.deleted_at IS NULL) AS held,
+ '/agents?needs=a:'||r.id
  FROM approval_requests r
  LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.resource_id AND r.resource_kind='node'
+ LEFT JOIN node_kinds nk ON nk.tenant_id=n.tenant_id AND nk.id=n.kind_id
+ LEFT JOIN work_orders nw ON nw.tenant_id=n.tenant_id AND nw.node_id=n.id
  LEFT JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.resource_id AND r.resource_kind='run'
  LEFT JOIN nodes wn ON wn.tenant_id=ar.tenant_id AND wn.id=ar.work_order_id
+ LEFT JOIN work_orders aw ON aw.tenant_id=ar.tenant_id AND aw.node_id=ar.work_order_id
+ LEFT JOIN agent_runs rr ON rr.tenant_id=r.tenant_id AND rr.id=r.run_id AND rr.agent_principal_id=r.agent_principal_id
+ LEFT JOIN work_orders rw ON rw.tenant_id=rr.tenant_id AND rw.node_id=rr.work_order_id
+ LEFT JOIN nodes rn ON rn.tenant_id=rr.tenant_id AND rn.id=rr.work_order_id
  LEFT JOIN nodes project ON project.tenant_id=r.tenant_id AND project.id=coalesce(n.project_id,wn.project_id)
  WHERE r.tenant_id=$1 AND r.expires_at>(SELECT at FROM clock)
  AND NOT EXISTS(SELECT 1 FROM approval_decisions d WHERE d.tenant_id=r.tenant_id AND d.request_id=r.id)
@@ -53,7 +68,7 @@ questions AS (
  AND (project.id IS NULL OR project.deleted_at IS NULL)
 ), held_requests AS (
  SELECT m.id::text,'action_request'::text,m.project_id::text,1::bigint,'Human request'::text,
- m.created_at,NULL::timestamptz,true,'/api/projects/'||m.project_id||'/messages/'||m.id
+ m.created_at,NULL::timestamptz,true,'/agents?needs=m:'||m.id
  FROM inbox_compat_messages m JOIN nodes project ON project.tenant_id=m.tenant_id AND project.id=m.project_id
  WHERE m.tenant_id=$1 AND m.project_id=ANY($5::uuid[]) AND m.is_action_request AND project.deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=m.tenant_id AND e.type='inbox.action_resolved'
@@ -62,7 +77,7 @@ questions AS (
    WHERE a.tenant_id=m.tenant_id AND a.source_request_id=m.id AND q.project_id=ANY($3::uuid[]))
 ), doctrine AS (
  SELECT p.id::text,'doctrine'::text,NULL::text,1::bigint,'Doctrine change'::text,p.created_at,
- NULL::timestamptz,false,'/api/rules/doctrine/inbox/'||p.id
+ NULL::timestamptz,false,'/settings/agent-rules#doctrine-inbox'
  FROM doctrine_proposals p
  WHERE p.tenant_id=$1 AND $7 AND p.data->>'inbox'='true' AND p.data->>'state'='pending'
  AND coalesce((p.data->>'pr_number')::int,0)=0 AND p.created_at>(SELECT at FROM clock)-interval '30 days'
@@ -78,7 +93,12 @@ questions AS (
  SELECT * FROM visible WHERE (NOT $8 OR (bucket,order_at,id,kind)>($9,$10::timestamptz,$11,$12))
  AND (NOT $14 OR (held AND kind IN ('question','approval','action_request') OR kind='approval' AND expires_at<=(SELECT at FROM clock)+$18::int*interval '1 second'))
  AND (NOT $15 OR NOT EXISTS(SELECT 1 FROM desk_notification_claims c
-  WHERE c.tenant_id=$1 AND c.kind=visible.kind AND c.item_id::text=visible.id AND c.revision=visible.revision AND c.recipient_id=$2))
+  WHERE c.tenant_id=$1 AND c.recipient_id=$2 AND (
+    c.kind=visible.kind AND c.item_id::text=visible.id AND c.revision=visible.revision
+    OR visible.kind='question' AND c.kind='action_request' AND c.revision=1 AND EXISTS(
+     SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.question_id::text=visible.id AND a.source_request_id=c.item_id)
+    OR visible.kind='action_request' AND c.kind='question' AND EXISTS(
+     SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.source_request_id::text=visible.id AND a.question_id=c.item_id))))
  AND ($16='' OR id=$16 AND kind=$17)
  ORDER BY bucket,order_at,id,kind LIMIT $13
 )

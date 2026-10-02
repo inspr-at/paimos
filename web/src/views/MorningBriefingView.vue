@@ -186,17 +186,17 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose() })
     <template v-else>
       <p v-if="error" class="glass-card note" role="alert">{{ error }} <button class="btn sm" type="button" @click="load">Try again</button></p>
       <aside v-if="notices.length" class="glass-card note" aria-label="Briefing coverage"><p v-for="notice in notices" :key="notice">{{ notice }}</p></aside>
-      <section v-if="next" class="glass-card next-step" aria-label="Recommended next step"><p class="eyebrow">One next step</p><RouterLink :to="next.href">{{ next.title }}</RouterLink><p v-if="next.detail">{{ next.detail }}</p><RouterLink class="source" :to="next.source">Source</RouterLink></section>
+      <section v-if="next" class="glass-card next-step" aria-label="Recommended next step"><p class="eyebrow">One next step</p><RouterLink :to="next.href">{{ next.title }}</RouterLink><p v-if="next.detail">{{ next.detail }}</p><a v-if="next.source.startsWith('/api/')" class="source" :href="next.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="next.source">Source</RouterLink></section>
       <div v-if="range" class="briefing-grid">
         <section class="glass-card briefing-section" aria-labelledby="briefing-needs">
           <header><h2 id="briefing-needs">Decision Desk</h2><span v-if="deskCount !== null" class="count-badge">{{ deskCount }}</span></header>
           <p v-if="deskCount === null" class="muted">Decision Desk could not be read. Refresh to include it.</p>
           <p v-else-if="!needs.length" class="muted">No open desk items.</p>
-          <ul v-else><li v-for="need in (showAll ? needs : needs.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><RouterLink class="source" :to="need.source">Source</RouterLink></li></ul>
+          <ul v-else><li v-for="need in (showAll ? needs : needs.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><a v-if="need.source.startsWith('/api/')" class="source" :href="need.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="need.source">Source</RouterLink></li></ul>
         </section>
         <section v-if="otherNeeds.length" class="glass-card briefing-section" aria-labelledby="briefing-other">
           <header><h2 id="briefing-other">Other checks</h2><span class="count-badge">{{ otherNeeds.length }}</span></header>
-          <ul><li v-for="need in (showAll ? otherNeeds : otherNeeds.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><RouterLink class="source" :to="need.source">Source</RouterLink></li></ul>
+          <ul><li v-for="need in (showAll ? otherNeeds : otherNeeds.slice(0, 8))" :key="need.id"><RouterLink class="fact-title" :to="need.href">{{ need.title }}</RouterLink><p v-if="need.detail">{{ need.detail }}</p><a v-if="need.source.startsWith('/api/')" class="source" :href="need.source" target="_blank" rel="noopener">Source</a><RouterLink v-else class="source" :to="need.source">Source</RouterLink></li></ul>
         </section>
         <p v-if="chores" class="muted">{{ chores }} sign-in {{ chores === 1 ? 'request' : 'requests' }} · <RouterLink to="/agents">Review sign-ins</RouterLink></p>
         <section v-for="section in sections" :key="section.key" class="glass-card briefing-section" :aria-labelledby="`briefing-${section.key}`">

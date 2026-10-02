@@ -217,7 +217,7 @@ export const useAgents = defineStore('agents', () => {
   })
   const initialRuns: Paged<AgentRun> = { items: [], next_cursor: null }
   const runsRead = usePolledData(() => listRuns({ limit: 200 }), initialRuns, undefined, { order: createReadOrder(), adopt: page => mergePage(page, runLedger) })
-  const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
+  const refreshStale = computed(() => sessionsRead.stale.value || approvalsRead.stale.value || deskRead.stale.value || accountsRead.stale.value || modelsRead.stale.value || runsRead.stale.value)
 
   // ---------- Reads ----------
   const refreshApprovals = approvalsRead.refresh

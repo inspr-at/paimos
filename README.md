@@ -162,7 +162,7 @@ before the cutoff advances. Journey next actions use one batch snapshot query.
 The Decision Desk section and the Agents badge use the same server projection:
 `GET /api/decision-desk/projection`. Held approvals sort by expiry, then other
 held work by age, then ordinary open items by age, with source ID ties. Questions
-merged from several askers count once; a question replaces its linked action
+with several askers count once; a question replaces its linked action
 request. Sign-ins remain separate chores. Counts cover all currently readable
 sources independently of page size; failed reads and coverage limits stay visible.
 The briefing preserves server order and links to the exact question/source;
@@ -172,9 +172,10 @@ in a separate section until their desk adapters exist.
 AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
 `NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
 existing AEON-455 phone scheduler. Eligible work has a real unfinished work
-link; a parked label alone is insufficient. Approval expiry warnings use a
-15-minute window, subject to the phone scheduler's quiet hours and escalation.
-Claims persist once per source/revision/recipient across devices and replicas.
+link or a correlated unresolved held request; a parked label alone is insufficient.
+The proposed approval expiry-warning window is 15 minutes, subject to the phone scheduler's quiet hours and escalation.
+Claims persist once per source/revision/recipient across devices and replicas,
+including action requests later represented by their canonical question.
 An ambiguous transport failure retains its claim and records failure rather
 than repeating a push. Payloads contain only source pointers. Answer commits,
 grace edits, corrections and expiry never emit success notifications; doctrine

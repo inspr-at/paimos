@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -44,7 +45,7 @@ func setup(t *testing.T) *fixture {
 	f.person, f.reader, f.agent = principal(tenant.Person), principal(tenant.Person), principal(tenant.Agent)
 	dbtest.BindRole(t, f.d, tid, f.person.ID, "owner")
 	dbtest.BindRole(t, f.d, tid, f.agent.ID, "member")
-	f.agent.Scopes = []string{"questions.ask", "questions.read"}
+	f.agent.Scopes = []string{"questions.ask", "questions.read", "inbox.send"}
 	node := func(kind, parent string) string {
 		var id string
 		err := db.InTenant(dbtest.Seed(ctx), f.d.App, tid, func(tx pgx.Tx) error {
@@ -63,6 +64,11 @@ func setup(t *testing.T) *fixture {
 	f.m = New(f.d.App)
 	f.m.Mount(f.mux)
 	questions.New(f.d.App).Mount(f.mux)
+	messaging, err := inbox.NewMessaging(f.d.App, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messaging.Mount(f.mux)
 	return f
 }
 
@@ -80,6 +86,11 @@ func (f *fixture) ask(t *testing.T, project, meanwhile string, blocked []string)
 		t.Fatal(err)
 	}
 	in := questions.Input{RequestID: requestID, Question: "Private question " + requestID, Meanwhile: meanwhile, BlockedNodeIDs: blocked, Options: []questions.Option{{ID: "yes", Title: "Yes", Answer: "Proceed"}}}
+	return f.askInput(t, project, in)
+}
+
+func (f *fixture) askInput(t *testing.T, project string, in questions.Input) questions.Question {
+	t.Helper()
 	b, _ := json.Marshal(in)
 	r := httptest.NewRequest("POST", "/api/projects/"+project+"/questions", bytes.NewReader(b))
 	r = r.WithContext(tenant.WithPrincipal(t.Context(), f.agent))
@@ -95,14 +106,39 @@ func (f *fixture) ask(t *testing.T, project, meanwhile string, blocked []string)
 	return q
 }
 
-func (f *fixture) approval(t *testing.T, resource string, expiry time.Time) string {
+func (f *fixture) decide(t *testing.T, q questions.Question, answer string) questions.Question {
+	t.Helper()
+	var requestID string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT gen_random_uuid()::text`).Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	in := questions.DecisionInput{RequestID: requestID, ExpectedRevision: q.Revision, OptionID: "yes", Answer: answer, Outcome: "once"}
+	b, _ := json.Marshal(in)
+	r := httptest.NewRequest("POST", "/api/questions/"+q.ID+"/decision", bytes.NewReader(b)).WithContext(tenant.WithPrincipal(t.Context(), f.person))
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("decision %d: %s", w.Code, w.Body.String())
+	}
+	var got questions.Question
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func (f *fixture) approval(t *testing.T, resource string, expiry time.Time, run ...string) string {
 	t.Helper()
 	var id string
 	kind := "node"
 	if resource == "" {
 		kind = "tenant"
 	}
-	err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at,proposed_at) VALUES($1,$2,$2,'nodes.write',$3,nullif($4,'')::uuid,'Private rationale',$5,least(now(),$5::timestamptz-interval '1 hour')) RETURNING id::text`, f.person.TenantID, f.agent.ID, kind, resource, expiry).Scan(&id)
+	var runID any
+	if len(run) > 0 {
+		runID = run[0]
+	}
+	err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at,proposed_at,run_id) VALUES($1,$2,$2,'nodes.write',$3,nullif($4,'')::uuid,'Private rationale',$5,least(now(),$5::timestamptz-interval '1 hour'),$6) RETURNING id::text`, f.person.TenantID, f.agent.ID, kind, resource, expiry, runID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,13 +162,18 @@ func TestMixedOrderCountsFanInAndKeyset(t *testing.T) {
 	later := f.approval(t, f.ticket, time.Now().Add(2*time.Hour))
 	first := f.approval(t, f.ticket, time.Now().Add(time.Hour))
 	tenantApproval := f.approval(t, "", time.Now().Add(3*time.Hour))
-	// Add a real second membership to the same canonical question. Identity,
-	// asker count and timestamps remain distinct; the desk still counts once.
+	// Seed P2's fan-in boundary using two different agents and preserved input.
+	// P2 is a separate package; this projection must still count its output once.
+	var secondAgent string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','second') RETURNING id::text`, f.person.TenantID).Scan(&secondAgent); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, f.person.TenantID, secondAgent, "member")
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.desk_write','on',true)`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,comment_node_id,input) SELECT tenant_id,project_id,question_id,principal_id,gen_random_uuid(),request_digest,comment_node_id,input FROM desk_askers WHERE question_id=$1`, held.ID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,comment_node_id,input) SELECT tenant_id,project_id,question_id,$2,request_id,request_digest,comment_node_id,input FROM desk_askers WHERE question_id=$1`, held.ID, secondAgent)
 		return err
 	})
 	if err != nil {
@@ -197,16 +238,22 @@ func TestRevocationDecisionExpiryAndFinishedWork(t *testing.T) {
 	}
 	f.exec(t, `INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision) VALUES($1,$2,$3,'denied')`, f.person.TenantID, approval, f.person.ID)
 	f.approval(t, f.ticket, time.Now().Add(-time.Hour))
-	// Model P3's committed answer boundary without a grace clock sleep.
-	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.desk_write','on',true)`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `UPDATE desk_questions SET state='answered' WHERE node_id=$1`, q.ID)
-		return err
-	})
-	if err != nil {
+	// A real answer and its grace edit must remove the source immediately,
+	// while retaining the revision and replaced delivery evidence.
+	answered := f.decide(t, q, "Proceed")
+	edited := f.decide(t, answered, "Proceed with correction")
+	if edited.Revision != q.Revision+2 || edited.Answer == nil || len(edited.Pending) == 0 {
+		t.Fatal("grace fixture lost its answer/delivery evidence")
+	}
+	var answers, replaced int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_answers WHERE question_id=$1`, q.ID).Scan(&answers); err != nil {
 		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_pending WHERE question_id=$1 AND state='replaced'`, q.ID).Scan(&replaced); err != nil {
+		t.Fatal(err)
+	}
+	if answers != 2 || replaced == 0 {
+		t.Fatal("grace edit fixture did not retain history")
 	}
 	if got := f.page(t, f.reader, 100, nil); got.Counts.Open != 0 {
 		t.Fatalf("expired/answered item survives: %+v", got)
