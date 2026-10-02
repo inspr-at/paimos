@@ -3,10 +3,13 @@ package nodes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (pl *planner) loadLearning(ctx context.Context, tx pgx.Tx, visible func(string) bool, project ...string) error {
@@ -35,6 +38,14 @@ func (pl *planner) loadLearning(ctx context.Context, tx pgx.Tx, visible func(str
 		}
 		pl.learning = nil
 		pl.learningIssue = "history unavailable"
+		// Driver error strings can carry SQL or data. Log only the value-free
+		// SQLSTATE and bounded request context, once for this shared planner.
+		code := "unknown"
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			code = pgErr.Code
+		}
+		slog.WarnContext(ctx, "planning learning history unavailable", "project_id", scope, "target_cells", len(cells), "sqlstate", code)
 		return nil
 	}
 	if err := hintTx.Commit(ctx); err != nil {
@@ -66,14 +77,9 @@ func (pl *planner) calibrateLearning(route *planRoute, key routeKey, mix *float6
 		on = fmt.Sprintf("on route %s %s %s", key.harness, key.model, key.effort)
 	}
 	out.basisText = fmt.Sprintf("median of finished tickets %s (n=%d)", on, out.tickets)
-	if pl.learningIssue != "" {
-		out = calibrate(nil, key, mix)
-		out.speed = 1
-		out.level = "default"
-		out.basisText = "uncalibrated, " + pl.learningIssue + " (n=0)"
-		return out
-	}
-	if route != nil {
+	// Model history can degrade independently of the bounded legacy query.
+	// Preserve that calibration and its pricing; degraded history learns no speed.
+	if pl.learningIssue == "" && route != nil {
 		cell := route.cell
 		history := usagedashboard.History(pl.learning, cell)
 		if history.SpeedFactor != nil {
@@ -124,6 +130,9 @@ func (pl *planner) calibrateLearning(route *planRoute, key routeKey, mix *float6
 			}
 		}
 		out.basisText = fmt.Sprintf("uncalibrated: documented planning fallback (n=%d)", out.tickets)
+	}
+	if pl.learningIssue != "" {
+		out.basisText += "; " + pl.learningIssue
 	}
 	return out
 }

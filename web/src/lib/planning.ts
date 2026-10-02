@@ -203,7 +203,7 @@ function uncalibrated(row: PlanningRow): boolean {
 }
 function uncalibratedLine(row: PlanningRow): string {
   const cal = row.planning?.estimate_snapshot?.rate_basis ?? row.planning?.tokens.calibration
-  return cal?.basis_text?.includes('history truncated') || cal?.basis_text?.includes('history unavailable') ? `Uncalibrated · ${cal.basis_text}` : `Uncalibrated · insufficient model history (n=${cal?.tickets ?? 0})`
+  return cal?.basis_text && (row.planning?.estimate_snapshot || cal.basis_text.includes('history truncated') || cal.basis_text.includes('history unavailable')) ? `Uncalibrated · ${cal.basis_text}` : `Uncalibrated · insufficient model history (n=${cal?.tickets ?? 0})`
 }
 function modelDurationLine(row: PlanningRow): string {
   const history = row.planning?.estimate_snapshot?.model_estimate ?? row.planning?.model_estimate
@@ -253,7 +253,7 @@ export function tokensCell(row: PlanningRow): FigureCell {
   }
   if (spent !== null && tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
   if (row.planning?.children?.uncalibrated) lines.push(basisLine(tokens!, row))
-  if (tokens && est !== null && !row.planning?.children?.uncalibrated && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
+  if (tokens && est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children?.uncalibrated && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
     const basis = basisLine(tokens, row); if (basis) lines.push(basis)
   }
   if (spent === null && est !== null && snap?.rate_basis.basis === 'default') lines.push(uncalibratedLine(row), snapshotLine(row))
@@ -287,7 +287,7 @@ export function listCostCell(row: PlanningRow): FigureCell {
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(uncalibrated(row) ? uncalibratedLine(row) : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
   if (row.planning?.children?.uncalibrated) lines.push(basisLine(row.planning.tokens, row))
-  if (est !== null && !row.planning?.children?.uncalibrated && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
+  if (est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children?.uncalibrated && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
     const basis = basisLine(row.planning.tokens, row); if (basis) lines.push(basis)
   }
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')

@@ -35,16 +35,18 @@ func (r *learningLimitRows) Scan(dest ...any) error {
 
 type learningLimitTx struct {
 	pgx.Tx
-	aggregated bool
+	aggregated   bool
 	profileCount int
-	candidates bool
+	candidates   bool
 }
 
 func (tx *learningLimitTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	switch {
 	case strings.Contains(sql, "FROM model_profiles"):
 		count := tx.profileCount
-		if count == 0 { count = 1 }
+		if count == 0 {
+			count = 1
+		}
 		return &learningLimitRows{count: count, profile: true}, nil
 	case strings.Contains(sql, "SELECT DISTINCT project_id"):
 		return &learningLimitRows{count: 4097}, nil // reviewed baseline
@@ -75,9 +77,9 @@ func TestLearningHistoryCapIsExplicit(t *testing.T) {
 }
 
 func TestLearningProfileCapStopsBeforeCandidates(t *testing.T) {
- tx := &learningLimitTx{profileCount: 4097}
- samples, truncated, err := LoadLearningHistory(t.Context(), tx, []LearningCell{{Family: "openai", Line: "astra", Effort: "xhigh"}}, "", func(string) bool { t.Fatal("visibility must not run at the profile cap"); return false })
- if err != nil || !truncated || len(samples) != 0 || tx.candidates || tx.aggregated {
-  t.Fatalf("profile cap must stop before candidate/aggregation work: samples=%v truncated=%v err=%v tx=%+v", samples, truncated, err, tx)
- }
+	tx := &learningLimitTx{profileCount: 4097}
+	samples, truncated, err := LoadLearningHistory(t.Context(), tx, []LearningCell{{Family: "openai", Line: "astra", Effort: "xhigh"}}, "", func(string) bool { t.Fatal("visibility must not run at the profile cap"); return false })
+	if err != nil || !truncated || len(samples) != 0 || tx.candidates || tx.aggregated {
+		t.Fatalf("profile cap must stop before candidate/aggregation work: samples=%v truncated=%v err=%v tx=%+v", samples, truncated, err, tx)
+	}
 }

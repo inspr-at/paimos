@@ -340,10 +340,15 @@ explicit speed factor: tokens = rounded size hours × unscaled token rate × spe
 `list_per_hour` is already speed-scaled. Snapshot history stays limited to its own
 project. Learning filters target profiles/lines and placements before a
 newest-12,000 candidate bound and expensive worker aggregation, then keeps 30
-eligible samples per cell. Reaching the bound returns uncalibrated, history
-truncated. Sorted and unsorted lists share one learning read per request. SQL
-hint errors roll back a savepoint and leave work starts usable with history
-unavailable.
+eligible samples per cell. Reaching the candidate or 4,096-profile bound leaves
+model history truncated. The independent bounded legacy route or any-route
+calibration remains usable, with the history issue appended to its basis; only
+insufficient legacy evidence uses the documented uncalibrated default. Sorted
+and unsorted lists share one learning read per request. SQL hint errors roll
+back a savepoint and leave work starts usable with history unavailable, with
+one diagnostic per shared planner containing SQLSTATE and request context,
+never raw SQL or error text. Workers must belong to the outcome project: a
+cross-project worker is excluded before the distinct-source aggregation guard.
 
 The read-only
 `GET /api/usage/model-estimates?profile_id=…&kind=…&bucket=normal|complex`
