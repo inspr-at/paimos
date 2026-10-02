@@ -132,7 +132,7 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	// A caller who can read nodes workspace-wide still sees learning only
 	// from the project where harness.read is granted.
 	hidden := w
-	hidden.root = w.node(t, "LEARNHIDDEN-1", "project", "", "open", nil)
+	hidden.root = w.node(t, "LHIDDEN-1", "project", "", "open", nil)
 	for i := range 5 {
 		seedLearningTicket(t, hidden, i+8, int64(4*3600000), false)
 	}
