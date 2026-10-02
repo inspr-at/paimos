@@ -300,7 +300,6 @@
 3 6689 github.com/inspr-at/paimos/internal/capacity
 3 6 github.com/inspr-at/paimos/internal/eta
 3 41898 github.com/inspr-at/paimos/internal/events
-3 0 github.com/inspr-at/paimos/internal/features
 3 2692 github.com/inspr-at/paimos/internal/fromclassic
 3 4543 github.com/inspr-at/paimos/internal/greetings
 3 4 github.com/inspr-at/paimos/internal/grokprobe
