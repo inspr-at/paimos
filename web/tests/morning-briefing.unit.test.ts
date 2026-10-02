@@ -109,3 +109,19 @@ it('sums permitted dashboard amounts exactly and deduplicates shared account win
   expect(total.allowance.windows).toHaveLength(1)
   expect(total.totals.unreported_sessions).toBe(first.totals.unreported_sessions + second.totals.unreported_sessions)
 })
+
+it('retains partial allowance windows and their independent truncation flag', () => {
+  const partial = usageDashboard('reported'), visible = usageDashboard('reported')
+  Object.assign(partial.allowance, { state: 'partial', truncated: true })
+  partial.truncated = false
+  const total = sumBriefingUsage([partial, visible])
+  expect(total.allowance).toMatchObject({ state: 'partial', truncated: true })
+  expect(total.allowance.windows).toEqual(partial.allowance.windows)
+  expect(total.truncated).toBe(true)
+})
+
+it('marks a mixture of visible and withheld allowance sources partial', () => {
+  const visible = usageDashboard('reported'), withheld = usageDashboard('reported')
+  withheld.allowance = { state: 'withheld', windows: [] }
+  expect(sumBriefingUsage([visible, withheld]).allowance.state).toBe('partial')
+})
