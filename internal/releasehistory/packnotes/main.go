@@ -105,6 +105,9 @@ func runWithArgs(args []string) error {
 			if *reuseFrom != "" {
 				failed := false
 				for _, r := range history.Releases {
+					if r.State == releasehistory.StatePublished && r.ReleaseChannel == reservation.Channel && r.ReleaseSequence >= reservation.Sequence {
+						return fmt.Errorf("cannot reuse sequence %d in channel %s: published release %s has sequence %d", reservation.Sequence, reservation.Channel, r.Version, r.ReleaseSequence)
+					}
 					if r.Version == *reuseFrom && r.State != releasehistory.StatePublished {
 						failed = true
 					}

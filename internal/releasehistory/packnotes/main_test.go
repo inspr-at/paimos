@@ -129,3 +129,122 @@ func TestPackHistoricReservation(t *testing.T) {
 		t.Fatal("original capture rewritten")
 	}
 }
+
+func TestPackRetryRequiresSequenceAbovePublished(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		sequence          int
+		publishedSequence int
+		withdrawn         bool
+		wantReject        bool
+	}{
+		{"withdrawn 116 below published 118", 116, 118, true, true},
+		{"second coordinate reuses published 119", 119, 119, false, true},
+		{"legitimate max plus one retry", 119, 118, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			write := func(name string, value any) []byte {
+				t.Helper()
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				return raw
+			}
+			git := func(args ...string) {
+				t.Helper()
+				cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+				cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
+				}
+			}
+			versionFields := func(version, channel string, sequence int) map[string]any {
+				return map[string]any{"product": "PAIMOS AEON", "version_scheme": releasehistory.SchemeCalVer3, "version": version, "release_channel": channel, "release_sequence": sequence}
+			}
+			const source = "261001205522.0.0"
+			const published = "261002004358.0.0"
+			const preview = "261002010000.0.0"
+			const retry = "261002120000.0.0"
+			const tenant = "11111111-1111-4111-8111-111111111111"
+			const project = "22222222-2222-4222-8222-222222222222"
+			write("version.json", versionFields(source, "stable", tc.sequence))
+			git("init", "-q")
+			git("add", "version.json")
+			git("commit", "-qm", "reserve original attempt")
+			write("own.json", releasehistory.HistoricTicketExport{
+				Schema: releasehistory.HistoricNotesSchema, TenantID: tenant, ProjectID: project,
+				CapturedAt:  time.Date(2026, 10, 1, 20, 55, 22, 0, time.UTC),
+				Reservation: &releasehistory.NoteReservation{Version: source, Channel: "stable", Sequence: tc.sequence, Tickets: []string{}},
+				Tickets:     []releasehistory.HistoricTicket{},
+			})
+			args := []string{"-repo", dir, "-historic", filepath.Join(dir, "own.json"), "-reserve", source, "-tenant", tenant, "-project", project}
+			if err := runWithArgs(args); err != nil {
+				t.Fatal("freeze original attempt:", err)
+			}
+			path := filepath.Join(dir, releasehistory.ProductNotesPath)
+			frozen, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write("version.json", versionFields(published, "stable", tc.publishedSequence))
+			git("add", "version.json")
+			git("commit", "-qm", "publish stable release")
+			git("tag", "v"+published)
+			// A higher published sequence in another channel must not block retry.
+			write("version.json", versionFields(preview, "preview", 200))
+			git("add", "version.json")
+			git("commit", "-qm", "publish preview release")
+			git("tag", "v"+preview)
+			fields := versionFields(retry, "stable", tc.sequence)
+			if tc.withdrawn {
+				fields["withdrawn_releases"] = []releasehistory.Withdrawal{{Version: source, Digest: "sha256:" + strings.Repeat("a", 64), Ticket: "AEON-530", Reason: "failed index completion"}}
+			} else {
+				fields["unpublished_reservations"] = []string{source}
+			}
+			beforeVersion := write("version.json", fields)
+			args[5] = retry
+			args = append(args, "-reuse-from", source)
+			err = runWithArgs(args)
+			if tc.wantReject {
+				if err == nil || !strings.Contains(err.Error(), "cannot reuse sequence") {
+					t.Fatalf("want published sequence rejection, got %v", err)
+				}
+				got, readErr := os.ReadFile(path)
+				if readErr != nil || !bytes.Equal(got, frozen) {
+					t.Fatal("rejected retry changed frozen notes", readErr)
+				}
+				gotVersion, readErr := os.ReadFile(filepath.Join(dir, "version.json"))
+				if readErr != nil || !bytes.Equal(gotVersion, beforeVersion) {
+					t.Fatal("rejected retry changed version.json", readErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal("legitimate retry rejected:", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := releasehistory.ReadProductNotes(got)
+			if err != nil || len(bundle.Releases) != 2 || bundle.Releases[retry].ReleaseSequence != tc.sequence {
+				t.Fatal("retry missing or has wrong sequence", err)
+			}
+			original, _ := json.Marshal(bundle.Releases[source])
+			reused, _ := json.Marshal(bundle.Releases[retry])
+			old, err := releasehistory.ReadProductNotes(frozen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldNotes, _ := json.Marshal(old.Releases[source])
+			if !bytes.Equal(original, oldNotes) || !bytes.Equal(reused, oldNotes) {
+				t.Fatal("retry changed original notes or provenance")
+			}
+		})
+	}
+}
