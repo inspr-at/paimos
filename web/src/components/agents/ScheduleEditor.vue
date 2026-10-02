@@ -336,7 +336,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
     <div class="ed-foot">
       <button class="btn ghost" type="button" @click="reset">Reset to default</button>
       <span class="sp" />
-      <span v-if="problem" class="ed-err" role="alert">{{ problem }}</span>
+      <span class="ed-err" :role="problem ? 'alert' : undefined">{{ problem }}</span>
       <button class="btn" type="button" @click="emit('close')">Cancel</button>
       <button class="btn primary" type="button" :disabled="!!problem || saving" @click="save">{{ saving ? 'Saving…' : 'Save' }}</button>
     </div>
@@ -355,7 +355,8 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
 .ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 .ed-foot .sp { flex: 1; }
-.ed-err { color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
+.ed-foot .btn.primary { min-width: 88px; }
+.ed-err { flex: 0 1 110px; height: 38px; overflow: auto; color: var(--gold-ink); font-size: 12.5px; font-weight: 600; }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
 .sec-t { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 13px; font-weight: 650; }
 .sec-t .aside { margin-left: auto; color: var(--ink-3); font-weight: 450; font-size: 12.5px; }
@@ -440,7 +441,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .sheet .ed-foot .btn { min-height: 44px; }
 .sheet .ed-foot .btn:not(.ghost) { flex: 1; }
 .sheet .ed-foot .sp { display: none; }
-.sheet .ed-foot .ed-err { width: 100%; }
+.sheet .ed-foot .ed-err { flex: none; width: 100%; }
 .sheet .ed-foot .ghost { width: 100%; order: 3; min-height: 40px; }
 .sheet .ed-x { width: 44px; height: 44px; }
 .sheet .models { grid-template-columns: 1fr; }

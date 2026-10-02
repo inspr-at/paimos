@@ -192,8 +192,8 @@ defineExpose({ open })
 <style scoped>
 .recovery-dialog { width: min(520px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius); background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recovery-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 30px); }
-.recovery-body { display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
+.recovery-card { padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; height: min(660px, calc(100dvh - 30px)); max-height: calc(100dvh - 30px); }
+.recovery-body { flex: 1; align-content: start; display: grid; gap: 14px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px; margin: -2px; }
 h2 { font-size: 19px; line-height: 1.2; }
 p { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .quiet { color: var(--ink-3); }
@@ -219,7 +219,7 @@ label { font-size: 12px; font-weight: 600; margin-bottom: -8px; color: var(--ink
 code { display: block; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; color: var(--ink-2); }
 .confirmation-text { padding: 8px 10px; border-radius: 8px; background: var(--code-bg); user-select: all; }
 .recovery-error { color: var(--danger); }
-.recovery-actions { flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.recovery-actions .btn { min-height: 40px; }
-@media (max-width: 500px) { .recovery-card { padding: 18px 16px 16px; gap: 14px; } .recovery-actions .btn { flex: 1; } }
+.recovery-actions { min-height: 88px; align-content: end; flex-shrink: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.recovery-actions .btn { width: 180px; min-height: 40px; }
+@media (max-width: 500px) { .recovery-dialog { width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; border-radius: 0; } .recovery-card { height: 100%; max-height: none; padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); gap: 14px; } .recovery-actions .btn { flex: 1; } }
 </style>

@@ -70,7 +70,7 @@ const emit = defineEmits<{
 <style scoped>
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
-.group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-option:hover { color: var(--ink); }
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
 .group-option:focus-visible { box-shadow: var(--focus-ring); }

@@ -42,7 +42,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) settle
 <style scoped>
 .confirm { width: min(420px, calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .confirm::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.confirm-card { height: 320px; box-sizing: border-box; display: grid; grid-template-rows: 48px minmax(0, 1fr) 52px; padding: 22px 24px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.confirm-card { height: 320px; box-sizing: border-box; display: grid; grid-template-rows: 48px minmax(0, 1fr) 64px; padding: 22px 24px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 h2 { font-size: 18px; overflow: auto; }
 #confirm-body { overflow: auto; scrollbar-gutter: stable; overflow-wrap: anywhere; }
 p { margin-top: 8px; font-size: 13.5px; color: var(--ink-2); }

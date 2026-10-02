@@ -135,11 +135,11 @@ function tabKeys(event: KeyboardEvent) {
 .tabs button[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: var(--shadow-btn); }
 .tabs button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .rows { height: 240px; overflow: auto; scrollbar-gutter: stable; align-content: start; display: grid; gap: 4px; margin: 12px 0 0; padding: 0; list-style: none; }
-.row { min-height: 56px; box-sizing: border-box; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 150px; align-items: center; gap: 14px; padding: 9px 10px; border-radius: 14px; background: color-mix(in srgb, var(--surface-raised) 55%, transparent); }
+.row { height: 56px; min-height: 56px; box-sizing: border-box; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 150px; align-items: center; gap: 14px; padding: 9px 10px; border-radius: 14px; background: color-mix(in srgb, var(--surface-raised) 55%, transparent); }
 .initial { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font: 700 13px/1 var(--font); }
 .initial.mark { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); }
 .label { min-width: 0; }
-.name { margin: 0; color: var(--ink); font: 650 14.5px/1.3 var(--font); }
+.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--ink); font: 650 14.5px/1.3 var(--font); }
 .sub { margin: 1px 0 0; overflow: hidden; color: var(--ink-3); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .row-step { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .target { min-width: 28px; text-align: center; color: var(--ink); font: 700 17px/1 var(--font); font-variant-numeric: tabular-nums; }

@@ -244,6 +244,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .ed-help { color: var(--ink-3); font-size: 12.5px; line-height: 1.45; }
 .ed-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 .ed-foot .sp { flex: 1; }
+.ed-foot .btn.primary { min-width: 88px; }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
 .sec-t { color: var(--ink); font-size: 13px; font-weight: 650; }
 
@@ -266,13 +267,13 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .val { min-width: 44px; padding: 0 2px; border-radius: 6px; color: var(--teal-ink); font: 650 13px var(--mono); font-variant-numeric: tabular-nums; text-align: center; }
 .opt:not(.on) .val { color: var(--ink-2); }
 
-.vendors { display: grid; gap: 6px; }
+.vendors { height: 220px; grid-template-rows: 30px minmax(0, 1fr); display: grid; gap: 6px; }
 .disclose { display: inline-flex; align-items: center; gap: 6px; justify-self: start; height: 30px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 650; }
 .disclose svg { color: var(--ink-3); transition: transform .15s ease; transform: rotate(-90deg); }
 .disclose[aria-expanded="true"] svg { transform: none; }
 @media (hover: hover) { .disclose:hover { background: var(--row-hover); } }
 .disclose:focus-visible { box-shadow: var(--focus-ring); }
-.vrows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.vrows { min-height: 0; overflow: auto; align-content: start; display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .vrows li { display: grid; grid-template-columns: 16px 72px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 36px; color: var(--ink-2); font-size: 13px; }
 .vrows li :deep(.mark) { color: var(--ink-2); }
 .vn { color: var(--ink); font-weight: 600; }

@@ -76,7 +76,7 @@ function presetHint(value: DatePreset) {
 .clear:hover { background: var(--row-selected); }
 .clear:focus-visible { box-shadow: var(--focus-ring); }
 .fields { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 2px; }
-.field-chip { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 12.5px; }
+.field-chip { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 .field-chip:hover { color: var(--ink); }
 .field-chip[aria-checked="true"] { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
 .field-chip:focus-visible { box-shadow: var(--focus-ring); }
