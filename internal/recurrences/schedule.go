@@ -76,6 +76,9 @@ func parseSchedule(t Trigger) (*schedule, error) {
 			return nil, fmt.Errorf("DAILY supports only FREQ")
 		}
 	case "WEEKLY":
+		if parts["INTERVAL"] != "" {
+			return nil, fmt.Errorf("INTERVAL is supported only for MONTHLY")
+		}
 		if parts["BYMONTHDAY"] != "" {
 			return nil, fmt.Errorf("WEEKLY does not support BYMONTHDAY")
 		}
@@ -91,6 +94,14 @@ func parseSchedule(t Trigger) (*schedule, error) {
 			}
 		}
 	case "MONTHLY":
+		if raw := parts["INTERVAL"]; raw != "" {
+			switch raw {
+			case "1", "2", "3", "6":
+				s.interval, _ = strconv.Atoi(raw)
+			default:
+				return nil, fmt.Errorf("MONTHLY INTERVAL must be 1, 2, 3 or 6")
+			}
+		}
 		if parts["BYDAY"] != "" {
 			return nil, fmt.Errorf("MONTHLY does not support BYDAY")
 		}
@@ -154,7 +165,9 @@ func (s *schedule) next(after time.Time) (time.Time, error) {
 	if day.Before(s.start) {
 		day = s.start
 	}
-	for i := 0; i < 370; i++ {
+	// A six-month interval on the 31st can skip a short month and a DST gap.
+	// Four years bounds that search without dropping a valid sparse schedule.
+	for i := 0; i < 4*366; i++ {
 		if s.matches(day) {
 			if at, ok := s.instant(day); ok && at.After(after) {
 				return at, nil
@@ -162,12 +175,12 @@ func (s *schedule) next(after time.Time) (time.Time, error) {
 		}
 		day = day.AddDate(0, 0, 1)
 	}
-	return time.Time{}, fmt.Errorf("no occurrence within a year")
+	return time.Time{}, fmt.Errorf("no occurrence within four years")
 }
 func (s *schedule) latest(now time.Time) (time.Time, error) {
 	local := now.In(s.location)
 	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 370 && !day.Before(s.start); i++ {
+	for i := 0; i < 4*366 && !day.Before(s.start); i++ {
 		if s.matches(day) {
 			if at, ok := s.instant(day); ok && !at.After(now) {
 				return at, nil
@@ -175,7 +188,7 @@ func (s *schedule) latest(now time.Time) (time.Time, error) {
 		}
 		day = day.AddDate(0, 0, -1)
 	}
-	return time.Time{}, fmt.Errorf("no past occurrence within a year")
+	return time.Time{}, fmt.Errorf("no past occurrence within four years")
 }
 
 // Preview uses exactly the scheduler's calendar calculation, strictly after

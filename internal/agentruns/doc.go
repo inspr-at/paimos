@@ -20,6 +20,9 @@
 // evidence), and retry_of_run_id.
 // Direct SQL completion leaves the new fields null. A retry must name an
 // earlier run of the same work order and agent.
+// Creation stamps the canonical preference starter and residency requirement,
+// including ticket-queue runs. The saved trace explains overrides that loosen
+// an inherited residency lock; vendor retries preserve that creation evidence.
 // This extends New; no new plugin installation or server wiring is required.
 //
 // AC3 / AEON-181: RunCreate accepts optional requested_account_id (0851).

@@ -30,20 +30,21 @@ import (
 )
 
 type Attachment struct {
-	ID          string     `json:"id"`
-	NodeID      string     `json:"node_id"`
-	SHA256      string     `json:"sha256"`
-	Name        string     `json:"name"`
-	ContentType string     `json:"content_type"`
-	Size        int64      `json:"size"`
-	Width       *int       `json:"width"`
-	Height      *int       `json:"height"`
-	Caption     string     `json:"caption"`
-	Position    string     `json:"position"`
-	CreatedBy   string     `json:"created_by"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	DeletedAt   *time.Time `json:"deleted_at"`
+	ThumbnailKind string     `json:"thumbnail_kind,omitempty"`
+	ID            string     `json:"id"`
+	NodeID        string     `json:"node_id"`
+	SHA256        string     `json:"sha256"`
+	Name          string     `json:"name"`
+	ContentType   string     `json:"content_type"`
+	Size          int64      `json:"size"`
+	Width         *int       `json:"width"`
+	Height        *int       `json:"height"`
+	Caption       string     `json:"caption"`
+	Position      string     `json:"position"`
+	CreatedBy     string     `json:"created_by"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	DeletedAt     *time.Time `json:"deleted_at"`
 }
 
 const columns = `id::text,node_id::text,sha256,name,content_type,size,width,height,caption,position::text,created_by::text,created_at,updated_at,deleted_at`
@@ -51,12 +52,16 @@ const columns = `id::text,node_id::text,sha256,name,content_type,size,width,heig
 func scan(row pgx.Row) (Attachment, error) {
 	var a Attachment
 	err := row.Scan(&a.ID, &a.NodeID, &a.SHA256, &a.Name, &a.ContentType, &a.Size, &a.Width, &a.Height, &a.Caption, &a.Position, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &a.DeletedAt)
+	if isHTML(a.ContentType) {
+		a.ThumbnailKind = "html-text"
+	}
 	return a, err
 }
 
 type Module struct {
-	Pool  *pgxpool.Pool
-	Store Store
+	Pool    *pgxpool.Pool
+	Store   Store
+	Sandbox *Sandbox
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -68,6 +73,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/attachments/{id}", m.patch)
 	mux.HandleFunc("DELETE /api/attachments/{id}", m.remove)
 	mux.HandleFunc("GET /api/attachments/{id}/content", m.content)
+	mux.HandleFunc("POST /api/attachments/{id}/preview", m.preview)
 }
 func uuid(s string) bool { var v pgtype.UUID; return len(s) == 36 && v.Scan(s) == nil && v.Valid }
 func (m *Module) principal(w http.ResponseWriter, r *http.Request, permission string) (tenant.Principal, bool) {
@@ -222,7 +228,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 				apierr(w, bad(400, "too many files"))
 				return
 			}
-			blob, err := m.Store.Put(r.Context(), p.TenantID, part)
+			blob, err := m.Store.PutNamed(r.Context(), p.TenantID, part, part.FileName())
 			if err != nil {
 				apierr(w, uploadError(err))
 				return

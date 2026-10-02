@@ -1,6 +1,7 @@
 {
   "resources": {
     "recurrences": "recurring work",
+    "questions": "questions",
     "nodes": "work",
     "comments": "comments",
     "knowledge": "knowledge",
@@ -46,6 +47,7 @@
     "ownership": "ownership"
   },
   "actions": {
+    "ask": "ask",
     "read": "See",
     "write": "Edit",
     "manage": "Manage",

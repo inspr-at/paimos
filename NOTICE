@@ -128,7 +128,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 gitleaks default rules v8.30.1 (compiled into the aeon binary, AEON-288)
 License: MIT
 Source: https://github.com/gitleaks/gitleaks/blob/v8.30.1/config/gitleaks.toml
-Vendored in internal/knowledge/gitleaks/, generated into internal/knowledge/gitleaks_rules.go
+Vendored in internal/credentialguard/gitleaks/, generated into internal/credentialguard/gitleaks_rules.go
 
 MIT License
 

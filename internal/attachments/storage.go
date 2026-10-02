@@ -17,6 +17,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/imagework"
+
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -101,6 +103,12 @@ type Prepared struct {
 }
 
 func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared, error) {
+	return s.PutNamed(ctx, tenant, src, "")
+}
+
+// PutNamed accepts HTML fragments that sniff as plain text only when their
+// filename explicitly selects HTML. A supplied MIME header is never authority.
+func (s Store) PutNamed(ctx context.Context, tenant string, src io.Reader, name string) (Prepared, error) {
 	if !validTenant(tenant) {
 		return Prepared{}, errors.New("invalid tenant")
 	}
@@ -144,11 +152,15 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	}
 	if strings.HasPrefix(ct, "text/plain") {
 		ct = "text/plain; charset=utf-8"
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".html" || ext == ".htm" {
+			ct = "text/html; charset=utf-8"
+		}
 	}
 	// Unknown binaries (logs, exports, office files that don't sniff as zip)
 	// are stored too; they are only ever served as a download with nosniff
 	// and a sandboxing CSP, never inline.
-	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream"
+	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream" || isHTML(ct)
 	if !allowed {
 		return Prepared{}, fmt.Errorf("%w %s", ErrUnsupportedType, ct)
 	}
@@ -158,14 +170,14 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	out := Prepared{SHA256: hex.EncodeToString(h.Sum(nil)), ContentType: ct, Size: n}
 	if strings.HasPrefix(ct, "image/") {
 		cfg, format, err := image.DecodeConfig(tmp)
-		if err != nil || cfg.Width < 1 || cfg.Height < 1 || int64(cfg.Width)*int64(cfg.Height) > 100_000_000 {
+		if err != nil || imagework.Attachment.Check(cfg.Width, cfg.Height) != nil {
 			return Prepared{}, errors.New("invalid or oversized image")
 		}
 		if map[string]string{"image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", "image/webp": "webp"}[ct] != format {
 			return Prepared{}, errors.New("image signature mismatch")
 		}
 		out.Width, out.Height, out.Image = cfg.Width, cfg.Height, true
-	} else if ct == "text/plain; charset=utf-8" {
+	} else if ct == "text/plain; charset=utf-8" || isHTML(ct) {
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return Prepared{}, err
 		}
@@ -177,39 +189,117 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	if err := ctx.Err(); err != nil {
 		return Prepared{}, err
 	}
+	var img image.Image
+	if out.Image {
+		release, err := imagework.Attachment.Acquire(ctx, out.Width, out.Height)
+		if err != nil {
+			return Prepared{}, err
+		}
+		defer release()
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return Prepared{}, err
+		}
+		img, _, err = image.Decode(tmp)
+		if err != nil {
+			return Prepared{}, err
+		}
+		// GIF's first frame can be smaller than its logical screen. Keep that
+		// supported while rejecting any frame that exceeds the reserved bounds.
+		if img.Bounds().Dx() > out.Width || img.Bounds().Dy() > out.Height {
+			return Prepared{}, errors.New("image dimensions differ from header")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Prepared{}, err
+	}
 	original, _ := s.path(tenant, out.SHA256, "original")
 	if err := writeFromFile(original, tmp); err != nil {
 		return Prepared{}, err
 	}
-	if out.Image {
+	if isHTML(ct) {
 		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 			return Prepared{}, err
 		}
-		img, _, err := image.Decode(tmp)
+		thumb, err := htmlTextThumbnail(ctx, tmp)
 		if err != nil {
 			return Prepared{}, err
 		}
-		for _, v := range []struct {
-			name string
-			max  int
-		}{{"thumb", 320}, {"preview", 1600}} {
-			target, _ := s.path(tenant, out.SHA256, v.name)
-			if _, err := os.Stat(target); err == nil {
-				continue
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return Prepared{}, err
-			}
-			var buf bytes.Buffer
-			if err := png.Encode(&buf, resize(img, v.max)); err != nil {
-				return Prepared{}, err
-			}
-			if err := writeAtomic(target, bytes.NewReader(buf.Bytes())); err != nil {
-				return Prepared{}, err
-			}
+		target, _ := s.path(tenant, out.SHA256, "thumb")
+		if err := writeAtomic(target, bytes.NewReader(thumb)); err != nil {
+			return Prepared{}, err
+		}
+	}
+	if out.Image {
+		if err := s.writeImageVariants(ctx, tenant, out.SHA256, img); err != nil {
+			return Prepared{}, err
 		}
 	}
 	return out, nil
 }
+
+// PutGeneratedPNG stores an already decoded, server-generated avatar image and
+// its normal attachment variants without another decode. The caller must hold
+// imagework.Avatar admission through this call (including all PNG encoding).
+// Untrusted upload bytes must go through Put instead.
+func (s Store) PutGeneratedPNG(ctx context.Context, tenant string, img image.Image) (Prepared, error) {
+	if !validTenant(tenant) {
+		return Prepared{}, errors.New("invalid tenant")
+	}
+	b := img.Bounds()
+	if err := imagework.Avatar.Check(b.Dx(), b.Dy()); err != nil {
+		return Prepared{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Prepared{}, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return Prepared{}, err
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	out := Prepared{SHA256: hex.EncodeToString(sum[:]), ContentType: "image/png", Size: int64(buf.Len()), Width: b.Dx(), Height: b.Dy(), Image: true}
+	if err := ctx.Err(); err != nil {
+		return Prepared{}, err
+	}
+	original, _ := s.path(tenant, out.SHA256, "original")
+	if _, err := os.Stat(original); errors.Is(err, os.ErrNotExist) {
+		if err := writeAtomic(original, bytes.NewReader(buf.Bytes())); err != nil {
+			return Prepared{}, err
+		}
+	} else if err != nil {
+		return Prepared{}, err
+	}
+	if err := s.writeImageVariants(ctx, tenant, out.SHA256, img); err != nil {
+		return Prepared{}, err
+	}
+	return out, nil
+}
+
+func (s Store) writeImageVariants(ctx context.Context, tenant, hash string, img image.Image) error {
+	for _, v := range []struct {
+		name string
+		max  int
+	}{{"thumb", 320}, {"preview", 1600}} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		target, _ := s.path(tenant, hash, v.name)
+		if _, err := os.Stat(target); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, resize(img, v.max)); err != nil {
+			return err
+		}
+		if err := writeAtomic(target, bytes.NewReader(buf.Bytes())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func resize(src image.Image, max int) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()

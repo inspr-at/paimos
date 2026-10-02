@@ -14,7 +14,9 @@ const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON rele
 const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, version?: string, now?: number) {
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   const history = presentedHistory(now)
   Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Bold Booster' })
   await mockReleases(page, history)

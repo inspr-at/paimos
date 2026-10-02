@@ -81,6 +81,50 @@ func TestRRULEValidationAndPreviewBounds(t *testing.T) {
 		t.Fatalf("long downtime %s %v", latest, err)
 	}
 }
+
+func TestMonthlyIntervalsAnchoredToStartDate(t *testing.T) {
+	for _, tc := range []struct {
+		name, rule, start, zone, clock, after string
+		want                                  []string
+	}{
+		{"one month", "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=-1", "2026-01-15", "UTC", "09:00", "2026-01-31T09:00:00Z", []string{"2026-02-28T09:00:00Z", "2026-03-31T09:00:00Z"}},
+		{"two months skip short month", "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=31", "2026-12-01", "UTC", "09:00", "2026-12-31T09:00:00Z", []string{"2027-08-31T09:00:00Z", "2027-10-31T09:00:00Z"}},
+		{"quarterly last day", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1", "2026-11-15", "UTC", "09:00", "2026-11-30T09:00:00Z", []string{"2027-02-28T09:00:00Z", "2027-05-31T09:00:00Z", "2027-08-31T09:00:00Z"}},
+		{"six months skip short month", "FREQ=MONTHLY;INTERVAL=6", "2026-08-31", "UTC", "09:00", "2026-08-31T09:00:00Z", []string{"2027-08-31T09:00:00Z", "2028-08-31T09:00:00Z"}},
+		{"six months leap day", "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=29", "2024-02-29", "UTC", "09:00", "2024-08-29T09:00:00Z", []string{"2025-08-29T09:00:00Z", "2026-08-29T09:00:00Z"}},
+		{"quarterly gap skips whole slot", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=29", "2025-12-01", "Europe/Vienna", "02:30", "2025-12-29T01:30:00Z", []string{"2026-06-29T00:30:00Z", "2026-09-29T00:30:00Z"}},
+		{"quarterly fold uses first instant", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=25", "2026-07-01", "Europe/Vienna", "02:30", "2026-07-25T00:30:00Z", []string{"2026-10-25T00:30:00Z", "2027-01-25T01:30:00Z"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			trigger := Trigger{Kind: "time", RRULE: tc.rule, StartDate: tc.start, Timezone: tc.zone, TimeOfDay: tc.clock}
+			got, err := Preview(trigger, timestamp(t, tc.after), len(tc.want))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, err := parseSchedule(trigger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, at := range got {
+				if at.Format(time.RFC3339) != tc.want[i] {
+					t.Fatalf("%d: %s want %s", i, at, tc.want[i])
+				}
+				latest, err := s.latest(at.Add(time.Minute))
+				if err != nil || !latest.Equal(at) {
+					t.Fatalf("latest %s want %s: %v", latest, at, err)
+				}
+			}
+		})
+	}
+}
+
+func TestMonthlyIntervalValidation(t *testing.T) {
+	for _, rule := range []string{"FREQ=DAILY;INTERVAL=1", "FREQ=WEEKLY;INTERVAL=1", "FREQ=WEEKLY;BYDAY=MO;INTERVAL=2", "FREQ=MONTHLY;INTERVAL=0", "FREQ=MONTHLY;INTERVAL=4", "FREQ=MONTHLY;INTERVAL=12", "FREQ=MONTHLY;INTERVAL=-1", "FREQ=MONTHLY;INTERVAL=01", "FREQ=MONTHLY;INTERVAL=1;INTERVAL=2"} {
+		if _, err := parseSchedule(Trigger{Kind: "time", RRULE: rule, StartDate: "2026-01-01", Timezone: "UTC", TimeOfDay: "09:00"}); err == nil {
+			t.Fatalf("accepted %s", rule)
+		}
+	}
+}
 func TestTemplateVariablesAndBounds(t *testing.T) {
 	for _, s := range []string{"{{unknown}}", "{{ occurrence }}", "{{date", "oops}}"} {
 		if validateVariables(s) == nil {

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/recurrences"
 )
@@ -21,16 +22,37 @@ func (rt *runtime) cmdRecur() *Command {
 	}}
 }
 func (rt *runtime) recurWrite(action string) *Command {
-	var bodyFile string
-	c := &Command{Name: action, Short: action + " a recurrence from JSON", Use: "recur " + action + " [--body-file FILE|-]", maxArgs: 0, addFlags: func(fs *flagSet) { fs.string(&bodyFile, "body-file", 0, "JSON definition; - reads stdin") }}
+	var bodyFile, descriptionFile, criteriaFile string
+	var tags []string
+	c := &Command{Name: action, Short: action + " a recurrence from JSON", Use: "recur " + action + " [--body-file FILE|-] [--tag NAME|UUID] [--description-file FILE] [--criteria-file FILE]", maxArgs: 0, addFlags: func(fs *flagSet) {
+		fs.string(&bodyFile, "body-file", 0, "JSON definition; - reads stdin")
+		fs.strings(&tags, "tag", "existing tag name or UUID in the target project/workspace (repeatable)")
+		fs.string(&descriptionFile, "description-file", 0, "template description file; overrides JSON description")
+		fs.string(&criteriaFile, "criteria-file", 0, "template criteria file, one nonblank criterion per line; overrides JSON criteria")
+	}}
 	if action == "update" {
-		c.Use = "recur update <recurrence-id> [--body-file FILE|-]"
+		c.Use = "recur update <recurrence-id> [--body-file FILE|-] [--tag NAME|UUID] [--description-file FILE] [--criteria-file FILE]"
 		c.minArgs = 1
 		c.maxArgs = 1
 	}
 	c.run = func(args []string) error {
 		if action == "update" && !validUUID(args[0]) {
 			return usagef("recurrence-id must be a UUID")
+		}
+		stdinFiles := 0
+		for _, file := range []string{bodyFile, descriptionFile, criteriaFile} {
+			if file == "-" {
+				stdinFiles++
+			}
+		}
+		if bodyFile == "" {
+			stdinFiles++
+		}
+		if stdinFiles > 1 {
+			return usagef("only one input file may read stdin")
+		}
+		if len(tags) > 50 {
+			return usagef("at most 50 --tag values are allowed")
 		}
 		var reader io.Reader = rt.stdin
 		var file *os.File
@@ -54,6 +76,15 @@ func (rt *runtime) recurWrite(action string) *Command {
 		if json.Unmarshal(raw, &body) != nil || body == nil {
 			return usagef("one JSON object is required on stdin or --body-file")
 		}
+		if len(tags) > 0 || descriptionFile != "" || criteriaFile != "" {
+			if err := rt.mergeRecurrenceTemplate(body, tags, descriptionFile, criteriaFile); err != nil {
+				return err
+			}
+			merged, err := json.Marshal(body)
+			if err != nil || len(merged) > 1<<20 {
+				return usagef("merged definition exceeds 1 MiB")
+			}
+		}
 		path := "/api/recurrences"
 		method := http.MethodPost
 		if action == "update" {
@@ -67,6 +98,151 @@ func (rt *runtime) recurWrite(action string) *Command {
 		return rt.printRecurrence(out)
 	}
 	return c
+}
+
+func (rt *runtime) mergeRecurrenceTemplate(body map[string]any, tags []string, descriptionFile, criteriaFile string) error {
+	template, ok := body["template"].(map[string]any)
+	if !ok {
+		return usagef("template must be a JSON object")
+	}
+	if descriptionFile != "" {
+		text, err := rt.recurTextFile(descriptionFile, 65536)
+		if err != nil {
+			return err
+		}
+		template["description"] = text
+	}
+	if criteriaFile != "" {
+		text, err := rt.recurTextFile(criteriaFile, 100*(4096+2))
+		if err != nil {
+			return err
+		}
+		criteria := []string{}
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if len(line) > 4096 || len(criteria) == 100 {
+				return usagef("criteria file allows at most 100 lines of 4096 bytes")
+			}
+			criteria = append(criteria, line)
+		}
+		template["acceptance_criteria"] = criteria
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	project, ok := body["project_id"].(string)
+	if !ok || !validUUID(project) {
+		return usagef("project_id must be a UUID to resolve --tag")
+	}
+	merged := []string{}
+	if raw, exists := template["tags"]; exists && raw != nil {
+		values, ok := raw.([]any)
+		if !ok || len(values) > 50 {
+			return usagef("template tags must contain at most 50 UUIDs")
+		}
+		for _, value := range values {
+			tag, ok := value.(string)
+			if !ok || !validUUID(tag) {
+				return usagef("template tags must be UUIDs")
+			}
+			merged = append(merged, strings.ToLower(tag))
+		}
+	}
+	seen := map[string]bool{}
+	for _, tag := range merged {
+		seen[tag] = true
+	}
+	for _, ref := range tags {
+		id, err := rt.recurTag(project, strings.TrimSpace(ref))
+		if err != nil {
+			return err
+		}
+		if !seen[id] {
+			if len(merged) == 50 {
+				return usagef("template tags allow at most 50 UUIDs")
+			}
+			merged = append(merged, id)
+			seen[id] = true
+		}
+	}
+	template["tags"] = merged
+	return nil
+}
+
+func (rt *runtime) recurTextFile(path string, limit int64) (string, error) {
+	var reader io.Reader = rt.stdin
+	if path != "-" {
+		file, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+		defer file.Close()
+		reader = file
+	}
+	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return "", err
+	}
+	if int64(len(raw)) > limit {
+		return "", usagef("template file exceeds %d bytes", limit)
+	}
+	return string(raw), nil
+}
+
+// The list's project projection distinguishes same-named tags in other
+// projects. Workspace tags are also valid, matching server validation. Refuse
+// a truncated scan rather than resolving a potentially ambiguous name.
+func (rt *runtime) recurTag(project, ref string) (string, error) {
+	if ref == "" || len(ref) > 512 {
+		return "", usagef("--tag requires a name or UUID")
+	}
+	query := url.Values{"kind": {"tag"}, "limit": {"200"}}
+	if validUUID(ref) {
+		query.Set("ids", ref)
+	} else {
+		query.Set("q", ref)
+	}
+	found := ""
+	for page := 0; page < 50; page++ {
+		var out struct {
+			Items []struct {
+				ID      string `json:"id"`
+				Title   string `json:"title"`
+				Project *struct {
+					ID string `json:"id"`
+				} `json:"project"`
+			} `json:"items"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := rt.do(http.MethodGet, "/api/nodes?"+query.Encode(), nil, &out); err != nil {
+			return "", err
+		}
+		for _, tag := range out.Items {
+			if tag.Project != nil && !strings.EqualFold(tag.Project.ID, project) {
+				continue
+			}
+			if strings.EqualFold(tag.Title, ref) || strings.EqualFold(tag.ID, ref) {
+				if !validUUID(tag.ID) {
+					return "", fmt.Errorf("tag response contains an invalid UUID")
+				}
+				if found != "" && !strings.EqualFold(found, tag.ID) {
+					return "", usagef("tag %q is ambiguous in this project/workspace; use its UUID", ref)
+				}
+				found = strings.ToLower(tag.ID)
+			}
+		}
+		if out.NextCursor == nil || *out.NextCursor == "" {
+			if found == "" {
+				return "", usagef("tag %q not found in this project/workspace", ref)
+			}
+			return found, nil
+		}
+		query.Set("cursor", *out.NextCursor)
+	}
+	return "", fmt.Errorf("tag lookup exceeds 50 pages; use a UUID")
 }
 func (rt *runtime) recurList() *Command {
 	var project, after string
