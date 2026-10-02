@@ -52,3 +52,7 @@ test('Decision entries use the same Knowledge taxonomy, routing and history stat
   assert.deepEqual(parseEntryParam('decision/decision-history'), {type:'decision',slug:'decision-history'})
   assert.equal(dockPath('AEON','decision','decision-history'),'/p/AEON/knowledge?entry=decision/decision-history')
 })
+
+test('Decisions have a distinct icon from Guidelines in lists and graph legends', () => {
+  assert.notEqual(typeMeta('decision').icon, typeMeta('guideline').icon)
+})

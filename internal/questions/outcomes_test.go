@@ -163,14 +163,14 @@ func TestRequirementPreservesFieldsReplayAndOwnCorrection(t *testing.T) {
 	if title != "Ticket title" || body != "Ticket body" || fields["priority"] != "high" || fields["custom"].(map[string]any)["x"] != float64(1) {
 		t.Fatalf("ticket fields lost: %+v", fields)
 	}
-	// Changing the tracked line means a later correction must fail safely.
+	// A person-edited criterion survives; the correction records review provenance.
 	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{acceptance_criteria}',to_jsonb(replace(fields->>'acceptance_criteria','Use remote storage.','Person edited this.'))),updated_at=clock_timestamp() WHERE id=$1`, f.ticket); err != nil {
 		t.Fatal(err)
 	}
 	q = f.outcome(t, q, "once", "Stop using the criterion")
 	f.advance(10 * time.Second)
 	f.dispatch(t)
-	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "failed" || e.ErrorCode != "criterion_changed" || e.ErrorMessage == "" {
+	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "delivered" || len(e.EffectData.ReviewRequired) != 1 || e.EffectData.ReviewRequired[0].Kind != "criterion" || e.EffectData.ReviewRequired[0].Ref != f.ticket {
 		t.Fatalf("edited criterion falsely corrected: %+v", e)
 	}
 	if !strings.Contains(f.criteria(t), "Person edited this.") {
@@ -187,6 +187,14 @@ func TestConcurrentCriterionAppendAndTicketRevisionConflict(t *testing.T) {
 	in.Question = "Another question"
 	two := f.outcome(t, f.ask(t, in), "requirement", "Second new criterion")
 	f.advance(10 * time.Second)
+	tx, err := f.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -200,6 +208,10 @@ func TestConcurrentCriterionAppendAndTicketRevisionConflict(t *testing.T) {
 		}()
 	}
 	close(start)
+	waitTenantWaiters(t, f, 2)
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -306,10 +318,9 @@ func TestOutcomeAvailabilityAndPermissionRevocationRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.advance(10 * time.Second)
-	started := make(chan struct{})
 	finished := make(chan error, 1)
-	go func() { close(started); _, e := f.m.DispatchTenant(t.Context(), f.person.TenantID); finished <- e }()
-	<-started
+	go func() { _, e := f.m.DispatchTenant(t.Context(), f.person.TenantID); finished <- e }()
+	waitTenantWaiters(t, f, 1)
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +422,7 @@ func TestDoctrinePendingPublishedAndCorrectedEffects(t *testing.T) {
 	q = f.outcome(t, q, "doctrine", "- 🟡 Keep commits small and documented.")
 	f.advance(10 * time.Second)
 	f.dispatch(t)
-	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "failed" || e.ErrorCode != "doctrine_review_required" || e.ErrorMessage == "" {
+	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "delivered" || e.EffectData.DoctrineID != "" || len(e.EffectData.ReviewRequired) != 1 || e.EffectData.ReviewRequired[0].Ref != published {
 		t.Fatalf("published doctrine auto-rewritten %+v", e)
 	}
 	if f.count(t, `SELECT count(*) FROM doctrine_proposals WHERE id=$1 AND data->>'state'='proposed' AND (data->>'pr_number')::int=17`, published) != 1 {
@@ -427,8 +438,11 @@ func TestDoctrinePendingPublishedAndCorrectedEffects(t *testing.T) {
 	q = f.outcome(t, q, "once", "Leave the published doctrine unchanged")
 	f.advance(10 * time.Second)
 	f.dispatch(t)
-	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "failed" || e.ErrorCode != "doctrine_review_required" {
-		t.Fatalf("landed rule automatically changed %+v", e)
+	if e := outcomeRow(t, f.status(t, q.ID)); e.State != "delivered" || len(e.EffectData.ReviewRequired) != 1 || e.EffectData.ReviewRequired[0].Ref != published {
+		t.Fatalf("landed rule correction lost review provenance %+v", e)
+	}
+	if f.count(t, `SELECT count(*) FROM doctrine_proposals WHERE id=$1 AND data->>'state'='promoted' AND data->>'promoted_commit'='2222222222222222222222222222222222222222'`, published) != 1 {
+		t.Fatal("landed doctrine evidence changed")
 	}
 }
 
@@ -448,9 +462,12 @@ func TestDoctrineChangedBaseDuringGraceIsVisibleAndSafe(t *testing.T) {
 	if e := outcomeRow(t, status); e.State != "failed" || e.ErrorMessage == "" || e.EffectRef != "" {
 		t.Fatalf("stale doctrine falsely proposed %+v", e)
 	}
+	if e := outcomeRow(t, status); e.EffectData.Retryable == nil || *e.EffectData.Retryable || !strings.Contains(e.ErrorMessage, "decide again") {
+		t.Fatal("stale base did not explain the final failure")
+	}
 	for _, stamp := range status.Outcomes {
-		if stamp.Outcome == "doctrine" && (stamp.Available || stamp.Why == "") {
-			t.Fatal("stale stamp did not explain refusal")
+		if stamp.Outcome == "doctrine" && !stamp.MappingPresent {
+			t.Fatal("read lost cheap mapping hint")
 		}
 	}
 	if f.count(t, `SELECT count(*) FROM doctrine_proposals`) != 0 {

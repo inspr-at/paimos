@@ -31,6 +31,19 @@ test('Decision entries expose active and superseded history without generic muta
   const calls = await mockKnowledge(page, world)
   await page.goto('/p/PHAROS/knowledge?type=decision&view=entries')
   await expect(groupTitles(page)).toHaveText(['Decisions'])
+  const rail = page.getByRole('navigation', { name: 'Kinds of knowledge' })
+  const decisionIcon = rail.getByRole('button', { name: /Decisions/ }).locator('.k-kind-icon')
+  const guidelineIcon = rail.getByRole('button', { name: /Guidelines/ }).locator('.k-kind-icon')
+  expect(await decisionIcon.locator('svg').innerHTML()).not.toBe(await guidelineIcon.locator('svg').innerHTML())
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    expect(await decisionIcon.evaluate(el => getComputedStyle(el).color)).not.toBe(await guidelineIcon.evaluate(el => getComputedStyle(el).color))
+    const colors = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement)
+      return { decision: css.getPropertyValue('--kind-decision').trim(), guideline: css.getPropertyValue('--kind-guideline').trim() }
+    })
+    expect(colors.decision).not.toBe(colors.guideline)
+  }
   await expect(rows(page)).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'New decision', exact: true })).toHaveCount(0)
   await rows(page).first().click()

@@ -19,6 +19,7 @@ import (
 
 // One adapter consumes the existing AEON-444 inbox; the desk has no git writer.
 type DoctrineAdapter interface {
+	PrepareDeskDraft(context.Context, tenant.Principal, doctrine.InboxInput) (*doctrine.PreparedInbox, error)
 	CheckDeskTargetTx(context.Context, pgx.Tx, tenant.Principal, doctrine.InboxInput) error
 	RecordDeskDraftTx(context.Context, pgx.Tx, tenant.Principal, doctrine.InboxInput, string, string, string) (string, []events.Change, error)
 	RetireDeskDraftTx(context.Context, pgx.Tx, tenant.Principal, string, string, string) ([]events.Change, error)
@@ -33,12 +34,20 @@ type outcomeInput struct {
 // EffectData keeps the exact appended text and service-owned identities. It is
 // retained on superseded revisions, so a correction can remove only its effect.
 type EffectData struct {
-	TicketID     string `json:"ticket_id,omitempty"`
-	Criterion    string `json:"criterion,omitempty"`
-	KnowledgeID  string `json:"knowledge_id,omitempty"`
-	DoctrineID   string `json:"doctrine_id,omitempty"`
-	Supersedes   string `json:"supersedes,omitempty"`
-	SupersededBy string `json:"superseded_by,omitempty"`
+	Retryable      *bool          `json:"retryable,omitempty"`
+	ReviewRequired []EffectReview `json:"review_required,omitempty"`
+	TicketID       string         `json:"ticket_id,omitempty"`
+	Criterion      string         `json:"criterion,omitempty"`
+	KnowledgeID    string         `json:"knowledge_id,omitempty"`
+	DoctrineID     string         `json:"doctrine_id,omitempty"`
+	Supersedes     string         `json:"supersedes,omitempty"`
+	SupersededBy   string         `json:"superseded_by,omitempty"`
+}
+
+type EffectReview struct {
+	Kind string `json:"kind"`
+	Ref  string `json:"ref"`
+	Why  string `json:"why"`
 }
 
 func doctrineInput(target *DoctrineTarget) doctrine.InboxInput {
@@ -52,7 +61,7 @@ func doctrineInput(target *DoctrineTarget) doctrine.InboxInput {
 	return in
 }
 
-func (m *Module) availability(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Question, target *DoctrineTarget) ([]OutcomeAvailability, error) {
+func (m *Module) availability(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Question, target *DoctrineTarget, check authz.ProjectCheck) ([]OutcomeAvailability, error) {
 	out := []OutcomeAvailability{{Outcome: "once"}, {Outcome: "always"}, {Outcome: "requirement"}, {Outcome: "doctrine"}}
 	for i := range out {
 		s := &out[i]
@@ -60,10 +69,7 @@ func (m *Module) availability(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			s.Why = "A signed-in person chooses this outcome."
 			continue
 		}
-		if err := authz.RequireTx(ctx, tx, p, "questions.decide", authz.Scope{ProjectID: q.ProjectID}); err != nil {
-			if !errors.Is(err, authz.ErrForbidden) {
-				return nil, err
-			}
+		if !check("questions.decide", q.ProjectID) {
 			s.Why = "Question decision permission is required."
 			continue
 		}
@@ -74,22 +80,28 @@ func (m *Module) availability(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		case "requirement":
 			permission = "nodes.write"
 		}
-		if permission != "" {
-			if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: q.ProjectID}); err != nil {
-				if !errors.Is(err, authz.ErrForbidden) {
-					return nil, err
-				}
-				s.Why = "This outcome requires " + permission + " permission."
-				continue
-			}
+		if permission != "" && !check(permission, q.ProjectID) {
+			s.Why = "This outcome requires " + permission + " permission."
+			continue
 		}
 		if s.Outcome == "requirement" {
 			if q.Input.TicketID == "" {
 				s.Why = "Requirement needs a linked editable ticket."
 				continue
 			}
-			if err := checkNode(ctx, tx, p.TenantID, q.ProjectID, q.Input.TicketID, true); err != nil {
+			var editable, textCriteria bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE n.tenant_id=$1 AND n.project_id=$2 AND n.id=$3 AND n.deleted_at IS NULL
+ AND (k.slug IN ('ticket','task','epic') OR k.field_schema->>'issue_family'='true')),
+ COALESCE((SELECT NOT (fields ? 'acceptance_criteria') OR fields->'acceptance_criteria'='null'::jsonb OR jsonb_typeof(fields->'acceptance_criteria')='string' FROM nodes WHERE tenant_id=$1 AND id=$3),false)`, p.TenantID, q.ProjectID, q.Input.TicketID).Scan(&editable, &textCriteria); err != nil {
+				return nil, err
+			}
+			if !editable {
 				s.Why = "The linked ticket is no longer editable."
+				continue
+			}
+			if !textCriteria {
+				s.Why = "Requirement needs text acceptance criteria; review the ticket's list or structured criteria first."
 				continue
 			}
 		}
@@ -102,10 +114,12 @@ func (m *Module) availability(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				s.Why = "The doctrine inbox adapter is unavailable."
 				continue
 			}
-			if err := m.doctrine.CheckDeskTargetTx(ctx, tx, p, doctrineInput(target)); err != nil {
-				_, s.Why = doctrine.DeskFailure(err)
+			if !check("rules.write", "") {
+				s.Why = "Doctrine requires workspace rules.write permission."
 				continue
 			}
+			s.MappingPresent = true
+
 		}
 		s.Available = true
 	}
@@ -135,7 +149,11 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		return err
 	}
 	q := Question{ID: d.question, ProjectID: d.project, Input: questionInput}
-	stamps, err := m.availability(ctx, tx, p, q, in.Doctrine)
+	check, err := authz.ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	stamps, err := m.availability(ctx, tx, p, q, in.Doctrine, check)
 	if err != nil {
 		return err
 	}
@@ -153,28 +171,7 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		return err
 	}
 	changes := []events.Change{}
-	data := EffectData{Supersedes: previousID}
-	if previous.KnowledgeID != "" {
-		if err := permit(ctx, tx, p, d.project, "knowledge.write"); err != nil {
-			return fail(403, "knowledge_access_lost", "Replacing the earlier Decision requires knowledge.write permission.")
-		}
-		var beforeNode, afterNode json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tid, previous.KnowledgeID).Scan(&beforeNode); err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `UPDATE nodes SET state='cancelled',fields=jsonb_set(jsonb_set(fields,'{metadata,decision_state}','"superseded"'),'{metadata,superseded_by}',to_jsonb($3::text)),
- updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2 AND fields->'metadata'->>'question_id'=$4 AND deleted_at IS NULL`, tid, previous.KnowledgeID, a.ID, d.question)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return fail(409, "effect_ownership_conflict", "The earlier Decision changed; review its provenance before correcting it.")
-		}
-		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tid, previous.KnowledgeID).Scan(&afterNode); err != nil {
-			return err
-		}
-		changes = append(changes, events.Change{NodeID: &previous.KnowledgeID, Type: "knowledge.updated", Before: beforeNode, After: afterNode, Metadata: json.RawMessage(`{"reason":"Decision Desk supersession"}`)})
-	}
+	data := EffectData{Supersedes: previousID, ReviewRequired: previous.ReviewRequired}
 	if previous.TicketID != "" || a.Outcome == "requirement" {
 		if err := permit(ctx, tx, p, d.project, "nodes.write"); err != nil {
 			return fail(403, "ticket_access_lost", "Updating the criterion requires ticket write permission.")
@@ -189,27 +186,31 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		if err := checkNode(ctx, tx, tid, d.project, ticket, true); err != nil {
 			return err
 		}
-		var fields map[string]any
+		var criteriaJSON json.RawMessage
 		var revision time.Time
 		var beforeNode, afterNode json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT fields,updated_at,to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tid, ticket).Scan(&fields, &revision, &beforeNode); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT fields->'acceptance_criteria',updated_at,to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tid, ticket).Scan(&criteriaJSON, &revision, &beforeNode); err != nil {
 			return err
 		}
 		if a.Outcome == "requirement" && !revision.Equal(in.TicketRevision) {
 			return fail(409, "ticket_revision_conflict", "The ticket changed during grace; review it and decide again. No criterion was changed.")
 		}
-		criteria, ok := fields["acceptance_criteria"].(string)
-		if fields["acceptance_criteria"] != nil && !ok {
+		criteria := ""
+		textCriteria := len(criteriaJSON) == 0 || string(criteriaJSON) == "null" || json.Unmarshal(criteriaJSON, &criteria) == nil
+		if !textCriteria && a.Outcome == "requirement" {
 			return fail(409, "criteria_format_conflict", "The ticket's acceptance criteria are not text; review them before appending.")
 		}
 		if len(criteria) > 64<<10 {
 			return fail(422, "criteria_too_large", "The ticket's criteria exceed the bounded append limit.")
 		}
+		changed := false
 		if previous.Criterion != "" {
-			if strings.Count(criteria, previous.Criterion) != 1 {
-				return fail(409, "criterion_changed", "The earlier tracked criterion was edited or removed; review the correction. No other criterion was changed.")
+			if !textCriteria || strings.Count(criteria, previous.Criterion) != 1 {
+				data.requireReview(EffectReview{Kind: "criterion", Ref: ticket, Why: "The earlier tracked criterion was edited or removed; it was preserved for person review."})
+			} else {
+				criteria = strings.Replace(criteria, previous.Criterion, "", 1)
+				changed = true
 			}
-			criteria = strings.Replace(criteria, previous.Criterion, "", 1)
 		}
 		if a.Outcome == "requirement" {
 			// Escape line breaks so the answer is exactly one tracked criterion.
@@ -217,34 +218,44 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 			data.TicketID = ticket
 			data.Criterion = "\n- [ ] " + text + " <!-- decision-desk:" + a.ID + " -->"
 			criteria += data.Criterion
+			changed = true
 		}
 		if len(criteria) > 64<<10 {
 			return fail(422, "criteria_too_large", "The appended criteria would exceed the bounded limit.")
 		}
-		if fields == nil {
-			fields = map[string]any{}
+		if changed {
+			raw, err := json.Marshal(criteria)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{acceptance_criteria}',$3::jsonb),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2`, tid, ticket, raw); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tid, ticket).Scan(&afterNode); err != nil {
+				return err
+			}
+			changes = append(changes, events.Change{NodeID: &ticket, Type: "node.updated", Before: beforeNode, After: afterNode, Metadata: json.RawMessage(`{"reason":"Decision Desk criterion"}`)})
 		}
-		fields["acceptance_criteria"] = criteria
-		raw, err := json.Marshal(fields)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$3,updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE tenant_id=$1 AND id=$2`, tid, ticket, raw); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tid, ticket).Scan(&afterNode); err != nil {
-			return err
-		}
-		changes = append(changes, events.Change{NodeID: &ticket, Type: "node.updated", Before: beforeNode, After: afterNode, Metadata: json.RawMessage(`{"reason":"Decision Desk criterion"}`)})
+
 	}
-	if previous.DoctrineID != "" && a.Outcome != "doctrine" {
+	reviewDoctrine := false
+	for _, review := range data.ReviewRequired {
+		if review.Kind == "doctrine" {
+			reviewDoctrine = true
+		}
+	}
+	if previous.DoctrineID != "" {
 		if m.doctrine == nil {
 			return fail(503, "doctrine_unavailable", "The earlier doctrine draft cannot be corrected until the adapter is available.")
 		}
 		more, err := m.doctrine.RetireDeskDraftTx(ctx, tx, p, previous.DoctrineID, d.question, a.ID)
 		if err != nil {
 			code, why := doctrine.DeskFailure(err)
-			return fail(409, code, why)
+			if code != "doctrine_review_required" {
+				return doctrineOutcomeError(err)
+			}
+			data.requireReview(EffectReview{Kind: "doctrine", Ref: previous.DoctrineID, Why: why})
+			reviewDoctrine = true
 		}
 		changes = append(changes, more...)
 	}
@@ -275,20 +286,19 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		}
 		changes = append(changes, events.Change{NodeID: &a.ID, Type: "knowledge.created", After: afterNode})
 	case "doctrine":
-		inbox := doctrineInput(in.Doctrine)
-		inbox.RequestID, inbox.Source, inbox.Why = a.ID, a.Answer, a.Reason
-		if inbox.Why == "" {
-			inbox.Why = "Human answer recorded on Decision Desk question " + d.question
+		if reviewDoctrine {
+			break
 		}
-		if questionInput.TicketID != "" {
-			if err := tx.QueryRow(ctx, `SELECT key FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tid, questionInput.TicketID).Scan(&inbox.Ticket); err != nil {
-				return err
-			}
+		if d.prepareErr != nil {
+			return d.prepareErr
 		}
-		id, more, err := m.doctrine.RecordDeskDraftTx(ctx, tx, p, inbox, d.question, a.ID, previous.DoctrineID)
+		if d.prepared == nil {
+			return fail(503, "doctrine_unavailable", "The draft preparation is unavailable; it will be retried.")
+		}
+		inbox := d.doctrineInput
+		id, more, err := m.doctrine.RecordDeskDraftTx(doctrine.WithPreparedInbox(ctx, d.prepared), tx, p, inbox, d.question, a.ID, "")
 		if err != nil {
-			code, why := doctrine.DeskFailure(err)
-			return fail(409, code, why)
+			return doctrineOutcomeError(err)
 		}
 		data.DoctrineID, ref = id, id
 		changes = append(changes, more...)
@@ -323,4 +333,26 @@ func (m *Module) applyOutcome(ctx context.Context, tx pgx.Tx, tid string, d deli
 		}
 	}
 	return nil
+}
+
+func doctrineOutcomeError(err error) error {
+	code, why := doctrine.DeskFailure(err)
+	status := 409
+	switch code {
+	case "doctrine_forbidden":
+		status = 403
+	case "doctrine_failed", "guard_unavailable", "busy":
+		status = 503
+	}
+	return fail(status, code, why)
+}
+
+func (data *EffectData) requireReview(review EffectReview) {
+	for i, existing := range data.ReviewRequired {
+		if existing.Kind == review.Kind {
+			data.ReviewRequired[i] = review
+			return
+		}
+	}
+	data.ReviewRequired = append(data.ReviewRequired, review)
 }

@@ -199,12 +199,31 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 		}
 		if p.Kind == "outcome" && p.State == "delivered" && q.Answer != nil {
 			if q.Answer.Outcome == "doctrine" {
-				state = "draft saved; waiting for a person"
+				switch p.DoctrineState {
+				case "pending":
+					state = "draft saved; waiting for a person"
+				case "dismissed":
+					state = "draft dismissed or expired"
+				case "":
+					if p.EffectData.DoctrineID == "" && len(p.EffectData.ReviewRequired) > 0 {
+						state = "no new draft created"
+					} else {
+						state = "draft recorded; current proposal state unavailable"
+					}
+				default:
+					state = "proposal: " + p.DoctrineState
+				}
 			} else {
 				state = "applied"
 			}
 		}
+		if len(p.EffectData.ReviewRequired) > 0 {
+			state += "; person review required"
+		}
 		fmt.Fprintf(rt.stdout, "%s: %s\n", p.Kind, state)
+		for _, review := range p.EffectData.ReviewRequired {
+			fmt.Fprintf(rt.stdout, "  review %s %s: %s\n", review.Kind, review.Ref, review.Why)
+		}
 		if p.ErrorMessage != "" {
 			fmt.Fprintln(rt.stdout, "  why:", p.ErrorMessage)
 		}

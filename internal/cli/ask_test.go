@@ -127,7 +127,7 @@ func TestAskOptionAndContextBounds(t *testing.T) {
 func TestQuestionStatusExplainsFailedEffectsAndPendingDoctrine(t *testing.T) {
 	out := &bytes.Buffer{}
 	rt := &runtime{stdout: out}
-	q := questions.Question{ID: "question", Answer: &questions.Answer{Outcome: "doctrine"}, Pending: []questions.Pending{{Kind: "outcome", State: "delivered", EffectRef: "draft-reference"}}}
+	q := questions.Question{ID: "question", Answer: &questions.Answer{Outcome: "doctrine"}, Pending: []questions.Pending{{Kind: "outcome", State: "delivered", EffectRef: "draft-reference", DoctrineState: "pending"}}}
 	if err := rt.printQuestion(q); err != nil {
 		t.Fatal(err)
 	}

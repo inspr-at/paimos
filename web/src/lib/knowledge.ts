@@ -28,14 +28,14 @@ export interface KnowledgePage {
 }
 
 // ---------- Knowledge kinds ----------
-export interface TypeMeta { type: KnowledgeType; label: string; plural: string; icon: 'runbook' | 'guideline' | 'memory' | 'server' | 'folders'; hint: string }
+export interface TypeMeta { type: KnowledgeType; label: string; plural: string; icon: 'person-check' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders'; hint: string }
 export const TYPES: readonly TypeMeta[] = [
   { type: 'runbook', label: 'Runbook', plural: 'Runbooks', icon: 'runbook', hint: 'Step-by-step procedures: deploys, rotations, recoveries.' },
   { type: 'guideline', label: 'Guideline', plural: 'Guidelines', icon: 'guideline', hint: 'Rules to follow: conventions, safety, style.' },
   { type: 'memory', label: 'Memory', plural: 'Memory', icon: 'memory', hint: 'What was learned: decisions, pitfalls, preferences.' },
   { type: 'external-system', label: 'External system', plural: 'External systems', icon: 'server', hint: 'Services the work touches: consoles, APIs, vaults.' },
   { type: 'related-project', label: 'Related project', plural: 'Related projects', icon: 'folders', hint: 'Projects this one depends on or feeds.' },
-  { type: 'decision', label: 'Decision', plural: 'Decisions', icon: 'guideline', hint: 'Approved Always answers; replacements keep their history.' },
+  { type: 'decision', label: 'Decision', plural: 'Decisions', icon: 'person-check', hint: 'Approved Always answers; replacements keep their history.' },
 ]
 // Each kind's hue (tokens.css --kind-*): list icons, graph bubbles and the legend agree.
 export const kindToken = (type: KnowledgeType | 'ticket') => `--kind-${type}`

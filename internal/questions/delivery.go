@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -93,6 +94,7 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 		rows, err := tx.Query(ctx, `SELECT e.id::text FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
  LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
  WHERE e.tenant_id=$1 AND e.kind IN ('inbox','comment','outcome') AND (e.state IN ('pending','failed') OR e.state='delivered' AND r.state='failed' AND r.failure_reason='session_ended')
+ AND coalesce(e.effect_data->>'retryable','true')<>'false'
  AND e.deliver_after<=$2 AND coalesce(e.retry_at,e.deliver_after)<=$2
  ORDER BY coalesce(e.retry_at,e.deliver_after),e.question_id,(e.kind='outcome') DESC,e.kind,e.id LIMIT $3`, tid, now, dispatchBatch)
 		if err != nil {
@@ -126,7 +128,7 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 			return err
 		}
 		var due *time.Time
-		err = tx.QueryRow(ctx, `SELECT min(greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after))) FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision WHERE e.tenant_id=$1 AND e.state IN ('pending','failed') AND e.kind IN ('inbox','comment','outcome')`, tid).Scan(&due)
+		err = tx.QueryRow(ctx, `SELECT min(greatest(e.deliver_after,coalesce(e.retry_at,e.deliver_after))) FROM desk_pending e JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision WHERE e.tenant_id=$1 AND e.state IN ('pending','failed') AND coalesce(e.effect_data->>'retryable','true')<>'false' AND e.kind IN ('inbox','comment','outcome')`, tid).Scan(&due)
 		if due != nil && due.Sub(now) < delay {
 			delay = due.Sub(now)
 		}
@@ -136,6 +138,9 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
 }
 
 type delivery struct {
+	prepared                                                *doctrine.PreparedInbox
+	prepareErr                                              error
+	doctrineInput                                           doctrine.InboxInput
 	id, project, question, asker, kind, state, ref, session string
 	revision                                                int64
 	due                                                     time.Time
@@ -143,11 +148,17 @@ type delivery struct {
 }
 
 func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
+	prepared, input, prepareErr := m.prepareDoctrineEffect(ctx, tid, id)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	return db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true),set_config('statement_timeout','10s',true)`); err != nil {
+			return err
+		}
 		if err := treeLock(ctx, tx, tid); err != nil {
 			return err
 		}
-		var d delivery
+		d := delivery{prepared: prepared, doctrineInput: input, prepareErr: prepareErr}
 		// Lookup carries no authority. Lock hierarchy before any generation rows.
 		if err := tx.QueryRow(ctx, `SELECT project_id::text,question_id::text FROM desk_pending WHERE tenant_id=$1 AND id=$2`, tid, id).Scan(&d.project, &d.question); err != nil {
 			return err
@@ -166,6 +177,13 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 		now, err := m.now(ctx, tx)
 		if err != nil {
 			return err
+		}
+		var retryable *bool
+		if err := tx.QueryRow(ctx, `SELECT (effect_data->>'retryable')::boolean FROM desk_pending WHERE tenant_id=$1 AND id=$2`, tid, id).Scan(&retryable); err != nil {
+			return err
+		}
+		if retryable != nil && !*retryable {
+			return nil
 		}
 		if current != d.revision || d.state == "replaced" || now.Before(d.due) || d.retry != nil && now.Before(*d.retry) {
 			return nil
@@ -203,7 +221,14 @@ func (m *Module) dispatchOne(ctx context.Context, tid, id string) error {
 		if errors.As(err, &ae) {
 			code, message = ae.code, ae.message
 		}
-		_, err = tx.Exec(ctx, `UPDATE desk_pending SET state='failed',error_code=$3,retry_at=$4,error_message=$5 WHERE tenant_id=$1 AND id=$2`, tid, id, code, now.Add(30*time.Second), message)
+		retryableEffect := true
+		var retryAt any = now.Add(30 * time.Second)
+		if d.kind == "outcome" && ae != nil && (ae.status == 400 || ae.status == 409 || ae.status == 422) {
+			retryableEffect = false
+			retryAt = nil
+			message += " Review this failure and decide again; automatic retries have stopped."
+		}
+		_, err = tx.Exec(ctx, `UPDATE desk_pending SET state='failed',error_code=$3,retry_at=$4,error_message=$5,effect_data=jsonb_set(effect_data,'{retryable}',to_jsonb($6::boolean)) WHERE tenant_id=$1 AND id=$2`, tid, id, code, retryAt, message, retryableEffect)
 		return err
 	})
 }
@@ -374,4 +399,47 @@ func routeAnswer(ctx context.Context, tx pgx.Tx, tid, project string, a Asker, a
 		id = next
 	}
 	return "", fail(409, "successor_chain_limit", "successor chain exceeds routing bound")
+}
+
+// Expensive rendering and the private quote guard run before the mutation
+// fence. The exact revision, actor, source and permissions are checked again
+// in the final transaction; this snapshot never grants authority.
+func (m *Module) prepareDoctrineEffect(ctx context.Context, tid, id string) (*doctrine.PreparedInbox, doctrine.InboxInput, error) {
+	if m.doctrine == nil {
+		return nil, doctrine.InboxInput{}, nil
+	}
+	var p tenant.Principal
+	var in outcomeInput
+	var input Input
+	var a Answer
+	var ticketKey, questionID string
+	p.TenantID, p.Kind = tid, tenant.Person
+	err := db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
+		now, err := m.now(ctx, tx)
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT a.node_id::text,a.answer,a.reason,a.decided_by::text,a.outcome_data,q.input,coalesce(n.key,''),q.node_id::text
+ FROM desk_pending e JOIN desk_answers a ON a.tenant_id=e.tenant_id AND a.question_id=e.question_id AND a.revision=e.revision
+ JOIN desk_questions q ON q.tenant_id=e.tenant_id AND q.node_id=e.question_id AND q.revision=e.revision
+ LEFT JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=(q.input->>'ticket_id')::uuid AND n.deleted_at IS NULL
+ WHERE e.tenant_id=$1 AND e.id=$2 AND e.kind='outcome' AND a.outcome='doctrine' AND e.state IN ('pending','failed')
+ AND e.deliver_after<=$3 AND coalesce(e.retry_at,e.deliver_after)<=$3 AND coalesce(e.effect_data->>'retryable','true')<>'false'`, tid, id, now).Scan(&a.ID, &a.Answer, &a.Reason, &p.ID, &in, &input, &ticketKey, &questionID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, doctrine.InboxInput{}, nil
+	}
+	if err != nil {
+		return nil, doctrine.InboxInput{}, err
+	}
+	draft := doctrineInput(in.Doctrine)
+	draft.RequestID, draft.Source, draft.Why, draft.Ticket = a.ID, a.Answer, a.Reason, ticketKey
+	if draft.Why == "" {
+		draft.Why = "Human answer recorded on Decision Desk question " + questionID
+	}
+	prepared, err := m.doctrine.PrepareDeskDraft(ctx, p, draft)
+	if err != nil {
+		return nil, draft, doctrineOutcomeError(err)
+	}
+	return prepared, draft, nil
 }

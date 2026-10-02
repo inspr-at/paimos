@@ -313,8 +313,36 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Principal, in InboxInput) (Proposal, error) {
 	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
 	defer cancel()
+	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID {
+		return Proposal{}, fail(400, "invalid_request", "Name a canonical request UUID.")
+	}
+	// Preserve exact replay semantics before rendering or quotation checks.
 	var p Proposal
+	found := false
 	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
+		stored, err := getProposal(ctx, tx, in.RequestID)
+		var refusal *failure
+		if errors.As(err, &refusal) && refusal.Status == 404 {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !stored.Inbox || stored.ProposedBy != actor.ID || (stored.InboxDigest != "" && stored.InboxDigest != inboxDigest(in) || stored.InboxDigest == "" && (stored.Path != in.Path || stored.RuleKey != in.RuleKey)) || stored.DeskQuestionID != "" || stored.DeskAnswerID != "" {
+			return fail(409, "request_conflict", "That request UUID belongs to another proposal.")
+		}
+		p, found = stored, true
+		return nil
+	})
+	if err != nil || found {
+		return p, err
+	}
+	prepared, err := m.PrepareDeskDraft(ctx, actor, in)
+	if err != nil {
+		return p, err
+	}
+	ctx = WithPreparedInbox(ctx, prepared)
+	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
 		var changes []events.Change
 		var err error
 		p, changes, err = m.recordInboxTx(ctx, tx, actor, in, "", "", "")

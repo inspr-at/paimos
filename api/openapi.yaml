@@ -8798,6 +8798,7 @@ components:
         outcome: {$ref: '#/components/schemas/QuestionOutcome'}
         available: {type: boolean}
         why: {type: string, description: Unavailable stamps have no shortcut; do not treat the stored suggestion as permission.}
+        mapping_present: {type: boolean, description: Cheap Doctrine mapping hint; the exact source and guard are validated only when deciding and applying.}
     QuestionDecisionInput:
       type: object
       additionalProperties: false
@@ -8842,11 +8843,22 @@ components:
       additionalProperties: false
       properties:
         ticket_id: {type: string, format: uuid}
-        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; corrections refuse if it changed.}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; person edits are preserved and flagged for review.}
         knowledge_id: {type: string, format: uuid}
         doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
         supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
         superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
+        retryable: {type: boolean, description: False means automatic retry is stopped; review the failure and decide a new revision.}
+        review_required:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required: [kind, ref, why]
+            properties:
+              kind: {type: string, enum: [criterion, doctrine]}
+              ref: {type: string}
+              why: {type: string}
     QuestionPending:
       type: object
       required: [id, revision, kind, state, deliver_after]
@@ -8859,11 +8871,12 @@ components:
         deliver_after: {type: string, format: date-time}
         effect_ref: {type: string}
         error_code: {type: string}
-        error_message: {type: string, description: Safe explanation of a failed effect; automatic retry rechecks current authority.}
+        error_message: {type: string, description: Safe explanation of a failed effect; retryable effects recheck authority; final conflicts require a new decision.}
         effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
         receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
         receipt_failure: {type: string}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
     Question:
       type: object
       required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]

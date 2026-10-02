@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -35,6 +36,11 @@ func DeskFailure(err error) (string, string) {
 // CheckDeskTargetTx checks the mapping and current authority without creating a
 // draft or contacting git. The caller holds the tenant access fence.
 func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, in InboxInput) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true),set_config('statement_timeout','10s',true)`); err != nil {
+		return err
+	}
 	if err := m.proposalAccess(actor); err != nil {
 		return err
 	}
@@ -99,8 +105,14 @@ func (m *Module) RetireDeskDraftTx(ctx context.Context, tx pgx.Tx, actor tenant.
 	if !p.Inbox || p.DeskQuestionID != question {
 		return nil, fail(409, "effect_ownership_conflict", "That draft belongs to another effect.")
 	}
+	// A person's dismissal (including TTL expiry) already retired this draft.
+	// Preserve their attribution, reason and history; the desk records lineage
+	// on its own new effect instead of reopening or rewriting the proposal.
+	if p.State == "dismissed" {
+		return nil, nil
+	}
 	if p.State != "pending" || p.PRNumber > 0 || p.Branch != "" || p.SubmittedBy != "" || p.EditedBy != "" || p.MergeCommit != "" || p.PromotedCommit != "" || p.OperationID != "" && time.Now().Before(p.OperationUntil) {
-		return nil, fail(409, "doctrine_review_required", "The earlier doctrine proposal was edited, published or closed. Create a new person-reviewed correction; its history will remain unchanged.")
+		return nil, fail(409, "doctrine_review_required", "The earlier doctrine proposal was edited or published. Person review is required through the existing Doctrine path; its history remains unchanged.")
 	}
 	p.State, p.DismissedBy, p.DismissReason, p.SupersededBy = "dismissed", actor.ID, "Superseded by Decision Desk answer "+answer, answer
 	if err := saveProposal(ctx, tx, actor, &p, ""); err != nil {
@@ -128,6 +140,18 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	if in.RuleSHA != "" && !digestPattern.MatchString(in.RuleSHA) {
 		return Proposal{}, nil, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
 	}
+	rawInput, _ := json.Marshal(in)
+	sum := sha256.Sum256(rawInput)
+	requestDigest := hex.EncodeToString(sum[:])
+	// Read-only preparation precedes the tenant mutation fence. A prepared
+	// capability is bound to this actor and exact input, and revalidated below.
+	if preparedInboxFrom(ctx) == nil {
+		prepared, err := m.prepareInboxTx(ctx, tx, actor, in)
+		if err != nil {
+			return Proposal{}, nil, err
+		}
+		ctx = context.WithValue(ctx, preparedInboxKey{}, prepared)
+	}
 	// This writer is also used by the pre-existing unforgeable analysis service
 	// capability. It receives the same access fence, never human authority.
 	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, actor.TenantID); err != nil {
@@ -138,9 +162,6 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 			return Proposal{}, nil, err
 		}
 	}
-	rawInput, _ := json.Marshal(in)
-	sum := sha256.Sum256(rawInput)
-	requestDigest := hex.EncodeToString(sum[:])
 	existing, err := getProposal(ctx, tx, in.RequestID)
 	if err == nil {
 		if !existing.Inbox || existing.ProposedBy != actor.ID || (existing.InboxDigest != "" && existing.InboxDigest != requestDigest || existing.InboxDigest == "" && (existing.Path != in.Path || existing.RuleKey != in.RuleKey)) || existing.DeskQuestionID != deskQuestion || existing.DeskAnswerID != deskAnswer {
@@ -152,63 +173,11 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	if !errors.As(err, &refusal) || refusal.Status != 404 {
 		return Proposal{}, nil, err
 	}
-	source, err := inboxSource(ctx, tx, in)
-	if err != nil {
+	prepared := preparedInboxFrom(ctx)
+	if err := m.verifyPreparedTx(ctx, tx, actor, in, prepared); err != nil {
 		return Proposal{}, nil, err
 	}
-	if !writableSource(source) {
-		return Proposal{}, nil, fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
-	}
-	if source.CredentialRef != "" {
-		if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
-			return Proposal{}, nil, err
-		}
-	}
-	files, err := cachedFiles(ctx, tx, source)
-	if err != nil {
-		return Proposal{}, nil, err
-	}
-	var guard *guardCorpus
-	if source.Repository == publicRepository {
-		guard, err = m.privateGuard(ctx, tx, actor)
-		if err != nil {
-			return Proposal{}, nil, err
-		}
-	}
-	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
-	if !ok || file.Problem != "" {
-		return Proposal{}, nil, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
-	}
-	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
-		return Proposal{}, nil, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
-	}
-	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
-	switch {
-	case in.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
-	case rule.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = rule.TLDR.EN, rule.TLDR.DE
-	}
-	if strings.TrimSpace(pin.TLDR.EN) == "" {
-		return Proposal{}, nil, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
-	}
-	if err := pin.validate(); err != nil {
-		return Proposal{}, nil, err
-	}
-	_, old, next, err := editRuleViews(source, files, pin)
-	if err != nil {
-		return Proposal{}, nil, err
-	}
-	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
-		return Proposal{}, nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
-	}
-	// A TL;DR alone is a change; adding one to a rule without one is too.
-	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
-		return Proposal{}, nil, fail(400, "no_change", "The proposal matches the pinned rule.")
-	}
-	if _, err := m.checkPrivateQuotesTx(ctx, tx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation); err != nil {
-		return Proposal{}, nil, err
-	}
+	source, pin, old, next, rule, index := prepared.source, prepared.pin, prepared.old, prepared.next, prepared.rule, prepared.index
 	changes := []events.Change{}
 	if replaces != "" {
 		changes, err = m.RetireDeskDraftTx(ctx, tx, actor, replaces, deskQuestion, deskAnswer)
@@ -219,7 +188,7 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	p := Proposal{ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
 		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
 		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index, DeskQuestionID: deskQuestion, DeskAnswerID: deskAnswer, InboxDigest: requestDigest}
-	current, err := getSource(ctx, tx, source.ID, true)
+	current, err := getSource(ctx, tx, source.ID, false)
 	if err != nil {
 		return Proposal{}, nil, err
 	}
@@ -272,4 +241,210 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	p.BaseCommit, p.InputDigest = source.Commit, inputDigest(pin)
 	changes = append(changes, events.Change{Type: "doctrine.inbox_proposed", After: map[string]any{"proposal_id": p.ID, "repository": p.Repository, "path": p.Path, "rule_key": p.RuleKey, "proposed_by": actor.ID, "ticket": p.Ticket, "question_id": deskQuestion, "answer_id": deskAnswer}})
 	return p, changes, nil
+}
+
+// PreparedInbox carries validated editor output only inside the server. It is
+// never request authority: the writer still fences access and checks freshness.
+type PreparedInbox struct {
+	exemptMain                 string
+	owner                      *Module
+	actor, tenant, inputDigest string
+	fingerprint                string
+	source                     Source
+	pin                        ProposalInput
+	old, next, rule            RuleView
+	index                      int
+}
+type preparedInboxKey struct{}
+
+func preparedInboxFrom(ctx context.Context) *PreparedInbox {
+	p, _ := ctx.Value(preparedInboxKey{}).(*PreparedInbox)
+	return p
+}
+func WithPreparedInbox(ctx context.Context, p *PreparedInbox) context.Context {
+	return context.WithValue(ctx, preparedInboxKey{}, p)
+}
+func inboxDigest(in InboxInput) string {
+	raw, _ := json.Marshal(in)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// Xmin identifies bounded cache/source versions without rendering or decrypting
+// under the tenant lock. Preparation verifies the same snapshot on both sides.
+func inboxFingerprint(ctx context.Context, tx pgx.Tx) (string, error) {
+	var count int
+	var stamp string
+	err := tx.QueryRow(ctx, `SELECT count(*),coalesce(jsonb_agg(jsonb_build_array(s.id,s.xmin::text,g.xmin::text,c.xmin::text) ORDER BY s.id)::text,'[]')
+ FROM (SELECT *,xmin FROM doctrine_sources ORDER BY id LIMIT 101) s
+ LEFT JOIN doctrine_private_guard g ON g.tenant_id=s.tenant_id AND g.source_id=s.id
+ LEFT JOIN doctrine_public_main_cache c ON c.tenant_id=s.tenant_id AND c.source_id=s.id`).Scan(&count, &stamp)
+	if err != nil {
+		return "", err
+	}
+	if count > 100 {
+		return "", fail(422, "source_limit", "Review the workspace source limit before proposing.")
+	}
+	return stamp, nil
+}
+func (m *Module) PrepareDeskDraft(ctx context.Context, actor tenant.Principal, in InboxInput) (*PreparedInbox, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var prepared *PreparedInbox
+	readCtx := ctx
+	if m.analysisAuthorized(ctx, actor) {
+		readCtx = db.AllProjects(ctx, "doctrine outcome preparation")
+	}
+	err := db.InTenant(readCtx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','3s',true),set_config('statement_timeout','10s',true)`); err != nil {
+			return err
+		}
+		if !m.analysisAuthorized(ctx, actor) {
+			if err := authz.RequireTx(ctx, tx, actor, "rules.write", authz.Scope{}); err != nil {
+				return err
+			}
+		}
+		var err error
+		prepared, err = m.prepareInboxTx(ctx, tx, actor, in)
+		return err
+	})
+	return prepared, err
+}
+func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, in InboxInput) (*PreparedInbox, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := m.proposalAccess(actor); err != nil {
+		return nil, err
+	}
+	if len(m.guardMaster) < 32 {
+		return nil, fail(503, "guard_unavailable", missingGuardReason)
+	}
+	stamp, err := inboxFingerprint(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	source, err := inboxSource(ctx, tx, in)
+	if err != nil {
+		return nil, err
+	}
+	if !writableSource(source) {
+		return nil, fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
+	}
+	if source.CredentialRef != "" {
+		if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+			return nil, err
+		}
+	}
+	files, err := cachedFiles(ctx, tx, source)
+	if err != nil {
+		return nil, err
+	}
+	var guard *guardCorpus
+	if source.Repository == publicRepository {
+		guard, err = m.privateGuard(ctx, tx, actor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
+	if !ok || file.Problem != "" {
+		return nil, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
+	}
+	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
+		return nil, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
+	}
+	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
+	switch {
+	case in.TLDR != nil:
+		pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
+	case rule.TLDR != nil:
+		pin.TLDR.EN, pin.TLDR.DE = rule.TLDR.EN, rule.TLDR.DE
+	}
+	if strings.TrimSpace(pin.TLDR.EN) == "" {
+		return nil, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
+	}
+	if err := pin.validate(); err != nil {
+		return nil, err
+	}
+	_, old, next, err := editRuleViews(source, files, pin)
+	if err != nil {
+		return nil, err
+	}
+	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
+		return nil, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
+	}
+	// A TL;DR alone is a change; adding one to a rule without one is too.
+	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
+		return nil, fail(400, "no_change", "The proposal matches the pinned rule.")
+	}
+	exemptMain, err := m.checkPrivateQuotesTx(ctx, tx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation)
+	if err != nil {
+		return nil, err
+	}
+
+	after, err := inboxFingerprint(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if after != stamp {
+		return nil, fail(409, "stale_source", "Doctrine changed during preparation; reload and decide again.")
+	}
+	return &PreparedInbox{exemptMain: exemptMain, owner: m, actor: actor.ID, tenant: actor.TenantID, inputDigest: inboxDigest(in), fingerprint: stamp, source: source, pin: pin, old: old, next: next, rule: rule, index: index}, nil
+}
+func (m *Module) verifyPreparedTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, in InboxInput, p *PreparedInbox) error {
+	if p.owner != m || p.actor != actor.ID || p.tenant != actor.TenantID || p.inputDigest != inboxDigest(in) {
+		return fail(409, "request_conflict", "Prepared doctrine belongs to another actor or input.")
+	}
+	// Protect the exact source/cache snapshot against pin and index changes.
+	// Sorted source fences precede any proposal rows created by this writer.
+	rows, err := tx.Query(ctx, `SELECT id FROM doctrine_sources ORDER BY id LIMIT 101 FOR NO KEY UPDATE`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	current, err := getSource(ctx, tx, p.source.ID, false)
+	if err != nil {
+		return err
+	}
+	stamp, err := inboxFingerprint(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if stamp != p.fingerprint || current.Commit != p.source.Commit {
+		return fail(409, "stale_source", "Doctrine changed after preparation; reload and decide again.")
+	}
+	if p.exemptMain != "" {
+		var valid bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM doctrine_public_main_cache WHERE source_id=$1 AND main_commit=$2 AND observed_at<=clock_timestamp() AND observed_at>clock_timestamp()-interval '5 minutes')`, current.ID, p.exemptMain).Scan(&valid); err != nil {
+			return err
+		}
+		if !valid {
+			return fail(422, "public_main_unavailable", "The public main exception expired after preparation; reindex before deciding again.")
+		}
+	}
+	if current.CredentialRef != "" {
+		if err := m.credentials.authorize(current.CredentialRef, actor.TenantID, current.Repository); err != nil {
+			return err
+		}
+	}
+	if current.Repository == publicRepository {
+		sources, err := listSources(ctx, tx)
+		if err != nil {
+			return err
+		}
+		for _, source := range sources {
+			if source.Repository == privateRepository {
+				if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }

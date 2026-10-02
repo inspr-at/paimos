@@ -45,9 +45,10 @@ func (d *DoctrineTarget) validate() error {
 }
 
 type OutcomeAvailability struct {
-	Outcome   string `json:"outcome"`
-	Available bool   `json:"available"`
-	Why       string `json:"why"`
+	MappingPresent bool   `json:"mapping_present,omitempty"`
+	Outcome        string `json:"outcome"`
+	Available      bool   `json:"available"`
+	Why            string `json:"why"`
 }
 type Input struct {
 	Doctrine         *DoctrineTarget `json:"doctrine,omitempty"`
@@ -101,6 +102,7 @@ type Answer struct {
 	DeliverAfter time.Time `json:"deliver_after"`
 }
 type Pending struct {
+	DoctrineState     string     `json:"doctrine_state,omitempty"`
 	ErrorMessage      string     `json:"error_message,omitempty"`
 	EffectData        EffectData `json:"effect_data,omitempty"`
 	ReceiptState      string     `json:"receipt_state,omitempty"`
