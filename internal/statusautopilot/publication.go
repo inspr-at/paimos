@@ -130,7 +130,7 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 			err = nil
 		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !c.Since.After(d.published) {
 			waiting = pending(c.Node)
-			suggesting = !waiting && s.ModeAt(now) == "suggest"
+			suggesting = s.ModeAt(now) == "suggest"
 			err = enact(ctx, item, p, c.Node, deliveryDecision(c.Node, d.release, d.title, d.version), s.ModeAt(now))
 		}
 		if err != nil {

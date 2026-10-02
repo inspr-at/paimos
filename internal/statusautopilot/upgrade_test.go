@@ -134,6 +134,9 @@ func TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms(t *testing.T) {
 	agent := f.p
 	agent.Kind = tenant.Agent
 	f.confirm(agent, 403)
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "admin")
+	f.confirm(f.p, 403) // settings.manage alone must not end the grace period.
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "owner")
 	f.confirm(f.p, 200)
 	f.run(f.now) // Same UTC day must rescan after confirmation.
 	if f.state(ids[0]).State != "open" || f.state(ids[1]).State != "accepted" || !f.state(ids[2]).Marks["triage_list"] || len(f.proposals()) != 0 {
@@ -250,4 +253,80 @@ func TestUpgradePublicationWaitsAndResumesAfterConfirmation(t *testing.T) {
 	if f.state(id).State != "delivered" {
 		t.Fatal("publication work lost during Suggest")
 	}
+}
+
+func TestProposalResolutionPermissionsAndTenantIsolation(t *testing.T) {
+	t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
+	f := setup(t)
+	f.add("AUT-2", "ticket", "in_progress", 4, nil)
+	f.run(f.now)
+	item := f.proposals()[0]
+	path := fmt.Sprintf("/api/status-autopilot/proposals/%d", item.EventID)
+	agent := f.p
+	agent.Kind = tenant.Agent
+	f.call(agent, "PUT", path, `{"action":"apply"}`, 403)
+	f.call(agent, "PUT", path, `{"action":"dismiss"}`, 403)
+	other := tenant.Principal{TenantID: "20000000-0000-4000-8000-000000000002", Kind: tenant.Person, Name: "Other owner"}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, other.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'other','Other')`, other.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other owner') RETURNING id::text`, other.TenantID).Scan(&other.ID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, other.TenantID, other.ID, "owner")
+	var out struct {
+		Items []Proposal `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(other, "GET", "/api/status-autopilot/proposals", "", 200).Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Items) != 0 {
+		t.Fatal("foreign proposals visible")
+	}
+	f.call(other, "PUT", path, `{"action":"dismiss"}`, 404)
+	t.Setenv("AEON_STATUS_AUTOPILOT", "off")
+	if f.proposals()[0].Applicable {
+		t.Fatal("server Off advertised Apply")
+	}
+	f.call(f.p, "PUT", path, `{"action":"apply"}`, 403)
+	f.call(f.p, "PUT", path, `{"action":"dismiss"}`, 200)
+}
+
+func TestSuggestPublicationFullBatchYieldsAndRetainsHumanChecks(t *testing.T) {
+	t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
+	f := setup(t)
+	ids := []string{}
+	for i := range batchSize + 1 {
+		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+2), "ticket", "done", 15, nil))
+	}
+	human := "Review"
+	checked := f.add("AUT-100", "ticket", "done", 15, &human)
+	ids = append(ids, checked)
+	f.release(ids)
+	f.run(time.Now().UTC())
+	for _, id := range ids {
+		if f.state(id).State != "done" || len(f.state(id).Marks) != 0 {
+			t.Fatal("Suggest mutated release ticket")
+		}
+	}
+	t.Setenv("AEON_STATUS_AUTOPILOT", "on")
+	f.run(time.Now().UTC().Add(2 * time.Minute))
+	for _, id := range ids[:len(ids)-1] {
+		if f.state(id).State != "delivered" {
+			t.Fatal("publication cursor lost a proposal")
+		}
+	}
+	if f.state(checked).State != "done" {
+		t.Fatal("pending human check delivered")
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type='status_autopilot.skipped'`, checked).Scan(&count)
+		if err == nil && count != 1 {
+			return fmt.Errorf("human check skip audit count %d", count)
+		}
+		return err
+	})
 }
