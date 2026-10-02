@@ -576,7 +576,7 @@ const KINDS = [
 .mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
 .titles { min-width: 0; }
 .titles .eyebrow { margin: 0; }
-.titles h1 { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titles h1 { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; overflow-wrap: anywhere; }
 .spacer { flex: 1 1 0; }
 .search { width: min(360px, 32vw); }
 .search .field { height: 36px; border-radius: 999px; padding-right: 34px; }
