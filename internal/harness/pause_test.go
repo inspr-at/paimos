@@ -432,9 +432,9 @@ func TestPauseProcessRunContinuationRetainsKindLabels(t *testing.T) {
 						var noSuccessor bool
 						var activeChildren, resumes int
 						if err := tx.QueryRow(t.Context(), `SELECT pause_record->>'state',handed_over_to_id IS NULL,
- (SELECT count(*) FROM harness_sessions WHERE parent_id=$2 AND stopped_at IS NULL),
+ (SELECT count(*) FROM harness_sessions WHERE parent_id=$2::uuid AND stopped_at IS NULL),
  (SELECT count(*) FROM events WHERE type='harness.resumed' AND after->>'id'=$1::text)
- FROM harness_sessions WHERE id=$1`, id, parent).Scan(&state, &noSuccessor, &activeChildren, &resumes); err != nil {
+ FROM harness_sessions WHERE id=$1::uuid`, id, parent).Scan(&state, &noSuccessor, &activeChildren, &resumes); err != nil {
 							return err
 						}
 						if state != wantState || !noSuccessor || activeChildren != 0 || resumes != 0 {
