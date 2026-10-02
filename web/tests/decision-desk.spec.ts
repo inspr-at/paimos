@@ -91,7 +91,7 @@ test('refresh does not replace the active memo and new arrivals wait for a bound
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
 })
 
-test('denied reads and permission races never appear as successful decisions', async ({ page }) => {
+test('denied reads keep the memo blocked and inaccessible context explicit', async ({ page }) => {
   const world = await mockDecisionDesk(page, { denied: true }); world.denyContext = true
   await openFirst(page, false)
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
@@ -105,34 +105,33 @@ test('denied reads and permission races never appear as successful decisions', a
 test('native approvals, action replies and rule changes use only their own endpoints', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click()
-  await page.getByTestId('desk-decide').click()
+  await page.getByTestId('choice-0').click(); await page.getByTestId('desk-decide').click()
   await expect.poll(() => world.calls.length).toBe(1)
   expect(world.calls[0]?.path).toBe('/api/approvals/approval-1/decision')
   await page.getByTestId('desk-close').click(); await page.getByTestId('desk-row-m:action-1').click()
   const reply = page.getByRole('textbox', { name: 'Reply to the agent' }); await page.getByTestId('choice-0').click(); await reply.fill('Continue with the tenant test.'); await reply.press('Enter')
   await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(2)
-  expect(world.calls[1]?.body).toMatchObject({ reply_to: 'action-1', recipient_session_id: 'original-generation', body: 'Continue with the tenant test.' })
+  expect(world.calls[1]?.body).toMatchObject({ to: world.action.sender_principal_id, reply_to: 'action-1', recipient_session_id: 'original-generation', body: 'Continue with the tenant test.' })
   await page.getByTestId('desk-close').click(); await page.getByTestId('desk-row-r:rule-1').click(); await page.getByTestId('desk-decide').click()
   await expect.poll(() => world.calls.length).toBe(3)
   expect(world.calls[2]?.path).toBe('/api/rules/doctrine/inbox/rule-1/pull-request')
 })
 
-test('phone approval and expiry races fail closed', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  const world = await mockDecisionDesk(page)
-  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click(); await page.getByTestId('desk-decide').click()
-  await expect(page.getByTestId('desk-status')).toContainText('Phone verification')
-  expect(world.calls).toHaveLength(0)
-  await page.getByTestId('desk-close').click(); world.approval.expires_at = '2000-01-01T00:00:00Z'
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click(); await page.getByTestId('desk-row-a:approval-1').click()
+test('expiry while the memo is open blocks the selected approval', async ({ page }) => {
+  const time = new Date('2026-10-02T12:00:00Z'); await page.clock.install({ time })
+  const world = await mockDecisionDesk(page); world.approval.expires_at = new Date(time.getTime() + 60_000).toISOString()
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click(); await page.getByTestId('choice-0').click()
+  await expect(page.getByTestId('desk-decide')).toBeEnabled()
+  await page.clock.runFor(60_001)
   await expect(page.getByTestId('desk-status')).toContainText('expired'); await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  expect(world.calls).toHaveLength(0)
 })
 
-test('phone decisions reuse the request-bound user verification ceremony', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
+test('wide screens reuse server-advertised request-bound phone verification', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 1000 })
   await page.addInitScript(() => Object.defineProperty(navigator, 'credentials', { value: { get: async () => ({ id: 'test-credential', rawId: new Uint8Array([1]).buffer, type: 'public-key', authenticatorAttachment: 'platform', getClientExtensionResults: () => ({}), response: { clientDataJSON: new Uint8Array([2]).buffer, authenticatorData: new Uint8Array([3]).buffer, signature: new Uint8Array([4]).buffer, userHandle: null } }) } }))
   const world = await mockDecisionDesk(page, { phone: true })
-  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-decide').click()
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click(); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-decide').click()
   await expect.poll(() => world.calls.length).toBe(2)
   expect(world.calls.map(call => call.path)).toEqual(['/api/phone-approvals/approval/approval-1/options', '/api/phone-approvals/approval/approval-1/decision'])
   expect(world.calls[1]?.body).toMatchObject({ decision: 'approved', request_hash: 'bound-request-hash', challenge_id: 'challenge-bound-to-choice' })
@@ -141,7 +140,7 @@ test('phone decisions reuse the request-bound user verification ceremony', async
 
 test('tier requests use the original process ownership and tier revision', async ({ page }) => {
   const world = await mockDecisionDesk(page, { tier: true })
-  await page.goto('/decision-desk'); await page.getByTestId('desk-row-t:tier-request-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-t:tier-request-1').click(); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled()
   await expect(page.getByTestId('stamp-always')).toBeDisabled()
   await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1)
   expect(world.calls[0]?.path).toBe('/api/projects/p-aeon/harness-sessions/tier-session/tier/requests/tier-request-1/decision')
@@ -151,7 +150,7 @@ test('tier requests use the original process ownership and tier revision', async
 
 test('tier ownership races retain the request without reporting success', async ({ page }) => {
   const world = await mockDecisionDesk(page, { tier: true }); world.denyWrite = true
-  await page.goto('/decision-desk'); await page.getByTestId('desk-row-t:tier-request-1').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-decide').click()
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-t:tier-request-1').click(); await page.getByTestId('choice-0').click(); await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-decide').click()
   await expect(page.getByTestId('desk-status')).toContainText('ownership changed')
   await expect(page.getByTestId('desk-announcement')).toContainText('not confirmed')
   expect(world.tier.requests[0]!.state).toBe('pending')
@@ -180,4 +179,116 @@ test('short memos stay short before a round requires a scrolling body', async ({
   expect(before!.height).toBeLessThan(900)
   expect(await page.getByTestId('desk-body').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
   await expectStableControls({ controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-0') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [{ name: 'select without growing a short memo', run: async () => { await page.getByTestId('choice-1').click(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } }] })
+})
+
+// Fix-round regressions: these exercise the reviewed 4c276ce3 failures.
+test('Enter on focused Deny selects Deny without granting the preselected approval', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click()
+  await expect(page.getByTestId('choice-1')).toBeEnabled()
+  await page.getByTestId('desk-paper').focus()
+  for (let tabs = 0; tabs < 30 && !await page.getByTestId('choice-1').evaluate(el => el === document.activeElement); tabs++) await page.keyboard.press('Tab')
+  await expect(page.getByTestId('choice-1')).toBeFocused(); await page.keyboard.press('Enter')
+  await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true')
+  expect(world.calls).toHaveLength(0)
+  await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1)
+  expect(world.calls[0]!.body.decision).toBe('denied')
+})
+test('protected requests require an explicit choice before Decide or memo Enter', async ({ page }) => {
+  const world = await mockDecisionDesk(page, { tier: true })
+  await page.goto('/decision-desk')
+  for (const id of ['a:approval-1', 't:tier-request-1']) {
+    await page.getByTestId(`desk-row-${id}`).click(); await expect(page.getByTestId('choice-0')).toBeEnabled()
+    await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByTestId('desk-decide')).toBeDisabled(); await page.getByTestId('desk-paper').press('Enter')
+    expect(world.calls).toHaveLength(0); await page.getByTestId('desk-close').click()
+  }
+})
+test('open questions remain visible behind 100 older answered questions', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  world.questions.unshift(...Array.from({ length: 100 }, (_, at) => ({ ...sampleQuestion(`old-${at}`), state: 'answered' as const })))
+  await page.goto('/decision-desk')
+  await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible()
+  expect(world.reads.some(path => path.includes('state=open'))).toBe(true)
+})
+test('loaded open and answered pages survive focus refresh with their memo still actionable', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  world.questions.push(...Array.from({ length: 100 }, (_, at) => sampleQuestion(`open-${at}`)))
+  world.questions.push(...Array.from({ length: 101 }, (_, at) => ({ ...sampleQuestion(`answered-${at}`), state: 'answered' as const })))
+  await page.goto('/decision-desk'); await page.getByRole('button', { name: 'Load 100 more' }).click()
+  await page.getByTestId('desk-row-q:open-99').click()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => world.reads.filter(path => path.includes('offset=100') && path.includes('state=open')).length).toBeGreaterThanOrEqual(2)
+  await expect(page.getByTestId('desk-decide')).toBeEnabled(); await page.getByTestId('desk-close').click()
+  await page.getByRole('button', { name: /^Decided/ }).click(); await page.getByRole('button', { name: 'Load 100 more' }).click()
+  await expect(page.getByTestId('desk-row-q:answered-100')).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(page.getByTestId('desk-row-q:answered-100')).toBeVisible()
+})
+test('narrow desktop approvals use the native API when server verification is unavailable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 }); const world = await mockDecisionDesk(page)
+  await page.goto('/decision-desk'); await page.getByTestId('desk-row-a:approval-1').click()
+  await page.getByTestId('choice-1').click(); await page.getByTestId('desk-decide').click()
+  await expect.poll(() => world.calls.length).toBe(1)
+  expect(world.calls[0]!.path).toBe('/api/approvals/approval-1/decision')
+})
+test('Decided rounds count only items arriving after the round starts', async ({ page }) => {
+  const world = await mockDecisionDesk(page); world.questions[0]!.state = 'answered'
+  await page.goto('/decision-desk'); await page.getByRole('button', { name: /^Decided/ }).click()
+  await page.getByTestId('desk-row-q:question-1').click()
+  await expect(page.locator('.arrival-hint')).toHaveCount(0)
+  world.questions.push(sampleQuestion('actual-arrival'))
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.locator('.arrival-hint')).toHaveText('1 new for the next round')
+})
+test('P.S. Enter confirms the note and supplies one decision announcement region', async ({ page }) => {
+  await mockDecisionDesk(page); await openFirst(page)
+  const field = page.getByRole('textbox', { name: 'P.S. for the agent' }); await field.fill('Separate note'); await field.press('Enter')
+  await expect(page.getByTestId('desk-status')).toContainText('note is set')
+  await expect(page.getByRole('dialog', { name: 'Decision Desk memo' }).locator('[role="status"][aria-live]')).toHaveCount(1)
+})
+
+test('focused Skip, pager, attachment and Close retain their native Enter actions', async ({ page }) => {
+  const world = await mockDecisionDesk(page); await openFirst(page)
+  await page.getByTestId('desk-skip').press('Enter'); await expect(page.getByTestId('desk-pager')).toContainText('2 of')
+  expect(world.calls).toHaveLength(0)
+  await page.getByTestId('desk-pager').press('Enter'); await expect(page.getByRole('listbox')).toBeFocused()
+  await page.getByRole('listbox').press('ArrowUp'); await page.getByRole('listbox').press('Enter')
+  await expect(page.getByTestId('desk-pager')).toContainText('1 of')
+  await page.getByRole('button', { name: 'Open Index plan' }).press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Index plan, attachment 1 of 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close viewer' }).click()
+  await page.getByTestId('desk-close').press('Enter'); await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).not.toBeVisible()
+  expect(world.calls).toHaveLength(0)
+})
+test('permissions revoked while a memo is open block its write and retain its draft', async ({ page }) => {
+  const world = await mockDecisionDesk(page); await openFirst(page)
+  await page.getByTestId('choice-2').click(); await page.getByRole('textbox', { name: 'Something else' }).fill('Keep my answer')
+  world.denyPermission = true
+  await page.evaluate(async () => { const authz = await import('/src/lib/authz.ts'); await authz.accessChanged() })
+  await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  await expect(page.getByRole('textbox', { name: 'Something else' })).toHaveValue('Keep my answer')
+  expect(world.calls).toHaveLength(0)
+})
+test('a source refresh during a blocked response clears Recording without advancing', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  let release!: () => void; world.hold = new Promise(resolve => { release = resolve })
+  await openFirst(page); await page.getByTestId('desk-decide').click()
+  await expect.poll(() => world.calls.length).toBe(1)
+  world.questions[0]!.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => world.reads.filter(path => path.startsWith('/api/decision-desk')).length).toBeGreaterThanOrEqual(2)
+  await expect(page.getByTestId('desk-status')).toContainText('source changed')
+  release()
+  await expect(page.getByTestId('desk-status')).toContainText('source changed while recording')
+  await expect(page.getByTestId('desk-status')).not.toContainText('Recording')
+  await expect(page.getByTestId('desk-pager')).toContainText('1 of')
+  await expect(page.getByTestId('desk-announcement')).not.toContainText('Decision recorded')
+})
+test('approval project names and doctrine PR context stay visible', async ({ page }) => {
+  await mockDecisionDesk(page); await page.goto('/decision-desk')
+  await page.getByTestId('desk-row-a:approval-1').click(); await expect(page.locator('.memo-heading .eyebrow')).toHaveText('Paimos Aeon')
+  await page.getByTestId('desk-close').click(); await page.getByTestId('desk-row-r:rule-1').click()
+  await expect(page.getByRole('link', { name: 'Open the doctrine pull request' })).toHaveAttribute('href', 'https://github.com/inspr-at/inspr-modules/pull/123')
+  await expect(page.getByRole('region', { name: 'Unavailable stamps' })).toContainText('own protected decision flow')
 })

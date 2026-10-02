@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
 import { answerFor, arrivals, CUSTOM_ANSWER, draftFor, macPlatform, newRound, outcomeUnavailable, roundCounts, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
-import { commitDesk, emptySources, loadDesk, questionItem, type Question } from '../src/lib/decisionDeskApi'
+import { commitDesk, emptySources, loadDesk, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type Question } from '../src/lib/decisionDeskApi'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
   input: { request_id: 'request', question: 'Which index?', options: [{ id: 'a', title: 'Partial', description: 'Smaller', answer: 'Use the partial index.' }], meanwhile: 'parked' }, askers: [], pending: [], created_at: '', updated_at: '' })
@@ -68,4 +68,43 @@ it('does not turn denied source reads into a claim that the desk is empty', asyn
   const result = await loadDesk()
   expect(result.items).toEqual([])
   expect(result.warnings).toContain('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+})
+
+it('does not preselect a grant, even when the protected source recommends it', () => {
+  const item = { ...questionItem(question(), 'Aeon'), kind: 'approval' as const, recommended: 'a' }
+  expect(draftFor(item).optionId).toBe('')
+  expect(draftFor({ ...item, kind: 'tier' }).optionId).toBe('')
+})
+it('files expired undecided approvals in history', () => {
+  const item = approvalItem({ id: 'a', agent_principal_id: 'agent', scope: 'nodes.read', resource_kind: 'node', rationale: '', expires_at: '2000-01-01T00:00:00Z', proposed_at: '', decision: null })
+  expect(item.decided).toBe(true)
+  expect(item.answer).toBe('Expired without a decision')
+})
+it('sends a held reply to the principal UUID even without a sender session or target', async () => {
+  const message = { id: 'held', sender_principal_id: 'd2c76909-751c-4408-82bf-d8e7a2495509', recipient_principal_id: 'person', to: 'person', body: '', sent_event_id: 1, is_action_request: true, expects_reply: true, delivery_level: 'simple' as const, status: 'held' as const, reply_obligation: 'open' as const }
+  const item = actionItem(message, 'project', 'Aeon'), sources = emptySources(); sources.actions.set(item.id, message)
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+    if (_url.includes('/message-targets')) return new Response('[]')
+    expect(JSON.parse(init.body as string)).toMatchObject({ to: message.sender_principal_id, reply_to: message.id })
+    return new Response(JSON.stringify({ status: 'accepted' }))
+  }); vi.stubGlobal('fetch', fetch)
+  await expect(commitDesk(item, { ...draftFor(item), answer: 'Continue.' }, sources, 'operation', false)).resolves.toMatchObject({ decided: true })
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+it('skips tier reads for sessions that do not advertise service_tier_v1', async () => {
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  const adapter = nativeTierAdapter(async () => [{ id: 's', advertised_capabilities: ['managed_control_v1'] }] as never, () => true)
+  expect(await adapter.read()).toEqual({ items: [], warnings: [] })
+  expect(fetch).not.toHaveBeenCalled()
+})
+it('formats delivery deadlines and keeps a rule proposal PR link', () => {
+  const q = question(); q.revision = 2; q.state = 'answered'
+  q.pending = [{ id: 'p', revision: 2, kind: 'inbox', state: 'pending', deliver_after: '2026-10-02T08:00:00Z' }]
+  expect(questionItem(q, 'Aeon').delivery).not.toContain('2026-10-02T08:00:00Z')
+  expect(ruleItem({ id: 'r', pr_url: 'https://github.com/inspr-at/inspr-modules/pull/123' } as never)).toHaveProperty('prUrl', 'https://github.com/inspr-at/inspr-modules/pull/123')
+})
+it('warns when the approvals read reaches its 200-row cap', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('/approvals?') ? Array.from({ length: 200 }, (_, at) => ({ id: `a-${at}`, resource_kind: 'tenant', proposed_at: '', expires_at: '', decision: null })) : { items: [], has_more: false }))))
+  const result = await loadDesk()
+  expect(result.warnings).toContain('Approvals may be incomplete: the source limit is 200 requests.')
 })

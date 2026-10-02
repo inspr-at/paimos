@@ -27,26 +27,33 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
   const questions = [q, sampleQuestion('question-2', { question: 'Should the successor continue the review?', source_handover_id: 'handover-1' })]
   const future = new Date(Date.now() + 3600_000).toISOString()
   const approval = { id: 'approval-1', agent_principal_id: 'agent-1', agent_name: 'Codex', scope: 'nodes.read', resource_kind: 'node', resource_id: 'n-a1', rationale: 'Read the ticket to continue the review.', expires_at: future, proposed_at: '2026-10-02T08:01:00Z', decision: null, risk: 'low' }
-  const action = { id: 'action-1', sender_principal_id: 'agent-1', recipient_principal_id: 'person', to: 'person', body: 'The reviewer needs guidance before trying again.', sender_session_id: 'original-generation', sent_event_id: 1, is_action_request: true, expects_reply: true, delivery_level: 'simple', status: 'held', reply_obligation: 'open', created_at: '2026-10-02T08:02:00Z' }
-  const rule = { id: 'rule-1', label: 'Keep mutation checks in the transaction', why: 'The earlier permission check can become stale.', proposed: 'Authorize inside the mutation transaction.', base: 'Authorize before the write.', created_at: '2026-10-02T08:03:00Z', ticket: 'AEON-1', state: 'pending' }
+  const action = { id: 'action-1', sender_principal_id: 'd2c76909-751c-4408-82bf-d8e7a2495509', recipient_principal_id: 'person', to: 'person', body: 'The reviewer needs guidance before trying again.', sender_session_id: 'original-generation', sent_event_id: 1, is_action_request: true, expects_reply: true, delivery_level: 'simple', status: 'held', reply_obligation: 'open', created_at: '2026-10-02T08:02:00Z' }
+  const rule = { id: 'rule-1', label: 'Keep mutation checks in the transaction', why: 'The earlier permission check can become stale.', proposed: 'Authorize inside the mutation transaction.', base: 'Authorize before the write.', created_at: '2026-10-02T08:03:00Z', ticket: 'AEON-1', pr_url: 'https://github.com/inspr-at/inspr-modules/pull/123', state: 'pending' }
   const ownership = { daemon_id: 'daemon-1', generation: 'generation-1', process_id: 'process-1', root_pid: 1234, group_id: 1234, started_at: '2026-10-02T08:00:00Z' }
   const tierRequest = { id: 'tier-request-1', session_id: 'tier-session', tier: 'default', reason: 'Return this run to the default tier.', state: 'pending', created_at: '2026-10-02T08:04:00Z' }
   const tier = { session_id: 'tier-session', revision: 2, read_only: false, active_tier: 'default', pending: null, reports: [], requests: [tierRequest] }
   const calls: { path: string; body: Record<string, unknown> }[] = []
-  const control = { questions, calls, denyWrite: false, failQuestions: false, denyContext: false, hold: undefined as undefined | Promise<void>, approval, action, rule, ownership, tier }
+  const reads: string[] = []
+  const control = { questions, calls, reads, denyPermission: !!options.denied, denyWrite: false, failQuestions: false, denyContext: false, hold: undefined as undefined | Promise<void>, approval, action, rule, ownership, tier }
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method()
+    if (method === 'GET') reads.push(new URL(request.url()).pathname + new URL(request.url()).search)
+    if (path === '/api/me/phone-approvals') return route.fulfill({ status: options.phone ? 200 : 404, json: options.phone ? { available: true } : { error: 'Not found' } })
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions('admin', new URL(request.url()).searchParams.get('project_id') ?? undefined)
       permissions.workspace.permissions.push('questions.read', 'questions.decide', 'rules.write')
-      if (options.denied) {
+      if (control.denyPermission) {
         permissions.workspace.permissions = permissions.workspace.permissions.filter(permission => permission !== 'questions.decide')
         if (permissions.project) permissions.project.permissions = permissions.project.permissions.filter(permission => permission !== 'questions.decide')
       }
       return route.fulfill({ json: permissions })
     }
-    if (path === '/api/decision-desk') return route.fulfill({ status: control.failQuestions ? 403 : 200, json: control.failQuestions ? { error: 'Forbidden' } : { items: questions, has_more: false } })
-    if (options.tier && path === '/api/harness-sessions') return route.fulfill({ json: { items: [{ id: 'tier-session', project_id: 'p-aeon', agent_principal_id: 'agent-1', ticket_node_id: 'n-a1', harness: 'codex', host: 'test', phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: '2026-10-02T08:00:00Z', management_mode: 'managed', advertised_capabilities: ['managed_control_v1'], process_ownership: ownership, revision: 1, row_version: 1, project: { id: 'p-aeon', key: 'AEON', title: 'Paimos Aeon' } }], next_cursor: null } })
+    if (path === '/api/decision-desk') {
+      const params = new URL(request.url()).searchParams, state = params.get('state'), offset = Number(params.get('offset') || 0)
+      const selected = questions.filter(question => !state || question.state === state)
+      return route.fulfill({ status: control.failQuestions ? 403 : 200, json: control.failQuestions ? { error: 'Forbidden' } : { items: selected.slice(offset, offset + 100), has_more: selected.length > offset + 100 } })
+    }
+    if (options.tier && path === '/api/harness-sessions') return route.fulfill({ json: { items: [{ id: 'tier-session', project_id: 'p-aeon', agent_principal_id: 'agent-1', ticket_node_id: 'n-a1', harness: 'codex', host: 'test', phase: 'working', activity: 'busy', heartbeat_at: new Date().toISOString(), created_at: '2026-10-02T08:00:00Z', management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'service_tier_v1'], process_ownership: ownership, revision: 1, row_version: 1, project: { id: 'p-aeon', key: 'AEON', title: 'Paimos Aeon' } }], next_cursor: null } })
     if (options.tier && path.endsWith('/tier')) return route.fulfill({ json: tier })
     if (options.tier && path.endsWith('/tier/requests/tier-request-1/decision')) {
       const body = request.postDataJSON(); calls.push({ path, body })
@@ -79,7 +86,11 @@ export async function mockDecisionDesk(page: Page, options: { denied?: boolean; 
     if (path.startsWith('/api/rules/doctrine/inbox/') && method === 'POST') { calls.push({ path, body: request.postDataJSON() }); return route.fulfill({ json: { ...rule, state: 'proposed' } }) }
     if (path.endsWith('/messages') && method === 'GET') return route.fulfill({ json: { items: path.includes('/p-aeon/') ? [action] : [], next_after: 1 } })
     if (path.endsWith('/message-targets')) return route.fulfill({ json: [{ id: 'target-1', principal_id: 'agent-1', address: 'agent:reviewer', enabled: true }] })
-    if ((path.endsWith('/messages') || path.endsWith('/resolution')) && method === 'POST') { calls.push({ path, body: request.postDataJSON() }); return route.fulfill({ json: { ...action, status: 'accepted' } }) }
+    if ((path.endsWith('/messages') || path.endsWith('/resolution')) && method === 'POST') {
+      const body = request.postDataJSON(); calls.push({ path, body })
+      if (path.endsWith('/messages') && body.to !== action.sender_principal_id) return route.fulfill({ status: 404, json: { error: 'Original sender not found' } })
+      return route.fulfill({ json: { ...action, status: 'accepted' } })
+    }
     if (path === '/api/nodes/n-a1/attachments') return route.fulfill({ status: control.denyContext ? 403 : 200, json: { items: [{ id: 'image-1', node_id: 'n-a1', name: options.html ? 'fragment.html' : 'index-plan.png', content_type: options.html ? 'text/html; charset=utf-8' : 'image/png', size: 70, sha256: 'test', width: options.html ? null : 1, height: options.html ? null : 1, thumbnail_kind: options.html ? 'html-text' : undefined, caption: 'Index plan', position: 0, created_by: { id: 'person', name: 'Markus Barta' }, created_at: '2026-10-02T08:00:00Z' }] } })
     if (path === '/api/attachments/image-1/preview') return route.fulfill({ json: { available: true, url: 'https://preview.example.org/preview/' + 'A'.repeat(43), expires_at: new Date(Date.now() + 60_000).toISOString() } })
     if (path === '/api/attachments/image-1/content') return route.fulfill({ contentType: 'image/png', body: PNG })

@@ -11,13 +11,14 @@ export interface DeskItem {
   choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
   revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
   answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
-  unavailable?: string
+  unavailable?: string; prUrl?: string
 }
 export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
 export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
 export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request' }
 export function draftFor(item: DeskItem): DeskDraft {
-  return { optionId: item.optionId ?? item.recommended ?? item.choices[0]?.id ?? '', answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
+  const protectedChoice = item.kind === 'approval' || item.kind === 'tier'
+  return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: item.outcome, dirty: false }
 }
 export function answerFor(item: DeskItem, draft: DeskDraft): string {
   const choice = item.choices.find(option => option.id === draft.optionId)

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
-import { listApprovals, decideApproval, revokeApproval, listMessages, listTargets, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
-import { canDecideApproval } from './agentState'
+import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
+import { canDecideApproval, decidedApprovals } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
 import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
-import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './phoneApprovals'
+import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
 import { answerFor, CUSTOM_ANSWER, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome } from './decisionDesk'
 
@@ -36,7 +36,23 @@ export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
   }
   return response.json() as Promise<T>
 }
-export const readQuestions = (offset = 0) => deskRequest<QuestionPage>(`/decision-desk?limit=100&offset=${offset}`)
+export type QuestionState = 'open' | 'answered'
+export const MAX_QUESTION_PAGES = 10
+export const readQuestions = (offset = 0, state: QuestionState = 'open') => deskRequest<QuestionPage>(`/decision-desk?state=${state}&limit=100&offset=${offset}`)
+async function readQuestionPages(state: QuestionState, pages: number): Promise<QuestionPage> {
+  const items: Question[] = []
+  let has_more = false
+  for (let page = 0; page < Math.min(MAX_QUESTION_PAGES, Math.max(1, pages)); page++) {
+    const result = await readQuestions(page * 100, state)
+    items.push(...result.items); has_more = result.has_more
+    if (!has_more) break
+  }
+  return { items, has_more }
+}
+export function deliveryTime(value?: string): string {
+  const timestamp = value ? Date.parse(value) : NaN
+  return Number.isFinite(timestamp) ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp) : 'an unavailable time'
+}
 export const readQuestion = (id: string) => deskRequest<Question>(`/questions/${encodeURIComponent(id)}`)
 export const decideQuestion = (id: string, revision: number, draft: DeskDraft, requestId: string) => deskRequest<Question>(`/questions/${encodeURIComponent(id)}/decision`, {
   request_id: requestId, expected_revision: revision, outcome: draft.outcome,
@@ -45,7 +61,7 @@ export const decideQuestion = (id: string, revision: number, draft: DeskDraft, r
 export function questionItem(question: Question, projectName: string): DeskItem {
   const pending = question.pending.filter(effect => effect.revision === question.revision && effect.kind !== 'outcome')
   const delivery = pending.some(effect => effect.state === 'failed' || effect.receipt_state === 'failed') ? 'Delivery failed; the answer is recorded.'
-    : pending.some(effect => effect.state === 'pending') ? `Delivery scheduled for ${question.answer?.deliver_after ?? pending[0]?.deliver_after}`
+    : pending.some(effect => effect.state === 'pending') ? `Delivery scheduled for ${deliveryTime(question.answer?.deliver_after ?? pending[0]?.deliver_after)}`
     : pending.some(effect => effect.receipt_state === 'handed_off') ? 'Handed to the agent.'
     : pending.some(effect => effect.state === 'delivered') ? 'Dispatched; receiver confirmation may still be pending.' : undefined
   const reuse = question.askers.find(asker => asker.from_record)?.from_record
@@ -66,11 +82,11 @@ function base(id: string, kind: DeskItem['kind'], title: string, context: string
   return { id, kind, title, context, choices, projectId: '', projectName: 'Workspace', findings: '', meanwhile: 'Waiting for a person.', destination: 'The native protected workflow.',
     why: '', outcome: 'once', suggestion: 'This action keeps its native permissions.', revision: 1, createdAt: '', held: true, decided: false }
 }
-export function approvalItem(approval: Approval): DeskItem {
+export function approvalItem(approval: Approval, projectName = approval.resource_kind === 'tenant' ? 'Workspace' : 'Project name unavailable'): DeskItem {
   return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
     { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
     { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
-  ]), createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: !!approval.decision, optionId: approval.decision ?? undefined, answer: approval.decision ?? undefined }
+  ]), projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
   return { ...base(`m:${message.id}`, 'action', 'An agent needs your steer', message.body, [
@@ -83,7 +99,7 @@ export function ruleItem(rule: DoctrineInboxItem): DeskItem {
   return { ...base(`r:${rule.id}`, 'rule', rule.label, rule.why ?? '', [
     { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change' },
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
-  ]), createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+  ]), prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
 }
 export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem> }
 export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map() })
@@ -105,7 +121,7 @@ export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSessio
   let records = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
   return {
     async read() {
-      const available = await sessions()
+      const available = (await sessions()).filter(session => session.advertised_capabilities.includes('service_tier_v1'))
       const warnings: string[] = available.length > 30 ? ['Tier requests are limited to the first 30 visible sessions.'] : []
       const next = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
       const reads = await Promise.allSettled(available.slice(0, 30).map(async session => ({ session, tier: await tierBody(await readTierResponse(session.project_id, session.id)) })))
@@ -153,17 +169,36 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
   const result = await decidePhone(review, { decision, reason, request_hash: review.request_hash })
   if (result.pending || result.approval?.decision !== decision) throw new Error('The verified decision was not confirmed.')
 }
-export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: boolean }
-export async function loadDesk(offset = 0, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
+export interface DeskRead { items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean> }
+export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}): Promise<DeskRead> {
   const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, questionsResult, approvalsResult, rulesResult] = await Promise.allSettled([getProjects(), readQuestions(offset), listApprovals(), getDoctrineInbox()])
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox()])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
   if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
-  if (questionsResult.status === 'fulfilled') for (const question of questionsResult.value.items) { sources.questions.set(`q:${question.id}`, question); items.push(questionItem(question, name(question.project_id))) }
-  else warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.')
-  if (approvalsResult.status === 'fulfilled') for (const approval of approvalsResult.value) { sources.approvals.set(`a:${approval.id}`, approval); items.push(approvalItem(approval)) }
-  else warnings.push('Approvals could not be read.')
+  for (const result of [openResult, answeredResult]) {
+    if (result.status === 'fulfilled') for (const question of result.value.items) { sources.questions.set(`q:${question.id}`, question); items.push(questionItem(question, name(question.project_id))) }
+    else warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+  }
+  if (approvalsResult.status === 'fulfilled') {
+    if (approvalsResult.value.length >= 200) warnings.push('Approvals may be incomplete: the source limit is 200 requests.')
+    // Reuse the ticket ancestry contract, bounded and cached within this read.
+    const nodes = new Map<string, Promise<WorkNode>>()
+    const readNode = (id: string) => { if (!nodes.has(id)) nodes.set(id, getNode(id)); return nodes.get(id)! }
+    const nodeIds = [...new Set(approvalsResult.value.filter(row => row.resource_kind === 'node').map(row => row.resource_id).filter((id): id is string => !!id))].slice(0, 30)
+    const names = new Map<string, string>()
+    await Promise.all(nodeIds.map(async resource => {
+      let id: string | null = resource
+      try {
+        for (let depth = 0; id && depth < 8; depth++) {
+          const project = projects.find(project => project.id === id)
+          if (project) { names.set(resource, project.title); break }
+          id = (await readNode(id)).parent_id
+        }
+      } catch { /* A missing name never becomes a fictitious Workspace. */ }
+    }))
+    for (const approval of approvalsResult.value.slice(0, 200)) { sources.approvals.set(`a:${approval.id}`, approval); items.push(approvalItem(approval, approval.resource_id ? names.get(approval.resource_id) : undefined)) }
+  } else warnings.push('Approvals could not be read.')
   if (rulesResult.status === 'fulfilled') for (const rule of rulesResult.value.items) { sources.rules.set(`r:${rule.id}`, rule); items.push(ruleItem(rule)) }
   else warnings.push('Rule changes could not be read.')
   if (projects.length > 30) warnings.push('Action requests are limited to the first 30 visible projects in this read.')
@@ -180,7 +215,7 @@ export async function loadDesk(offset = 0, adapters: ProtectedDeskAdapters = {})
     try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
     catch { warnings.push('Tier requests could not be read.') }
   }
-  return { items, sources, warnings: [...new Set(warnings)], hasMore: questionsResult.status === 'fulfilled' && questionsResult.value.has_more }
+  return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more } }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
@@ -205,23 +240,19 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
       await (adapters.phoneApproval ?? nativePhoneApproval)(approval, draft.optionId === 'approved' ? 'approved' : 'denied', draft.reason.trim())
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the verified approval workflow.' }
     }
-    if (item.decided) { if (draft.optionId !== 'revoke' || approval.decision !== 'approved') throw new Error('This decision cannot be replaced.'); await revokeApproval(approval.id) }
-    else await decideApproval(approval.id, draft.optionId === 'approved' ? 'approved' : 'denied', draft.reason.trim())
+    if (item.decided) throw new Error('This protected decision cannot be replaced here.')
+    await decideApproval(approval.id, draft.optionId === 'approved' ? 'approved' : 'denied', draft.reason.trim())
   } else if (item.kind === 'action') {
     const source = sources.actions.get(item.id)
     if (!source) throw new Error('The original request is unavailable.')
     if (draft.optionId === 'reply') {
       // P3 preserves the exact original request and generation. Never choose a newer session.
-      const targets = await listTargets(item.projectId)
-      const target = targets.find(target => target.principal_id === source.sender_principal_id && target.enabled)
-      const to = target?.address ?? (source.sender_session_id ? source.from : undefined)
-      if (!to) throw new Error('The original sender has no available inbox. The request remains open.')
-      const reply = await deskRequest<{ status: 'accepted' | 'held' | 'pending'; question_id?: string; answer_revision?: number; deliver_after?: string }>(`/projects/${encodeURIComponent(item.projectId)}/messages`, { to, body: answerFor(item, draft), idempotency_key: requestId, reply_to: source.id,
+      const reply = await deskRequest<{ status: 'accepted' | 'held' | 'pending'; question_id?: string; answer_revision?: number; deliver_after?: string }>(`/projects/${encodeURIComponent(item.projectId)}/messages`, { to: source.sender_principal_id, body: answerFor(item, draft), idempotency_key: requestId, reply_to: source.id,
         ...(source.sender_session_id ? { recipient_session_id: source.sender_session_id } : {}), expects_reply: false, is_action_request: false, delivery_level: 'simple' })
       if (reply.status === 'held') throw new Error('The reply remains held. Delivery was not confirmed.')
       if (reply.status === 'pending' && (!reply.question_id || !reply.answer_revision || !reply.deliver_after)) throw new Error('The pending reply response is incomplete. Refresh before trying again.')
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
-        delivery: reply.status === 'pending' ? `Reply recorded; delivery scheduled for ${reply.deliver_after}.` : 'Reply accepted by the inbox; receiver confirmation is pending.' }
+        delivery: reply.status === 'pending' ? `Reply recorded; delivery scheduled for ${deliveryTime(reply.deliver_after)}.` : 'Reply accepted by the inbox; receiver confirmation is pending.' }
     } else await resolveMessage(item.projectId, source.id, draft.optionId === 'resolved' ? 'resolved' : 'dismissed', draft.reason.trim())
   } else if (item.kind === 'rule') {
     if (draft.optionId === 'propose') await submitDoctrineInbox(item.id.slice(2))

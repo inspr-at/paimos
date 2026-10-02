@@ -2315,6 +2315,23 @@ rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
 
+The Decision Desk UI (AEON-567) lives at `/decision-desk`. Open and answered
+questions are paged separately; refresh retains up to ten loaded pages per state
+(1,000 questions), with remaining results stated explicitly. Each memo freezes its
+source for the round. New arrivals wait for the next round, including rounds opened
+from Decided. Expired approvals appear in history. Approvals and tier requests
+require an explicit choice; Enter on another focused control performs that control's
+action. In a field, Enter finishes editing and the platform modifier plus Enter
+submits. Access loss, expiry and changed sources block the write and retain drafts.
+
+Tier requests are read only for sessions advertising AEON-436's `service_tier_v1`.
+AEON-455 server availability selects request-bound phone verification on every
+screen size; a server without that package keeps the existing approvals API.
+Held replies address the original principal UUID and, when supplied, its exact
+session. Related ticket records use permission-checked node relations; specialised
+Always/doctrine publishing and its context projection remain upstream package
+integration work. The unavailable stamps explain their restrictions in the memo.
+
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,
 project-scoped question and returns immediately. Add `--ticket KEY`,

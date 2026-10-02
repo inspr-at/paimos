@@ -20,7 +20,7 @@ const index = ref(Math.max(0, props.round.indexOf(props.start))), pager = ref(fa
 const drafts = ref<Record<string, DeskDraft>>({}), skipped = ref(new Set<string>()), context = ref<DeskContext>({ attachments: [], related: [], outcomes: [], warnings: [] }), contextLoading = ref(false)
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>(), viewing = ref(false), brokenThumbs = ref(new Set<string>())
 const item = computed(() => props.items.find(item => item.id === props.round[index.value]))
-const draft = computed(() => item.value ? drafts.value[item.value.id] ?? (drafts.value[item.value.id] = draftFor(item.value)) : undefined)
+const draft = computed(() => item.value ? drafts.value[item.value.id] : undefined)
 const counts = computed(() => roundCounts(props.items, props.round, skipped.value))
 const mac = macPlatform(navigator.platform), submitKey = mac ? 'Cmd+Enter' : 'Ctrl+Enter'
 const outcomes: DeskOutcome[] = ['once', 'always', 'requirement', 'doctrine']
@@ -47,11 +47,12 @@ const announcement = ref('')
 const plainText = (value: unknown) => typeof value === 'string' ? value : 'Not supplied'
 watch(item, async current => {
   const turn = ++contextGeneration
+  if (current && !drafts.value[current.id]) drafts.value[current.id] = draftFor(current)
   error.value = ''; status.value = ''; editing.value = ''; pager.value = false; brokenThumbs.value = new Set()
   context.value = { attachments: [], related: [], outcomes: [], warnings: [] }; contextLoading.value = false
   clearTimeout(expiryTimer)
   expired.value = !!current?.expiresAt && Date.parse(current.expiresAt) <= Date.now()
-  if (current?.expiresAt && !expired.value) expiryTimer = setTimeout(() => { expired.value = true; status.value = 'This request expired. No permission was granted.' }, Math.min(2_147_483_647, Math.max(0, Date.parse(current.expiresAt) - Date.now())))
+  if (current?.expiresAt && !expired.value) expiryTimer = setTimeout(() => { expired.value = true; status.value = 'This request expired. No permission was granted.'; announcement.value = status.value }, Math.min(2_147_483_647, Math.max(0, Date.parse(current.expiresAt) - Date.now())))
   if (current?.ticketId || current?.ticketKey) {
     contextLoading.value = true
     const result = await loadDeskContext(current.ticketId ?? '', current.ticketKey)
@@ -66,7 +67,8 @@ async function focusField(name: string) {
   field?.focus(); field?.setSelectionRange(field.value.length, field.value.length)
 }
 function finishEditing() {
-  editing.value = ''; status.value = 'Your answer is set. Enter decides.'
+  const label = editing.value === 'answer' ? 'answer' : item.value?.kind === 'approval' || item.value?.kind === 'rule' ? 'reason' : 'note'
+  editing.value = ''; status.value = `Your ${label} is set. Enter decides.`; announcement.value = status.value
   memo.value?.focus({ preventScroll: true })
 }
 function choose(id: string) {
@@ -103,18 +105,24 @@ async function submit() {
   busy.value = true; slam.value = true; error.value = ''; status.value = 'Recording the decision…'
   try {
     const result = await props.decide({ ...current }, payload, requestId)
-    if (!live || item.value?.id !== capturedId || item.value.revision !== capturedRevision || index.value !== capturedIndex) return
+    if (!live) return
+    if (item.value?.id !== capturedId || item.value.revision !== capturedRevision || index.value !== capturedIndex || item.value.unavailable || !props.allowed(item.value)) {
+      status.value = 'The source changed while recording. Reopen it to confirm the result.'
+      slam.value = false
+      announcement.value = status.value
+      return
+    }
     drafts.value[capturedId] = draftFor(result); skipped.value.delete(capturedId)
     emit('recorded', result); slam.value = false; announcement.value = `Decision recorded for ${current.title}. ${result.delivery || ''}`
-    status.value = result.delivery || 'Decision recorded.'
+    status.value = ''
     await nextTick()
     if (live) { busy.value = false; navigate(1, `Decision recorded for ${current.title}. ${result.delivery || ''}`); await nextTick(); decideButton.value?.focus({ preventScroll: true }) }
   } catch (cause) {
     if (live && item.value?.id === capturedId) { error.value = cause instanceof Error ? cause.message : 'The decision failed. Your answer is kept.'; status.value = 'The decision was not confirmed.'; announcement.value = `Decision not confirmed. ${error.value}` }
-  } finally { if (live) busy.value = false }
+  } finally { if (live) { busy.value = false; slam.value = false } }
 }
 function openPager() { if (busy.value) return; pager.value = !pager.value; jumpIndex.value = index.value; if (pager.value) void nextTick(() => dialog.value?.querySelector<HTMLElement>('[role="listbox"]')?.focus()) }
-function pickJump(at: number) { index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
+function pickJump(at: number) { if (busy.value) return; index.value = at; pager.value = false; announcement.value = `Memo ${at + 1} of ${props.round.length}. ${props.items.find(item => item.id === props.round[at])?.title ?? 'Unavailable item'}`; void nextTick(() => pagerButton.value?.focus({ preventScroll: true })) }
 function close() { if (viewing.value) return; dialog.value?.close(); emit('close') }
 function keys(event: KeyboardEvent) {
   if (viewing.value || event.isComposing || event.defaultPrevented || (event.repeat && event.key === 'Enter')) return
@@ -141,7 +149,7 @@ function keys(event: KeyboardEvent) {
     event.preventDefault(); const choices = item.value?.choices ?? [], at = choices.findIndex(choice => choice.id === draft.value?.optionId)
     const choice = choices[(at + (key === 'arrowdown' ? 1 : -1) + choices.length) % choices.length]; if (choice) choose(choice.id)
   } else if (key === 's') { event.preventDefault(); skip() }
-  else if (key === 'enter') { event.preventDefault(); void submit() }
+  else if (key === 'enter' && (event.target === memo.value || event.target === decideButton.value)) { event.preventDefault(); void submit() }
   else if (key === 'escape') { event.preventDefault(); event.stopPropagation(); close() }
 }
 async function showAttachment(at: number) { const attachment = context.value.attachments[at]; if (!attachment) return; viewing.value = true; await nextTick(); lightbox.value?.open(attachment.id) }
@@ -164,7 +172,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
         <span class="toolbar-space"><span v-if="arrivalsCount" class="arrival-hint" role="status">{{ arrivalsCount }} new for the next round</span></span>
         <div class="action-buttons">
           <button type="button" :disabled="busy" data-testid="desk-skip" @click="skip">Skip <kbd>S</kbd></button>
-          <button ref="decideButton" class="desk-primary" type="button" :disabled="busy || (!item?.decided && blocked)" data-testid="desk-decide" @click="submit">{{ primary }} <KeyCap v-if="editing" k="mod" /><KeyCap k="enter" /></button>
+          <button ref="decideButton" class="desk-primary" type="button" :disabled="busy || (!item?.decided && (blocked || !draft?.optionId))" data-testid="desk-decide" @click="submit">{{ primary }} <KeyCap v-if="editing" k="mod" /><KeyCap k="enter" /></button>
           <button class="close-desk" type="button" aria-label="Close memo" data-testid="desk-close" @click="close"><AppIcon name="close" :size="18" /></button>
         </div>
         <div v-if="pager" class="jump-popover">
@@ -187,7 +195,7 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
             <span class="stamp-label">Stamp it as</span>
             <button v-for="(outcome, at) in outcomes" :key="outcome" class="stamp" :class="[`stamp-${outcome}`, { selected: draft.outcome === outcome, unavailable: !!outcomeUnavailable(item, outcome) }]" type="button" :aria-pressed="draft.outcome === outcome" :disabled="blocked || !canEdit || !!outcomeUnavailable(item, outcome)" :title="outcomeUnavailable(item, outcome) || ({ once: 'For this question only.', always: 'Answer the same question from the record.', requirement: 'Add an acceptance criterion.', doctrine: 'Propose a rule change.' }[outcome])" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)">{{ outcomeLabels[outcome] }}<kbd v-if="!outcomeUnavailable(item, outcome)">{{ outcomeKeys[at] }}</kbd></button>
           </div>
-          <div class="memo-status" role="status" aria-live="polite" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : outcomeUnavailable(item, draft.outcome) || item.delivery || item.suggestion) }}</div>
+          <div class="memo-status" data-testid="desk-status">{{ error || status || item.unavailable || (expired ? 'This request expired.' : !allowed(item) ? 'You do not have permission to decide.' : outcomeUnavailable(item, draft.outcome) || item.delivery || item.suggestion) }}</div>
           <div ref="body" class="memo-body" data-testid="desk-body">
             <section class="answer-column" aria-label="Your answer">
               <h3>Your answer</h3>
@@ -205,7 +213,9 @@ onBeforeUnmount(() => { live = false; contextGeneration++; clearTimeout(expiryTi
             </section>
             <aside class="context-column" aria-label="Background and destination">
               <section><h3>Meanwhile</h3><p>{{ item.meanwhile }}</p></section>
+              <section v-if="item.prUrl"><h3>Rule proposal</h3><a :href="item.prUrl" target="_blank" rel="noopener noreferrer">Open the doctrine pull request<AppIcon name="external" :size="12" /></a></section>
               <section><h3>Background</h3><p>{{ item.context || 'No background supplied by the source.' }}</p></section>
+              <section aria-label="Unavailable stamps"><h3>Stamp availability</h3><template v-for="outcome in outcomes" :key="outcome"><p v-if="outcomeUnavailable(item, outcome)">{{ outcomeLabels[outcome] }}: {{ outcomeUnavailable(item, outcome) }}</p></template></section>
               <section v-if="item.findings"><h3>Findings</h3><p>{{ item.findings }}</p></section>
               <section><h3>Where the answer goes</h3><p>{{ item.destination }}</p><p v-if="item.delivery">{{ item.delivery }}</p></section>
               <section v-if="item.ticketId || item.ticketKey"><h3>From the ticket</h3><p v-if="contextLoading" role="status">Reading ticket context…</p><template v-if="context.ticket"><RouterLink :to="`/work/${context.ticket.id}`">{{ context.ticket.key }} · {{ context.ticket.title }} <AppIcon name="external" :size="12" /></RouterLink><dl><div><dt>Status</dt><dd>{{ context.ticket.state }}</dd></div><div><dt>Priority</dt><dd>{{ plainText(context.ticket.fields.priority) }}</dd></div><div><dt>Acceptance</dt><dd>{{ plainText(context.ticket.fields.acceptance_criteria) }}</dd></div><div><dt>PR / checks</dt><dd>{{ plainText(context.ticket.fields.pr_url) }} · {{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').slice(0, 3).map(outcome => outcomeLine(outcome).full).join(' · ') || 'No check evidence supplied' }}</dd></div></dl></template><p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p></section>

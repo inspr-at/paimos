@@ -3,20 +3,22 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import { arrivals, kindLabels, newRound, outcomeLabels, type DeskDraft, type DeskItem, type DeskOutcome } from '../lib/decisionDesk'
-import { commitDesk, decisionPermission, emptySources, loadDesk, nativeTierAdapter, readQuestions, questionItem, type DeskSources } from '../lib/decisionDeskApi'
+import { commitDesk, decisionPermission, emptySources, loadDesk, nativeTierAdapter, MAX_QUESTION_PAGES, type DeskSources } from '../lib/decisionDeskApi'
+import { phoneVerificationAvailable } from '../lib/deskPhoneApproval'
 import { can, onAccessChange } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 
 const session = useSession()
 const agents = useAgents()
-const makeAdapters = () => ({ tiers: nativeTierAdapter(async () => { await agents.loadAll(); return agents.sessions }, can) })
+const makeAdapters = () => ({ tiers: nativeTierAdapter(async () => { await agents.refreshSessions(); return agents.sessions }, can) })
 let adapters = makeAdapters()
 const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const items = ref<DeskItem[]>([]), roundItems = ref<DeskItem[]>([]), round = ref<string[]>([]), start = ref(''), opened = ref(false)
-const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref(false), loading = ref(false), offset = ref(0), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | ''>('')
+const state = ref<'loading' | 'ready'>('loading'), warnings = ref<string[]>([]), more = ref({ open: false, answered: false }), loading = ref(false), pages = ref({ open: 1, answered: 1 }), filter = ref<'open' | 'decided'>('open'), outcomeFilter = ref<DeskOutcome | ''>('')
+const roundBaseline = ref<string[]>([]), phoneVerification = ref<boolean | undefined>(), capabilityError = ref('')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
-const fresh = computed(() => arrivals(items.value, round.value))
+const fresh = computed(() => arrivals(items.value, roundBaseline.value))
 const visible = computed(() => items.value.filter(item => item.decided === (filter.value === 'decided') && (!outcomeFilter.value || item.outcome === outcomeFilter.value)))
 const person = computed(() => session.identity?.principal.kind === 'person')
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
@@ -24,12 +26,13 @@ async function refresh() {
   const turn = ++generation, identity = owner.value
   loading.value = true
   try {
-    const result = await loadDesk(0, adapters)
+    const result = await loadDesk(pages.value, adapters)
     if (!alive || turn !== generation || identity !== owner.value) return
-    sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore; offset.value = 0
+    sources = result.sources; items.value = result.items; warnings.value = result.warnings; more.value = result.hasMore
     // Memo content stays frozen; changed or vanished records require a deliberate reopen.
     if (opened.value) roundItems.value = roundItems.value.map(item => {
       const latest = result.items.find(row => row.id === item.id)
+      if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) return { ...item, unavailable: 'This request expired. No permission was granted.' }
       if (!latest) return { ...item, unavailable: 'The source could not be confirmed. Close and refresh before deciding.' }
       if (latest.revision !== item.revision || latest.decided !== item.decided) return { ...item, unavailable: 'The source changed. Close and reopen before deciding.' }
       return item
@@ -38,22 +41,13 @@ async function refresh() {
   finally { if (alive && turn === generation) { state.value = 'ready'; loading.value = false } }
 }
 async function loadMore() {
-  if (loading.value || !more.value) return
-  const turn = ++generation, identity = owner.value, next = offset.value + 100
-  loading.value = true
-  try {
-    const page = await readQuestions(next)
-    if (!alive || turn !== generation || identity !== owner.value) return
-    const mapped = page.items.map(question => {
-      const name = items.value.find(item => item.projectId === question.project_id)?.projectName ?? 'Project name unavailable'
-      const item = questionItem(question, name); sources.questions.set(item.id, question); return item
-    })
-    const byId = new Map(items.value.map(item => [item.id, item])); mapped.forEach(item => byId.set(item.id, item))
-    items.value = [...byId.values()]; offset.value = next; more.value = page.has_more
-  } catch { if (turn === generation) warnings.value = [...warnings.value, 'More questions could not be read. The list is incomplete.'] }
-  finally { if (alive && turn === generation) loading.value = false }
+  const state = filter.value === 'open' ? 'open' : 'answered'
+  if (loading.value || !more.value[state] || pages.value[state] >= MAX_QUESTION_PAGES) return
+  pages.value = { ...pages.value, [state]: pages.value[state] + 1 }
+  await refresh()
 }
 function begin(id?: string) {
+  roundBaseline.value = newRound(items.value)
   roundItems.value = [...visible.value]; round.value = newRound(roundItems.value)
   if (!round.value.length) return
   start.value = id && round.value.includes(id) ? id : round.value[0]!
@@ -63,7 +57,8 @@ async function decide(item: DeskItem, draft: DeskDraft, requestId: string) {
   const identity = owner.value
   if (!allowed(item) || item.unavailable) throw new Error('This action is no longer available to this person.')
   if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) throw new Error('This request expired.')
-  const result = await commitDesk(item, draft, sources, requestId, window.matchMedia('(max-width: 720px)').matches, adapters)
+  if (item.kind === 'approval' && phoneVerification.value === undefined) throw new Error(capabilityError.value || 'Approval verification availability is still being checked.')
+  const result = await commitDesk(item, draft, sources, requestId, phoneVerification.value === true, adapters)
   if (!alive || identity !== owner.value) throw new Error('The signed-in person changed. Reopen the desk.')
   return result
 }
@@ -71,8 +66,18 @@ function recorded(item: DeskItem) {
   items.value = items.value.map(row => row.id === item.id ? item : row)
   roundItems.value = roundItems.value.map(row => row.id === item.id ? item : row)
 }
-watch(owner, () => { generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; void refresh() }, { immediate: true })
-const stopAccess = onAccessChange(() => { if (opened.value) roundItems.value = roundItems.value.map(item => allowed(item) ? item : { ...item, unavailable: 'Access changed. Reopen the desk to confirm this source.' }) })
+watch(owner, () => {
+  generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
+  sources = emptySources(); adapters = makeAdapters(); filter.value = 'open'; outcomeFilter.value = ''; pages.value = { open: 1, answered: 1 }
+  phoneVerification.value = undefined; capabilityError.value = ''
+  const identity = owner.value
+  void phoneVerificationAvailable().then(available => { if (alive && identity === owner.value) phoneVerification.value = available })
+    .catch(() => { if (alive && identity === owner.value) capabilityError.value = 'Approval verification availability could not be confirmed. Refresh the page before deciding.' })
+  void refresh()
+}, { immediate: true })
+// A refresh signal arrives before the permission response. Only an actual
+// reset invalidates the frozen source; can() reacts to the completed refresh.
+const stopAccess = onAccessChange(change => { if (change === 'reset' && opened.value) roundItems.value = roundItems.value.map(item => allowed(item) ? item : { ...item, unavailable: 'Access changed. Reopen the desk to confirm this source.' }) })
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
 onMounted(() => { window.addEventListener('focus', focus); poll = setInterval(() => { if (!document.hidden && !loading.value) void refresh() }, 30_000) })
@@ -87,9 +92,9 @@ onBeforeUnmount(() => { alive = false; generation++; stopAccess(); clearInterval
     <div v-if="warnings.length" class="source-warnings" role="status"><p v-for="warning in warnings" :key="warning">{{ warning }}</p></div>
     <p v-if="state === 'ready' && !visible.length">{{ warnings.length ? 'The available sources have no matching items.' : filter === 'decided' ? 'No recorded decisions in this view.' : 'Nothing is waiting in the available sources.' }}</p>
     <ol class="desk-list" aria-label="Desk items"><li v-for="item in visible" :key="item.id"><button type="button" class="desk-row" :data-testid="`desk-row-${item.id}`" @click="begin(item.id)"><span class="row-kind">{{ kindLabels[item.kind] }}</span><span class="row-topic"><strong>{{ item.title }}</strong><small>{{ item.projectName }} · {{ item.decided ? item.answer : item.meanwhile }}</small></span><span class="row-state">{{ item.decided ? outcomeLabels[item.outcome] : item.held ? 'Holding work' : 'Waiting' }}</span></button></li></ol>
-    <p v-if="more" class="incomplete">More questions are available. <button type="button" :disabled="loading" @click="loadMore">Load 100 more</button></p>
+    <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="incomplete">More questions are available. <button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>The view is limited to 1,000 questions per state.</span></p>
     <p class="chore-line">Sign-ins and account setup remain in <RouterLink to="/agents">Agents</RouterLink>.</p>
-    <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
+    <p v-if="opened && fresh.length" class="arrival-line">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
     <DecisionDeskMemo v-if="opened" :key="owner" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :allowed="allowed" :decide="decide" @recorded="recorded" @close="opened = false" />
   </main>
 </template>
