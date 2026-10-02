@@ -194,8 +194,18 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "snapshot", "person", "Owner", []string{"admin"})
 	displayRoutesFixture(t, p, 2)
+	old := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
+	now := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
+	expires := now.Add(time.Hour)
+	replacement := []Route{}
+	for _, step := range old.Steps {
+		replacement = append(replacement, Route{Role: "review-gate", Priority: step.Priority, ProfileID: step.ProfileID, State: "unavailable", Reason: "replacement", ValidUntil: &expires})
+	}
 	writer, pid := lockDisplayTable(t)
-	if _, err := writer.Exec(t.Context(), `UPDATE model_role_routes SET reason='replacement' WHERE tenant_id=$1`, p.TenantID); err != nil {
+	if _, err := writer.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replaceRoutes(t.Context(), writer, p, replacement, now); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -243,7 +253,7 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 		t.Fatal("partial snapshot")
 	}
 	for _, step := range out.Steps {
-		if step.Reason != out.Steps[0].Reason {
+		if step.Reason != out.Steps[0].Reason || step.State != out.Steps[0].State {
 			t.Fatal("mixed pre/post replacement snapshot")
 		}
 	}

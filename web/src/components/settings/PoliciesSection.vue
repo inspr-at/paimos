@@ -86,7 +86,7 @@ function tabKey(event: KeyboardEvent, index: number) {
           <div class="routing-notes">
             <p><strong>CLI</strong> follows configured priority and harness health, without ticket context.</p>
             <p><strong>Dispatch</strong> applies family order, review floors, platform capability, approved accounts and model preferences.</p>
-            <p>Built-in review family order: {{ ladder.dispatch_family_order.join(' → ') }}.</p>
+            <p>Built-in review family order: {{ ladder.dispatch_family_order.join(', then ') }}.</p>
             <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
           </div>
         </template>

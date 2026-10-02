@@ -190,14 +190,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       controls: roleControls, scrollAreas: { policies: panel },
       interactions: [
         { name: 'loaded to loading', run: async () => { await role('scout').click(); await truncation.started; await expect(content).toHaveAttribute('aria-busy', 'true') } },
-        { name: 'loading to truncated', run: async () => { truncation.release(); await expect(panel.getByText(TRUNCATED_LADDER, { exact: true })).toBeVisible(); await expect(panel.locator('.ladder li')).toHaveCount(50) } },
+        { name: 'loading to truncated', run: async () => { truncation.release(); await expect(content.getByText(TRUNCATED_LADDER, { exact: true })).toBeVisible(); await expect(panel.locator('.ladder li')).toHaveCount(50) } },
       ],
     })
     mock.data.count = 50
     const complete = mock.holdNext()
     await role('build').click(); await complete.started
     await expectStableControls({ controls: roleControls, scrollAreas: { policies: panel }, interactions: [
-      { name: 'loading to complete', run: async () => { complete.release(); await loaded(); await expect(panel.locator('.ladder li')).toHaveCount(50); await expect(panel.getByText(TRUNCATED_LADDER, { exact: true })).toHaveCount(0) } },
+      { name: 'loading to complete', run: async () => { complete.release(); await loaded(); await expect(panel.locator('.ladder li')).toHaveCount(50); await expect(content.getByText(TRUNCATED_LADDER, { exact: true })).toHaveCount(0) } },
     ] })
     mock.data.mode = 'failed'
     const failure = mock.holdNext()

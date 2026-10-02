@@ -14098,7 +14098,7 @@ components:
                   profile: {$ref: '#/components/schemas/ModelProfile'}
         setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
         truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
-        dispatch_family_order: {type: array, items: {type: string}, description: Built-in family order used by review dispatch, before further qualification and preferences.}
+        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used by review dispatch, before further qualification and preferences.'}
         review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
     ModelResolution:
       type: object
