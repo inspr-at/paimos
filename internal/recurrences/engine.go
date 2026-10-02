@@ -75,6 +75,15 @@ func (m *Module) runAll(ctx context.Context) error {
 // reload the due row after obtaining them. All comparisons use the DB clock.
 func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 	ctx = db.AllProjects(ctx, "recurrence scheduler")
+	var active bool
+	if err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrences WHERE NOT paused)`).Scan(&active)
+	}); err != nil {
+		return err
+	}
+	if !active {
+		return nil
+	}
 	actor, err := ensureActor(ctx, m, tenantID)
 	if err != nil {
 		return err
@@ -178,6 +187,7 @@ func (m *Module) syncPublications(ctx context.Context, actor tenant.Principal) e
 		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (r.project_node_id) r.project_node_id::text,r.release_node_id::text,n.title,coalesce(r.version,''),r.released_at
    FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id AND n.deleted_at IS NULL
    WHERE r.state IN ('released','superseded') AND r.released_at IS NOT NULL AND r.released_at<=$1
+   AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=r.project_node_id AND NOT c.paused AND c.trigger->>'kind'='event')
    ORDER BY r.project_node_id,r.released_at DESC,r.release_node_id DESC`, now)
 		if err != nil {
 			return err
@@ -201,7 +211,8 @@ func (m *Module) syncPublications(ctx context.Context, actor tenant.Principal) e
 				continue
 			}
 			var project string
-			err = tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.fields->>'project_key'=$1 AND k.slug='project' AND n.deleted_at IS NULL`, p.ProjectKey).Scan(&project)
+			err = tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.fields->>'project_key'=$1 AND k.slug='project' AND n.deleted_at IS NULL
+ AND EXISTS(SELECT 1 FROM recurrences c WHERE c.project_id=n.id AND NOT c.paused AND c.trigger->>'kind'='event')`, p.ProjectKey).Scan(&project)
 			if errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}

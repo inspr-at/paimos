@@ -41,7 +41,7 @@ func setup(t *testing.T) *fixture {
 	})
 	dbtest.BindRole(t, f.d, f.p.TenantID, f.p.ID, "owner")
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix) VALUES($1,'tag','Tag','TAG') ON CONFLICT DO NOTHING`, f.p.TenantID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'tag','Tag','TAG','tag') ON CONFLICT DO NOTHING`, f.p.TenantID)
 		return err
 	})
 	f.project = f.node("project", nil, "Project")

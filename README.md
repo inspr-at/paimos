@@ -85,7 +85,8 @@ its `origin/main` baseline. Migration 1115 introduces `recurrences` and
 `recurrence_occurrences`, both tenant-scoped with forced RLS and project
 visibility. Classify `recurrences.template` and `created_by_principal_id` as
 personal; other definition, schedule and cursor columns as metadata. Locate a
-recurrence by `(tenant_id,id)`. Classify occurrence receipt columns as metadata,
+recurrence by `(tenant_id,id)`. Classify the user-supplied occurrence key as
+personal and other occurrence receipt columns as metadata,
 located by `(tenant_id,recurrence_id,occurrence_key)`; linked ticket contents and
 actor identity remain personal data in the existing nodes/principals/events
 inventory. The coordinator must add these entries when merging onto the DSAR

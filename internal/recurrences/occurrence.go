@@ -119,7 +119,7 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return manage(r.Context(), tx, p, item.ProjectID)
+		return authorizeDefinition(r.Context(), tx, p, item.Input)
 	})
 	if err != nil {
 		reply(w, 200, nil, err)
