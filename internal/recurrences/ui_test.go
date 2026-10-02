@@ -93,14 +93,15 @@ func TestUIReadOnlyDraftHistoryAndRetirement(t *testing.T) {
 
 func TestUIDraftPreviewAdmitsProjectOnlyManager(t *testing.T) {
 	f := setup(t)
+	manager := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Person}
 	f.tx(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.p.ID); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Project manager') RETURNING id::text`, manager.TenantID).Scan(&manager.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.p.TenantID, f.p.ID, f.project)
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, manager.TenantID, manager.ID, f.project)
 		return err
 	})
-	ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), f.p), f.d.App)
+	ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), manager), f.d.App)
 	const pattern = "POST /api/recurrences/preview"
 	if err := authz.RequirePattern(ctx, pattern, authz.Scope{}); err == nil {
 		t.Fatal("project-only grant reached workspace boundary")
@@ -112,7 +113,7 @@ func TestUIDraftPreviewAdmitsProjectOnlyManager(t *testing.T) {
 	if err = authz.RequirePattern(ctx, pattern, scope); err != nil {
 		t.Fatal(err)
 	}
-	f.call(f.p, "POST", "/api/recurrences/preview", f.input(), 200)
+	f.call(manager, "POST", "/api/recurrences/preview", f.input(), 200)
 }
 
 func TestUIReleasePickerForceOverlapAndSchedulerDeduplication(t *testing.T) {
