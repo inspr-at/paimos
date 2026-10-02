@@ -112,10 +112,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 			}
 		}
 	}
-	measured := false
-	for _, w := range active {
-		measured = measured || w.capacityReadAt != nil
-	}
+	unknownOnly := len(active) == 0
 	if len(active) == 0 || len(permits) > 0 {
 		w := provisionalWindow(a.ID, now, "blind")
 		w.capacitySource = "estimate"
@@ -135,7 +132,7 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	// Unknown usage cannot enforce a numeric reserve, but the person's clock
 	// and explicit Hold remain real gates. Sprint/Away/Run now retain meaning.
-	if !measured && len(regular) == 0 && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
+	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
 		next := s.NextStart(now, s.OffDays == "normal")
 		if next == nil || next.After(now) {
 			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil

@@ -405,6 +405,10 @@ func TestBUnknownScheduleDSTNightsAndRunNow(t *testing.T) {
 			}
 			save()
 			f.route(t, 409)
+			// A just-reset room reading is history. Its presence cannot bypass
+			// the person's clock once admission has become unknown again.
+			f.report(t, 25, now.Add(-time.Minute), now)
+			f.route(t, 409)
 			seed(t, f.admin, func(tx pgx.Tx) error {
 				a, err := getAccount(t.Context(), tx, f.account.ID)
 				if err != nil {
