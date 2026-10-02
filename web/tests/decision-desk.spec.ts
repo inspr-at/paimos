@@ -204,6 +204,47 @@ test('protected requests require an explicit choice before Decide or memo Enter'
     expect(world.calls).toHaveLength(0); await page.getByTestId('desk-close').click()
   }
 })
+for (const [kind, id] of [['approval', 'a:approval-1'], ['tier', 't:tier-request-1']] as const) {
+  test(`memo Enter without a selected ${kind} choice keeps the answer hint and focus`, async ({ page }) => {
+    const world = await mockDecisionDesk(page, { tier: true })
+    await page.goto('/decision-desk'); await page.getByTestId(`desk-row-${id}`).click()
+    await expect(page.getByTestId('choice-0')).toBeEnabled()
+    await expect(page.locator('[data-field="answer"]')).toHaveCount(0)
+    const paper = page.getByTestId('desk-paper')
+    await paper.focus()
+    await expectStableControls({
+      controls: { actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), stamps: page.getByTestId('desk-stamps'), selectors: page.getByTestId('desk-choices'), clicked: page.getByTestId('choice-row-1') },
+      scrollAreas: { body: page.getByTestId('desk-body') },
+      interactions: [{ name: 'Enter without a choice', run: async () => {
+        await paper.press('Enter')
+        await expect(page.getByTestId('desk-answer-summary')).toHaveText('Choose an answer above.')
+        await expect(page.getByTestId('desk-status')).toHaveText('Choose an answer above.')
+        await expect(paper).toBeFocused()
+        await expect(page.getByTestId('desk-decide')).toBeDisabled()
+        expect(world.calls).toHaveLength(0)
+      } }, { name: 'choose after validation', run: async () => {
+        await paper.press('2')
+        await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true')
+        await expect(page.getByTestId('desk-answer-summary')).not.toContainText('Editing')
+        await expect(page.getByTestId('desk-decide')).toBeEnabled()
+        expect(world.calls).toHaveLength(0)
+      } }],
+    })
+  })
+}
+test('memo Enter on an empty custom answer still focuses its answer field', async ({ page }) => {
+  const world = await mockDecisionDesk(page)
+  await openFirst(page)
+  await page.getByTestId('choice-2').click()
+  const field = page.getByRole('textbox', { name: 'Something else' })
+  await expect(field).toBeFocused(); await field.press('Enter')
+  await expect(page.getByTestId('desk-paper')).toBeFocused()
+  await page.getByTestId('desk-paper').press('Enter')
+  await expect(page.getByTestId('desk-status')).toHaveText('Set an answer before deciding.')
+  await expect(field).toBeFocused()
+  await expect(page.getByTestId('desk-answer-summary')).toContainText('Editing')
+  expect(world.calls).toHaveLength(0)
+})
 test('open questions remain visible behind 100 older answered questions', async ({ page }) => {
   const world = await mockDecisionDesk(page)
   world.questions.unshift(...Array.from({ length: 100 }, (_, at) => ({ ...sampleQuestion(`old-${at}`), state: 'answered' as const })))
