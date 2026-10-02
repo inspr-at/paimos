@@ -53,7 +53,7 @@ func withEstimateHints(warnings []string) []string {
 	return out
 }
 func validEstimate(value any) bool {
-	h, ok := value.(float64)
+	h, ok := fieldNumber(value)
 	return ok && h > 0 && h <= 200 && !math.IsInf(h, 0) && !math.IsNaN(h)
 }
 

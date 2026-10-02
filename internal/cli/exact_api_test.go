@@ -56,7 +56,10 @@ func TestExactAPIFieldWrites(t *testing.T) {
 			var err error
 			switch operation {
 			case "priority":
-				err = rt.updateIssue(issuePatch{Ref: "AEON-1", Priority: "high"})
+				code, _, stderr := runCLI([]string{"aeon", "--config", rt.configPath, "issue", "update", "AEON-1", "--priority", "high"}, "")
+				if code != 0 {
+					t.Fatal(stderr)
+				}
 			case "metadata":
 				err = rt.updateKnowledge("memory", "note", "AEON", "", "", "", "", `{"id":9007199254740997}`)
 			case "apply":
@@ -222,5 +225,61 @@ func TestExactAPIMCPToolsReachHTTP(t *testing.T) {
 				t.Fatalf("tool never reached %s %s", tc.method, tc.path)
 			}
 		})
+	}
+}
+
+func TestExactAPIMCPKnowledgeToolsReachHTTP(t *testing.T) {
+	isolate(t)
+	var calls []transcriptRequest
+	srv := transcriptFixture(t, "memory", "note", &calls)
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	rt := &runtime{program: "aeon", configPath: filepath.Join(t.TempDir(), "missing"), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	left, right := mcp.NewInMemoryTransports()
+	ss, err := rt.mcpServer().Connect(t.Context(), left, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ss.Close()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "dev"}, nil).Connect(t.Context(), right, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	for _, tc := range []struct {
+		name         string
+		args         map[string]any
+		method, path string
+	}{
+		{"knowledge_list", map[string]any{"project": "AEON", "type": "memory"}, "GET", "/api/nodes"},
+		{"knowledge_get", map[string]any{"project": "AEON", "type": "memory", "slug": "note"}, "GET", "/api/nodes"},
+		{"knowledge_create", map[string]any{"project": "AEON", "type": "memory", "slug": "note", "title": "Note"}, "POST", "/api/nodes"},
+		{"knowledge_update", map[string]any{"project": "AEON", "type": "memory", "slug": "note", "title": "Changed"}, "PATCH", "/api/nodes/" + transcriptEntryID},
+		{"search", map[string]any{"query": "note"}, "GET", "/api/search"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls = nil
+			res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: tc.name, Arguments: tc.args})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.IsError {
+				t.Fatal(toolText(res))
+			}
+			found := false
+			for _, c := range calls {
+				found = found || (c.method == tc.method && strings.Split(c.path, "?")[0] == tc.path)
+			}
+			if !found {
+				t.Fatal("tool did not reach HTTP")
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	calls = nil
+	if _, _, err := rt.toolIssueUpdate(ctx, nil, issueUpdateArgs{Ref: "MEM-1", Title: "Late"}); err == nil || len(calls) != 0 {
+		t.Fatal("cancelled mutation reached HTTP")
 	}
 }

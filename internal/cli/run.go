@@ -53,6 +53,7 @@ func programName(argv0 string) string {
 }
 
 type runtime struct {
+	requestContext     context.Context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer
@@ -369,4 +370,19 @@ func (rt *runtime) whoami(ctx context.Context) error {
 	fmt.Fprintf(rt.stdout, "principal: %s (%s)\n", me.Principal.Name, me.Principal.Kind)
 	fmt.Fprintf(rt.stdout, "tenant: %s (%s)\n", me.Tenant.Name, me.Tenant.Slug)
 	return nil
+}
+
+func (rt *runtime) context() context.Context {
+	if rt.requestContext != nil {
+		return rt.requestContext
+	}
+	return context.Background()
+}
+
+// workRuntime isolates mutable caches and carries cancellation for one MCP call.
+func (rt *runtime) workRuntime(ctx context.Context) *runtime {
+	copy := *rt
+	copy.requestContext = ctx
+	copy.kinds = nil
+	return &copy
 }

@@ -3693,6 +3693,7 @@ paths:
   /nodes:
     get:
       operationId: listNodes
+      description: 'A cursor whose anchor was deleted or no longer matches the filters returns 409 cursor_expired; restart from the first page.'
       security: *auth
       parameters:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
@@ -3720,6 +3721,7 @@ paths:
         - {$ref: '#/components/parameters/Limit'}
         - {$ref: '#/components/parameters/Cursor'}
       responses:
+        '409': {description: 'cursor_expired: pagination anchor is gone or no longer matches; restart from the first page'}
         '200':
           $ref: '#/components/responses/Nodes'
         '400':
@@ -5850,7 +5852,7 @@ paths:
         '200': {description: Delivery settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
     put:
       operationId: putInboxDeliverySettings
-      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with.
+      description: Requires settings.manage. Applies to messages sent afterwards; queued messages keep the deadline they were accepted with. Changes atomically append inbox.delivery_settings_changed with the actor and effective before/after policy. Unchanged policies append no event.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
       responses:
         '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/InboxDeliverySettings'}}}}
