@@ -37,7 +37,7 @@ func ResolveReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, author, p
 	if err != nil {
 		return out, err
 	}
-	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3}
+	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
 	sort.SliceStable(steps, func(i, j int) bool {
 		a, b := steps[i].Profile, steps[j].Profile
 		if rank[a.Family] != rank[b.Family] {

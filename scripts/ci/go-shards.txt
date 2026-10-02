@@ -154,8 +154,8 @@
 2 0 github.com/inspr-at/paimos/internal/scopecode
 2 0 github.com/inspr-at/paimos/internal/systemactor
 2 0 github.com/inspr-at/paimos/internal/workorders
-2 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
-2 0 github.com/inspr-at/paimos/web
+2 0 github.com/inspr-at/paimos/scripts
+2 0 github.com/inspr-at/paimos/scripts/onboarding-platform
 3 98754 github.com/inspr-at/paimos/internal/agentaccounts
 3 53121 github.com/inspr-at/paimos/internal/agentd
 3 4432 github.com/inspr-at/paimos/internal/agentpairing TestAddHarnessApprovalSupersedesOnlyQueuedVerification
@@ -301,9 +301,10 @@
 4 42 github.com/inspr-at/paimos/internal/sessionusage
 4 0 github.com/inspr-at/paimos/internal/statusautopilot
 4 0 github.com/inspr-at/paimos/internal/version
-4 0 github.com/inspr-at/paimos/scripts
-4 0 github.com/inspr-at/paimos/scripts/onboarding-platform
+4 0 github.com/inspr-at/paimos/internal/workqueue
+4 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
 4 4 github.com/inspr-at/paimos/scripts/pdf-visual-diff
+4 0 github.com/inspr-at/paimos/web
 5 5191 github.com/inspr-at/paimos/internal/agentpairing TestAttachCannotRenewChangedSession
 5 1836 github.com/inspr-at/paimos/internal/agentpairing TestAttachPairingFileCannotRequestActivateRenewOrUpload
 5 406 github.com/inspr-at/paimos/internal/agentpairing TestGeneratedInstallerIPv6Origin

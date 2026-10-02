@@ -268,6 +268,7 @@
 2 22093 github.com/inspr-at/paimos/internal/ticketwork
 2 0 github.com/inspr-at/paimos/internal/version
 2 0 github.com/inspr-at/paimos/internal/workorders
+2 0 github.com/inspr-at/paimos/internal/workqueue
 2 0 github.com/inspr-at/paimos/scripts
 2 0 github.com/inspr-at/paimos/scripts/ci-runner-guard
 2 0 github.com/inspr-at/paimos/scripts/onboarding-platform

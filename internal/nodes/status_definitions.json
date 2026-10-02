@@ -115,7 +115,7 @@
   ],
   "queued": {
     "label": "Queued",
-    "meaning": "Open plus a place in the work queue (AEON-522); the next free agent picks it up, then it becomes In progress automatically.",
+    "meaning": "Open or Blocked plus a place in the work queue (AEON-522); Blocked waits on its named blocker. When ready, the next free agent picks it up, then it becomes In progress automatically.",
     "is_status": false
   },
   "autopilot": {

@@ -92,7 +92,7 @@ func (m *messaging) claimDelivery(w http.ResponseWriter, r *http.Request) {
 
 func localDeliveryAdapter(name string) bool {
 	switch name {
-	case "codex", "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "claude_resume", "claude_channel":
+	case "codex", "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "agentd_gemini", "agentd_opencode", "claude_resume", "claude_channel":
 		return true
 	}
 	return false
@@ -187,7 +187,7 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		if err := tx.QueryRow(ctx, `SELECT adapter,target_kind,maximum_level,sealed_target FROM inbox_message_targets WHERE id=$1::uuid AND principal_id=$2::uuid`, *targetID, p.ID).Scan(&adapter, &kind, &maximum, &sealed); err != nil {
 			return err
 		}
-		if requested == "simple" && priorFallback == "" && fallbackID != nil && (adapter == "agentd_codex" || adapter == "agentd_claude" || adapter == "agentd_pi" || adapter == "agentd_cursor" || adapter == "claude_channel") {
+		if requested == "simple" && priorFallback == "" && fallbackID != nil && (adapter == "agentd_codex" || adapter == "agentd_claude" || adapter == "agentd_pi" || adapter == "agentd_cursor" || adapter == "agentd_gemini" || adapter == "agentd_opencode" || adapter == "claude_channel") {
 			if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,fallback_reason='not_steerable' WHERE id=$1::uuid`, id, *fallbackID); err != nil {
 				return err
 			}
