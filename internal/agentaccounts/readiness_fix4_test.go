@@ -89,6 +89,8 @@ func TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow(t *testing.T) {
 	clock := &fix4Clock{at: time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)}
 	observed := clock.now()
 	f := readinessWorld(t, "fix4-day-outage", observed)
+	f.runner.Scopes = []string{"account.read", "account.probe", "account.manage"}
+	f.token = issueKey(t, f.runner, f.runner.Scopes)
 	mux := http.NewServeMux()
 	New(appPool).Mount(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +116,11 @@ func TestFix4AutomaticReplayAfterDayOutageAllowsFreshCheckNow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	t.Cleanup(func() {
+		if s != nil {
+			_ = s.Close(context.Background())
+		}
+	})
 	if err := s.PollOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
