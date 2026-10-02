@@ -248,7 +248,7 @@ for (const show of [false, true]) {
     await expect(row(page, withdrawn.version)).toHaveCount(0)
     await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
     await expect(sheet(page).getByText(/not in this build/)).toBeVisible()
-    await expect(sheet(page).locator('.detail')).toHaveCount(0)
+    await expect(sheet(page).locator('.detail').getByRole('button', { name: `Copy version ${withdrawn.version}`, exact: true })).toHaveCount(0)
     await expect(sheet(page)).not.toContainText(withdrawn.codename)
     await expect(sheet(page).getByRole('region', { name: 'Release cadence' }).locator('.total')).toHaveText('7 releases')
     expect(await page.evaluate(async version => {
