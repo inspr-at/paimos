@@ -169,6 +169,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdListen(),
 		rt.cmdMessage(),
 		rt.cmdMCP(),
+		rt.cmdAsk(),
 		{
 			Name:  "version",
 			Short: "Print the calendar version",

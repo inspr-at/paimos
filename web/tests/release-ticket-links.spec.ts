@@ -15,6 +15,7 @@ const TITLE = 'Connect Hetzner Cloud for managed provisioning'
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
 async function open(page: Page, data = fixtures()) {
   const history = releaseHistory()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
   const calls = await mockWork(page, data)
   await mockReleases(page, history)
   await page.goto(`/releases/${history.releases[1].version}`)

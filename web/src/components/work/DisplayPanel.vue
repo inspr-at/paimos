@@ -3,6 +3,7 @@
 import { GROUPS, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import type { ColumnId } from '../../lib/columns'
 import type { SortKey } from '../../lib/work'
+import { useModelDisplay } from '../../lib/prefs'
 import AppIcon from '../AppIcon.vue'
 import ColumnPicker from './ColumnPicker.vue'
 import SortEditor from './SortEditor.vue'
@@ -19,6 +20,7 @@ defineProps<{
 }>()
 // The header graph is on until a person turns it off. Callers that omit the
 // prop keep that default so the switch does not flash off.
+const { modelDisplay, set: setModelDisplay } = useModelDisplay()
 const emit = defineEmits<{
   group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
@@ -37,9 +39,9 @@ const emit = defineEmits<{
           :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)"
         >{{ option.label }}</button>
       </div>
-      <div v-if="grouped" class="pair">
-        <button type="button" class="btn sm" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
-        <button type="button" class="btn sm" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
+      <div class="pair">
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
       </div>
     </template>
     <template v-else>
@@ -58,6 +60,17 @@ const emit = defineEmits<{
       </div>
     </div>
     <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+    <div class="section model-display">
+      <div class="model-choice"><span>Effort meter</span><div class="seg" role="radiogroup" aria-label="Effort meter">
+        <button v-for="on in [true, false]" :key="String(on)" type="button" role="radio" :aria-checked="modelDisplay.effortMeter === on" @click="setModelDisplay('effortMeter', on)">{{ on ? 'On' : 'Off' }}</button>
+      </div></div>
+      <div class="model-choice"><span>Model names</span><div class="seg" role="radiogroup" aria-label="Model names">
+        <button v-for="name in ['full', 'short'] as const" :key="name" type="button" role="radio" :aria-checked="modelDisplay.modelNames === name" @click="setModelDisplay('modelNames', name)">{{ name === 'full' ? 'Full' : 'Short' }}</button>
+      </div></div>
+      <div class="model-choice"><span>Version</span><div class="seg" role="radiogroup" aria-label="Version">
+        <button v-for="version in ['show', 'hide'] as const" :key="version" type="button" role="radio" :aria-checked="modelDisplay.modelVersion === version" @click="setModelDisplay('modelVersion', version)">{{ version === 'show' ? 'Show' : 'Hide' }}</button>
+      </div></div>
+    </div>
     <div class="section">
       <label class="switch">
         <input type="checkbox" :checked="headerGraph !== false" @change="emit('headerGraph', ($event.target as HTMLInputElement).checked)" />
@@ -68,13 +81,17 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+.model-display { display: grid; gap: 8px; }
+.model-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-2); font-size: 12.5px; }
+.model-choice .seg { display: grid; grid-template-columns: repeat(2, 1fr); min-width: 116px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
-.group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-option:hover { color: var(--ink); }
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
 .group-option:focus-visible { box-shadow: var(--focus-ring); }
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.pair .btn { min-width: 0; padding-inline: 4px; gap: 4px; font-size: 12px; }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }

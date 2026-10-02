@@ -437,20 +437,52 @@ func TestListPlanningColumns(t *testing.T) {
 		}
 	}
 
-	// Sorting: model by the role's rung, then area; tokens and cost by spent,
-	// then estimate.
+	// Model sorting always uses the shown model's full identity and version,
+	// with unknowns last; it must match actual and frozen planned cells.
 	keys := func(who tenant.Principal, sort string) []string {
 		return listKeys(t, who, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+sort)
 	}
-	// PLN-5's estimate now suggests build/backend, so it participates in
-	// model sorting despite its cancelled state; roll-up still excludes it.
-	if got := keys(w.admin, "model"); strings.Join(got[:6], ",") != "PLN-4,PLN-5,PLN-8,PLN-6,PLN-2,PLN-7" {
-		t.Fatalf("model sort: %v", got)
+	for _, order := range []string{"model", "-model", "model,-tokens"} {
+		items := listPage(t, w.admin, "/api/nodes?within="+w.root.ID+"&kind=ticket,epic&sort="+order).Items
+		previous := ""
+		empty := false
+		for _, item := range items {
+			name := ""
+			if item.KindSlug != "epic" && item.Planning != nil {
+				plan := item.Planning
+				if len(plan.Models) > 0 {
+					name = plan.Models[0].FullName()
+					if name == "" {
+						name = plan.Models[0].Label
+					}
+				} else {
+					route := plan.Route
+					if plan.Snapshot != nil {
+						route = plan.Snapshot.Route
+					}
+					if route != nil {
+						name = route.FullName()
+						if name == "" {
+							name = strings.Split(route.Label, " · ")[0]
+						}
+					}
+				}
+			}
+			name = strings.ToLower(name)
+			if name == "" {
+				empty = true
+				continue
+			}
+			if empty {
+				t.Fatalf("%s: populated model follows unknown", order)
+			}
+			if previous != "" && ((order != "-model" && name < previous) || (order == "-model" && name > previous)) {
+				t.Fatalf("%s: %q after %q", order, name, previous)
+			}
+			previous = name
+		}
 	}
-	// Descending reverses the rung and the area, and still leaves a missing area last.
-	if got := keys(w.admin, "-model"); strings.Join(got[:6], ",") != "PLN-7,PLN-2,PLN-8,PLN-5,PLN-6,PLN-4" {
-		t.Fatalf("model sort descending: %v", got)
-	}
+
 	if got := keys(w.admin, "-tokens"); strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-1,PLN-2" && strings.Join(got[:4], ",") != "PLN-5,PLN-4,PLN-2,PLN-1" {
 		t.Fatalf("tokens sort: %v", got)
 	}

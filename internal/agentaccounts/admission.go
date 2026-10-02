@@ -697,11 +697,14 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 			same = append(same, a)
 		}
 	}
-	same, err = narrowCandidates(ctx, tx, run, harness, same)
+	same, residencyEmptied, err := narrowCandidates(ctx, tx, run, harness, same)
 	if err != nil {
 		return nil, err
 	}
 	best := waitFor("offline")
+	if residencyEmptied {
+		best = waitFor("residency")
+	}
 	for _, a := range same {
 		if run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
 			continue

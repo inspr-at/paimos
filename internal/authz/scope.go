@@ -16,7 +16,7 @@ import (
 )
 
 // ProjectFilteredRoutes may be authorized by a permission held in any of the
-// caller's project bindings (Scope.AnyProject). Each one reads only rows that
+// caller's project bindings (Scope.AnyProject). Each one accesses only rows that
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
@@ -26,6 +26,8 @@ import (
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/decision-desk":                      true,
+	"GET /api/journey/next-actions":               true,
 	"GET /api/queue":                              true,
 	"GET /api/me/host-labels":                     true,
 	"PUT /api/me/host-labels":                     true,
@@ -33,6 +35,13 @@ var ProjectFilteredRoutes = map[string]bool{
 	"PUT /api/me/security/session-watching":       true,
 	"GET /api/approvals":                          true,
 	"GET /api/harness-sessions/live":              true,
+	"GET /api/me/agent-pause-settings":            true,
+	"PUT /api/me/agent-pause-settings":            true,
+	"GET /api/me/leaving-at":                      true,
+	"PUT /api/me/leaving-at":                      true,
+	"DELETE /api/me/leaving-at":                   true,
+	"POST /api/harness-sessions/pause":            true,
+	"POST /api/harness-sessions/resume":           true,
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/settings/status-autopilot":          true,
 	"GET /api/status-autopilot/changes":           true,
@@ -114,6 +123,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["questionId"] != "":
+		return "node", values["questionId"]
 	case values["nodeId"] != "":
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):

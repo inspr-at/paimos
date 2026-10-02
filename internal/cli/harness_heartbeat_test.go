@@ -58,6 +58,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": transcriptEntryID, "harness": "codex", "model": "fixture-model", "effort": "high", "enabled": true}})
+		case r.URL.Path == "/api/me/leaving-at" || r.URL.Path == "/api/me/agent-pause-settings":
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			_, _ = w.Write([]byte(`{"principal":{"id":"44444444-4444-4444-8444-444444444444","name":"worker"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/"+transcriptProjectID+"/harness-sessions":
@@ -417,6 +419,7 @@ func TestCoordinatorHeartbeatRetryRejectsOtherFailures(t *testing.T) {
 		{"no native reference", "coordinator", "", "active generation conflicts with registration", 409},
 		{"other conflict", "coordinator", transcriptSessionID, "successor registration conflicts", 409},
 		{"vendor conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent", 409},
+		{"vendor fingerprint conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent (sha256:0123456789abcdef)", 409},
 		{"metadata conflict", "coordinator", transcriptSessionID, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata", 409},
 		{"worker lease conflict", "worker", transcriptSessionID, harness.RegistrationLeaseConflict, 409},
 		{"lease conflict without source", "coordinator", "", harness.RegistrationLeaseConflict, 409},

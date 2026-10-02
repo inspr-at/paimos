@@ -82,7 +82,7 @@ func TestSensitiveProseIsClean(t *testing.T) {
 		"Moved web/src/components/knowledge/KnowledgeEntryPage.vue to the new layout.",
 	}
 	for _, text := range prose {
-		if spans := sensitiveSpans(text); len(spans) > 0 {
+		if spans := sensitiveRanges("text", text); len(spans) > 0 {
 			t.Errorf("flagged %q at %v", text, spans)
 		}
 	}

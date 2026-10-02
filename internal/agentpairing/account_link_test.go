@@ -2,6 +2,7 @@
 package agentpairing_test
 
 import (
+	"bytes"
 	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -165,7 +166,8 @@ func TestAccountLinkExpiryFreshnessAndPersonOnly(t *testing.T) {
 func assertLinkTrail(t *testing.T, f *fixture, offer agentsetup.AccountLinkView, state, event string) {
 	t.Helper()
 	var stored string
-	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state FROM account_person_link_requests WHERE id=$1`, offer.RequestID).Scan(&stored); err != nil {
+	var revision int64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,account_revision FROM account_person_link_requests WHERE id=$1`, offer.RequestID).Scan(&stored, &revision); err != nil {
 		t.Fatal(err)
 	}
 	if stored != state || f.events(event) != 1 {
@@ -175,8 +177,63 @@ func assertLinkTrail(t *testing.T, f *fixture, offer agentsetup.AccountLinkView,
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT "after"::text FROM events WHERE tenant_id=$1 AND type=$2`, f.tenantID, event).Scan(&audit); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(audit, offer.AccountID) || strings.Contains(audit, strings.ReplaceAll(offer.Code, " ", "")) || strings.Contains(audit, offer.Code) {
-		t.Fatal("link event omitted its account or exposed its code")
+	if !linkTrailAuditMatches(audit, offer.AccountID, revision) {
+		t.Fatal("link event must contain only its exact account, empty person, and request revision")
+	}
+}
+
+func linkTrailAuditMatches(audit, account string, revision int64) bool {
+	// A six-digit code can occur by chance inside an account UUID. Verify the
+	// complete public snapshot instead of searching its serialized text for a
+	// code substring; unknown fields (including code/proof fields) are rejected.
+	var snapshot struct {
+		AccountID *string `json:"account_id"`
+		PersonID  *string `json:"person_id"`
+		Revision  *int64  `json:"revision"`
+	}
+	if !json.Valid([]byte(audit)) {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewBufferString(audit))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&snapshot); err != nil {
+		return false
+	}
+	return snapshot.AccountID != nil && *snapshot.AccountID == account &&
+		snapshot.PersonID != nil && *snapshot.PersonID == "" &&
+		snapshot.Revision != nil && *snapshot.Revision == revision
+}
+
+func TestAccountLinkDisconnectAuditSnapshot(t *testing.T) {
+	const account = "12345678-1234-4567-89ab-123456789abc"
+	const audit = `{"account_id":"` + account + `","person_id":"","revision":0}`
+	// This valid snapshot deterministically triggers the old random failure.
+	if !strings.Contains(audit, strings.ReplaceAll("123 456", " ", "")) {
+		t.Fatal("fixture must reproduce the code/UUID substring collision")
+	}
+	for _, tc := range []struct {
+		name, audit string
+		want        bool
+	}{
+		{"code coincides with UUID digits", audit, true},
+		{"missing account", `{"person_id":"","revision":0}`, false},
+		{"wrong account", `{"account_id":"other","person_id":"","revision":0}`, false},
+		{"null account", `{"account_id":null,"person_id":"","revision":0}`, false},
+		{"missing person", `{"account_id":"` + account + `","revision":0}`, false},
+		{"unexpected person", `{"account_id":"` + account + `","person_id":"123456","revision":0}`, false},
+		{"missing revision", `{"account_id":"` + account + `","person_id":""}`, false},
+		{"wrong revision", `{"account_id":"` + account + `","person_id":"","revision":1}`, false},
+		{"clear code", strings.TrimSuffix(audit, "}") + `,"user_code":"123 456"}`, false},
+		{"normalized code", strings.TrimSuffix(audit, "}") + `,"code":"123456"}`, false},
+		{"device proof", strings.TrimSuffix(audit, "}") + `,"device_proof":"proof"}`, false},
+		{"nested code", strings.TrimSuffix(audit, "}") + `,"details":{"code":"123456"}}`, false},
+		{"invalid JSON", audit + `{}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := linkTrailAuditMatches(tc.audit, account, 0); got != tc.want {
+				t.Fatalf("audit snapshot matches = %t, want %t", got, tc.want)
+			}
+		})
 	}
 }
 

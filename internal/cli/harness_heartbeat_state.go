@@ -106,10 +106,12 @@ type heartbeatPendingUsage struct {
 }
 
 type heartbeatSession struct {
-	id    string
-	lease string
-	disk  heartbeatDisk
-	hold  heartbeatHold
+	// pauseWakeAt is derived from a DB-clock hint and never persisted or used as signal authority.
+	pauseWakeAt time.Time
+	id          string
+	lease       string
+	disk        heartbeatDisk
+	hold        heartbeatHold
 	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
 	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
 	stopReason string

@@ -388,6 +388,9 @@ func publishSetIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Set, rev
 	if err := ValidateRules(s.Rules); err != nil {
 		return Snapshot{}, err
 	}
+	if err := guardPublicationCredentials(s, note); err != nil {
+		return Snapshot{}, err
+	}
 	snap := Snapshot{SetID: s.ID, Scope: s.Scope, Name: s.Name, Revision: s.Revision, Version: version, Rules: canonicalRules(s.Rules), PublishedAt: time.Now().UTC(), Note: note, TLDR: storedTLDR(s.TLDR, SetBasis(s.Rules))}
 	snap.SHA256 = SnapshotDigest(snap)
 	old, err := loadVersion(ctx, tx, s.ID, version)
