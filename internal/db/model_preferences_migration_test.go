@@ -7,9 +7,37 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestRunResidencyMigrationValidatesDeferredConstraints(t *testing.T) {
+	raw, err := os.ReadFile("migrations/1106_work_placement_and_run_residency.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(sql, "ADD COLUMN residency text,") || !strings.Contains(sql, "ADD COLUMN prefs_person_id uuid,") {
+		t.Fatal("run columns must be plain nullable additions")
+	}
+	for _, constraint := range []string{"agent_runs_residency_check", "agent_runs_prefs_person_fk"} {
+		add := regexp.MustCompile(`ADD CONSTRAINT ` + constraint + ` [^;]+? NOT VALID`).FindStringIndex(sql)
+		validate := strings.Index(sql, "VALIDATE CONSTRAINT "+constraint)
+		if add == nil || validate < add[1] {
+			t.Fatalf("%s must be installed NOT VALID before validation", constraint)
+		}
+	}
+	d := dbtest.Open(t)
+	var count int
+	if err := d.App.QueryRow(t.Context(), `SELECT count(*) FROM pg_constraint WHERE conrelid='agent_runs'::regclass AND conname IN ('agent_runs_residency_check','agent_runs_prefs_person_fk') AND convalidated`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatal("migration left residency constraints unvalidated", count)
+	}
+}
 
 func TestModelPreferencesMigrationSeedsEveryTenantUnderRLS(t *testing.T) {
 	d, err := dbtest.NewUnmigrated(t.Context())

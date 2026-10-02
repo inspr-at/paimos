@@ -113,11 +113,24 @@ func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	return err
 }
 func Requirement(ctx context.Context, tx pgx.Tx, personID *string, projectID, ticketRequirement string) (string, error) {
+	requirement, _, err := requirementTrace(ctx, tx, personID, projectID, ticketRequirement)
+	return requirement, err
+}
+
+// RequirementTrace retains the residency decision as well as the enforced floor.
+// A stamp alone cannot explain overrides that loosen an inherited lock.
+type RequirementTrace struct {
+	PersonID  *string         `json:"person_id"`
+	Residency ResidencyResult `json:"residency"`
+}
+
+func requirementTrace(ctx context.Context, tx pgx.Tx, personID *string, projectID, ticketRequirement string) (string, RequirementTrace, error) {
 	chain, err := LoadChain(ctx, tx, personID, projectID)
 	if err != nil {
-		return "", err
+		return "", RequirementTrace{}, err
 	}
-	return Strictest(ResolveResidency(chain).Value, ticketRequirement), nil
+	trace := RequirementTrace{PersonID: personID, Residency: ResolveResidency(chain)}
+	return Strictest(trace.Residency.Value, ticketRequirement), trace, nil
 }
 
 // withRoutingVisibility reads only routing metadata under tenant RLS. Routing
@@ -139,6 +152,11 @@ func withRoutingVisibility(ctx context.Context, tx pgx.Tx, fn func() error) erro
 // OrderRequirement returns the live ticket floor for the work-order ancestry.
 // AEON-473 may supply residency presets; absence is any on day one.
 func OrderRequirement(ctx context.Context, tx pgx.Tx, orderID string, personID *string) (string, error) {
+	requirement, _, err := OrderRequirementTrace(ctx, tx, orderID, personID)
+	return requirement, err
+}
+
+func OrderRequirementTrace(ctx context.Context, tx pgx.Tx, orderID string, personID *string) (string, RequirementTrace, error) {
 	var project *string
 	var fields []byte
 	err := tx.QueryRow(ctx, `WITH RECURSIVE up AS (
@@ -150,13 +168,13 @@ func OrderRequirement(ctx context.Context, tx pgx.Tx, orderID string, personID *
  SELECT (SELECT project_id::text FROM up ORDER BY depth LIMIT 1),
  coalesce((SELECT fields FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1),'{}'::jsonb)`, orderID).Scan(&project, &fields)
 	if err != nil {
-		return "", err
+		return "", RequirementTrace{}, err
 	}
 	pid := ""
 	if project != nil {
 		pid = *project
 	}
-	return Requirement(ctx, tx, personID, pid, PlacementFields(fields).Residency)
+	return requirementTrace(ctx, tx, personID, pid, PlacementFields(fields).Residency)
 }
 
 type RunPolicy struct {

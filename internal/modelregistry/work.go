@@ -152,6 +152,9 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			return WorkResolution{}, fail(400, "review-gate requires author_family")
 		}
 		route, err := ResolveReviewFor(ctx, tx, p, q, now)
+		if err != nil {
+			return WorkResolution{}, err
+		}
 		out := WorkResolution{Resolution: Resolution{Role: route.Role, AuthorFamily: q.AuthorFamily, Profile: route.Profile, Ladder: route.Ladder,
 			OwnerRequired: route.OwnerRequired, Source: "aeon"}, Residency: route.Residency, Trace: route.Trace}
 		if route.Profile != nil {

@@ -119,7 +119,7 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 			continue
 		}
 		next := advice.Accounts[0]
-		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id,residency,prefs_person_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID, modelprefs.Stamp(policy.Residency), policy.PersonID))
+		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID, modelprefs.Stamp(policy.Residency), policy.PersonID, v.Trace))
 		if err != nil {
 			return err
 		}

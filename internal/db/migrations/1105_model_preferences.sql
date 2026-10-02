@@ -47,7 +47,7 @@ CREATE TABLE model_pref_cells (
  bucket text NOT NULL CHECK (bucket IN ('normal','complex')),
  mode text NOT NULL CHECK (mode IN ('auto','latest','pinned')),
  profile_id uuid, family text, line text CHECK (line ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
- effort text CHECK (length(effort) BETWEEN 1 AND 32), harness text CHECK (harness IN ('codex','claude','pi','cursor','grok')),
+ effort text CHECK (length(effort) BETWEEN 1 AND 32), harness text CHECK (harness IN ('codex','claude','pi','cursor','grok','gemini','opencode')),
  PRIMARY KEY (tenant_id,scope_id,kind_id,bucket),
  FOREIGN KEY (tenant_id,scope_id,kind_id) REFERENCES model_pref_rows(tenant_id,scope_id,kind_id) ON DELETE CASCADE,
  FOREIGN KEY (tenant_id,profile_id) REFERENCES model_profiles(tenant_id,id),

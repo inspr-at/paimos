@@ -78,6 +78,9 @@ func TestVendorHandoffWaitRetryAndFences(t *testing.T) {
 				if len(queued) != 1 || queued[0].RetryOfRunID == nil || *queued[0].RetryOfRunID != v.ID || queued[0].OrderID != o.NodeID || queued[0].CapacityOverride != "" {
 					t.Fatalf("wrong retry %+v", queued)
 				}
+				if len(v.Trace) == 0 || string(queued[0].Trace) != string(v.Trace) {
+					t.Fatal("vendor retry lost the creation preference trace")
+				}
 				var target string
 				f.tx(t, f.agent, func(tx pgx.Tx) error {
 					return tx.QueryRow(t.Context(), `SELECT retry_account_id::text FROM agent_runs WHERE id=$1`, queued[0].ID).Scan(&target)

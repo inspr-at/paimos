@@ -62,6 +62,7 @@ type Review struct {
 	GateReason     string                    `json:"gate_reason"`
 	Result         reviewgate.Result         `json:"result"`
 	Ladder         []modelregistry.Candidate `json:"ladder"`
+	Trace          json.RawMessage           `json:"trace,omitempty"`
 	Cost           *int64                    `json:"cost_micros"`
 	Duration       *int64                    `json:"duration_seconds"`
 	CreatedAt      time.Time                 `json:"created_at"`
@@ -188,12 +189,16 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	ladder, _ := json.Marshal(route.Ladder)
+	trace, err := json.Marshal(route.Trace)
+	if err != nil {
+		return nil, err
+	}
 	githubStatus := "unconfigured"
 	if m.publisher != nil && in.PullRequest != nil && m.publisher.Configured(p.TenantID, in.Repository) {
 		githubStatus = "pending"
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,pull_request,ladder,github_status,ticket_snapshot)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, p.TenantID, o.NodeID, id, in.RequestID, request, b.Repository, b.BaseSHA, b.HeadSHA, b.AuthorRunID, b.AuthorFamily, b.ProfileID, b.ReviewerFamily, b.PullRequest, ladder, githubStatus, snapshot)
+	_, err = tx.Exec(ctx, `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,pull_request,ladder,github_status,ticket_snapshot,trace)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, p.TenantID, o.NodeID, id, in.RequestID, request, b.Repository, b.BaseSHA, b.HeadSHA, b.AuthorRunID, b.AuthorFamily, b.ProfileID, b.ReviewerFamily, b.PullRequest, ladder, githubStatus, snapshot, trace)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +214,7 @@ func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	if route.Profile != nil {
-		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID, person, route.Residency); err != nil {
+		if _, err = agentruns.QueueReview(ctx, tx, p, o, *assignee, route.Profile.ID, route.Account.ID, person, route.Residency, trace); err != nil {
 			return nil, err
 		}
 	}
@@ -267,11 +272,11 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	err := tx.QueryRow(ctx, `SELECT v.work_order_id::text,v.ticket_node_id::text,v.request_id::text,v.repository,v.base_sha,v.head_sha,v.author_run_id::text,v.author_family,v.reviewer_profile_id::text,v.reviewer_family,v.pull_request,
         v.run_id::text,coalesce(r.status,'blocked'),p.model,p.effort,p.version,r.effective_model,coalesce(r.model_evidence,''),v.result,v.ladder,v.created_at,v.github_status,w.status,
         CASE WHEN EXISTS(SELECT 1 FROM run_telemetry t WHERE t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.cost_micros_delta>0) THEN r.cost_micros END,
-        CASE WHEN r.started_at IS NOT NULL THEN greatest(0,extract(epoch FROM(coalesce(r.ended_at,clock_timestamp())-r.started_at)))::bigint END
+        CASE WHEN r.started_at IS NOT NULL THEN greatest(0,extract(epoch FROM(coalesce(r.ended_at,clock_timestamp())-r.started_at)))::bigint END,v.trace
         FROM work_order_reviews v JOIN work_orders w ON w.tenant_id=v.tenant_id AND w.node_id=v.work_order_id
         LEFT JOIN agent_runs r ON r.tenant_id=v.tenant_id AND r.id=v.run_id
         LEFT JOIN model_profiles p ON p.tenant_id=v.tenant_id AND p.id=v.reviewer_profile_id WHERE v.work_order_id=$1`, id).Scan(
-		&v.OrderID, &v.TicketID, &v.RequestID, &v.Repository, &v.BaseSHA, &v.HeadSHA, &v.AuthorRunID, &v.AuthorFamily, &v.ProfileID, &v.ReviewerFamily, &v.PullRequest, &v.RunID, &v.Status, &v.Model, &v.Effort, &v.ProfileVersion, &v.EffectiveModel, &v.modelEvidence, &raw, &ladder, &v.CreatedAt, &v.GitHubStatus, &orderStatus, &v.Cost, &v.Duration)
+		&v.OrderID, &v.TicketID, &v.RequestID, &v.Repository, &v.BaseSHA, &v.HeadSHA, &v.AuthorRunID, &v.AuthorFamily, &v.ProfileID, &v.ReviewerFamily, &v.PullRequest, &v.RunID, &v.Status, &v.Model, &v.Effort, &v.ProfileVersion, &v.EffectiveModel, &v.modelEvidence, &raw, &ladder, &v.CreatedAt, &v.GitHubStatus, &orderStatus, &v.Cost, &v.Duration, &v.Trace)
 	if err != nil {
 		return v, err
 	}

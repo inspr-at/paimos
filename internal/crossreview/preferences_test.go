@@ -2,14 +2,62 @@
 package crossreview
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"strings"
 	"testing"
 )
+
+func TestReviewStoresLoosenedResidencyLockTrace(t *testing.T) {
+	f := newFixture(t)
+	project := testID()
+	f.tx(t, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'TRACE-P1','Trace project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, project); err != nil {
+			return err
+		}
+		eu, any := "eu", "any"
+		if _, err := modelprefs.SaveScope(t.Context(), tx, f.person, modelprefs.Scope{Level: "person", PersonID: &f.person.ID, Residency: &eu, ResidencyLocked: true}); err != nil {
+			return err
+		}
+		_, err := modelprefs.SaveScope(t.Context(), tx, f.person, modelprefs.Scope{Level: "project", ProjectID: &project, Residency: &any})
+		return err
+	})
+	var created Review
+	in := f.input()
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", in, 201, &created)
+	if created.RunID == nil {
+		t.Fatal("loosened project did not queue the qualified reviewer")
+	}
+	var reviews []Review
+	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &reviews)
+	if len(reviews) != 1 {
+		t.Fatal("missing stored review")
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var runTrace json.RawMessage
+		if err := tx.QueryRow(t.Context(), `SELECT trace FROM agent_runs WHERE id=$1`, *created.RunID).Scan(&runTrace); err != nil {
+			return err
+		}
+		for _, raw := range []json.RawMessage{created.Trace, reviews[0].Trace, runTrace} {
+			var trace modelregistry.PreferenceTrace
+			if err := json.Unmarshal(raw, &trace); err != nil {
+				return err
+			}
+			if trace.Residency.Value != "any" || !trace.Residency.LoosenedLock || len(trace.Residency.LoosenedLocks) != 1 || trace.Residency.LoosenedLocks[0] != (modelprefs.ResidencyLock{Level: "person", Value: "eu"}) || trace.PersonID == nil || *trace.PersonID != f.person.ID {
+				t.Fatalf("stored review/run lost loosening evidence: %+v", trace)
+			}
+		}
+		return nil
+	})
+}
 
 func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 	for _, tc := range []struct {

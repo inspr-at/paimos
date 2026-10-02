@@ -4,6 +4,7 @@ package agentruns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -21,6 +22,7 @@ import (
 )
 
 type Run struct {
+	Trace                     json.RawMessage             `json:"trace,omitempty"`
 	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
 	QueueRoutedAt             *time.Time                  `json:"queue_routed_at,omitempty"`
@@ -132,11 +134,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace)
 
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
@@ -292,7 +294,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	person := modelprefs.PrefsPerson(ctx, tx, p)
-	requirement, err := modelprefs.OrderRequirement(ctx, tx, o.NodeID, person)
+	requirement, trace, err := modelprefs.OrderRequirementTrace(ctx, tx, o.NodeID, person)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +327,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, trace))
 	if err != nil {
 		return nil, err
 	}
