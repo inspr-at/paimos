@@ -105,7 +105,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			// The tenant/tree claim comes before node rows and recurrence rows. This
 			// single-row unit never takes a later resource lock after events.Append.
 			r, err := scanRecurrence(tx.QueryRow(ctx, `SELECT `+recurrenceColumns+` FROM recurrences r WHERE NOT paused AND
-    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now))
+    ((trigger->>'kind'='time' AND next_at<=$1) OR (trigger->>'kind'='event' AND EXISTS(SELECT 1 FROM events e WHERE e.type='release.published' AND e.node_id=r.project_id AND e.id>r.event_cursor AND `+eventDueSQL+`<=$1))) ORDER BY next_at NULLS LAST,id LIMIT 1`, now))
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -140,7 +140,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			var id int64
 			var raw []byte
 			var eventAt time.Time
-			if err = tx.QueryRow(ctx, `SELECT id,after,at FROM events WHERE type='release.published' AND node_id=$1 AND id>$2 ORDER BY id DESC LIMIT 1`, r.ProjectID, r.EventCursor).Scan(&id, &raw, &eventAt); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT e.id,e.after,e.at FROM events e JOIN recurrences r ON r.id=$3 WHERE e.type='release.published' AND e.node_id=$1 AND e.id>$2 AND `+eventDueSQL+`<=$4 ORDER BY e.id DESC LIMIT 1`, r.ProjectID, r.EventCursor, r.ID, now).Scan(&id, &raw, &eventAt); err != nil {
 				return err
 			}
 			var pub Publication
@@ -153,7 +153,21 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			// Historical publication discovery, or an unsynced release during pause,
 			// advances the cursor without creating stale work after resume.
 			if !pub.PublishedAt.Before(r.ActiveSince) && !pub.PublishedAt.After(now) {
-				if _, err = occur(ctx, tx, actor, r, fmt.Sprintf("event:%d", id), pub.PublishedAt, &id, pub.Name, pub.Version); err != nil {
+				key := publicationKey(pub)
+				if key == "" {
+					key = fmt.Sprintf("event:%d", id)
+				} else {
+					key = "release:" + key
+				}
+				// Preserve part A's event:id receipts on upgrade.
+				var prior bool
+				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrence_occurrences WHERE recurrence_id=$1 AND source_event_id=$2)`, r.ID, id).Scan(&prior); err != nil {
+					return err
+				}
+				if !prior {
+					_, err = occur(ctx, tx, actor, r, key, eventTime(r.Trigger, pub.PublishedAt), &id, pub.Name, pub.Version)
+				}
+				if err != nil {
 					return err
 				}
 			}

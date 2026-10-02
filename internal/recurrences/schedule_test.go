@@ -31,6 +31,9 @@ func TestCalendarEdges(t *testing.T) {
 		{"skipped civil day", "FREQ=DAILY", "09:00", "Pacific/Apia", "2011-12-28", "2011-12-29T19:00:00Z", []string{"2011-12-30T19:00:00Z"}},
 		{"weekly default anchor", "FREQ=WEEKLY", "09:00", "UTC", "2026-10-05", "2026-10-02T12:00:00Z", []string{"2026-10-05T09:00:00Z", "2026-10-12T09:00:00Z"}},
 		{"month default anchor", "FREQ=MONTHLY", "09:00", "UTC", "2026-01-31", "2026-01-31T09:00:00Z", []string{"2026-03-31T09:00:00Z"}},
+		{"two months", "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1", "09:00", "Europe/Vienna", "2026-10-02", "2026-10-02T12:00:00Z", []string{"2026-12-01T08:00:00Z", "2027-02-01T08:00:00Z"}},
+		{"quarterly last day", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=-1", "09:00", "UTC", "2026-10-02", "2026-10-31T09:00:00Z", []string{"2027-01-31T09:00:00Z", "2027-04-30T09:00:00Z"}},
+		{"six months anchor retained", "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=1", "09:00", "UTC", "2026-10-02", "2027-04-01T09:00:00Z", []string{"2027-10-01T09:00:00Z", "2028-04-01T09:00:00Z"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			trigger := Trigger{Kind: "time", RRULE: tc.rule, TimeOfDay: tc.clock, Timezone: tc.zone, StartDate: tc.start}
@@ -87,6 +90,9 @@ func TestTemplateVariablesAndBounds(t *testing.T) {
 	got := render("#{{occurrence}} {{date}} {{release_name}} {{release_version}}", 3, timestamp(t, "2026-10-02T23:30:00Z"), Trigger{Kind: "time", Timezone: "Europe/Vienna"}, "Sonde", "261002081219.0.0")
 	if got != "#3 2026-10-03 Sonde 261002081219.0.0" {
 		t.Fatal(got)
+	}
+	if got := render("{{date}}", 1, timestamp(t, "2026-10-02T23:30:00Z"), Trigger{Kind: "event", EventTimezone: "Europe/Vienna"}, "", ""); got != "2026-10-03" {
+		t.Fatalf("event date %s", got)
 	}
 	in := Input{ProjectID: "10000000-0000-4000-8000-000000000001", ParentID: "10000000-0000-4000-8000-000000000002", Template: Template{Title: "Sweep {{occurrence}}"}, Trigger: Trigger{Kind: "time", RRULE: "FREQ=DAILY", Timezone: "UTC", TimeOfDay: "09:00"}}
 	if err := in.normalize(timestamp(t, "2026-10-02T12:00:00Z")); err != nil {

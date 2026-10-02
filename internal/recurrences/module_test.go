@@ -401,7 +401,9 @@ func TestPermissionsExplicitAgentGrantTenantIsolationAndRLS(t *testing.T) {
 	dbtest.BindRole(t, f.d, f.p.TenantID, viewerID, "viewer")
 	agent := tenant.Principal{ID: agentID, TenantID: f.p.TenantID, Kind: tenant.Agent, Scopes: []string{Permission, "nodes.write", "run.create", "work_orders.write"}, KeyCreatorID: f.p.ID}
 	f.call(agent, "GET", "/api/recurrences/"+r.ID, nil, 403)
-	f.call(tenant.Principal{ID: viewerID, TenantID: f.p.TenantID, Kind: tenant.Person}, "GET", "/api/recurrences/"+r.ID, nil, 403)
+	viewer := tenant.Principal{ID: viewerID, TenantID: f.p.TenantID, Kind: tenant.Person}
+	f.call(viewer, "GET", "/api/recurrences/"+r.ID, nil, 200)
+	f.call(viewer, "POST", "/api/recurrences/"+r.ID+"/pause", map[string]int{"expected_revision": 1}, 403)
 	var roleID string
 	f.tx(func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'recurring_agent','Explicit recurring agent') RETURNING id::text`, f.p.TenantID).Scan(&roleID); err != nil {

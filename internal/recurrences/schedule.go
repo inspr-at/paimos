@@ -12,18 +12,21 @@ import (
 // Trigger is deliberately a bounded RFC 5545 subset. Unsupported rule parts
 // fail validation rather than silently changing the user's schedule.
 type Trigger struct {
-	Kind      string `json:"kind"`
-	RRULE     string `json:"rrule,omitempty"`
-	TimeOfDay string `json:"time_of_day,omitempty"`
-	Timezone  string `json:"timezone,omitempty"`
-	StartDate string `json:"start_date,omitempty"`
-	Event     string `json:"event,omitempty"`
+	Kind          string `json:"kind"`
+	RRULE         string `json:"rrule,omitempty"`
+	TimeOfDay     string `json:"time_of_day,omitempty"`
+	Timezone      string `json:"timezone,omitempty"`
+	StartDate     string `json:"start_date,omitempty"`
+	Event         string `json:"event,omitempty"`
+	EventStart    string `json:"event_start,omitempty"`
+	EventTimezone string `json:"event_timezone,omitempty"`
 }
 type schedule struct {
 	location     *time.Location
 	start        time.Time // Calendar dates are advanced in UTC, never by 24h in a zone.
 	hour, minute int
 	frequency    string
+	interval     int
 	days         map[time.Weekday]bool
 	monthDays    map[int]bool
 }
@@ -31,7 +34,7 @@ type schedule struct {
 var weekdays = map[string]time.Weekday{"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday, "WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday}
 
 func parseSchedule(t Trigger) (*schedule, error) {
-	if t.Kind != "time" || t.Event != "" || len(t.RRULE) > 256 || len(t.Timezone) > 128 || t.Timezone == "Local" || t.Timezone == "" {
+	if t.Kind != "time" || t.Event != "" || t.EventStart != "" || t.EventTimezone != "" || len(t.RRULE) > 256 || len(t.Timezone) > 128 || t.Timezone == "Local" || t.Timezone == "" {
 		return nil, fmt.Errorf("time trigger requires an RRULE, HH:MM and IANA timezone")
 	}
 	loc, err := time.LoadLocation(t.Timezone)
@@ -46,7 +49,7 @@ func parseSchedule(t Trigger) (*schedule, error) {
 	if err != nil || start.Year() < 1900 || start.Year() > 9998 {
 		return nil, fmt.Errorf("start_date must be a valid date between 1900 and 9998")
 	}
-	s := &schedule{location: loc, start: start, hour: clock.Hour(), minute: clock.Minute(), days: map[time.Weekday]bool{}, monthDays: map[int]bool{}}
+	s := &schedule{location: loc, start: start, hour: clock.Hour(), minute: clock.Minute(), interval: 1, days: map[time.Weekday]bool{}, monthDays: map[int]bool{}}
 	parts := map[string]string{}
 	for _, part := range strings.Split(t.RRULE, ";") {
 		k, v, ok := strings.Cut(part, "=")
@@ -56,11 +59,17 @@ func parseSchedule(t Trigger) (*schedule, error) {
 		parts[k] = v
 	}
 	for k := range parts {
-		if k != "FREQ" && k != "BYDAY" && k != "BYMONTHDAY" {
+		if k != "FREQ" && k != "BYDAY" && k != "BYMONTHDAY" && k != "INTERVAL" {
 			return nil, fmt.Errorf("unsupported RRULE part %s", k)
 		}
 	}
 	s.frequency = parts["FREQ"]
+	if raw := parts["INTERVAL"]; raw != "" {
+		s.interval, err = strconv.Atoi(raw)
+		if err != nil || s.frequency != "MONTHLY" || (s.interval != 1 && s.interval != 2 && s.interval != 3 && s.interval != 6) {
+			return nil, fmt.Errorf("MONTHLY INTERVAL must be 1, 2, 3 or 6")
+		}
+	}
 	switch s.frequency {
 	case "DAILY":
 		if len(parts) != 1 {
@@ -109,6 +118,10 @@ func (s *schedule) matches(d time.Time) bool {
 	case "WEEKLY":
 		return s.days[d.Weekday()]
 	case "MONTHLY":
+		months := (d.Year()-s.start.Year())*12 + int(d.Month()-s.start.Month())
+		if months%s.interval != 0 {
+			return false
+		}
 		last := time.Date(d.Year(), d.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
 		return s.monthDays[d.Day()] || s.monthDays[d.Day()-last-1]
 	default:

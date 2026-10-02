@@ -46,8 +46,12 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/recurrences", m.list)
 	mux.HandleFunc("POST /api/recurrences", m.create)
+	mux.HandleFunc("POST /api/recurrences/preview", m.previewDraft)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}", m.get)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}", m.update)
+	mux.HandleFunc("DELETE /api/recurrences/{recurrenceId}", m.remove)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/history", m.listHistory)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/releases", m.listReleases)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/pause", m.pause)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/resume", m.resume)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/run-now", m.runNow)
@@ -92,6 +96,15 @@ func reply(w http.ResponseWriter, status int, out any, err error) {
 // inheritance (authz.readGrants enforces that rule for every route).
 func manage(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
 	return authz.RequireTx(ctx, tx, p, Permission, authz.Scope{ProjectID: project})
+}
+func readPermission(p tenant.Principal) string {
+	if p.Kind == tenant.Person {
+		return "nodes.read"
+	}
+	return Permission
+}
+func read(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	return authz.RequireTx(ctx, tx, p, readPermission(p), authz.Scope{ProjectID: project})
 }
 func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Input) error {
 	for _, perm := range []string{Permission, "nodes.write"} {
@@ -197,7 +210,10 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return manage(r.Context(), tx, p, out.ProjectID)
+		if err = read(r.Context(), tx, p, out.ProjectID); err != nil {
+			return err
+		}
+		return results(r.Context(), tx, []Recurrence{out}, func(items []Recurrence) { out = items[0] })
 	})
 	reply(w, 200, out, err)
 }
@@ -215,7 +231,8 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	items := []Recurrence{}
 	var next *string
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(r.Context(), tx, p, Permission, authz.Scope{AnyProject: true}); err != nil {
+		permission := readPermission(p)
+		if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
 			return err
 		}
 		check, err := authz.ProjectsTx(r.Context(), tx, p)
@@ -224,12 +241,12 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		// Bound the SQL result in the projects whose permission was evaluated;
 		// pagination must not skip visible work behind unmanaged rows.
-		allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, Permission)
+		allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, permission)
 		if err != nil {
 			return err
 		}
-		workspace := check(Permission, "")
-		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) ORDER BY id LIMIT 101`, project, after, workspace, allowed)
+		workspace := check(permission, "")
+		rows, err := tx.Query(r.Context(), `SELECT `+recurrenceColumns+` FROM recurrences WHERE ($1='' OR project_id=nullif($1,'')::uuid) AND ($2='' OR id>nullif($2,'')::uuid) AND ($3 OR project_id=ANY($4::uuid[])) AND NOT EXISTS(SELECT 1 FROM events e WHERE e.node_id=recurrences.project_id AND e.type='recurrence.deleted' AND e.after->>'id'=recurrences.id::text) ORDER BY id LIMIT 101`, project, after, workspace, allowed)
 		if err != nil {
 			return err
 		}
@@ -246,7 +263,11 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			next = &id
 			items = items[:100]
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		return results(r.Context(), tx, items, func(out []Recurrence) { items = out })
 	})
 	reply(w, 200, map[string]any{"items": items, "next_cursor": next}, err)
 }
@@ -405,7 +426,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = manage(r.Context(), tx, p, item.ProjectID); err != nil {
+		if err = read(r.Context(), tx, p, item.ProjectID); err != nil {
 			return err
 		}
 		now, err := m.clock(r.Context(), tx)
@@ -425,7 +446,11 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, map[string]any{"times": times, "trigger_kind": trigger}, err)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, typ string, before, after any) error {
-	meta, _ := json.Marshal(map[string]string{"job": Job})
+	id := ""
+	if item, ok := after.(Recurrence); ok {
+		id = item.ID
+	}
+	meta, _ := json.Marshal(map[string]string{"job": Job, "recurrence_id": id})
 	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: typ, Before: before, After: after, Metadata: meta})
 	return err
 }

@@ -23,6 +23,7 @@ func TestRecurCLIContract(t *testing.T) {
 		{[]string{"recur", "pause", id, "--revision", "7"}, "POST", "/api/recurrences/" + id + "/pause", map[string]any{"expected_revision": float64(7)}},
 		{[]string{"recur", "resume", id, "--revision", "7"}, "POST", "/api/recurrences/" + id + "/resume", map[string]any{"expected_revision": float64(7)}},
 		{[]string{"recur", "run-now", id, "--idempotency-key", "once"}, "POST", "/api/recurrences/" + id + "/run-now", map[string]any{"idempotency_key": "once"}},
+		{[]string{"recur", "run-now", id, "--idempotency-key", "once", "--release-key", "project/version:v2", "--force-overlap", "--revision", "7"}, "POST", "/api/recurrences/" + id + "/run-now", map[string]any{"idempotency_key": "once", "release_key": "project/version:v2", "force_overlap": true, "expected_revision": float64(7)}},
 		{[]string{"recur", "preview", id, "--count", "3"}, "GET", "/api/recurrences/" + id + "/preview?count=3", nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {

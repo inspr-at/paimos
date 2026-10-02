@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch, watchEffect } from 'vue'
-import { APIError, undoEvent, type ListItem } from '../../lib/api'
+import { APIError, getRecurrence, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
 import { toast } from '../../lib/toast'
@@ -53,6 +53,10 @@ import AssigneeMenu from './AssigneeMenu.vue'
 import { useWorkQueue } from '../../stores/workQueue'
 import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
+import RecurrenceEditor from '../recurrences/RecurrenceEditor.vue'
+import RecurrenceProvenance from '../recurrences/RecurrenceProvenance.vue'
+import { criteriaText, recurrenceName, type Recurrence } from '../../lib/recurrences'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 
 // The ticket workspace: the same parts in the docked side panel and in the
 // full page. Every write goes through useTicket (precondition, conflicts).
@@ -104,6 +108,28 @@ function closeConvert() {
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const session = useSession()
+const repeatSource = ref<ListItem | null>(null)
+const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
+const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
+const recurrenceScope = useIdentityScope()
+watch(() => [props.item?.id, props.project.id, recurrenceScope.owner.value], () => { recurrenceScope.reset(); repeatSource.value = null; recurrenceEdit.value = null; originRecurrence.value = null }, { flush: 'sync' })
+watch(mayRepeat, value => { if (!value) { repeatSource.value = null; recurrenceEdit.value = null } })
+function repeat() { if (mayRepeat.value && item.value) repeatSource.value = { ...item.value, fields: { ...item.value.fields } } }
+function editRecurrence() {
+  const recordId = item.value?.id, id = originRecurrence.value?.id
+  if (!mayRepeat.value || !id) return
+  void recurrenceScope.run(({ after, signal }) => after(getRecurrence(id, signal), latest => {
+    if (item.value && item.value.id === recordId && item.value.fields.recurrence_id === id && mayRepeat.value) recurrenceEdit.value = latest
+  }), { failed: error => toast(error instanceof Error ? error.message : 'Recurring work unavailable.', { tone: 'error' }) })
+}
+function originLoaded(value: Recurrence) { if (item.value?.fields.recurrence_id === value.id) originRecurrence.value = value }
+function recurrenceSaved(result: Recurrence) {
+  const edited = !!recurrenceEdit.value
+  repeatSource.value = null; recurrenceEdit.value = null
+  const owner = recurrenceScope.owner.value, projectId = props.project.id, routeKey = props.project.routeKey
+  if (edited) originRecurrence.value = result
+  toast(`${edited ? 'Saved' : 'Created'} ${recurrenceName(result)}.`, { action: { label: 'Show', run: () => { if (owner && owner === recurrenceScope.owner.value && props.project.id === projectId) void queueRouter.push({ path: `/p/${encodeURIComponent(routeKey)}/settings`, query: { recurrence: result.id } }) } } })
+}
 const humanCheckPerson = computed(() => session.identity?.principal.kind === 'person')
 const humanCheckEditable = computed(() => humanCheckPerson.value || !item.value?.fields.human_check_completed)
 const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
@@ -164,7 +190,7 @@ let base = { ...draft }
 // save is checked against), never whatever object shows at the moment.
 function snapshot(it: ListItem = ticket.base() ?? item.value!) {
   return {
-    ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
+    ...benefitDraft(it.fields), title: it.title, body: it.body ?? '', acceptance: criteriaText(it.fields.acceptance_criteria),
     notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
     humanCheck: it.human_check ?? '',
   }
@@ -365,7 +391,7 @@ const menu = ref<{ kind: 'priority' | 'assignee' | 'epic' | 'release'; anchor: H
 const showAcceptance = ref(false)
 const showNotes = ref(false)
 
-const acceptance = computed(() => typeof item.value?.fields.acceptance_criteria === 'string' ? item.value.fields.acceptance_criteria : '')
+const acceptance = computed(() => criteriaText(item.value?.fields.acceptance_criteria))
 const notes = computed(() => typeof item.value?.fields.notes === 'string' ? item.value.fields.notes : '')
 async function saveHumanCheck(text: string | null) {
   const result = await ticket.patch({ human_check: text })
@@ -498,6 +524,8 @@ function isDirty() {
 }
 function focus() { root.value?.focus({ preventScroll: true }) }
 function queueKey(event: KeyboardEvent) {
+  const repeatTarget = event.target as HTMLElement | null
+  if (event.key.toUpperCase() === 'R' && event.shiftKey && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey && !editing.value && !repeatTarget?.isContentEditable && !repeatTarget?.closest('input, textarea, select') && !document.querySelector('dialog[open], .floating') && mayRepeat.value) { event.preventDefault(); event.stopPropagation(); repeat(); return }
   if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !queueAction.value || document.querySelector('.floating')) return
   const target = event.target as HTMLElement | null
   if (target?.isContentEditable || target?.closest('input, textarea, select')) return
@@ -527,16 +555,20 @@ defineExpose({
     <TicketHeaderBar
       ref="header"
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :can-repeat="mayRepeat" :recurrence-label="originRecurrence ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
        :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @convert="convertOpen = true" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
+      @repeat="repeat"
+      @edit-recurrence="editRecurrence"
     >
       <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
+    <RecurrenceEditor v-if="repeatSource" :project="project" :source="repeatSource" @close="repeatSource = null" @saved="recurrenceSaved" />
+    <RecurrenceEditor v-if="recurrenceEdit" :project="project" :recurrence="recurrenceEdit" @close="recurrenceEdit = null" @saved="recurrenceSaved" />
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
@@ -624,6 +656,7 @@ defineExpose({
             <button type="button" class="btn sm" @click="queueAction?.toggle()"><AppIcon name="sparkle" :size="13" />Fix what is missing</button>
           </section>
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
+          <RecurrenceProvenance v-if="typeof item.fields.recurrence_id === 'string' && typeof item.fields.occurrence_number === 'number'" :key="item.id" :node-id="item.id" :recurrence-id="item.fields.recurrence_id" :number="item.fields.occurrence_number" :project-key="project.routeKey" @loaded="originLoaded" />
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>

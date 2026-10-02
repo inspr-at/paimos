@@ -12,6 +12,28 @@ images use explicit release versions; there is no `latest` tag.
 
 ## Recurring work
 
+In the web app, **Repeat…** in a ticket or epic's More menu (Shift+R while
+its panel is focused) opens the recurrence editor. Project **Settings →
+Recurring work** lists definitions with Pause/Resume, revision-checked Undo,
+Run now, Edit, History, Copy CLI command and Delete. Read-only people can inspect
+definitions and history; changing them needs `recurrences.manage`. The editor
+previews unsaved schedules through `POST /api/recurrences/preview`, using the
+server's calendar engine. Created tickets show the recurrence name and occurrence
+number, linking back to project Settings. Array-based template criteria are
+readable and editable in the ordinary ticket panel.
+
+The additive UI contract stores the optional recurrence `name` in `template`.
+`GET /api/recurrences/{id}/history` pages 50 events with a `before` cursor and
+`all|created|skipped|changes` filter. `GET /api/recurrences/{id}/releases` lists
+up to 100 published project releases, explicitly reports truncation, and includes
+existing receipts. Names use supplied marketing codenames, with the canonical
+version on hover. Manual release runs (`--release-key`) share their durable key
+with automatic runs. `--force-overlap` is an explicit manual confirmation and
+does not edit the overlap policy; `--revision` can bind Run now to a definition.
+Delete requires `expected_revision`; it pauses the definition and appends a
+retirement event. Receipts, the definition and created tickets are retained;
+retired definitions are omitted from reads and cannot be resumed or run.
+
 `aeon recur create|list|get|update|pause|resume|run-now|preview` manages
 server-owned schedules. Create reads a JSON definition from stdin or
 `--body-file`; update takes the recurrence UUID and a full definition with
@@ -22,13 +44,17 @@ the original occurrence receipt. Named instances and `--json` work as usual.
 A definition names a project and an immutable parent, a ticket/task template,
 and a trigger. Time triggers accept `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,FR`, or
 `FREQ=MONTHLY;BYMONTHDAY=1,-1`, plus `time_of_day` (`HH:MM`), an IANA `timezone`,
-and an optional `start_date` (defaults to today's local date). Omitted weekday
+and an optional `start_date` (defaults to today's local date). Monthly rules
+also accept `INTERVAL=1|2|3|6`, anchored to the start month. Omitted weekday
 or month-day comes from that start date; other RRULE parts are rejected. Invalid
 month dates and spring gaps are skipped; a repeated fall time uses its first
 instant. Preview uses the same calendar and returns UTC timestamps without
 writing anything, including while paused. Event triggers use
 `{"kind":"event","event":"release.published"}`; future publication dates
-cannot be previewed.
+cannot be previewed. Event triggers may set `event_start` to `now` (default),
+`hour` or `morning`; morning means 06:00 on the next local calendar day in
+`event_timezone` (an IANA zone, default UTC). The scheduler checks the database
+clock before claiming delayed publications, including across DST changes.
 
 For example, a weekly tool sweep under the code-health epic can be created with
 this body (replace project/parent UUIDs with the intended existing nodes):
