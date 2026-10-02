@@ -32,6 +32,11 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  supported_pause_levels?: readonly import('./agentPause').PauseLevel[]
+  pause_can_interrupt?: boolean
+  pause_progress?: import('./agentPause').PauseProgress
+  pause?: import('./agentPause').AgentPause
+  continuation?: { succeeds_session_id: string; handover: import('./agentPause').Handover; brief: string }
   agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
   current_activity?: CurrentAgentActivity | null
   current_activity_history?: CurrentAgentActivity[]
@@ -205,3 +210,18 @@ export const openSessionWatch = (project: string, session: string) => new EventS
 export const readSessionRating = (session: string, signal?: AbortSignal) => api(sessionResourceById(session, 'delivery-rating'), { signal })
 export const writeSessionRating = (session: string, body: { score: number | null; tags: string[]; comment: string }) => api(sessionResourceById(session, 'delivery-rating'), { ...post(body), method: 'PUT' })
 export const deleteSessionRating = (session: string) => api(sessionResourceById(session, 'delivery-rating'), { method: 'DELETE' })
+
+// AEON-524: all pause and wind-down rows still pass the canonical ledger.
+export async function pauseSession(project: string, id: string, level: import('./agentPause').PauseLevel, note: string) {
+  const at = await call<HarnessSessionRow>(sessionResource(project, id, 'pause'), 'POST', { level, note })
+  return rowOf(at.body, at)
+}
+export async function resumeSession(project: string, id: string) {
+  const at = await call<{ session: HarnessSessionRow; successor?: HarnessSessionRow; continuation: { brief: string } }>(sessionResource(project, id, 'resume'), 'POST', {})
+  return { session: rowOf(at.body.session, at), successor: at.body.successor ? rowOf(at.body.successor, at) : undefined, brief: at.body.continuation.brief }
+}
+export async function leavingReport(method = 'GET', body?: import('./agentPause').WindDownScope & { deadline_at: string }) {
+  const at = await call<import('./agentPause').LeavingReport & { items: HarnessSessionRow[] }>('/me/leaving-at', method, body)
+  const { items, ...report } = at.body
+  return { report, items: items.map(item => rowOf(item, at)) }
+}

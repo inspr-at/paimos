@@ -396,7 +396,7 @@ export const useAgents = defineStore('agents', () => {
     return [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
   })
   const grouped = computed(() => {
-    const out: Record<SessionStatus['group'], SessionView[]> = { problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
+    const out: Record<SessionStatus['group'], SessionView[]> = { pausing: [], paused: [], problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
     for (const view of views.value) out[view.status.group].push(view)
     // Start order for live sessions, latest stop first for ended ones (AEON-468).
     for (const [group, list] of Object.entries(out)) list.sort((a, b) => (group === 'stopped' ? byStopped : byStart)(a.session, b.session))

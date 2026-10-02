@@ -25,6 +25,10 @@ import ListeningLabel from './ListeningLabel.vue'
 import SessionRecovery from './SessionRecovery.vue'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
+import SessionPauseActions from './SessionPauseActions.vue'
+import PauseEvidence from './PauseEvidence.vue'
+import FloatingPanel from '../work/FloatingPanel.vue'
+import { pausingSession } from '../../lib/agentPause'
 import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
 import { cleanActivityNote } from '../../lib/activityPrivacy'
@@ -37,8 +41,10 @@ import { sessionEtaEligible } from './sessionRow'
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
+const actionsAnchor = ref<HTMLElement | null>(null)
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
+watch(() => props.view?.session.id, () => { actionsAnchor.value = null })
 const agents = useAgents()
 const auth = useSession()
 const root = ref<HTMLElement>()
@@ -167,14 +173,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading && !compactControls" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
-        <template v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
-          <button v-if="works('interrupt')" type="button" class="btn sm ghost" data-tip="Stop the current turn" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
-          <button v-if="works('stop')" type="button" class="btn sm ghost stop" data-tip="End this session" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
-        </template>
+        <SessionPauseActions v-if="!reported?.watch" :session="reported || view.session" />
+        <button v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1') && works('interrupt') && !pausingSession(view.session)" class="icon-btn sm flat" type="button" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
+        <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null"><div role="menu"><button class="btn sm ghost" type="button" role="menuitem" @click="control('interrupt'); actionsAnchor = null"><AppIcon name="interrupt" />Interrupt this step</button></div></FloatingPanel>
         <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
       <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
+      <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
@@ -214,6 +220,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="sr-only">Now</h3>
+        <PauseEvidence :session="reported || view.session" :now="now" />
         <p v-if="view.session.archived_at" class="now-meta">Archived registration · process state unknown. No process was stopped by recovery.</p>
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">

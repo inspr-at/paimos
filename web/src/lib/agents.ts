@@ -148,8 +148,8 @@ export const message = (error: unknown) => error instanceof Error ? error.messag
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed']
-const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled']
+const OTHER_EVENTS = ['harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
 export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
@@ -190,3 +190,7 @@ export function claudeStatuslineCopy(audience: AgentAccount['statusline_opt_in']
 export function putQuotaPool(account_ids: string[], quota_fingerprint: string, confirmed: boolean): Promise<void> {
   return request<void>('/agent-accounts/quota-pool', 'PUT', { account_ids, quota_fingerprint, confirmed })
 }
+
+export const readPauseDefault = () => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings')
+export const savePauseDefault = (default_level: import('./agentPause').PauseLevel) => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings', 'PUT', { default_level })
+export const readEstimateInterval = () => request<{ interval_minutes: number }>('/settings/eta-interval')

@@ -16,6 +16,7 @@ const identity = useSession()
 const agents = useAgents()
 const copy = computed(() => attachCopy(brand.value.short_name))
 // A decision changes what /agents lists as waiting; the page refreshes it.
+defineProps<{ hideTrigger?: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 // Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
@@ -87,7 +88,7 @@ function show(result: AttachReview) {
   close(); dialog.value?.showModal()
   present(result)
 }
-defineExpose({ show })
+defineExpose({ show, open })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
   if (!allowed.value || !/^\d{9}$/.test(normalized)) { error.value = copy.value.invalidCode; return Promise.resolve() }
@@ -125,7 +126,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 
 <template>
   <template v-if="allowed">
-    <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
+    <button v-if="!hideTrigger" class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
     <dialog ref="dialog" aria-labelledby="attach-title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
       <header><h2 id="attach-title">{{ !review || metadataOnly ? copy.attachTitle : copy.watchTitle }}</h2><button class="close" type="button" aria-label="Close attach review" @click="close"><AppIcon name="close" :size="18" /></button></header>
       <form v-if="!review" @submit.prevent="lookup">

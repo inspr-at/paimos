@@ -9,7 +9,7 @@ export function useAgentAppearance() {
   const choice = computed(() => normalizeAgentState(preference.value.value))
   const save = (patch: Partial<AgentStatePreference>) => preference.save(normalizeAgentState({ ...choice.value, ...patch }), 0)
   const appearance = (state: AgentState) => ({
-    '--agent-state-color': `var(--agent-${choice.value.palette}-${inactiveState(state) ? 'inactive' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state})`,
+    '--agent-state-color': state === 'paused' ? 'var(--ink-2)' : `var(--agent-${choice.value.palette}-${state === 'pausing' ? 'working' : inactiveState(state) ? 'inactive' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state})`,
     '--agent-state-opacity': String(inactiveState(state) && choice.value.dimInactive ? choice.value.inactiveOpacity / 100 : 1),
     '--agent-state-saturation': inactiveState(state) || choice.value.palette === 'monochrome' ? '0' : '1',
   })

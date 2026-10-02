@@ -12,6 +12,9 @@ import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
+import SessionPauseActions from './SessionPauseActions.vue'
+import { useAgentPause } from '../../stores/agentPause'
+import { pausingSession } from '../../lib/agentPause'
 import { isStale, useSessionRemoval } from './sessionRemoval'
 import AgentStateLabel from './AgentStateLabel.vue'
 import ListeningLabel from './ListeningLabel.vue'
@@ -61,9 +64,9 @@ const sort = ref<SessionSort | null>(null)
 const forest = computed(() => orderForest(sessionForest(showRemoved.value ? props.history ?? [] : current.value, props.now), sort.value, props.now, showRemoved.value))
 // Three calm buckets in urgency order: what needs a look, what runs, what ended.
 // Each row still names its exact state; a family sits with its most urgent member.
-type Bucket = 'attention' | 'live' | 'stopped'
-const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'stopped', label: 'Ended' }]
-const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'working' || group === 'idle' ? 'live' : 'attention'
+type Bucket = 'attention' | 'live' | 'pausing' | 'paused' | 'stopped'
+const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'pausing', label: 'Pausing' }, { id: 'paused', label: 'Paused' }, { id: 'stopped', label: 'Ended' }]
+const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'pausing' ? 'pausing' : group === 'paused' ? 'paused' : group === 'working' || group === 'idle' ? 'live' : 'attention'
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket)
@@ -71,7 +74,7 @@ const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
 // A direct link may reveal its selected row, but never its stopped siblings.
-const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
+const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
 const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
 function toggle(branch: Branch) {
   const id = branch.view.session.id
@@ -196,12 +199,11 @@ const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.contro
 const etaOf = (view: SessionView) => sessionEtaEligible(view) ? etaFromSession(view.session) : null
 const working = (view: SessionView) => sessionEtaEligible(view) && view.session.phase === 'working'
 const hasEta = computed(() => current.value.some(view => !!etaOf(view) || working(view)))
-// The hover shortcut exists only where Interrupt works right now.
-const inline = (view: SessionView, kind: SessionControl['kind']) => menuOf(view).control.includes(kind)
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
 const agents = useAgents()
+const pause = useAgentPause()
 const moving = ref(false)
 const dragged = ref<SessionView | null>(null)
 const dropOver = ref('')
@@ -291,6 +293,7 @@ function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
 }
+defineExpose({ toggleHistory })
 </script>
 
 <template>
@@ -432,10 +435,7 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
           <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
           <span role="cell" class="c-actions">
-            <button
-              v-if="inline(view, 'interrupt')" type="button" class="icon-btn sm flat act" :aria-label="`Interrupt ${view.name}`" data-tip="Interrupt: stop the current turn, keep the session"
-              @click="emit('control', view, 'interrupt')"
-            ><AppIcon name="interrupt" :size="16" /></button>
+            <SessionPauseActions :session="view.session" compact />
             <button
               v-if="bin(view)" type="button" class="icon-btn sm flat bin" :aria-label="`Remove ${view.name}`" data-tip="Remove · undo right after"
               :disabled="removal.busy.value" @click="removal.removeOne(view.session, view.name, true)"
@@ -456,12 +456,12 @@ function rowClick(event: MouseEvent, id: string) {
         <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
           <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to lead…</span>
         </button>
+        <button v-if="pause.eligible(menu.view.session, 'pause') && (menu.view.session.supported_pause_levels?.includes('pause') || menu.view.session.advertised_capabilities.includes('inbox') || menu.view.session.advertised_capabilities.includes('pause'))" type="button" role="menuitem" class="menu-item" @click="pause.open('pause', [menu.view.session], menu.anchor); menu = null"><AppIcon name="pause" /><span class="mi-text">Pause…</span></button>
+        <button v-if="pause.eligible(menu.view.session, 'stop')" type="button" role="menuitem" class="menu-item danger" @click="pause.open('stop', [menu.view.session], menu.anchor); menu = null"><AppIcon name="halt" /><span class="mi-text">Stop now…</span></button>
+        <button v-if="pause.eligible(menu.view.session, 'resume')" type="button" role="menuitem" class="menu-item" @click="pause.open('resume', [menu.view.session], menu.anchor); menu = null"><AppIcon name="play" /><span class="mi-text">Resume</span></button>
         <template v-if="menuItems.control.length">
-          <button v-if="menuItems.control.includes('interrupt')" type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('interrupt')">
-            <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt</span><small>Stop the current turn, keep the session</small></span>
-          </button>
-          <button v-if="menuItems.control.includes('stop')" type="button" role="menuitem" class="menu-item danger" @click="pick('stop')">
-            <AppIcon name="halt" :size="16" /><span class="mi-text"><span>Stop session…</span></span>
+          <button v-if="menuItems.control.includes('interrupt') && !pausingSession(menu.view.session)" type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('interrupt')">
+            <AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt this step</span><small>No handover; stays for your next message.</small></span>
           </button>
           <button v-if="menuItems.control.includes('settings')" type="button" role="menuitem" class="menu-item" @click="pickOpen">
             <AppIcon name="edit" :size="16" /><span class="mi-text"><span>Name, model, effort</span></span>
@@ -510,7 +510,7 @@ function rowClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; padding: 0 0 8px; }
+.table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 132px 80px 80px 108px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -619,9 +619,10 @@ function rowClick(event: MouseEvent, id: string) {
 .faint { color: var(--ink-3); }
 .mono-cell { font-family: var(--mono); font-variant-ligatures: none; }
 /* Controls appear on the row the pointer or keyboard is on; the layout never
-   shifts. The row's inset leaves ~66px of the 76px track: two 28px controls. */
+   shifts. Reserve room for Resume, Remove and More, including the row inset. */
 .row > .c-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 4px 0 0; }
 /* The bin is always visible on an ended or silent row: it is that row's action. */
+@media (hover: hover) { .row:not(:hover):not(:focus-within):not(.active):not(.selected) :deep(.pause-shortcut) { opacity: 0; } }
 .act, .more { opacity: 0; transition: opacity .15s ease; }
 .row:hover :is(.act, .more), .row.active :is(.act, .more), .row.selected :is(.act, .more), .row:focus-within :is(.act, .more), .more[aria-expanded="true"] { opacity: 1; }
 .bin { color: var(--ink-3); }
@@ -652,16 +653,16 @@ function rowClick(event: MouseEvent, id: string) {
 /* Estimates need a ticket track wide enough for "overdue 5 min". */
 /* Retain the pre-Host ticket allocation: the new column must not wrap ETA/%
    or increase existing row heights. The other flexible tracks absorb Host. */
-.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 132px 80px 80px 76px; }
+.table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 132px 80px 80px 108px; }
 @container sessions (max-width: 980px) {
   .sort-bar { display: flex; }
-  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 132px 72px 76px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(max(104px, calc((100% - var(--state-width) - 148px) * .42 / 2.52)), .42fr) minmax(116px, .75fr) 132px 72px 76px; }
+  .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(68px, .42fr) minmax(116px, .75fr) 132px 72px 108px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(120px, 1.35fr) minmax(max(104px, calc((100% - var(--state-width) - 148px) * .42 / 2.52)), .42fr) minmax(116px, .75fr) 132px 72px 108px; }
   .c-elapsed { display: none; }
 }
 @container sessions (max-width: 760px) {
-  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 132px 68px; }
-  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 132px 68px; }
+  .table { --state-width: 150px; grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(64px, auto) minmax(108px, .7fr) 132px 108px; }
+  .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.2fr) minmax(100px, auto) minmax(108px, .7fr) 132px 108px; }
   .c-beat, .c-elapsed { display: none; }
   .act { display: none; }
 }

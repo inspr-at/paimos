@@ -10,6 +10,30 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Pause and wind down agents
+
+The Agents page offers Pause and Stop now per controllable session, plus quiet
+Pause all and Resume all actions. Pause asks for a level and an optional handover
+note; Pause all supports per-agent overrides and Keep running. A lead can include
+its workers. Personal settings choose the default pause level. Paused generations
+keep the saved handover, next steps, questions and WIP commit. Resume saves a
+continuation request; a launcher must start the successor, including after a reboot.
+
+Wind down starts only after its host-grouped preview is confirmed. The host picker
+uses personal computer names, tri-state host selection, individual agents and All /
+None quick picks; it also groups by state. The request carries `deadline_at` plus
+`hosts: "all" | [...]` and optional explicit `agents`. Host scope is persisted, but
+new-start blocking remains launcher follow-up work: new agents can still start.
+Missing or stale planning reports never imply a finish estimate. The plan reads
+back durable backend outcomes; a deadline or queued stop alone cannot mark it done.
+Cancellation withdraws pending requests, keeps existing handovers and reports stops
+already in flight. Partial batch writes name accepted and failed requests.
+
+Dialogs anchor their controls above variable content on desktop and pin their
+footer on phone sheets. Submit uses Command+Enter on Apple platforms and Ctrl+Enter
+elsewhere; Escape first leaves a field, then closes. API rows pass through the
+canonical session ledger and controls stay bound to the captured generation/run.
+
 ## Ticket work queue
 
 `aeon queue list`, `add <ticket>`, `remove <ticket>`, `move <ticket> <position>`,
