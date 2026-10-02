@@ -15,14 +15,18 @@ func TestJournalHoldLookupIsBoundedByAdmission(t *testing.T) {
 	// Seed many immutable acknowledgements for other holds, ahead of the target.
 	// The target is appended last; unrelated acknowledgements must stay unread.
 	_, err := f.database.Admin.Exec(t.Context(), `INSERT INTO aithema_journal_records(tenant_id,sid,seq,client_event_id,contract,kind,original_bytes,document)
-  SELECT $1,$2,g,gen_random_uuid(),'aithema.journal.record','budget.hold',convert_to('{}','UTF8'),convert_to(jsonb_set($3::jsonb,'{data,hold_id}',to_jsonb('00000000-0000-4000-8000-000000000000'::text))::text,'UTF8') FROM generate_series(1,2000) g`, f.claims.TenantID, f.claims.SessionID, marshal(f.journalHold(id)))
+  SELECT $1,$2,g,('00000000-0000-4000-8000-'||lpad(g::text,12,'0'))::uuid,'aithema.journal.record','budget.hold',convert_to('{}','UTF8'),convert_to(jsonb_set($3::jsonb,'{data,hold_id}',to_jsonb('00000000-0000-4000-8000-000000000000'::text))::text,'UTF8') FROM generate_series(1,2000) g`, f.claims.TenantID, f.claims.SessionID, marshal(f.journalHold(id)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.database.Admin.Exec(t.Context(), `UPDATE aithema_sessions SET seq=2000 WHERE tenant_id=$1 AND sid=$2`, f.claims.TenantID, f.claims.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	f.acknowledgeHold(id)
+	ack := f.journalHold(id)
+	// Put the target last under both sequence and client-event index ordering;
+	// a legacy scan must not pass just because a random UUID sorts first.
+	ack["client_event_id"] = "ffffffff-ffff-4fff-bfff-ffffffffffff"
+	f.success("journal", "records", "POST", marshal(ack), nil)
 	work := dbtest.ReadWork{}
 	err = db.InTenant(t.Context(), f.database.App, f.claims.TenantID, func(tx pgx.Tx) error {
 		st, err := load(t.Context(), tx, f.claims.TenantID, f.claims.SessionID)
