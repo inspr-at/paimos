@@ -158,6 +158,7 @@
         "internal/brand/**",
         "internal/ticketbenefits/**",
         "internal/statusautopilot/**",
+        "internal/recurrences/**",
         "internal/usagedashboard/**",
         "internal/activity/**"
       ]
