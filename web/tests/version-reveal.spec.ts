@@ -2,15 +2,16 @@
 // INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest and every version
 // surface reveals them. Inside a control (the footer's history button, a release
 // row) the control's hover or keyboard focus reveals and its click still acts;
-// standing alone (the release heading, "Running here") the version is the shared
-// renderer's copy pill. Reduced motion switches at once.
+// standing alone the detail heading is the shared renderer's copy pill. The
+// history's status dock crossfades Pretty to canonical text. Reduced motion
+// switches at once in either presentation.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-const options = (page: Page) => page.getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 const pill = (page: Page) => page.getByRole('button', { name: /^Release history, (?:.*?, )?version / })
 
 // A release with a marketing name shows the name and reveals its stamp (AEON-430,
@@ -21,7 +22,7 @@ async function setup(page: Page) {
   for (const release of history.releases) delete release.codename
   await mockWork(page, fixtures())
   await mockReleases(page, history)
-  return history
+  return { ...history, releases: history.releases.filter(r => r.state === 'published') }
 }
 
 // The rendered version inside `scope`, and its seconds segment.
@@ -59,28 +60,37 @@ test('footer pill: hover and keyboard focus reveal the seconds; a click still op
   await expect(sheet(page)).toBeVisible()
 })
 
-test('release history rows: hover and the keyboard’s current row reveal; a click still selects', async ({ page }) => {
+test('unnamed release rows: only the version copy control reveals; the row still selects', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const history = await setup(page)
   await page.goto('/releases')
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const row = options(page).nth(2)
   await expectRest(row)
-  await row.hover()
-  await expectRevealed(row)
+  await row.locator('.row-name').hover()
+  await expectRest(row)
+  const copy = row.getByRole('button', { name: `Copy version ${history.releases[2].version}`, exact: true })
+  await copy.hover()
+  await expect(copy).toHaveAttribute('data-version-view', 'revealed')
+  await expect(copy.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
   await away(page)
   await expectRest(row)
-  // The listbox keeps focus; the current option follows j and reveals.
-  await page.getByRole('listbox', { name: 'Releases, newest first' }).focus()
+  // The listbox keeps focus; j selects while the independent copy stays Pretty.
+  await page.getByRole('grid', { name: 'Releases, newest first' }).focus()
   await page.keyboard.press('j')
   await expect(options(page).nth(1)).toHaveAttribute('aria-selected', 'true')
-  await expectRevealed(options(page).nth(1))
+  await expectRest(options(page).nth(1))
   await expectRest(options(page).first())
-  await version(row).click()
+  await copy.click()
+  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.releases[2].version)
+  await expect(row).toHaveAttribute('aria-selected', 'false')
+  await row.locator('.row-name').click()
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
 })
 
-test('release heading and "Running here": the copy pill reveals on hover and focus and copies exactly', async ({ page, context }) => {
+test('release heading and the history dock: copy controls reveal on hover and focus and copy exactly', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.setViewportSize({ width: 1280, height: 800 })
   const history = await setup(page)
@@ -98,10 +108,23 @@ test('release heading and "Running here": the copy pill reveals on hover and foc
   await page.keyboard.press('Enter')
   await expect(copy).toHaveAttribute('data-copy-state', 'copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
-  const running = sheet(page).getByRole('group', { name: 'Release cadence' }).locator('.value')
-  await expectRest(running)
-  await version(running).hover()
-  await expectRevealed(running)
+  // An unnamed title stays canonical; the dock owns the Pretty/canonical reveal.
+  const title = sheet(page).getByRole('heading', { level: 1 })
+  await expect(title).toHaveText(history.current)
+  const dock = sheet(page).locator('.status-dock')
+  const dockCopy = dock.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+  const full = dockCopy.locator('[data-version-character="canonical"]')
+  await expect(dockCopy).toHaveAttribute('data-version-view', 'pretty')
+  await dockCopy.hover()
+  await expect(dockCopy).toHaveAttribute('data-version-view', 'revealed')
+  await expect(full.last()).toHaveCSS('opacity', '1')
+  await away(page)
+  await expect(dockCopy).toHaveAttribute('data-version-view', 'pretty')
+  await expect(full.last()).toHaveCSS('opacity', '0')
+  await dockCopy.focus()
+  await page.keyboard.press('Enter')
+  await expect(dock.getByRole('status')).toHaveText('Version copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
 })
 
 test('journey release list: hover and focus reveal; a click still opens the release', async ({ page }) => {

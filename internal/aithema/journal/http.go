@@ -101,6 +101,10 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, area, action stri
 		writeError(w, err)
 		return
 	}
+	if len(result.Body) > maxResponseBytes {
+		writeError(w, fault(413, "too_large"))
+		return
+	}
 	w.WriteHeader(result.Status)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(result.Body)
