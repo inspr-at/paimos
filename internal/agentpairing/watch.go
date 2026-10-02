@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -127,6 +128,9 @@ func loadAttach(ctx context.Context, tx pgx.Tx, id string) (attachwatch.View, st
 	err := tx.QueryRow(ctx, `SELECT id::text,digest,snapshot,state,expires_at,lease_until,session_id::text,owner_id::text,user_code,consent_mode,coalesce(local_auth_nonce,'') FROM harness_attach_requests WHERE id=$1 FOR UPDATE`, id).Scan(&v.RequestID, &v.Digest, &v.Snapshot, &v.State, &v.ExpiresAt, &v.LeaseUntil, &v.SessionID, &owner, &code, &v.ConsentMode, &v.LocalAuthNonce)
 	if err == nil && v.State == "pending" {
 		v.ConsentMode, err = computerWatchConsentMode(ctx, tx, owner, v.Snapshot.Platform, v.Snapshot.ComputerID)
+	}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary')`).Scan(&v.AgentActivityMode)
 	}
 	v.ConsentDigest = attachwatch.ConsentDigest(v.RequestID, v.Digest, v.ConsentMode)
 	v.LocalConsentProofVersion = attachwatch.LocalConsentProofVersion
@@ -270,6 +274,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		if expected.proofVersion != attachwatch.LocalConsentProofVersion {
 			return attachFailure(409, "update_agentd", "upgrade paimos-agentd to local consent proof v2 and restart; existing pairing keys remain valid; fresh approval required", attachwatch.RefusalVersion)
 		}
+		if in.Operation != "poll" && (in.Doing != nil || in.ToolActivity != nil) {
+			return fail(400, "invalid_request", "activity requires an active watch")
+		}
 		if in.Operation == "request" {
 			s := in.Snapshot
 			if in.LocalConfirmed || in.ConsentDigest != "" {
@@ -344,6 +351,9 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		if owner != approvedOwner || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
 			rejected = fail(403, "forbidden", "attach approval binding changed")
 			return attachEnd(ctx, tx, &out, "detached")
+		}
+		if out.State != "active" && (in.Doing != nil || in.ToolActivity != nil) {
+			return fail(400, "invalid_request", "activity requires an active watch")
 		}
 		waiting := out.State == "pending" || out.State == "approved"
 		expired, err := attachExpired(ctx, tx, &out)
@@ -465,6 +475,15 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.Sequence < 1 {
 			return fail(400, "invalid_request", "poll sequence required")
+		}
+		if in.Doing != nil || in.ToolActivity != nil {
+			if err = agentactivity.ReportAttached(ctx, tx, p.TenantID, p.ID, *out.SessionID, in.Doing, in.ToolActivity); err != nil {
+				var invalid *agentactivity.InvalidReport
+				if errors.As(err, &invalid) {
+					return fail(400, "invalid_request", invalid.Message)
+				}
+				return err
+			}
 		}
 		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET heartbeat_at=clock_timestamp() WHERE id=$1`, *out.SessionID); err != nil {
 			return err

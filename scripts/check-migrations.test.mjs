@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrations, contractMarker, destructive, publishedMigrations } from './check-migrations.mjs';
+import { checkMigrations, contractMarker, destructive, publishedMigrations, splitSQL } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
 
@@ -291,6 +291,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -315,6 +316,36 @@ test('integration exceptions pin the merged contract, run-kind and briefing expa
   assert.equal(destructive(source), true);
 });
 
+test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review exception', () => {
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === '1100_aithema_pending_content.sql');
+  assert.equal(entry.ticket, 'AEON-483');
+  assert.match(entry.reason, /coordinator review before merge\/release/);
+  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
+  const source = readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8');
+  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(destructive(source), true);
+  assert.match(source, /octet_length\(original_bytes\) <= 1048576/);
+  assert.match(source, /contract = 'aithema\.spec\.snapshot'/);
+  assert.match(source, /contract = 'aithema\.journal\.record' AND kind = 'pending_op\.content'/);
+  const statements = splitSQL(source);
+  const drops = statements.filter(sql => /DROP CONSTRAINT/.test(sql));
+  assert.deepEqual(drops, ['ALTER TABLE aithema_journal_records\n    DROP CONSTRAINT aithema_journal_records_original_bytes_check']);
+  assert.equal(destructive(statements.filter(sql => !drops.includes(sql)).join(';')), false);
+  assert.match(source, /\) NOT VALID;/);
+  assert.doesNotMatch(source, /VALIDATE CONSTRAINT|CREATE UNIQUE INDEX/);
+  assert.match(source, /total BETWEEN 1048577 AND 16777216/);
+  const validation = readFileSync(new URL('../internal/db/migrations/1101_aithema_content_bytes_validate.sql', import.meta.url), 'utf8');
+  assert.equal(destructive(validation), false);
+  assert.match(validation, /VALIDATE CONSTRAINT aithema_journal_records_content_bytes_check/);
+  const index = readFileSync(new URL('../internal/db/migrations/1102_aithema_content_address.sql', import.meta.url), 'utf8');
+  assert.equal(destructive(index), false);
+  assert.ok(index.startsWith('-- aeon:no-transaction\n'));
+  assert.equal(splitSQL(index).length, 1);
+  assert.match(index, /CREATE UNIQUE INDEX CONCURRENTLY/);
+
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -323,7 +354,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 

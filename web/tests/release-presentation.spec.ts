@@ -10,7 +10,7 @@ import { mockReleases, presentedHistory } from './releases-fixtures'
 const NOW = Date.parse('2026-09-29T12:00:00Z')
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const detail = (page: Page) => sheet(page).locator('article.detail')
-const rows = (page: Page) => sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+const rows = (page: Page) => sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
 
 async function open(page: Page, index = 0, locale?: string) {
   const history = presentedHistory(NOW)

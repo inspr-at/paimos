@@ -211,6 +211,65 @@ func TestRefusedLegacyMigrationDoesNotRotateOrCreateEnclaveKey(t *testing.T) {
 	}
 }
 
+// Inject failures between the initial lookup, create-only write and readback.
+// These fixtures never call the operator's Keychain.
+type migrationFaultVault struct {
+	memoryVault
+	fault  string
+	writes int
+}
+
+func (v *migrationFaultVault) Read(id string) ([]byte, error) {
+	if v.writes != 0 {
+		switch v.fault {
+		case "readback denied":
+			return nil, agentsecurity.ErrDenied
+		case "readback missing":
+			return nil, os.ErrNotExist
+		case "readback differs":
+			return []byte("different-fixture"), nil
+		}
+	}
+	return v.memoryVault.Read(id)
+}
+
+func (v *migrationFaultVault) Write(id string, raw []byte, first bool) error {
+	v.writes++
+	if v.fault == "create race" {
+		v.values[id] = []byte("precreated-fixture")
+	}
+	return v.memoryVault.Write(id, raw, first)
+}
+
+func TestVaultMigrationFailurePreservesLegacyFile(t *testing.T) {
+	for _, fault := range []string{"create race", "readback denied", "readback missing", "readback differs"} {
+		t.Run(fault, func(t *testing.T) {
+			s := testStore(t)
+			legacy := []byte("aeon_fixture_" + stringRepeat('c', 64))
+			if err := s.Write("runtime.key", legacy, true); err != nil {
+				t.Fatal(err)
+			}
+			v := &migrationFaultVault{memoryVault: memoryVault{values: map[string][]byte{}}, fault: fault}
+			s.vault = v
+			if raw, err := s.Read("runtime.key", 4096); err == nil || len(raw) != 0 {
+				t.Fatal("failed migration returned authority")
+			}
+			if v.writes != 1 {
+				t.Fatal("migration failure did not exercise the write/readback path")
+			}
+			if fault == "create race" && !bytes.Equal(v.values[s.vaultID("runtime.key")], []byte("precreated-fixture")) {
+				t.Fatal("migration overwrote a concurrently created item")
+			}
+			path := filepath.Join(s.Path(), "runtime.key")
+			kept, err := os.ReadFile(path)
+			info, statErr := os.Stat(path)
+			if err != nil || statErr != nil || !bytes.Equal(kept, legacy) || info.Mode().Perm() != 0600 {
+				t.Fatal("failed migration changed or removed the legacy file")
+			}
+		})
+	}
+}
+
 func TestVaultedPairingBindsPublicRuntimeBeforeCredentialedRequests(t *testing.T) {
 	e, api, _, opts, _ := engineFixture(t)
 	e.Store.vault = &memoryVault{values: map[string][]byte{}}
@@ -267,13 +326,51 @@ func TestVaultedPairingBindsPublicRuntimeBeforeCredentialedRequests(t *testing.T
 type fixtureEnclave struct {
 	id     string
 	public string
+	err    error
 }
 
 func (s *fixtureEnclave) Create(_ context.Context, id string) (string, error) {
 	s.id = id
-	return s.public, nil
+	return s.public, s.err
 }
 func (*fixtureEnclave) Sign(context.Context, string, []byte, string) (string, error) { return "", nil }
+
+func TestEnclaveCreationFailureCannotDowngradePairing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"existing tag", agentsecurity.ErrExists},
+		{"access denied", agentsecurity.ErrDenied},
+		{"cancelled", context.Canceled},
+		{"unavailable", agentsecurity.ErrUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, api, _, opts, _ := engineFixture(t)
+			signer := &fixtureEnclave{err: tc.err}
+			e.Enclave = signer
+			v := &memoryVault{values: map[string][]byte{}}
+			e.Store.vault = v
+			p, err := e.Begin(t.Context(), opts)
+			if signer.id == "" {
+				t.Fatal("fixture never attempted enclave creation")
+			}
+			if errors.Is(tc.err, agentsecurity.ErrUnavailable) {
+				if err != nil || p.Stage != "awaiting_approval" || api.createCount != 1 || api.request.LocalAuthPublicKey != "" {
+					t.Fatal("hardware unavailability did not request ordinary Aeon approval")
+				}
+				s, err := e.load()
+				if err != nil || s.LocalAuthKeyID != "" {
+					t.Fatal("unavailable enclave left a local key identity")
+				}
+				return
+			}
+			if !errors.Is(err, tc.err) || api.createCount != 0 || len(v.values) != 0 {
+				t.Fatal("enclave creation failure downgraded or persisted a pairing")
+			}
+		})
+	}
+}
 
 func TestEnclaveKeyIsCreatedAtPairingAndPreservedForAddedHarness(t *testing.T) {
 	e, api, _, opts, _ := engineFixture(t)

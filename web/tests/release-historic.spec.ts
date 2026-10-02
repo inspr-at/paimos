@@ -79,7 +79,7 @@ for (const width of [1600, 390]) {
       expect(await noHorizontalScroll(page)).toBe(true)
 
       if (width === 390) await sheet(page).getByRole('button', { name: 'All releases' }).click()
-      await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').nth(1).click()
+      await sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').nth(1).click()
       await expect(page).toHaveURL(`/releases/${V102}`)
       const features = detail(page).getByRole('region', { name: 'Features, 5' })
       await expect(features.locator('.group-h .g-icon svg')).toHaveCount(1)
