@@ -771,7 +771,12 @@ native binding, give `harness run-heartbeat` that child's `--source-session UUID
 manual registration can use the child's native ID as its private session ref.
 Explicit vendor references remain unique among active generations per tenant and
 agent across all harnesses. Registration conflicts name the conflicting field
-without returning private values.
+without returning private values. Vendor binding conflicts also append
+`(sha256:<16 hex characters>)`, a fingerprint of the supplied reference using
+the first eight bytes of `SHA-256("aeon.harness.ref\0" + reference)`. The same
+reference has the same fingerprint on insertion and replay; the reference
+itself and worker lease remain private. Concurrent children use separate
+`--harness-session-file` and `--worker-lease-file` files.
 
 On **Agents**, the old lead links to its successor and adopted workers link back
 to the old lead. Drag a live worker to a live lead, or choose **Move to lead…**

@@ -417,6 +417,7 @@ func TestCoordinatorHeartbeatRetryRejectsOtherFailures(t *testing.T) {
 		{"no native reference", "coordinator", "", "active generation conflicts with registration", 409},
 		{"other conflict", "coordinator", transcriptSessionID, "successor registration conflicts", 409},
 		{"vendor conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent", 409},
+		{"vendor fingerprint conflict", "coordinator", transcriptSessionID, "vendor_session_ref is already bound to an active generation for this agent (sha256:0123456789abcdef)", 409},
 		{"metadata conflict", "coordinator", transcriptSessionID, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata", 409},
 		{"worker lease conflict", "worker", transcriptSessionID, harness.RegistrationLeaseConflict, 409},
 		{"lease conflict without source", "coordinator", "", harness.RegistrationLeaseConflict, 409},
