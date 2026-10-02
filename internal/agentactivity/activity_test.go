@@ -48,7 +48,7 @@ func TestToolObservationsNeverForwardArguments(t *testing.T) {
 }
 
 func TestSummaryBoundaries(t *testing.T) {
-	for _, text := range []string{"Implementing agent activity", "Waiting for CI", strings.Repeat("é", 60)} {
+	for _, text := range []string{"Implementing agent activity", "Reviewing the change", "Waiting for CI", strings.Repeat("é", 60)} {
 		if _, valid := CleanSummary(text); !valid {
 			t.Fatalf("rejected public summary %q", text)
 		}
@@ -74,6 +74,13 @@ func TestSummaryBoundaries(t *testing.T) {
 			t.Fatalf("accepted unsafe or format-character summary %q", text)
 		}
 	}
+	for _, separator := range []string{"\u2028", "\u2029", "\u093e"} {
+		for _, text := range []string{"A" + separator + "KIAIOSFODNN7EXAMPLE", "abcdefghijkl" + separator + "mnopqrstuvwx"} {
+			if _, valid := CleanSummary(text); valid {
+				t.Fatalf("accepted summary containing a Unicode separator or spacing mark %q", text)
+			}
+		}
+	}
 }
 
 func TestCurrentRevalidatesStoredActivity(t *testing.T) {
@@ -85,6 +92,7 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 		at                                    time.Time
 	}{
 		{"valid summary", "Implementing activity", "Running Go tests", Summary, "Implementing activity", "agent", fresh},
+		{"public review summary", "Reviewing the change", "Running Go tests", Summary, "Reviewing the change", "agent", fresh},
 		{"normalized summary", "  Implementing activity  ", "Running Go tests", Summary, "Implementing activity", "agent", fresh},
 		{"credential word fallback", "Reading secret", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"short key fallback", "Key AKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
@@ -93,6 +101,12 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 		{"split opaque token fallback", "abcdefghijkl\u0301mnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"enclosing mark fallback", "A\u20ddKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"enclosing opaque token fallback", "abcdefghijkl\u20ddmnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"line separator fallback", "A\u2028KIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"line separator opaque token fallback", "abcdefghijkl\u2028mnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"paragraph separator fallback", "A\u2029KIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"paragraph separator opaque token fallback", "abcdefghijkl\u2029mnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"spacing mark fallback", "A\u093eKIAIOSFODNN7EXAMPLE", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
+		{"spacing mark opaque token fallback", "abcdefghijkl\u093emnopqrstuvwx", "Running Go tests", Summary, "Running Go tests", "auto", fresh},
 		{"unsafe summary hidden", "Reading token", "Editing secret.go", Summary, "", "", fresh},
 		{"invalid tool hidden", "", "Running Go tests with arguments", Tool, "", "", fresh},
 		{"unsafe basename hidden", "", "Editing ../api.go", Tool, "", "", fresh},
@@ -121,6 +135,13 @@ func TestCurrentRevalidatesStoredActivity(t *testing.T) {
 }
 
 func TestLegacyNotePrivacy(t *testing.T) {
+	for _, separator := range []string{"\u2028", "\u2029", "\u093e"} {
+		for _, text := range []string{"A" + separator + "KIAIOSFODNN7EXAMPLE", "abcdefghijkl" + separator + "mnopqrstuvwx"} {
+			if clean, valid := CleanNote(text); valid || clean != "" {
+				t.Fatalf("accepted legacy note containing a Unicode separator or spacing mark %q", text)
+			}
+		}
+	}
 	for _, text := range []string{"AKIAIOSFODNN7EXAMPLE", "https://user:pass@host/a", "FOO=secret", "FOO=example", "A\u0301KIAIOSFODNN7EXAMPLE", "abcdefghijkl\u0301mnopqrstuvwx", "A\u20ddKIAIOSFODNN7EXAMPLE", "s\u200bk-live", "Editing id-rsa.go", "abcdefghijklmnopqrstuvwx", "\ufeffWorking", "Working\ufeff"} {
 		if clean, valid := CleanNote(text); valid || clean != "" {
 			t.Fatalf("accepted unsafe legacy note %q", text)

@@ -2,5 +2,5 @@
   "credential_words": ["secret", "token", "credential", "password", "id_", "id-rsa", "id-ed25519", "private", "_rsa", "_ed25519", "bearer", "api_key", "api-key", "akia", "asia", "sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xox", "xapp-", "aiza", "ya29.", "glpat-", "npm_", "pypi-", "hf_"],
   "opaque_pattern": "[A-Za-z0-9+/_=-]{24,}",
   "forbidden_characters": "=\\/@$`",
-  "unicode_categories": ["Cc", "Cf", "Mn", "Me"]
+  "unicode_categories": ["Cc", "Cf", "Mn", "Me", "Zl", "Zp", "Mc"]
 }

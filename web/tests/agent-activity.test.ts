@@ -26,6 +26,9 @@ test('summary policy preserves the existing heartbeat note for older reporters',
 })
 test('shared privacy rules screen current text, legacy fallback and both histories', () => {
   const unsafe = ['AKIAIOSFODNN7EXAMPLE', 'https://user:pass@host/a', 'FOO=secret', 'FOO=example', 'A\u0301KIAIOSFODNN7EXAMPLE', 'abcdefghijkl\u0301mnopqrstuvwx', 'A\u20ddKIAIOSFODNN7EXAMPLE', 'abcdefghijkl\u20ddmnopqrstuvwx', 's\u200bk-live', 'Editing AKIAIOSFODNN7EXAMPLE.go', 'Editing sk-live.go', 'Editing ghp_example.ts', 'Editing xoxb-example.ts', 'Editing id-rsa.go', 'abcdefghijklmnopqrstuvwx', '\ud800', '\ufeffWorking', 'Working\ufeff']
+  for (const separator of ['\u2028', '\u2029', '\u093e']) {
+    unsafe.push(`A${separator}KIAIOSFODNN7EXAMPLE`, `abcdefghijkl${separator}mnopqrstuvwx`)
+  }
   for (const text of unsafe) {
     assert.equal(currentActivity(view(text), now), '', text)
     assert.equal(cleanActivityNote(text), '', text)
