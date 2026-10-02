@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { COLLAPSE_MS, SUCCESS_MS } from '../src/components/agents/approvalSettle'
 
 const world: AgentWorld = {
   me: me.id,
@@ -66,6 +67,9 @@ test.describe('with motion', () => {
     await expect(item.getByRole('button', { name: 'Saving…' })).toBeDisabled()
     await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(0)
     await expect(settled(page)).toHaveCount(0)
+    // Hold the short collapse phase so hosted scheduling cannot skip it.
+    await page.clock.install({ time: new Date() })
+    await page.clock.pauseAt(new Date(Date.now() + 100))
     release()
     const done = settled(page)
     await expect(done).toHaveClass(/approved/)
@@ -79,9 +83,11 @@ test.describe('with motion', () => {
     await expect(decidedCount(page)).toHaveText('4')
     await expect(queue(page).locator('.count-badge')).toHaveText('4')
     // The fold: Decided ticks, the card goes, the count follows.
+    await page.clock.runFor(SUCCESS_MS)
     await expect(done).toHaveClass(/collapsing/)
     await expect(decidedCount(page)).toHaveText('5')
     await expect(decidedCount(page)).toHaveClass(/tick/)
+    await page.clock.runFor(COLLAPSE_MS)
     await expect(done).toHaveCount(0)
     await expect(queue(page).locator('[data-row^="a:"]')).toHaveCount(2)
     await expect(queue(page).locator('.count-badge')).toHaveText('3')

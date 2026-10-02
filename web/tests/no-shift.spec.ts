@@ -142,6 +142,30 @@ for (const width of [1440, 1024, 390]) {
   })
 }
 
+test('saving a pacing option keeps keyboard focus for Escape', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await setup(page)
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/agent-accounts/capacity/schedule', async route => {
+    if (route.request().method() === 'PUT') await pending
+    await route.fallback()
+  })
+  await page.goto('/agents')
+  await page.getByRole('region', { name: 'Accounts and computers' }).getByRole('button', { name: /days · keep/ }).click()
+  const pacing = page.getByRole('dialog', { name: 'Pacing' })
+  const seven = pacing.getByRole('radio', { name: '7', exact: true })
+  await seven.click()
+  await expect(seven).toHaveAttribute('aria-disabled', 'true')
+  await expect(seven).toBeFocused()
+  release()
+  await expect(seven).toHaveAttribute('aria-checked', 'true')
+  await expect(seven).toHaveAttribute('aria-disabled', 'false')
+  await expect(seven).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(pacing).toHaveCount(0)
+})
+
 test('phone steer feedback and retry never move the pinned action bar', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const data = await setup(page)

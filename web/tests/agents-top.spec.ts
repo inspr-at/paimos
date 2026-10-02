@@ -510,7 +510,7 @@ test.describe('phone', () => {
     await expect(sheet).toHaveCount(0)
     await (await pacing(page)).getByRole('button', { name: 'Customize night and shifts' }).click()
     await expect(page.getByRole('dialog', { name: 'Agents outside your hours' })).toBeVisible()
-    await page.locator('.scrim').click({ position: { x: 20, y: 20 } })
+    await page.getByRole('dialog', { name: 'Agents outside your hours' }).getByRole('button', { name: 'Cancel' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expect(await noScroll(page)).toBe(true)
     // AEON-299 review 5: with a toast in the background, focus never leaves the
