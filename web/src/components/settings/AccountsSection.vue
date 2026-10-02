@@ -15,6 +15,7 @@ import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import AccountsCard from '../agents/AccountsCard.vue'
+import LinkedAccounts from '../agents/LinkedAccounts.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
 import SettingsCard from './SettingsCard.vue'
 
@@ -95,6 +96,7 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
 
 <template>
   <div id="add-account" class="add-account">
+    <p v-if="session.identity?.principal.kind === 'person' && can('profile.write')" class="add-hint"><RouterLink class="btn sm" to="/link"><AppIcon name="link" :size="14" />Link an account</RouterLink>Enter the code from your agent window.</p>
     <SettingsCard title="Accounts" icon="gauge" anchor="agent-accounts">
       <template #lead>The vendor accounts agents run on. Sign in on the computer itself; the password never leaves it.</template>
       <template v-if="mayManage && computersState === 'ready'" #aside>
@@ -109,6 +111,7 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
         :set="setAccount"
       />
     </SettingsCard>
+    <LinkedAccounts />
   </div>
 </template>
 

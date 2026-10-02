@@ -13,3 +13,5 @@ func writeSessionIndex(string, string, int, string) error { return nil }
 func removeSessionIndexForState(string) {}
 
 func stateDirSentLabel(string) string { return "" }
+
+func writeHookActivity(string, string, string) {}
