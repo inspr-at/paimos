@@ -256,8 +256,9 @@ for (const show of [false, true]) {
       return codenameOf(version)
     }, withdrawn.version)).toBe('')
     await sheet(page).getByRole('button', { name: 'Compare', exact: true }).click()
-    await expect(sheet(page).locator('.compare')).toBeVisible()
-    await expect(sheet(page).locator('.compare')).not.toContainText(withdrawn.codename)
-    await expect(sheet(page).locator(`.compare .pair .calendar-version[aria-label^="${withdrawn.version}"]`)).toHaveCount(0)
+    const comparison = sheet(page).locator('section.compare')
+    await expect(comparison).toBeVisible()
+    await expect(comparison).not.toContainText(withdrawn.codename)
+    await expect(comparison.locator(`.pair .calendar-version[aria-label^="${withdrawn.version}"]`)).toHaveCount(0)
   })
 }
