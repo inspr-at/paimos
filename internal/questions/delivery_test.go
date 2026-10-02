@@ -420,3 +420,43 @@ func TestHeldReplyAtomicFailureAndKeyRefusal(t *testing.T) {
 		t.Fatal("parent settled without durable answer")
 	}
 }
+
+func TestHeldReplyUsesExistingQuestionSourceAndKeepsRetryRevision(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	parent := f.held(t)
+	in := input()
+	in.SessionID = f.session
+	in.SourceRequestID = parent
+	q := f.ask(t, in)
+	path := "/api/projects/" + f.project + "/messages"
+	body := map[string]any{"to": f.agent.ID, "body": "original reply", "idempotency_key": "original-key", "reply_to": parent}
+	w := request(t.Context(), f.mux, f.person, "POST", path, body)
+	if w.Code != 201 {
+		t.Fatalf("existing source: %d %s", w.Code, w.Body.String())
+	}
+	var first inbox.CompatMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.QuestionID != q.ID {
+		t.Fatal("source made duplicate question")
+	}
+	latest := f.answer(t, f.status(t, q.ID), "edited through desk")
+	w = request(t.Context(), f.mux, f.person, "POST", path, body)
+	if w.Code != 201 {
+		t.Fatal(w.Body.String())
+	}
+	var replay inbox.CompatMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.ID != first.ID || replay.AnswerRevision != first.AnswerRevision {
+		t.Fatal("old retry claimed a newer revision")
+	}
+	f.advance(10 * time.Second)
+	f.dispatch(t)
+	f.expectEffects(t, latest, "delivered")
+	if n := f.count(t, `SELECT count(*) FROM inbox_compat_messages WHERE reply_to_id=$1 AND NOT is_action_request AND body::jsonb->>'answer'='edited through desk'`, parent); n != 1 {
+		t.Fatal("source reply correlation lost")
+	}
+}

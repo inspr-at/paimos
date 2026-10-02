@@ -33,16 +33,19 @@ func WithHeldReplyBridge(bridge HeldReplyBridge) func(*messaging) {
 // must precede this call: new message identities then acquire the event counter
 // last. No wake, process start, or held-parent release is performed here.
 type DeskReply struct {
-	ID, RootID, ProjectID, RecipientID, RecipientSessionID string
-	Body, RootBody, RecipientName, RootSenderSessionID     string
+	ID, RootID, ReplyToID, ProjectID, RecipientID, RecipientSessionID string
+	Body, RootBody, RecipientName, RootSenderSessionID                string
 }
 
 func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in DeskReply) error {
+	if in.ReplyToID == "" {
+		in.ReplyToID = in.RootID
+	}
 	var rootExists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages WHERE tenant_id=$1 AND id=$2)`, p.TenantID, in.RootID).Scan(&rootExists); err != nil {
 		return err
 	}
-	meta := map[string]string{"id": in.ID, "question_reply_root_id": in.RootID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID}
+	meta := map[string]string{"id": in.ID, "question_reply_root_id": in.RootID, "reply_to_id": in.ReplyToID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: "inbox.compat_sent", After: meta})
 	if err != nil {
 		return err
@@ -64,7 +67,7 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level,recipient_session_id,sender_label)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,c.thread_id,LEAST(c.hop+1,10),$2,$11,false,false,'simple',$12,$13 FROM inbox_compat_messages c WHERE c.tenant_id=$1 AND c.id=$10`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, "paimos:"+p.Name, "paimos:"+in.RecipientName, in.Body, "desk/"+in.ID, in.RootID, ev.ID, deskNullable(in.RecipientSessionID), p.Name)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,c.thread_id,LEAST(c.hop+1,10),$2,$11,false,false,'simple',$12,$13 FROM inbox_compat_messages c WHERE c.tenant_id=$1 AND c.id=$10`, p.TenantID, in.ID, in.ProjectID, p.ID, in.RecipientID, "paimos:"+p.Name, "paimos:"+in.RecipientName, in.Body, "desk/"+in.ID, in.ReplyToID, ev.ID, deskNullable(in.RecipientSessionID), p.Name)
 	if err != nil {
 		return err
 	}

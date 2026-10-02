@@ -1,12 +1,12 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-564: additive delivery scheduling and immutable correction lineage.
 SET LOCAL lock_timeout = '5s';
-ALTER TABLE desk_answers ADD COLUMN replaces uuid;
-ALTER TABLE desk_answers ADD CONSTRAINT desk_answer_replaces_fk
+ALTER TABLE desk_answers ADD COLUMN replaces uuid,
+ ADD CONSTRAINT desk_answer_replaces_fk
  FOREIGN KEY (tenant_id,project_id,replaces) REFERENCES desk_answers(tenant_id,project_id,node_id);
 ALTER TABLE desk_pending ADD COLUMN retry_at timestamptz;
-ALTER TABLE desk_pending ADD COLUMN delivery_session_id uuid;
-ALTER TABLE desk_pending ADD CONSTRAINT desk_delivery_session_fk
+ALTER TABLE desk_pending ADD COLUMN delivery_session_id uuid,
+ ADD CONSTRAINT desk_delivery_session_fk
  FOREIGN KEY (tenant_id,project_id,delivery_session_id) REFERENCES harness_sessions(tenant_id,project_id,id);
 -- Durable answers survive an ended generation even without a pause record.
 ALTER TABLE harness_sessions ADD COLUMN desk_answers jsonb NOT NULL DEFAULT '[]'::jsonb;

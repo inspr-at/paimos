@@ -36,8 +36,8 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,55))`, p.TenantID); err != nil {
 			return err
 		}
-		var recipient, body string
-		err := tx.QueryRow(r.Context(), `SELECT sender_principal_id::text,recipient_principal_id::text,coalesce(sender_session_id::text,''),body,thread_id,hop FROM inbox_compat_messages WHERE tenant_id=$1 AND project_id=$2 AND id=$3 AND is_action_request FOR NO KEY UPDATE`, p.TenantID, project, in.Parent).Scan(&sender, &recipient, &session, &body, &thread, &hop)
+		var recipient string
+		err := tx.QueryRow(r.Context(), `SELECT sender_principal_id::text,recipient_principal_id::text,coalesce(sender_session_id::text,''),thread_id,hop FROM inbox_compat_messages WHERE tenant_id=$1 AND project_id=$2 AND id=$3 AND is_action_request FOR NO KEY UPDATE`, p.TenantID, project, in.Parent).Scan(&sender, &recipient, &session, &thread, &hop)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -135,7 +135,7 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 		if err = tx.QueryRow(r.Context(), `SELECT revision FROM desk_questions WHERE tenant_id=$1 AND node_id=$2 FOR NO KEY UPDATE`, p.TenantID, id).Scan(&revision); err != nil {
 			return err
 		}
-		// Include the full tell payload in the deterministic retry identity check.
+		// Bind retries to the person, parent and caller idempotency key.
 		requestID := heldRequestID(p.ID, in.Parent, in.Key)
 		decision := DecisionInput{RequestID: requestID, ExpectedRevision: revision, Answer: in.Body, Outcome: "once"}
 		// Retries retain the original expected revision so digest comparison is stable.
@@ -151,7 +151,7 @@ func (m *Module) ReplyHeld(w http.ResponseWriter, r *http.Request, p tenant.Prin
 			return err
 		}
 		original := &Answer{}
-		err = tx.QueryRow(r.Context(), `SELECT r.revision,r.created_at,r.deliver_after,e.id::text FROM desk_answers r JOIN desk_pending e ON e.tenant_id=r.tenant_id AND e.question_id=r.question_id AND e.revision=r.revision AND e.kind='inbox' JOIN desk_askers a ON a.tenant_id=e.tenant_id AND a.id=e.asker_id WHERE r.tenant_id=$1 AND r.question_id=$2 AND r.decided_by=$3 AND r.request_id=$4 AND a.reply_root_id=$5`, p.TenantID, id, p.ID, requestID, in.Parent).Scan(&original.Revision, &original.CreatedAt, &original.DeliverAfter, &replyID)
+		err = tx.QueryRow(r.Context(), `SELECT r.revision,r.created_at,r.deliver_after,e.id::text FROM desk_answers r JOIN desk_pending e ON e.tenant_id=r.tenant_id AND e.question_id=r.question_id AND e.revision=r.revision AND e.kind='inbox' JOIN desk_askers a ON a.tenant_id=e.tenant_id AND a.id=e.asker_id WHERE r.tenant_id=$1 AND r.question_id=$2 AND r.decided_by=$3 AND r.request_id=$4 AND (a.reply_root_id=$5 OR a.source_request_id=$5)`, p.TenantID, id, p.ID, requestID, in.Parent).Scan(&original.Revision, &original.CreatedAt, &original.DeliverAfter, &replyID)
 		if err == nil {
 			q.Answer = original
 			q.Revision = original.Revision
