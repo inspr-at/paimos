@@ -3133,11 +3133,11 @@ paths:
               type: object
               required: [file, crop]
               properties:
-                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB'}
+                file: {type: string, format: binary, description: 'PNG, JPEG or WebP up to 8 MiB, 4194304 pixels and 4096 pixels per side; dimensions and crop are checked before decoding'}
                 crop: {$ref: '#/components/schemas/AvatarCrop'}
       responses:
         '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
-        '400': {description: Invalid crop or image}
+        '400': {description: 'Invalid crop or image; at most 4,194,304 pixels, 4096 pixels per side and a square crop up to 2048 pixels per side'}
         '413': {description: Upload too large}
     delete:
       operationId: deleteMyAvatar
@@ -3905,7 +3905,7 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
     post:
       operationId: addNodeAttachments
-      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default).
+      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default). Images are limited to 16777216 pixels and 8192 pixels per side, checked before decoding. Image processing shares a server-wide memory budget with avatar uploads.
       security: *auth
       requestBody:
         required: true
@@ -10438,7 +10438,7 @@ components:
       properties:
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
-        size: {type: integer, minimum: 1}
+        size: {type: integer, minimum: 1, maximum: 2048}
     PersonalProfilePatch:
       type: object
       additionalProperties: false
