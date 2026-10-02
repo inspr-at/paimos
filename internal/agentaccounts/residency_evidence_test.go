@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -131,6 +132,10 @@ func TestResidencyEvidenceOwnershipAndTenantIsolation(t *testing.T) {
 	owner := makePrincipal(t, "evidence", "person", "Owner", []string{"admin"})
 	host := addPrincipal(t, owner.TenantID, "agent", "Host", []string{"admin"})
 	otherHost := addPrincipal(t, owner.TenantID, "agent", "Other host", []string{"admin"})
+	// Legacy fixture binding intentionally applies only to people. Give both
+	// hosts real grants so ownership refusals cannot pass for missing roles.
+	dbtest.BindRole(t, testDB, owner.TenantID, host.ID, "admin")
+	dbtest.BindRole(t, testDB, owner.TenantID, otherHost.ID, "admin")
 	admin := addPrincipal(t, owner.TenantID, "person", "Unrelated admin", []string{"admin"})
 	profile := codexProfile(t, owner)
 	token := issueKey(t, host, []string{"account.manage", "account.probe", "account.read"})
