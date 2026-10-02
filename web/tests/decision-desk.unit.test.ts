@@ -36,6 +36,17 @@ it('fails answered reads honestly when a required continuation cursor is missing
   const result = await loadDesk({ open: 1, answered: 2 })
   expect(result.warnings).toContain('Questions could not be read. They may be inaccessible; this is not an empty desk.')
 })
+it('rejects oversized source pages before collecting question records', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    const url = new URL(path, 'https://test.invalid')
+    if (url.pathname === '/api/decision-desk') return Response.json({ items: Array.from({ length: 101 }, (_, i) => ({ ...question(), id: `q${i}` })), has_more: false })
+    return Response.json(url.pathname === '/api/approvals' ? [] : { items: [] })
+  }))
+  const result = await loadDesk()
+  expect(result.items).toEqual([])
+  expect(result.sources.questions.size).toBe(0)
+  expect(result.warnings).toContain('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+})
 it('freezes round IDs while arrivals and decided/skipped counts remain distinct', () => {
   const one = questionItem(question(), 'Aeon'), two = { ...one, id: 'q:two' }, three = { ...one, id: 'q:new' }
   const round = newRound([one, two])

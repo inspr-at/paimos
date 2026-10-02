@@ -46,6 +46,7 @@ async function readQuestionPages(state: QuestionState, pages: number): Promise<Q
   let has_more = false, cursor: string | undefined
   for (let page = 0; page < Math.min(MAX_QUESTION_PAGES, Math.max(1, pages)); page++) {
     const result = await readQuestions(page * 100, state, cursor)
+    if (result.items.length > 100) throw new Error('The question page exceeded its limit. Refresh before loading more.')
     result.items.forEach(question => items.set(question.id, question)); has_more = result.has_more
     if (!has_more) break
     if (state === 'answered') {
