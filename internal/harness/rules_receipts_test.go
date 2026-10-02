@@ -172,6 +172,7 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback(context.Background())
+	blockerPID := int(blocker.Conn().PgConn().PID())
 	if _, err = blocker.Exec(t.Context(), `SELECT id FROM harness_sessions WHERE id=$1 FOR UPDATE`, strings.TrimPrefix(session, "/api/projects/"+f.project+"/harness-sessions/")); err != nil {
 		t.Fatal(err)
 	}
@@ -181,10 +182,12 @@ func TestRulesReceiptConcurrentConflictAndReplay(t *testing.T) {
 	for _, request := range []harness.RulesReceiptWrite{in, other} {
 		go func() { results <- f.call(f.agent, "POST", path, request, lease) }()
 	}
-	// pg_stat_activity sees separate connections blocked by the row lock.
+	// Identify the blocker directly. Query text is truncated at PostgreSQL's
+	// track_activity_query_size, so widening the session projection must not
+	// hide a real waiter or turn this concurrent CAS assertion into a timeout.
 	var waiting int
 	for range 100 {
-		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM harness_sessions%FOR UPDATE%'`).Scan(&waiting)
+		err = f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND $1::integer=ANY(pg_blocking_pids(pid))`, blockerPID).Scan(&waiting)
 		if err != nil || waiting == 2 {
 			break
 		}
