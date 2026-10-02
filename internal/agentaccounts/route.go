@@ -277,7 +277,7 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 		return err
 	}
 	var recoveryChanged bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts f WHERE f.recovery_run_id=$2 AND NOT EXISTS(SELECT 1 FROM account_readiness_memberships m WHERE m.resource_id=f.resource_id AND m.account_id=$1 AND m.binding_revision=$3))`, a.ID, run.ID, a.LinkRevision).Scan(&recoveryChanged); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts f WHERE f.recovery_run_id=$2 AND f.resource_id NOT IN (`+currentReadinessResources+`))`, a.ID, run.ID).Scan(&recoveryChanged); err != nil {
 		return err
 	}
 	if quotaChanged || recoveryChanged {

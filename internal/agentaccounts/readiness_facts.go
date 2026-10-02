@@ -130,8 +130,17 @@ func ReadinessResources(ctx context.Context, tx pgx.Tx, a Account) ([]ReadinessR
 	return out, rows.Err()
 }
 
+// Fact admission and reserved recovery use the same current authority: the
+// account plus its person-confirmed siblings, each at its current revision.
+// An obsolete confirmed identity cannot survive as a dangling membership.
+const currentReadinessResources = `SELECT m.resource_id FROM account_readiness_memberships m
+ JOIN agent_accounts member ON member.tenant_id=m.tenant_id AND member.id=m.account_id
+ JOIN account_readiness_resources resource ON resource.tenant_id=m.tenant_id AND resource.id=m.resource_id
+ WHERE m.account_id IN (` + quotaAccounts + `) AND m.binding_revision=member.link_revision
+ AND (resource.identity_kind<>'person_confirmed' OR resource.identity_key=encode(sha256(convert_to('quota:'||member.harness||':'||COALESCE(member.quota_pool_fingerprint,''),'UTF8')),'hex'))`
+
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id JOIN agent_accounts member ON member.tenant_id=m.tenant_id AND member.id=m.account_id JOIN account_readiness_resources resource ON resource.tenant_id=m.tenant_id AND resource.id=m.resource_id WHERE m.account_id IN (`+quotaAccounts+`) AND m.binding_revision=member.link_revision AND (resource.identity_kind<>'person_confirmed' OR resource.identity_key=encode(sha256(convert_to('quota:'||member.harness||':'||COALESCE(member.quota_pool_fingerprint,''),'UTF8')),'hex')) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`, a.ID, a.LinkRevision)
+	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f WHERE f.resource_id IN (`+currentReadinessResources+`) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}

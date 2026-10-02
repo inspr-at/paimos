@@ -443,7 +443,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// A managed run's own provisional estimate can outlive its short ledger
 	// window while a vendor stop is backing off. Its current permission comes
 	// from ValidateReservedCapacity below, including the single recovery permit.
-	// Measured, manual and pairing windows retain their expiry/freshness gates.
+	// Obsolete measured holds may also reach current admission, but only a
+	// recovery permit bound in this transaction can authorize their launch.
+	// Manual and pairing windows retain their expiry/freshness gates.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
  (w.account_id=$2::uuid OR (NOT w.pairing_verification AND EXISTS(
   SELECT 1 FROM agent_accounts door JOIN agent_accounts ledger
@@ -453,7 +455,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
    AND EXISTS(SELECT 1 FROM agent_runs owned WHERE owned.id=r.run_id AND owned.purpose='managed')))),w.starts_at<=clock_timestamp()
   AND (w.ends_at>clock_timestamp() OR ($3::text='managed' AND NOT w.pairing_verification
    AND w.capacity_kind IN ('blind','refresh') AND w.capacity_source='estimate' AND w.capacity_refresh_run=r.run_id))
-  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance))
+  AND (w.capacity_read_at IS NULL OR (w.capacity_allowed AND NOT w.capacity_retired AND (w.capacity_read_at>=clock_timestamp()-interval '10 minutes' OR w.capacity_refresh_run IS NOT DISTINCT FROM r.run_id) AND w.used+w.reserved<=w.allowance)),
+ coalesce(($3::text='managed' AND NOT w.pairing_verification AND w.starts_at<=clock_timestamp()
+  AND w.capacity_read_at<=clock_timestamp() AND coalesce(w.capacity_source,'')<>'estimate'
+  AND coalesce(w.capacity_kind,'') NOT IN ('blind','refresh')
+  AND (w.capacity_read_at<clock_timestamp()-interval '10 minutes' OR w.ends_at<=clock_timestamp() OR w.capacity_retired)),false)
 	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
 	 WHERE r.run_id=$1 AND r.state<>'released' ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID, *v.AccountID, v.Purpose)
 	if err != nil {
@@ -463,17 +469,19 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	valid := true
 	quotaValid := true
 	active := true
+	needsRecovery := false
 	for rows.Next() {
 		var id, state string
-		var current, quotaMatches bool
-		if err = rows.Scan(&id, &state, &quotaMatches, &current); err != nil {
+		var current, quotaMatches, recoverable bool
+		if err = rows.Scan(&id, &state, &quotaMatches, &current, &recoverable); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		count++
 		valid = valid && seen[id]
 		quotaValid = quotaValid && quotaMatches
-		active = active && state == "active" && current
+		active = active && state == "active" && (current || recoverable)
+		needsRecovery = needsRecovery || !current && recoverable
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -505,6 +513,15 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
 		}
 		return nil, workorders.Fail(409, "reserved capacity is not eligible")
+	}
+	if needsRecovery {
+		var held bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_readiness_facts WHERE recovery_run_id=$1)`, v.ID).Scan(&held); err != nil {
+			return nil, err
+		}
+		if !held {
+			return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
+		}
 	}
 	if o.Assignee != nil && *o.Assignee != v.AgentID {
 		return nil, workorders.Fail(409, "work-order assignment changed")

@@ -238,6 +238,16 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	if err != nil {
 		return AccountReadiness{}, err
 	}
+	if wait == nil {
+		for _, window := range windows {
+			// Readiness asks whether even the smallest hold can fit; measured
+			// windows retain their learned hold. Manual pace is a real cap too.
+			if _, ok := fits(window, now, max(1, window.capacityHold)); !ok {
+				wait = waitFor("allowance")
+				break
+			}
+		}
+	}
 	in.RecoveryEligible = wait == nil && containsRecovery(windows)
 	if wait != nil {
 		reason := map[string]string{"state": "paused", "capacity": "slots_occupied", "approval": "approval_required", "allowance": "manual_limit", "hold": "hold", "sign_in": "sign_in", "offline": "offline", "schedule": "schedule", "reserve": "reserve"}[wait.Code]

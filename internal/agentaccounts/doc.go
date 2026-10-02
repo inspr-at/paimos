@@ -212,11 +212,14 @@
 // An eligible unstarted reservation may acquire that permit during claim;
 // other queued holds stay intact and cannot launch during its recovery wait.
 // A managed run's own expired provisional estimate reaches current admission;
-// measured, manual and pairing ledgers retain their expiry/freshness checks.
+// an obsolete measured hold also reaches admission but needs a current bound
+// recovery permit. Manual and pairing ledgers retain their expiry checks.
 // Telemetry-only denials acquire a canonical wait at claim or a fresh owner
 // check, preserving the original stop/deadline and the exact early intent.
 // Readiness evaluates the same non-mutating admission policy, including fresh
-// fact-only reserves and recovery eligibility, without consuming the permit.
+// fact-only reserves, manual window pace and recovery eligibility, without
+// consuming the permit. Recovery uses the same current sibling/resource
+// authority at reservation and claim; withdrawn pools/revisions release holds.
 // Manual allowances cap work but never make unknown vendor usage measured.
 // A restarted heartbeat survives rejection of an obsolete pending check. The
 // 409 response identifies the committed heartbeat; stale facts are discarded,

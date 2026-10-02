@@ -6507,7 +6507,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity may launch only after current admission atomically binds its resource-scoped recovery permit; manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
