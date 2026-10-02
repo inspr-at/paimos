@@ -326,25 +326,27 @@ test('a link to a view someone cannot see keeps its filters and drops the view',
   await expect(bar(page).getByRole('link', { name: 'All tickets' })).toHaveAttribute('aria-current', 'page')
 })
 
-test('filters and views have no axe violations in light and dark', async ({ page }) => {
-  const data = world()
-  data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
-  data.preferences['list:p-pharos'] = { defaultView: MINE }
-  await mockWork(page, data)
-  const scan = async () => {
-    // Judge settled states only. A sort or filter change re-queries the list, and
-    // until the answer arrives the previous rows stay on screen dimmed as stale
-    // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
-    // initials, a loading transition rather than the page. Popovers mount off
-    // screen and are placed on the next frame.
-    await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
-    await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
-    for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-    const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
-    expect(summary, summary.join('\n')).toEqual([])
-  }
-  for (const colorScheme of ['light', 'dark'] as const) {
+// Seven full-page scans per scheme get independent test budgets; combining both
+// schemes timed out during the final scan on hosted CI, without an axe failure.
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`filters and views have no axe violations in ${colorScheme}`, async ({ page }) => {
+    const data = world()
+    data.views.push(mockView({ id: MINE, name: 'Mine', filters: { priority: 'high' } }), mockView({ id: SHARED, name: 'Team', owner_principal_id: mira, shared: true }))
+    data.preferences['list:p-pharos'] = { defaultView: MINE }
+    await mockWork(page, data)
+    const scan = async () => {
+      // Judge settled states only. A sort or filter change re-queries the list, and
+      // until the answer arrives the previous rows stay on screen dimmed as stale
+      // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
+      // initials, a loading transition rather than the page. Popovers mount off
+      // screen and are placed on the next frame.
+      await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
+      await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
+      for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+      const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
+      expect(summary, summary.join('\n')).toEqual([])
+    }
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await page.goto(`/p/PHAROS?priority=high,!low&tag=!docs&date=updated:30d&v=${MINE}&status=!done`)
     await expect(rows(page).first()).toBeVisible()
@@ -369,8 +371,8 @@ test('filters and views have no axe violations in light and dark', async ({ page
     await expect(page.getByRole('dialog', { name: 'Save view' })).toBeVisible()
     await scan()
     await page.keyboard.press('Escape')
-  }
-})
+  })
+}
 
 for (const width of [1920, 1440, 1280, 1024, 390]) {
   test(`at ${width}px the view bar and toolbar never overflow the page`, async ({ page }) => {

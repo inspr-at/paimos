@@ -6531,7 +6531,7 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold.
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
       security: [{agentKey: []}]
       parameters:
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6541,6 +6541,7 @@ paths:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry

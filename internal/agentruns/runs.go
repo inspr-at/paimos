@@ -438,6 +438,12 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if generation == nil || *generation != in.Generation {
 		return nil, workorders.Fail(409, "account daemon generation changed")
 	}
+	// Disconnect may already have released a queued run's reservations. Check
+	// enrollment authority under the pairing lock before those mutable holds so
+	// the owning daemon still gets the revocation cleanup instruction.
+	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
+		return nil, err
+	}
 	// Validate the exact reservation set, including on retry; never let a caller
 	// replace or omit a window from the account module's atomic reservation.
 	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,
@@ -481,9 +487,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return releaseObsoleteClaim(ctx, tx, p, v, "quota_pool_changed")
 		}
 		return nil, workorders.Fail(409, "reservation set mismatch")
-	}
-	if err = agentpairing.AccountFence(ctx, tx, *v.AccountID, v.Status != "queued"); err != nil {
-		return nil, err
 	}
 	if v.Status != "queued" {
 		if v.DaemonID != nil && v.Generation != nil {
