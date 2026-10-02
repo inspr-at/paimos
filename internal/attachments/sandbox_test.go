@@ -256,6 +256,12 @@ func TestHTMLPreviewCapabilities(t *testing.T) {
 	if request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content?variant=preview", "", nil).Code != 404 {
 		t.Fatal("HTML executable preview on app origin")
 	}
+	for i := 1; i < maxPrincipalGrants; i++ {
+		issue()
+	}
+	if mint(p, previewApp).Code != 429 {
+		t.Fatal("per-person capability bound ignored")
+	}
 	now = now.Add(previewTTL)
 	if load(preview, nil).Code != 404 {
 		t.Fatal("expired grant accepted")
@@ -301,11 +307,11 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 	d, p, node := setup(t)
 	var project, other string
 	for i, target := range []*string{&project, &other} {
-		if err := d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title) SELECT $1,id,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, p.TenantID, []string{"A", "B"}[i]).Scan(target); err != nil {
+		if err := d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, p.TenantID, []string{"PA-1", "PB-1"}[i]).Scan(target); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$1 WHERE id=$2`, project, node); err != nil {
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, project, node); err != nil {
 		t.Fatal(err)
 	}
 	s := Store{FilesDir: t.TempDir()}
@@ -332,10 +338,27 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 	if _, _, err := m.previewAttachment(t.Context(), p, id); err != nil {
 		t.Fatalf("project guest refused: %v", err)
 	}
-	foreign := p
-	foreign.TenantID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	foreign := tenant.Principal{Kind: tenant.Person}
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('preview-other','Other') RETURNING id::text`).Scan(&foreign.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other reader',ARRAY['member']) RETURNING id::text`, foreign.TenantID).Scan(&foreign.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member'`, foreign.TenantID, foreign.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := m.previewAttachment(t.Context(), foreign, id); err == nil {
 		t.Fatal("second tenant read content")
+	}
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.previewAttachment(t.Context(), p, id); err == nil {
+		t.Fatal("deleted project still readable")
+	}
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, project); err != nil {
+		t.Fatal(err)
 	}
 	// A deterministic barrier revokes project access while redemption is
 	// paused in the session verifier. The subsequent RLS/authz read must deny.
@@ -351,7 +374,7 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 		m.WrapSandbox(http.NotFoundHandler()).ServeHTTP(w, httptest.NewRequest("GET", previewOrigin+"/preview/"+token, nil))
 	}()
 	<-entered
-	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$1 WHERE id=$2`, other, node); err != nil {
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, other, node); err != nil {
 		close(resume)
 		wg.Wait()
 		t.Fatal(err)
@@ -365,7 +388,7 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 		t.Fatal("unauthorized same-tenant project read")
 	}
 	// Digest corruption never serves mutable replacement bytes.
-	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$1 WHERE id=$2`, project, node); err != nil {
+	if _, err := d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, project, node); err != nil {
 		t.Fatal(err)
 	}
 	m.Sandbox.grants[sha256.Sum256([]byte(token))] = previewGrant{principal: p, attachment: a, project: project, expires: time.Now().Add(time.Minute), lease: func(context.Context) (tenant.Principal, error) { return p, nil }}

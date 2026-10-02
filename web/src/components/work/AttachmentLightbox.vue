@@ -36,17 +36,21 @@ const htmlState = ref<'loading' | 'ready' | 'unavailable' | 'expired'>('unavaila
 let htmlRequest: AbortController | undefined
 let htmlExpiry: ReturnType<typeof setTimeout> | undefined
 let htmlGeneration = 0
+let htmlSelection = ''
+const selectedHTMLKey = () => [current.value?.id, current.value?.sha256, current.value?.updated_at].join(':')
 
 function clearHTML() {
   htmlGeneration++
   htmlRequest?.abort()
   clearTimeout(htmlExpiry)
   htmlURL.value = ''
+  htmlSelection = ''
 }
 async function loadHTML() {
   clearHTML()
   const item = current.value
   if (!item || !isHTML(item) || !dialog.value?.open) return
+  htmlSelection = selectedHTMLKey()
   const generation = htmlGeneration
   htmlState.value = 'loading'
   htmlRequest = new AbortController()
@@ -209,6 +213,9 @@ const onResize = () => fit()
 window.addEventListener('resize', onResize)
 onBeforeUnmount(() => { clearHTML(); window.removeEventListener('resize', onResize) })
 watch(() => props.items.length, length => { if (!length && dialog.value?.open) close(); else if (index.value >= length) index.value = Math.max(0, length - 1) })
+// A live collection update can replace the selected row without navigation.
+// Never display a previous attachment's capability under the new row's name.
+watch(selectedHTMLKey, key => { if (dialog.value?.open && key !== htmlSelection) void loadHTML() })
 watch(() => compare.value?.view, () => void nextTick(fit))
 defineExpose({ open })
 const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.y}px) scale(${scale.value})`)
@@ -234,7 +241,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
         <button v-if="items.length > 1 && isImage(current)" type="button" class="pill-btn solo" :aria-pressed="!!compare" aria-keyshortcuts="c" data-tip="Compare two screens · c" @click="toggleCompare"><AppIcon name="compare" :size="14" />Compare</button>
         <button type="button" class="pill-btn solo details-btn" :aria-pressed="details" aria-label="Details" aria-keyshortcuts="d" data-tip="Details · d" @click="details = !details; $nextTick(fit)"><AppIcon name="info" :size="15" /><span class="label">Details</span></button>
         <a class="pill-btn round" :href="contentUrl(current.id, 'original')" :download="current.name" :aria-label="`Download ${current.name}`" data-tip="Download the original"><AppIcon name="download" :size="15" /></a>
-        <a v-if="isHTML(current)" class="pill-btn solo" :href="htmlURL || undefined" :aria-disabled="!htmlURL" :tabindex="htmlURL ? 0 : -1" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Open preview in new tab</a>
+        <a v-if="isHTML(current)" class="pill-btn round" :href="htmlURL || undefined" :aria-disabled="!htmlURL" :tabindex="htmlURL ? 0 : -1" aria-label="Open preview in new tab" data-tip="Open preview in new tab" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"><AppIcon name="external" :size="15" /></a>
         <button type="button" class="pill-btn round copy-link" aria-label="Copy link" data-tip="Copy link to the original" @click="copyLink"><AppIcon name="link" :size="15" /></button>
         <button type="button" class="pill-btn round" aria-label="Close viewer" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="close"><AppIcon name="close" :size="15" /></button>
       </header>
