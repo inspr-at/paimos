@@ -664,6 +664,13 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 		t.Run(writer, func(t *testing.T) {
 			f := setup(t)
 			r := f.create(f.input())
+			caller := f.p
+			if writer == "membership change" {
+				f.tx(func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Concurrent member') RETURNING id::text`, f.p.TenantID).Scan(&caller.ID)
+				})
+				dbtest.BindRole(t, f.d, f.p.TenantID, caller.ID, "member")
+			}
 			ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 10*time.Second)
 			defer cancel()
 			other, err := f.d.App.Begin(ctx)
@@ -685,7 +692,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 					if _, err := lock(ctx, barrier, f.p.TenantID, false); err != nil {
 						return err
 					}
-					if err := manage(ctx, tx, f.p, f.project); err != nil {
+					if err := manage(ctx, tx, caller, f.project); err != nil {
 						return err
 					}
 					_, err := tx.Exec(ctx, `UPDATE recurrences SET paused=true WHERE id=$1`, r.ID)
@@ -707,7 +714,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 				// Match lockProjectMutation: tree first, then tenant FOR UPDATE.
 				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, f.p.TenantID)
 				if err == nil {
-					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='admin') WHERE principal_id=$1 AND scope_type='workspace'`, f.p.ID)
+					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
 				}
 			}
 			if err == nil {
@@ -716,11 +723,15 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 				_ = other.Rollback(t.Context())
 			}
 			recurrenceErr := <-done
-			if err != nil || recurrenceErr != nil {
+			if err != nil {
 				t.Fatalf("%s error %v; recurrence error %v", writer, err, recurrenceErr)
 			}
-			if !f.get(r.ID).Paused {
-				t.Fatal("recurrence write did not commit")
+			if writer == "membership change" {
+				if !errors.Is(recurrenceErr, authz.ErrForbidden) || f.get(r.ID).Paused {
+					t.Fatalf("demoted recurrence write was not denied: %v", recurrenceErr)
+				}
+			} else if recurrenceErr != nil || !f.get(r.ID).Paused {
+				t.Fatalf("recurrence write did not commit: %v", recurrenceErr)
 			}
 		})
 	}
@@ -749,6 +760,9 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 			f.now = timestamp(t, "2026-10-19T12:00:00Z")
 			f.tx(func(tx pgx.Tx) error {
 				if failure == "invalid publication" {
+					if _, err := tx.Exec(t.Context(), `SELECT id FROM nodes WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{bad.ProjectID, good.ProjectID}); err != nil {
+						return err
+					}
 					// Force deterministic claim ordering for the NULL next_at rows.
 					if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET id=$2 WHERE id=$1`, bad.ID, "10000000-0000-4000-8000-000000000010"); err != nil {
 						return err
