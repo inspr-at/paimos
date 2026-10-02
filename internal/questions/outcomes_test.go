@@ -267,7 +267,7 @@ func TestOutcomeAvailabilityAndPermissionRevocationRetry(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'answer_only','Answer only') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['questions.read','questions.decide'])`, f.person.TenantID, role); err != nil {
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','questions.read','questions.decide'])`, f.person.TenantID, role); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, limited, role, f.project); err != nil {
