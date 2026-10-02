@@ -1102,7 +1102,10 @@ call it without waiting on itself.
 Protocol writes, including startup and control frames, have a 20-second maximum
 and honor shorter caller deadlines while queued or blocked in the pipe. A canceled
 partial write closes the transport and cleans up its owned process group. Account
-probes also clean up their own descendants and bound inherited-pipe waits. The
+probes also clean up their own descendants and bound inherited-pipe waits. Vendor
+launches bound stderr draining to two seconds after leader exit, including failed
+ownership checks; cleanup signals the launch group before reaping its leader.
+Codex quota capture applies its three-second budget to every protocol write. The
 native Grok proxy rejects headers beyond 4096 bytes before buffering more input.
 The local `run-agent` runner shares the accepted run deadline across the agent
 and `--test-exec`; Stop cancels both phases and waits for owned process cleanup.

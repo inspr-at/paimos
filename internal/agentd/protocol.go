@@ -68,6 +68,12 @@ func pinnedExecutable(path string) (string, error) {
 }
 
 func launchWire(path string, args []string, workspace string, environment []string, protocol string, observe func(AdapterEvent)) (*wireProcess, error) {
+	return launchWireChecked(path, args, workspace, environment, protocol, observe, func(p *wireProcess) error { return p.lifetime.Verify() })
+}
+
+// The per-launch check allows lifecycle tests to place an exit precisely
+// between the initial group check and the retained lifetime's verification.
+func launchWireChecked(path string, args []string, workspace string, environment []string, protocol string, observe func(AdapterEvent), check func(*wireProcess) error) (*wireProcess, error) {
 	if !ownedprocess.TrackingSupported() {
 		return nil, errors.New("safe child lifetime observation unsupported")
 	}
@@ -99,6 +105,8 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	cmd.Stdout = childStdout
 	defer childStdout.Close()
 	cmd.Stderr = io.Discard
+	// Bound exec's stderr copier even if a writer survives group cleanup.
+	cmd.WaitDelay = 2 * time.Second
 	configured := ownedprocess.Configure(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
@@ -115,8 +123,11 @@ func launchWire(path string, args []string, workspace string, environment []stri
 	p := &wireProcess{cmd: cmd, stdin: stdin, stdout: stdout, pending: map[string]chan json.RawMessage{}, readDone: make(chan struct{}), waitDone: make(chan struct{}), observe: observe, protocol: protocol}
 	p.identity = ownedprocess.Identity{ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: time.Now().UTC()}
 	p.lifetime = ownedprocess.Track(cmd)
-	if err := p.lifetime.Verify(); err != nil {
-		_ = cmd.Process.Kill()
+	if err := check(p); err != nil {
+		// Start completed Setpgid and no waiter has reaped the leader yet.
+		// Its reserved PID still identifies this launch's group even when
+		// the leader has exited and verification can no longer observe it.
+		_ = ownedprocess.Signal(cmd, true)
 		_ = p.lifetime.Wait()
 		_ = stdin.Close()
 		_ = stdout.Close()

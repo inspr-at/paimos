@@ -24,7 +24,7 @@ type Fixture struct {
 	exitErr     error
 }
 
-func New(t *testing.T) *Fixture {
+func New(t *testing.T, wrapChild ...func(string) string) *Fixture {
 	t.Helper()
 	dir := t.TempDir()
 	paths := make([]string, 3)
@@ -44,7 +44,11 @@ func New(t *testing.T) *Fixture {
 	f := &Fixture{root: open(paths[0]), child: open(paths[1]), ready: make(chan struct{}), exited: make(chan struct{})}
 	// The descendant holds stdout/stderr and a separate witness descriptor.
 	// Closing exec's own copy pipes cannot falsely satisfy the witness EOF.
-	f.Script = fmt.Sprintf("( exec 3>%q; IFS= read -r finish <%q ) & IFS= read -r finish <%q", paths[2], paths[1], paths[0])
+	child := fmt.Sprintf("exec 3>%q; IFS= read -r finish <%q", paths[2], paths[1])
+	for _, wrap := range wrapChild {
+		child = wrap(child)
+	}
+	f.Script = fmt.Sprintf("( %s ) & IFS= read -r finish <%q", child, paths[0])
 	go func() {
 		defer close(f.exited)
 		alive, err := os.Open(paths[2])
@@ -85,6 +89,8 @@ func (f *Fixture) Ready(t *testing.T) {
 }
 
 func (f *Fixture) ExitRoot() { _, _ = io.WriteString(f.root, "exit\n") }
+
+func (f *Fixture) ExitChild() { _, _ = io.WriteString(f.child, "exit\n") }
 
 func (f *Fixture) AssertExited(t *testing.T) {
 	t.Helper()

@@ -321,7 +321,7 @@ func (a *CodexAdapter) CaptureCapacity(ctx context.Context, key string) []capaci
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-capacity", "version": "1"}}); err != nil {
 		return nil
 	}
-	if p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
+	if p.sendContext(op, map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
 		return nil
 	}
 	raw, err := p.request(op, "jsonrpc", "account/read", map[string]any{"refreshToken": false})
