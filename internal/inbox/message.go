@@ -252,10 +252,10 @@ type Acceptance struct {
 // roll back the caller's transaction. Terminal failure notices intentionally
 // use their separate receipt-free path so failures cannot recurse.
 func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
-	if in.Body == "" || strings.ContainsRune(in.Body, 0) || len(in.Body) > maxBodyRunes*utf8.UTFMax || utf8.RuneCountInString(in.Body) > maxBodyRunes {
+	if in.Body == "" || len(in.Body) > maxBodyRunes*utf8.UTFMax || strings.ContainsRune(in.Body, 0) || utf8.RuneCountInString(in.Body) > maxBodyRunes {
 		return Message{}, badRequest("invalid body")
 	}
-	if in.IdempotencyKey == "" || strings.ContainsRune(in.IdempotencyKey, 0) || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
+	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
 		return Message{}, badRequest("invalid idempotency_key")
 	}
 	var id string

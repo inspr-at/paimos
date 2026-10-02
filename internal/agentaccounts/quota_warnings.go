@@ -162,6 +162,7 @@ func prepareQuotaWarnings(ctx context.Context, tx pgx.Tx, p tenant.Principal, a 
 		if _, err := tx.Exec(ctx, `INSERT INTO account_quota_warning_observations(tenant_id,quota_key,window_key,resource_id,reset_key,reading_at,remaining_percent,resets_at)
           SELECT tenant_id,quota_key,window_key,resource_id,reset_key,greatest(reading_at,recovered_at),CASE WHEN recovered_at IS NULL THEN remaining_percent END,resets_at
           FROM account_quota_warnings WHERE quota_key=$1 AND window_key=$2
+          AND NOT EXISTS(SELECT 1 FROM account_quota_warning_observations WHERE quota_key=$1 AND window_key=$2)
           ORDER BY greatest(reading_at,recovered_at) DESC,(recovered_at IS NULL) DESC,reading_at DESC,remaining_percent,threshold_percent LIMIT 1
           ON CONFLICT(tenant_id,quota_key,window_key) DO NOTHING`, quotaKey, f.WindowKey); err != nil {
 			return nil, err

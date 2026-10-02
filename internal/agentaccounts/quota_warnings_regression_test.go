@@ -117,6 +117,43 @@ func TestQuotaWarningUrgentRecoveryEarlyKeepsAvailabilityWithoutNotice(t *testin
 	}
 }
 
+func TestQuotaWarningUpgradePreservesHistoricalRecoveryWatermark(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "quota-upgrade-recovery", now)
+	project, run := insertProjectRun(t, f.admin, f.runner, f.profile, "Upgrade project")
+	lead := quotaSession(t, f, project, "", nil, "Lead")
+	quotaSession(t, f, project, run, &lead, "Worker")
+	reset := now.Add(time.Hour)
+	fact := quotaFact(t, f, 98, now.Add(2*time.Second), reset)
+	recoveryAt := now.Add(3 * time.Second)
+	// Seed the prior binary's retained receipt directly, without a current
+	// observation. Its reading_at precedes recovered_at, and the healthy
+	// percentage was never retained. An upgrade must keep that evidence.
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO account_quota_warnings(tenant_id,resource_id,quota_key,window_key,reset_key,threshold_percent,severity,suppressed,reading_at,remaining_percent,resets_at,recovered_at)
+        SELECT $1,$2::uuid,$2::uuid::text,'5h',$3,v.threshold,v.severity,v.suppressed,$4,2,$5,$6 FROM (VALUES(3,'urgent',false),(10,'early',true)) v(threshold,severity,suppressed)`, f.admin.TenantID, fact.ResourceID, reset.UTC().Format(time.RFC3339Nano), now, reset, recoveryAt); err != nil {
+		t.Fatal(err)
+	}
+	deliveredAt := now.Add(4 * time.Second)
+	fact.ObservedAt = deliveredAt
+	quotaReport(t, f, fact, deliveredAt)
+	if got := quotaSessionWarnings(t, f, deliveredAt); len(got) != 0 {
+		t.Fatalf("upgrade lost historical recovery evidence: %+v", got)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'quota-warning/%'`); n != 0 {
+		t.Fatalf("upgrade replay sent a new notice: %d", n)
+	}
+	// A genuinely newer reading resumes current availability while preserving
+	// the urgent-only receipt and its early-notification suppression semantics.
+	at := now.Add(5 * time.Second)
+	quotaReport(t, f, quotaFact(t, f, 92, at, reset), at)
+	if got := quotaSessionWarnings(t, f, at); len(got) != 1 || got[0].Severity != "early" || got[0].RemainingPercent != 8 {
+		t.Fatalf("new measured evidence did not replace upgrade watermark: %+v", got)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'quota-warning/%'`); n != 0 {
+		t.Fatalf("upgrade discarded early-notification suppression: %d", n)
+	}
+}
+
 func TestQuotaWarningInboxDeliveryLifecycle(t *testing.T) {
 	for _, reason := range []string{inbox.ReasonNoListener, inbox.ReasonSessionEnded} {
 		t.Run(reason, func(t *testing.T) {
@@ -125,17 +162,23 @@ func TestQuotaWarningInboxDeliveryLifecycle(t *testing.T) {
 			project, run := insertProjectRun(t, f.admin, f.runner, f.profile, "Delivery project")
 			lead := quotaSession(t, f, project, "", nil, "Lead")
 			quotaSession(t, f, project, run, &lead, "Worker")
+			if _, err := adminPool.Exec(t.Context(), `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts) VALUES($1,600,900,8)`, f.admin.TenantID); err != nil {
+				t.Fatal(err)
+			}
 			quotaReport(t, f, quotaFact(t, f, 98, now, now.Add(time.Hour)), now)
 			var message string
 			if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM inbox_messages WHERE tenant_id=$1 AND idempotency_key LIKE 'quota-warning/%'`, f.admin.TenantID).Scan(&message); err != nil {
 				t.Fatal(err)
 			}
 			var queued bool
-			if err := adminPool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM inbox_receipts r JOIN inbox_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id WHERE r.message_id=$1 AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL AND m.fetched_at IS NULL)`, message).Scan(&queued); err != nil {
+			if err := adminPool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM inbox_receipts r JOIN inbox_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id WHERE r.message_id=$1 AND r.state='queued' AND r.deliver_by=m.created_at+interval '600 seconds' AND m.acked_at IS NULL AND m.fetched_at IS NULL)`, message).Scan(&queued); err != nil {
 				t.Fatal(err)
 			}
 			if !queued {
-				t.Fatal("unread quota warning needs a queued receipt and delivery deadline")
+				t.Fatal("unread quota warning needs a queued receipt and the workspace delivery deadline")
+			}
+			if n := scalar(t, f.admin, `SELECT count(*) FROM events WHERE type='inbox.receipt_queued' AND after->>'message_id'='`+message+`'`); n != 1 {
+				t.Fatalf("acceptance must audit one queued receipt: %d", n)
 			}
 			if reason == inbox.ReasonNoListener {
 				// Set a deadline in the known past; do not wait for wall-clock time.
@@ -147,7 +190,7 @@ func TestQuotaWarningInboxDeliveryLifecycle(t *testing.T) {
 				}
 			} else {
 				err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp() WHERE id=$1`, lead); err != nil {
+					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp() WHERE id=$1`, lead); err != nil {
 						return err
 					}
 					return inbox.FailSessionMessages(t.Context(), tx, f.admin.TenantID, lead)
