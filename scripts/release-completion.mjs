@@ -16,6 +16,8 @@ export const BINARIES = [
   'aeon-cli-darwin-arm64', 'aeon-cli-darwin-amd64',
   'aeon-cli-linux-amd64', 'aeon-cli-linux-arm64',
 ];
+// These CGO_ENABLED=0, -trimpath builds must reproduce the tagged source bytes.
+export const STATIC_BINARIES = BINARIES.filter(name => !name.startsWith('paimos-agentd-darwin-'));
 export const ASSETS = [...BINARIES, 'SHA256SUMS'];
 const digestOK = value => /^sha256:[a-f0-9]{64}$/.test(value ?? '');
 const commitOK = value => /^[a-f0-9]{40}$/.test(value ?? '');
@@ -144,6 +146,13 @@ export function complete(release, directory, { write = false, pinEvidence = '' }
   for (const asset of existing?.assets ?? []) bytes.set(asset.name, assetBytes(asset, run));
   const missing = ASSETS.filter(name => !bytes.has(name));
   if (existing && !existing.draft && missing.length) fail('cannot add assets to a published release');
+  // An unsigned pre-seeded asset must not become trusted through our checksum.
+  // Check every static rebuild before creating checksums or mutating the release.
+  for (const name of STATIC_BINARIES) {
+    const rebuilt = readFileSync(join(directory, name));
+    if (bytes.has(name) && !bytes.get(name).equals(rebuilt)) fail(`existing static asset differs from tagged rebuild: ${name}; reserve a new coordinate`);
+    if (!bytes.has(name)) bytes.set(name, rebuilt);
+  }
   for (const name of BINARIES) if (!bytes.has(name)) bytes.set(name, readFileSync(join(directory, name)));
   if (!bytes.has('SHA256SUMS')) bytes.set('SHA256SUMS', Buffer.from(BINARIES.map(name => `${hash(bytes.get(name))}  ${name}\n`).join('')));
   const sums = checksumMap(bytes.get('SHA256SUMS').toString());

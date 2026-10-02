@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ASSETS, BINARIES, REPOSITORY, complete, prepare, restore, checksumMap } from './release-completion.mjs';
+import { ASSETS, BINARIES, STATIC_BINARIES, REPOSITORY, complete, prepare, restore, checksumMap } from './release-completion.mjs';
 
 const version = '261002120000.0.0', tag = `v${version}`, source = 'a'.repeat(40), tooling = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
@@ -148,6 +148,32 @@ test('partial draft reuses the original signed bytes and adds only missing asset
   assert.ok(f.bytes.get(name).equals(original));
   assert.equal(writes(f).length, 8);
   assert.ok(writes(f).every(call => call[2] === 'upload' && !call.includes('--clobber') && !call[4].endsWith(`/${name}`)));
+});
+
+for (const name of STATIC_BINARIES) {
+  for (const withChecksum of [false, true]) test(`pre-seeded ${name} differing from tagged rebuild is refused${withChecksum ? ' even with matching uploaded checksums' : ''}`, () => {
+    const f = fixture(withChecksum ? [name, 'SHA256SUMS'] : [name]);
+    // Simulate a completed upload with valid API integrity and attacker-chosen bytes.
+    f.bytes.set(name, Buffer.from(`pre-seeded unsigned binary: ${name}`));
+    f.bytes.set('SHA256SUMS', Buffer.from(BINARIES.map(binary => `${sha(f.bytes.get(binary))}  ${binary}\n`).join('')));
+    for (const asset of f.state.assets) {
+      asset.size = f.bytes.get(asset.name).length;
+      asset.digest = `sha256:${sha(f.bytes.get(asset.name))}`;
+    }
+    const rebuilt = readFileSync(join(f.dir, name));
+    assert.throws(() => complete(release, f.dir, { write: true }, f.run), /existing static asset differs from tagged rebuild/);
+    assert.deepEqual(writes(f), []);
+    assert.equal(existsSync(join(f.dir, 'SHA256SUMS')), false);
+    assert.ok(readFileSync(join(f.dir, name)).equals(rebuilt));
+  });
+}
+
+test('all six existing static assets byte-match and completion only adds missing assets', () => {
+  const f = fixture(STATIC_BINARIES);
+  assert.equal(STATIC_BINARIES.length, 6);
+  assert.equal(complete(release, f.dir, { write: true }, f.run).status, 'complete');
+  assert.equal(writes(f).length, 3);
+  assert.ok(writes(f).every(call => !STATIC_BINARIES.includes(call[4].split('/').at(-1))));
 });
 
 test('a prior checksum file permits only identical rebuilt missing bytes', () => {

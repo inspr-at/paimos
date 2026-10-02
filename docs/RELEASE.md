@@ -527,8 +527,14 @@ reattesting the index; code fixes to the product require a new coordinate.
 `release-completion.mjs` defaults to read-only planning; workflow asset writes
 explicitly use `complete DIST --write`. It creates a draft if absent, or adds
 only missing draft assets. Existing metadata and uploaded bytes remain
-unchanged. It downloads original assets, verifies their API digest when
-available, then verifies all eight binaries against `SHA256SUMS`. Without an
+unchanged. It downloads original assets and verifies their API digest when
+available. Before any upload or checksum write, all six existing static Linux
+`paimos-agentd` and `aeon-cli` assets must byte-match this run's rebuild from the
+tagged source (`CGO_ENABLED=0`, `-trimpath`, the same `-X` version). Restored
+Darwin agents must pass strict codesign verification, team P66J39QV6V and an
+exact `--version` match to the release coordinate before artifact upload; a
+valid signature from another coordinate is refused. It then verifies all eight
+binaries against `SHA256SUMS`. Without an
 existing checksum file it computes one over the preserved original bytes plus
 new missing binaries. With a checksum file already uploaded, missing rebuilt
 bytes must match it exactly. Uploads never use

@@ -41,6 +41,7 @@ type job struct {
 	}
 	Needs       []string
 	Permissions map[string]string
+	Env         map[string]string
 	Outputs     map[string]string
 	Environment string
 	Steps       []step
@@ -135,6 +136,80 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	}
 	if _, ok := w.Jobs["homebrew-tap"]; ok {
 		t.Fatal("tap stays publication-triggered")
+	}
+}
+
+func TestDarwinRestoreGateRequiresExactReleaseVersion(t *testing.T) {
+	j := readWorkflow(t, "release-completion.yml").Jobs["agentd-darwin"]
+	gateIndex, gate := named(t, j, "Verify darwin signature")
+	if gate.If != "" || gate.Env["VERSION"] != "${{ needs.prepare.outputs.version }}" || j.Env["AEON_DEVELOPER_ID_TEAM"] != "P66J39QV6V" {
+		t.Fatal("restored and newly signed binaries must verify the exact prepared version and team")
+	}
+	for i, s := range j.Steps {
+		if strings.HasPrefix(s.Uses, "actions/upload-artifact@") && i <= gateIndex {
+			t.Fatal("Darwin verification must precede artifact upload")
+		}
+	}
+	const version = "261002120000.0.0"
+	for _, arch := range []string{"arm64", "amd64"} {
+		for _, tc := range []struct {
+			name, embedded, team             string
+			signed, probeFails, ok, executed bool
+		}{
+			{"same-coordinate", version, "P66J39QV6V", true, false, true, true},
+			{"signed-other-coordinate", "261001120000.0.0", "P66J39QV6V", true, false, false, true},
+			{"version-suffix", version + "-other", "P66J39QV6V", true, false, false, true},
+			{"failed-version-probe", version, "P66J39QV6V", true, true, false, true},
+			{"wrong-team", version, "OTHERTEAM00", true, false, false, false},
+			{"invalid-signature", version, "P66J39QV6V", false, false, false, false},
+		} {
+			t.Run(arch+"/"+tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				binDir := filepath.Join(dir, "release-source", "dist")
+				if err := os.MkdirAll(binDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				// Model a valid Developer ID signature independently of the embedded
+				// coordinate; only the version probe distinguishes the older release.
+				codesign := `#!/bin/bash
+case "$1" in
+  --verify) [ "$SIGNATURE_OK" = true ] ;;
+  -dv) printf 'TeamIdentifier=%s\n' "$SIGNED_TEAM" >&2 ;;
+  *) exit 1 ;;
+esac
+`
+				binary := `#!/bin/bash
+[ "$1" = --version ] || exit 1
+printf 'executed\n' >> "$TRACE"
+printf 'paimos-agentd %s\n' "$BINARY_VERSION"
+[ "$VERSION_FAIL" != true ]
+`
+				asset := "paimos-agentd-darwin-" + arch
+				for path, content := range map[string]string{filepath.Join(dir, "codesign"): codesign, filepath.Join(binDir, asset): binary} {
+					if err := os.WriteFile(path, []byte(content), 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				trace := filepath.Join(dir, "trace")
+				cmd := exec.Command("bash", "-c", gate.Run)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ASSET_NAME="+asset,
+					"VERSION="+version, "AEON_DEVELOPER_ID_TEAM=P66J39QV6V", "SIGNED_TEAM="+tc.team,
+					"SIGNATURE_OK="+map[bool]string{true: "true", false: "false"}[tc.signed], "BINARY_VERSION="+tc.embedded,
+					"VERSION_FAIL="+map[bool]string{true: "true", false: "false"}[tc.probeFails], "TRACE="+trace)
+				output, err := cmd.CombinedOutput()
+				if (err == nil) != tc.ok {
+					t.Fatalf("Darwin gate success %v, want %v: %s", err == nil, tc.ok, output)
+				}
+				if tc.signed && !tc.probeFails && tc.team == "P66J39QV6V" && !tc.ok && !strings.Contains(string(output), "version does not match") {
+					t.Fatalf("validly signed stale agent must fail the version check: %s", output)
+				}
+				_, err = os.Stat(trace)
+				if (err == nil) != tc.executed {
+					t.Fatal("the version probe must run only after signature and team verification")
+				}
+			})
+		}
 	}
 }
 

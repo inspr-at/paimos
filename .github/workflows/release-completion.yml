@@ -193,10 +193,16 @@ jobs:
       - name: Verify darwin signature
         env:
           ASSET_NAME: paimos-agentd-darwin-${{ matrix.arch }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           codesign --verify --strict "release-source/dist/$ASSET_NAME"
           codesign -dv --verbose=4 "release-source/dist/$ASSET_NAME" 2>&1 | grep -Fx "TeamIdentifier=$AEON_DEVELOPER_ID_TEAM"
+          agent_version="$("release-source/dist/$ASSET_NAME" --version)"
+          if [ "$agent_version" != "paimos-agentd $VERSION" ]; then
+            echo "::error::darwin agent version does not match the release coordinate"
+            exit 1
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agentd-darwin-${{ matrix.arch }}
