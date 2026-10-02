@@ -7,7 +7,7 @@ import { accountPlan, gauge, pct, when, whenFull, type AccountRow, type Gauge, t
 import { reworkDetail, reworkPercent } from './deliveryRating.ts'
 import { compactCount, formatCount, formatUSD, type TokenParts, type UsageDashboard, type UsageWork, type WasteItem, type WorkGroup } from './usageFormat.ts'
 
-export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi' }
+export const HARNESS: Record<string, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', cursor: 'Cursor', pi: 'Pi', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 export const harnessName = (h: string) => HARNESS[h] ?? (h ? h[0].toUpperCase() + h.slice(1) : h)
 export const plural = (n: number, one: string, many = `${one}s`) => `${formatCount(n)} ${n === 1 ? one : many}`
 

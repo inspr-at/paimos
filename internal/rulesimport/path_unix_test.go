@@ -111,7 +111,7 @@ func TestDoctrineAncestorAndLeafSwaps(t *testing.T) {
 
 func TestDoctrinePreflightOpensNothingForbidden(t *testing.T) {
 	root := t.TempDir()
-	for _, relative := range []string{".ssh/AGENTS.md", ".inspr/AGENTS.md", "Secrets/AGENTS.md", ".config/AGENTS.md", "transcripts/AGENTS.md", "credentials/AGENTS.md", "data.age/AGENTS.md", ".env", "data.gpg", "ar1-api.json", "notes.txt", "AGENTS.md.key", "unknown.md"} {
+	for _, relative := range []string{".ssh/AGENTS.md", ".inspr/AGENTS.md", "Secrets/AGENTS.md", ".config/AGENTS.md", ".gemini/AGENTS.md", ".opencode/AGENTS.md", "transcripts/AGENTS.md", "credentials/AGENTS.md", "data.age/AGENTS.md", ".env", "data.gpg", "ar1-api.json", "notes.txt", "AGENTS.md.key", "unknown.md"} {
 		t.Run(relative, func(t *testing.T) {
 			path := writeDoc(t, root, relative, "FORBIDDEN-SYNTHETIC-CONTENT")
 			opens := 0

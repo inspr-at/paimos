@@ -500,12 +500,12 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 	if s.DisconnectAll || s.View.ComputerState != "connected" {
 		return e.progress(s), errors.New("Add harness requires a connected computer")
 	}
-	if len(candidates) == 0 || len(candidates) > 5 {
-		return e.progress(s), errors.New("select a signed-in harness account")
+	if len(candidates) == 0 || len(candidates) > 7 {
+		return e.progress(s), errors.New("select a harness account or explicit local profile")
 	}
 	selected := map[string]bool{}
 	for _, c := range candidates {
-		if selected[c.Harness] || c.Login != "signed_in" || !safeLabel.MatchString(c.Label) {
+		if selected[c.Harness] || !candidateEnrollable(c) || !safeLabel.MatchString(c.Label) {
 			return e.progress(s), errors.New("invalid Add harness account choice")
 		}
 		selected[c.Harness] = true
@@ -572,7 +572,7 @@ func renewsExistingPin(s *snapshot, candidates []Candidate) bool {
 		return false
 	}
 	c := candidates[0]
-	if c.Harness == "claude" || c.Harness == "grok" || c.Login != "signed_in" {
+	if c.Harness == "claude" || c.Harness == "grok" || !candidateReady(c) {
 		return false
 	}
 	for _, a := range s.View.Enrollments {

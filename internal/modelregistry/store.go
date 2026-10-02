@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -22,16 +23,17 @@ const (
 
 // Profile is one immutable model pin.
 type Profile struct {
-	ID        string    `json:"id"`
-	Slug      string    `json:"slug"`
-	Version   string    `json:"version"`
-	Harness   string    `json:"harness"`
-	Family    string    `json:"family"`
-	Model     string    `json:"model"`
-	Effort    string    `json:"effort"`
-	Tier      string    `json:"tier"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Slug        string    `json:"slug"`
+	Version     string    `json:"version"`
+	Harness     string    `json:"harness"`
+	Family      string    `json:"family"`
+	Model       string    `json:"model"`
+	Effort      string    `json:"effort"`
+	EffortLevel *int      `json:"effort_level,omitempty"`
+	Tier        string    `json:"tier"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Route is one step in a role ladder. A non-available state suppresses the
@@ -66,7 +68,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return ensureAdditionalCatalog(ctx, tx, p)
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
 		return err
@@ -75,7 +77,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return ensureAdditionalCatalog(ctx, tx, p)
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -118,6 +120,9 @@ func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWr
 		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
 		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier).
 		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	if out.Harness == "gemini" {
+		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
+	}
 	return out, err
 }
 
@@ -143,6 +148,9 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 		var profile Profile
 		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt); err != nil {
 			return nil, err
+		}
+		if profile.Harness == "gemini" {
+			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
 		}
 		out = append(out, profile)
 	}
@@ -180,7 +188,7 @@ func validateProfile(in profileWrite) error {
 	if in.Version == "" || len(in.Version) > 64 || strings.ContainsAny(in.Version, "\x00\r\n") {
 		return fail(http.StatusBadRequest, "invalid version")
 	}
-	if !validHarness(in.Harness) || (!validFamily(in.Family) && !(in.Harness == "pi" && in.Family == "unknown")) || !validTier(in.Tier) {
+	if !validHarness(in.Harness) || (!validFamily(in.Family) && !((in.Harness == "pi" || in.Harness == "opencode") && in.Family == "unknown")) || !validTier(in.Tier) {
 		return fail(http.StatusBadRequest, "invalid harness, family or tier")
 	}
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {
@@ -188,6 +196,14 @@ func validateProfile(in profileWrite) error {
 	}
 	if len(in.Effort) > 32 || !effortRE.MatchString(in.Effort) {
 		return fail(http.StatusBadRequest, "invalid effort")
+	}
+	if in.Harness == "gemini" {
+		if _, err := harnesslaunch.GeminiBudgetForModel(in.Model, in.Effort); err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+	}
+	if in.Harness == "opencode" && !strings.Contains(in.Model, "/") {
+		return fail(http.StatusBadRequest, "OpenCode requires provider/model")
 	}
 	return nil
 }

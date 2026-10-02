@@ -835,7 +835,7 @@ const assigneeWorkerEligible = `s.stopped_at IS NULL
 
 // assigneeHarnessLabel is who()'s last resort: the harness word plus " agent".
 const assigneeHarnessLabel = `CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
-        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
+        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok' WHEN 'gemini' THEN 'Gemini CLI' WHEN 'opencode' THEN 'OpenCode'
         ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent'`
 
 // assigneeShownExpr is the name this caller would see for session s: a

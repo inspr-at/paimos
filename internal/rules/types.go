@@ -51,7 +51,7 @@ const MaxTLDRBytes = 300
 
 var identityPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`)
 var Roles = []string{"coordinator", "builder", "reviewer", "operator"}
-var Harnesses = []string{"claude-code", "codex", "grok", "pi", "cursor"}
+var Harnesses = []string{"claude-code", "codex", "grok", "pi", "cursor", "gemini", "opencode"}
 
 type Scope struct {
 	Layer     string `json:"layer"`

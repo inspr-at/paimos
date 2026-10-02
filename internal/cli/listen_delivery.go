@@ -43,7 +43,7 @@ func (rt *runtime) doMessaging(ctx context.Context, method, path string, body, d
 
 func localMessagingAdapter(name string) bool {
 	switch name {
-	case "codex", "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "claude_resume", "claude_channel", "claude":
+	case "codex", "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "agentd_gemini", "agentd_opencode", "claude_resume", "claude_channel", "claude":
 		return true
 	}
 	return false
@@ -208,7 +208,7 @@ func deliverLocalMessaging(ctx context.Context, adapter string, work inbox.Deliv
 			result.FallbackReason = "unsupported"
 		}
 		return result, runLocalMessagingCommand(ctx, "claude", []string{"-p", flag, work.TargetRef}, strings.NewReader(body))
-	case "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor":
+	case "agentd_codex", "agentd_claude", "agentd_pi", "agentd_cursor", "agentd_gemini", "agentd_opencode":
 		return deliverAgentdMessaging(ctx, adapter, work)
 	case "claude_channel":
 		return localDeliveryResult{}, &localUnavailable{reason: "not_steerable"}
