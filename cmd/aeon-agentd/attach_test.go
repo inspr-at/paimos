@@ -44,11 +44,12 @@ func TestAttachApprovalNoticeNamesWhereToApproveAndPrefillsOnlyDigits(t *testing
 	expires := now.Add(10 * time.Minute)
 	got := attachApprovalNotice("https://aeon.example", "123456789", &expires, now)
 	for _, want := range []string{
-		"Waiting for your approval in Aeon (expires in 10 min).",
-		"Open https://aeon.example/agents \u2192 Attach session and enter code 123-456-789",
-		"\n  https://aeon.example/agents#attach=123456789\n",
-		"you still approve",
-		"Keep this terminal open; Ctrl-C detaches.",
+		"Waiting for your approval in Aeon · expires in 10 min",
+		"Where  aeon.example/agents \u2192 Decision Desk",
+		"Code   123 456 789",
+		"\x1b]8;;https://aeon.example/agents#attach=123456789\x1b\\https://aeon.example/agents#attach=123456789\x1b]8;;\x1b\\\n",
+		"you still review and allow",
+		"Keep this terminal open. Ctrl-C cancels the request.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("notice lacks %q:\n%s", want, got)
@@ -95,9 +96,9 @@ func TestAttachEndStatesAreNamed(t *testing.T) {
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 	for _, tc := range []struct{ state, previous, want string }{
-		{"unreachable", "pending", "expired before it was approved"},
-		{"unreachable", "approved", "expired before it was approved"},
-		{"detached", "pending", "declined or cancelled in Aeon"},
+		{"unreachable", "pending", "expired before it was allowed"},
+		{"unreachable", "approved", "expired before it was allowed"},
+		{"detached", "pending", "declined in Aeon or cancelled"},
 		{"detached", "approved", "approval was withdrawn"},
 		{"confirmed_exited", "active", "session exited"},
 		{"detached", "active", "Attach: detached"},
@@ -111,15 +112,15 @@ func TestAttachEndStatesAreNamed(t *testing.T) {
 		expires  *time.Time
 		want     string
 	}{
-		{"pending", at(-time.Second), "expired before it was approved"},
-		{"pending", at(3 * time.Second), "expired before it was approved"},
+		{"pending", at(-time.Second), "expired before it was allowed"},
+		{"pending", at(3 * time.Second), "expired before it was allowed"},
 		{"pending", at(5 * time.Minute), "declined, cancelled or expired in Aeon"},
 		{"pending", nil, "declined, cancelled or expired in Aeon"},
 		{"approved", at(5 * time.Minute), "approval ended before the attach started"},
 		{"active", nil, "lost contact"},
 	} {
 		err := attachPollFailure(tc.previous, tc.expires, now)
-		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "run attach again") {
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "run attach again") && !strings.Contains(err.Error(), "run aeon-agentd attach again") {
 			t.Fatalf("%s: %v lacks %q", tc.previous, err, tc.want)
 		}
 	}
@@ -131,8 +132,8 @@ func TestAttachStateLines(t *testing.T) {
 		statusOnly  bool
 		want        string
 	}{
-		{"approved", "aeon", false, "Approved in Aeon. Connecting"},
-		{"approved", attachwatch.ConsentLocalAuth, false, "Waiting for local confirmation on the paired Mac; nothing is shared yet"},
+		{"approved", "aeon", false, "Allowed in Aeon. Connecting"},
+		{"approved", attachwatch.ConsentLocalAuth, false, "Confirm with Touch ID on this Mac; nothing is shared yet"},
 		{"active", "aeon", false, "New turns are shared"},
 		{"active", "aeon", true, "Session status is reported"},
 	} {
@@ -276,5 +277,16 @@ func TestAttachBrowserFailureDisableAndInvalidURLs(t *testing.T) {
 				t.Fatal("raw opener error printed")
 			}
 		})
+	}
+}
+
+func TestAttachCancellationNamesWhetherAnythingWasShared(t *testing.T) {
+	for _, state := range []string{"pending", "approved"} {
+		if got := attachCancelledLine(state); got != "Cancelled. Nothing was shared; Aeon shows the request as cancelled." {
+			t.Fatal(got)
+		}
+	}
+	if got := attachCancelledLine("active"); got != "Detached. Nothing more is shared." {
+		t.Fatal(got)
 	}
 }

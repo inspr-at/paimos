@@ -3,6 +3,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, myPermissions } from '../lib/authz'
+import type { AttachQueueRow, AttachReview } from '../lib/attachWatch'
 import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
@@ -98,7 +99,11 @@ const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidd
 // ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
 const showSetup = computed(() => agents.loaded && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
 const pageTitle = ref<HTMLElement>()
-const waiting = computed(() => agents.needsCount + capacity.signins.length)
+const attachCount = ref(0)
+const attachRows = ref<AttachQueueRow[]>([])
+const attachHistory = ref<AttachQueueRow[]>([])
+const waiting = computed(() => agents.needsCount + capacity.signins.length + attachCount.value)
+function reviewAttach(request: AttachReview) { attachDialog.value?.show(request, attachRows.value.map(row => row.review)) }
 
 // ---------- Resources and people ----------
 function resource(approval: Approval): Resource {
@@ -138,7 +143,14 @@ let foldHadFocus = false
 function foldNeeds(el: Element, done: () => void) {
   const card = el as HTMLElement
   foldHadFocus = card.contains(document.activeElement)
-  if (reducedMotion() || !card.parentElement) { done(); return }
+  // The app owns this fold; native anchoring must not correct its scroll offset.
+  const scroller = card.closest<HTMLElement>('main'), anchor = scroller?.style.overflowAnchor ?? ''
+  if (scroller) scroller.style.overflowAnchor = 'none'
+  const remove = () => {
+    done()
+    requestAnimationFrame(() => { if (scroller) scroller.style.overflowAnchor = anchor })
+  }
+  if (reducedMotion() || !card.parentElement) { remove(); return }
   const px = (value: string) => parseFloat(value) || 0
   const style = getComputedStyle(card)
   const edges = px(style.borderTopWidth) + px(style.borderBottomWidth) + px(style.paddingTop) + px(style.paddingBottom)
@@ -146,7 +158,7 @@ function foldNeeds(el: Element, done: () => void) {
   Object.assign(card.style, { height: `${card.offsetHeight}px`, minHeight: '0', overflow: 'clip' })
   void card.offsetHeight
   Object.assign(card.style, { transition: 'height .28s cubic-bezier(.4, 0, .2, 1), margin-bottom .28s cubic-bezier(.4, 0, .2, 1), opacity .2s ease', height: '0px', marginBottom: `${-(gap + edges)}px`, opacity: '0' })
-  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); done() }
+  const finish = () => { clearTimeout(timer); card.removeEventListener('transitionend', ended); remove() }
   const ended = (event: TransitionEvent) => { if (event.target === card && event.propertyName === 'height') finish() }
   const timer = setTimeout(finish, 450)
   card.addEventListener('transitionend', ended)
@@ -311,7 +323,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         </div>
         <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
       </div>
-      <AttachApproval ref="attachDialog" hide-trigger @changed="attachPending?.refresh()" />
+      <AttachApproval ref="attachDialog" hide-trigger :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
       <FloatingPanel v-if="headerMenu" :anchor="headerMenu.anchor" align="end" :width="300" :label="headerMenu.type === 'add' ? 'Add agent or computer' : 'More agent actions'" @close="restore => { if (restore) headerMenu?.anchor.focus(); headerMenu = null }">
         <div role="menu" class="header-menu" @keydown="menuKeys">
           <template v-if="headerMenu.type === 'add'">
@@ -336,15 +348,16 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
          page does not jump as each read lands. -->
     <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
-        <AttachPending ref="attachPending" :now="agents.now" @review="request => attachDialog?.show(request)" />
+        <AttachPending ref="attachPending" :now="agents.now" @count="count => attachCount = count" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
         <Transition :css="false" @leave="foldNeeds" @after-leave="needsFolded">
           <ApprovalQueue
-            v-if="agents.loaded && (waiting || settling)"
-            ref="queue" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
+            v-if="agents.loaded && (waiting || settling || rows.length)"
+            ref="queue" :attaches="rows" :attach-history="attachHistory" :pending="agents.pending" :held="agents.held" :signins="capacity.signins" :history="history" :now="agents.now" :loaded="agents.loaded"
             :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
-            @focus-row="id => cursor = id" @open-agent="openAgent" @settling="active => settling = active" @announce="announce"
+            @review-attach="request => { attachRows = rows; reviewAttach(request) }" @dismiss-attach="id => attachPending?.dismiss(id)" @focus-row="id => cursor = id" @open-agent="openAgent" @settling="active => settling = active" @announce="announce"
           />
         </Transition>
+        </AttachPending>
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
@@ -357,7 +370,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <ApprovalQueue
-          v-if="agents.loaded && !waiting && !settling && history.length" history-only
+          v-if="agents.loaded && !waiting && !settling && !attachRows.length && (history.length || attachHistory.length)" history-only :attach-history="attachHistory"
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />

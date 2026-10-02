@@ -206,25 +206,31 @@ async function sendRequest() {
           <button type="button" class="icon-btn flat" aria-label="Close" @click="closeSheet"><AppIcon name="close" :size="15" /></button>
         </header>
         <div class="sheet-body">
-          <form v-if="editing" class="sheet-form" @submit.prevent="submit(editing)">
+          <form v-if="editing" :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit(editing)">
             <input v-if="editing === 'rename'" :id="`${uid}-setting`" v-model="settingValue" maxlength="128" :disabled="waiting" autocomplete="off" :aria-label="settingNames[editing]" />
             <select v-else :id="`${uid}-setting`" v-model="settingValue" :aria-label="settingNames[editing]" :disabled="waiting || loadingSettings || !settingChoices.length">
               <option value="" disabled>Choose {{ settingNames[editing].toLowerCase() }}</option>
               <option v-for="value in settingChoices" :key="value" :value="value">{{ value }}</option>
             </select>
             <p v-if="editing !== 'rename' && !loadingSettings && !settingChoices.length" class="hint">No compatible choices in this account’s catalog.</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!validValue || waiting || loadingSettings || !!unavailable">Save {{ settingNames[editing].toLowerCase() }}</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
-          <form v-else class="sheet-form" @submit.prevent="submit('steer')">
+          <form v-else :id="`${uid}-sheet-form`" class="sheet-form" @submit.prevent="submit('steer')">
             <label :for="`${uid}-steer`">What should change?</label>
             <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />
             <p :id="`${uid}-help`" class="hint">{{ session.harness === 'claude' ? 'Queues your message for the next turn and interrupts the current one.' : 'Adds your message to the running turn.' }}</p>
-            <div class="sheet-actions"><button type="submit" class="btn primary" :disabled="!canSteer || waiting || !!unavailable">Send steer</button><button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button></div>
           </form>
           <p v-if="sheetOpen && feedback" class="feedback" role="status">{{ feedback }}</p>
           <p v-if="sheetOpen && error" class="hint" role="alert">{{ error }}</p>
-          <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
         </div>
+        <footer class="pinned-actions">
+          <div class="sheet-recovery-slot">
+            <div v-if="sheetOpen && uncertain" class="sheet-actions"><button type="button" class="btn ghost" :disabled="busy" @click="check()">Check result</button><button v-if="request" type="button" class="btn ghost" :disabled="busy" @click="sendRequest">Retry same request</button></div>
+          </div>
+          <div class="sheet-actions">
+            <button type="submit" :form="`${uid}-sheet-form`" class="btn primary" :disabled="!!unavailable || waiting || (editing ? !validValue || loadingSettings : !canSteer)">{{ editing ? `Save ${settingNames[editing].toLowerCase()}` : 'Send steer' }}</button>
+            <button type="button" class="btn ghost" :disabled="waiting" @click="closeSheet">Cancel</button>
+          </div>
+        </footer>
       </div>
     </dialog>
   </section>
@@ -255,16 +261,19 @@ summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px
 .overflow-menu :deep(.mi-text small){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-3);line-height:1.35}
 .menu-note{margin:4px 10px 6px;padding-top:8px;border-top:1px solid var(--line);overflow-wrap:anywhere}
 .overflow-menu:not(:has([role="menuitem"])) .menu-note{border-top:0;padding-top:0}
-.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:auto;max-height:min(88dvh, var(--vv-h, 88dvh));margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
+.steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:var(--vv-h, 100dvh);max-height:var(--vv-h, 100dvh);margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
 .steer-sheet::backdrop{background:var(--scrim)}
-.sheet-card{display:flex;flex-direction:column;max-height:min(88dvh, var(--vv-h, 88dvh));border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
+.sheet-card{display:flex;flex-direction:column;height:100%;max-height:100%;border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
 .grabber{align-self:center;width:40px;height:4px;margin-top:8px;border-radius:999px;background:var(--line-2)}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}
 .sheet-head .icon-btn{width:44px;height:44px}
-.sheet-body{display:grid;gap:10px;padding:4px 16px calc(16px + env(safe-area-inset-bottom))}
+.sheet-body{position:relative;flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
 .sheet-lead{margin:0;font-size:14px}
 .sheet-actions{display:flex;gap:8px}
+.sheet-form{flex:none;min-height:0;display:flex;flex-direction:column}
+.sheet-recovery-slot{height:44px;overflow:auto}
+.pinned-actions{display:flex;flex-direction:column;gap:8px;flex:none;padding:12px 16px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
 .sheet-actions .btn{flex:1;min-height:44px}
 @media(max-width:720px){
   .managed-controls{gap:8px;padding-top:8px}

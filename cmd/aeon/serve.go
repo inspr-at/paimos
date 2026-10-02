@@ -66,6 +66,7 @@ import (
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
+	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -209,6 +210,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("greetings: %w", err)
 	}
 	fileStore := attachments.Store{FilesDir: cfg.FilesDir}
+	attachmentsMod := attachments.New(pool, fileStore)
+	attachmentsMod.Sandbox = attachments.NewSandbox(cfg.PublicURL, cfg.HTMLSandboxOrigin, authMod.PreviewSessionLease)
 	var confirmationMod *confirmation.Module
 	pluginRegistry, err := plugins.BuiltinWithRegistration(func(reg *plugins.Registry) error {
 		var err error
@@ -303,9 +306,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	go reviewMod.RunStatusReporter(ctx)
 	api := &httpapi.Server{
-		Pool:      pool,
-		Brand:     &productBrand,
-		PublicURL: cfg.PublicURL,
+		Pool:                    pool,
+		Brand:                   &productBrand,
+		PublicURL:               cfg.PublicURL,
+		AttachmentSandboxOrigin: attachmentsMod.Sandbox.Origin(),
 		// AEON-430: the footer names the running release from /api/version.
 		Codename: historyMod.CodenameOf,
 		Web:      webFS,
@@ -326,7 +330,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
-			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			attachmentsMod,
 			greetingsMod,
 			knowledge.New(pool),
 			projectgroups.New(pool),
@@ -346,6 +350,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
+			questions.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
 			pairingMod,
@@ -386,7 +391,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		ln = listened
 	}
 	srv := &http.Server{
-		Handler:           agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide),
+		Handler:           attachmentsMod.WrapSandbox(agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

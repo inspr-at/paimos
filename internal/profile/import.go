@@ -242,25 +242,12 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				size = cfg.Height
 			}
 			crop := Crop{X: (cfg.Width - size) / 2, Y: (cfg.Height - size) / 2, Size: size}
-			original, variants, err := ProcessAvatar(body, crop)
+			original, hashes, err := storeAvatarData(ctx, job.Store, tenantID, body, crop)
 			if err != nil {
 				return report, err
 			}
-			store := job.Store
-			store.MaxSize = 0
-			saved, err := store.Put(ctx, tenantID, bytes.NewReader(original))
-			if err != nil {
-				return report, err
-			}
-			after.AvatarOriginalHash = saved.SHA256
-			after.AvatarHashes = map[string]string{}
-			for size, b := range variants {
-				saved, err := store.Put(ctx, tenantID, bytes.NewReader(b))
-				if err != nil {
-					return report, err
-				}
-				after.AvatarHashes[fmt.Sprint(size)] = saved.SHA256
-			}
+			after.AvatarOriginalHash = original
+			after.AvatarHashes = hashes
 		}
 		// Serialize target writes, re-read and apply the classic snapshot only to
 		// fields present in the source. A replay with equal values appends no event.
