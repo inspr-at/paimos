@@ -42,6 +42,7 @@ func TestAccountEventHistoryAndSSEUseCurrentOwnerSharing(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbtest.BindLegacy(t, d, peer.TenantID, peer.ID)
+	dbtest.BindLegacy(t, d, owner.TenantID, owner.ID)
 	m := New(d.App).(*module)
 	page, err := m.read(t.Context(), peer, "", event.ID-1, 5)
 	if err != nil {

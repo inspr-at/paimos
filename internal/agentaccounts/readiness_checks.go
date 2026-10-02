@@ -154,6 +154,24 @@ func requestCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string,
 		return c, err
 	}
 	if fresh {
+		tag, err := tx.Exec(ctx, `INSERT INTO account_readiness_check_waits(tenant_id,check_id,resource_id,window_key,wait_id)
+            SELECT f.tenant_id,$1,f.resource_id,f.window_key,f.wait_id FROM account_readiness_facts f
+            JOIN account_readiness_memberships m ON m.tenant_id=f.tenant_id AND m.resource_id=f.resource_id
+            WHERE m.account_id=$2 AND m.binding_revision=$3 AND f.wait_id IS NOT NULL AND NOT f.early_recovery_used
+            AND (f.stop_kind='money_402' OR (f.stop_kind='unnamed' AND f.denial_reason IN ('','vendor_denied')))
+            ORDER BY f.resource_id,f.window_key LIMIT 33`, c.ID, id, a.LinkRevision)
+		if err != nil {
+			return c, err
+		}
+		if tag.RowsAffected() > 32 {
+			return c, fail(503, "too many recovery waits")
+		}
+		c.EarlyRecoveryRequested = tag.RowsAffected() > 0
+		if _, err := tx.Exec(ctx, `UPDATE account_readiness_checks SET early_recovery_requested=$2 WHERE id=$1`, c.ID, c.EarlyRecoveryRequested); err != nil {
+			return c, err
+		}
+	}
+	if fresh {
 		// Event counter is last; no later writes acquire resource locks.
 		err = writeEvent(ctx, tx, p, "account.check_requested", nil, map[string]any{"account_id": id, "binding_revision": a.LinkRevision, "check_id": c.ID, "actor_principal_id": p.ID})
 	}

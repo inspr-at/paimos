@@ -68,10 +68,10 @@ func TestReadinessMigrationPreservesOldAccountAndAllowanceWrites(t *testing.T) {
 			t.Fatalf("new account resource seed %d", members)
 		}
 		var protected int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM pg_class WHERE relname=ANY($1::text[]) AND relrowsecurity AND relforcerowsecurity`, []string{"account_readiness_resources", "account_readiness_memberships", "account_readiness_facts", "account_readiness_checks", "account_readiness_check_keys"}).Scan(&protected); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM pg_class WHERE relname=ANY($1::text[]) AND relrowsecurity AND relforcerowsecurity`, []string{"account_readiness_resources", "account_readiness_memberships", "account_readiness_facts", "account_readiness_checks", "account_readiness_check_keys", "account_readiness_check_waits"}).Scan(&protected); err != nil {
 			return err
 		}
-		if protected != 5 {
+		if protected != 6 {
 			t.Fatalf("tenant RLS protection count %d", protected)
 		}
 		return nil

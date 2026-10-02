@@ -73,7 +73,7 @@ CREATE TABLE account_readiness_checks (
     requested_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     completed_at timestamptz,
     result text CHECK (result IN ('success','unsupported','timeout','protocol','launch_failed','identity_mismatch','authentication_failed')),
-    early_recovery_requested boolean NOT NULL DEFAULT true,
+    early_recovery_requested boolean NOT NULL DEFAULT false,
     PRIMARY KEY (tenant_id,id),
     UNIQUE (tenant_id,account_id,id,binding_revision),
     FOREIGN KEY (tenant_id,account_id) REFERENCES agent_accounts(tenant_id,id),
@@ -100,6 +100,23 @@ CREATE TABLE account_readiness_check_keys (
 );
 
 CREATE INDEX account_readiness_check_keys_check ON account_readiness_check_keys(tenant_id,check_id);
+
+-- Freeze the waits present when a person requested recovery. A later vendor
+-- stop cannot inherit an earlier click. B consumes the facts' canonical wait
+-- marker, shared with expiry recovery, never the check request itself.
+CREATE TABLE account_readiness_check_waits (
+    tenant_id uuid NOT NULL REFERENCES tenants(id),
+    check_id uuid NOT NULL,
+    resource_id uuid NOT NULL,
+    window_key text NOT NULL,
+    wait_id uuid NOT NULL,
+    PRIMARY KEY (tenant_id,check_id,resource_id,window_key),
+    FOREIGN KEY (tenant_id,check_id) REFERENCES account_readiness_checks(tenant_id,id),
+    FOREIGN KEY (tenant_id,resource_id,window_key) REFERENCES account_readiness_facts(tenant_id,resource_id,window_key)
+);
+ALTER TABLE account_readiness_check_waits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_readiness_check_waits FORCE ROW LEVEL SECURITY;
+CREATE POLICY account_readiness_check_waits_tenant ON account_readiness_check_waits USING (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid) WITH CHECK (tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 
 ALTER TABLE account_readiness_resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE account_readiness_resources FORCE ROW LEVEL SECURITY;

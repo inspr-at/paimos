@@ -289,8 +289,16 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		reader := p
 		reader.Scopes = scopes
-		if err := authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}); err != nil {
-			return fail(403, "account probe permission required")
+		if !hasScope(scopes, "account.probe") {
+			return fail(403, "account probe scope required")
+		}
+		// Existing opaque enrollments historically authorize probes by their
+		// live key scope and registering principal. Preserve that protocol;
+		// the additive readiness report also requires current role authority.
+		if in.Readiness != nil {
+			if err := authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}); err != nil {
+				return fail(403, "account probe permission required")
+			}
 		}
 		var reportErr error
 		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)

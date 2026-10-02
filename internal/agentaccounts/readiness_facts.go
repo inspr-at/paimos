@@ -186,11 +186,11 @@ func storeReadinessFact(ctx context.Context, tx pgx.Tx, a Account, v ReadinessFa
         reported_by_account_id=EXCLUDED.reported_by_account_id,binding_revision=EXCLUDED.binding_revision,source=EXCLUDED.source,observed_at=EXCLUDED.observed_at,
         reading_at=COALESCE(EXCLUDED.reading_at,account_readiness_facts.reading_at),used_percent=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.used_percent ELSE EXCLUDED.used_percent END,
         remaining=CASE WHEN EXCLUDED.reading_at IS NULL THEN account_readiness_facts.remaining ELSE EXCLUDED.remaining END,credit_state=CASE WHEN EXCLUDED.reading_at IS NULL AND account_readiness_facts.credit_state='exhausted' THEN account_readiness_facts.credit_state ELSE EXCLUDED.credit_state END,
-        resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR ($17=false AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
-        stop_kind=CASE WHEN account_readiness_facts.stop_kind='money_402' OR ($17=false AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.stop_kind ELSE EXCLUDED.stop_kind END,
-        denial_reason=CASE WHEN account_readiness_facts.stop_kind='money_402' OR ($17=false AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.denial_reason ELSE EXCLUDED.denial_reason END,
-        wait_id=CASE WHEN account_readiness_facts.stop_kind<>'none' THEN account_readiness_facts.wait_id ELSE EXCLUDED.wait_id END,
-        next_attempt_at=CASE WHEN account_readiness_facts.stop_kind<>'none' THEN account_readiness_facts.next_attempt_at ELSE EXCLUDED.next_attempt_at END
+        resets_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none' AND account_readiness_facts.stop_kind<>'none') THEN account_readiness_facts.resets_at ELSE EXCLUDED.resets_at END,
+        stop_kind=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.stop_kind ELSE EXCLUDED.stop_kind END,
+        denial_reason=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at) AND EXCLUDED.stop_kind='none') THEN account_readiness_facts.denial_reason ELSE EXCLUDED.denial_reason END,
+        wait_id=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)) THEN account_readiness_facts.wait_id ELSE EXCLUDED.wait_id END,
+        next_attempt_at=CASE WHEN account_readiness_facts.stop_kind='money_402' OR (account_readiness_facts.stop_kind='unnamed' AND NOT ($17 AND EXCLUDED.reading_at>account_readiness_facts.observed_at)) THEN account_readiness_facts.next_attempt_at ELSE EXCLUDED.next_attempt_at END
         WHERE EXCLUDED.observed_at>account_readiness_facts.observed_at`, aTenant(ctx), v.ResourceID, v.WindowKey, a.ID, a.LinkRevision, v.Source, v.ObservedAt, v.ResetsAt, v.ReadingAt, v.UsedPercent, v.CreditState, v.Remaining, v.StopKind, v.DenialReason, waitID, next, room)
 	return err
 }

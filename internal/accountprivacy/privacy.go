@@ -23,12 +23,12 @@ func Load(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) (Pol
 		return nil, errors.New("too many account privacy targets")
 	}
 	rows, err := tx.Query(ctx, `SELECT a.id::text,
-      (a.share_usage OR (a.owner_person_id=$2::uuid AND $3='person') OR (a.registered_by_principal_id=$2::uuid AND $3='agent'))
+      COALESCE((a.share_usage OR (a.owner_person_id=$2::uuid AND $3='person') OR (a.registered_by_principal_id=$2::uuid AND $3='agent')),false)
       AND NOT EXISTS (SELECT 1 FROM agent_accounts peer WHERE peer.id<>a.id AND (
         (a.quota_pool_fingerprint<>'' AND peer.quota_pool_fingerprint=a.quota_pool_fingerprint) OR
         EXISTS(SELECT 1 FROM account_readiness_memberships m JOIN account_readiness_memberships pm ON pm.tenant_id=m.tenant_id AND pm.resource_id=m.resource_id
           WHERE m.account_id=a.id AND m.binding_revision=a.link_revision AND pm.account_id=peer.id AND pm.binding_revision=peer.link_revision))
-        AND NOT (peer.share_usage OR (peer.owner_person_id=$2::uuid AND $3='person') OR (peer.registered_by_principal_id=$2::uuid AND $3='agent')))
+        AND NOT COALESCE((peer.share_usage OR (peer.owner_person_id=$2::uuid AND $3='person') OR (peer.registered_by_principal_id=$2::uuid AND $3='agent')),false))
       FROM agent_accounts a WHERE a.id=ANY($1::uuid[])`, ids, p.ID, string(p.Kind))
 	if err != nil {
 		return nil, err
@@ -185,6 +185,16 @@ func mask(obj map[string]any) {
 		delete(obj, key)
 	}
 	// Old account timestamps are nullable in the published contract.
+	if _, ok := obj["remaining_fraction"]; ok {
+		obj["remaining_fraction"] = nil
+	}
+	if _, ok := obj["unavailable_reasons"]; ok {
+		reasons := []string{}
+		if available, _ := obj["available"].(bool); !available {
+			reasons = append(reasons, "unavailable")
+		}
+		obj["unavailable_reasons"] = reasons
+	}
 	if _, ok := obj["last_probe_at"]; ok {
 		obj["last_probe_at"] = nil
 	}

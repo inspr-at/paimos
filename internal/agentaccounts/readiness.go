@@ -44,6 +44,7 @@ var readinessReasonOrder = []string{"owner_required", "approval_required", "paus
 
 func ProjectReadiness(in ReadinessInput) AccountReadiness {
 	out := AccountReadiness{AccountID: in.AccountID, State: "unknown", CanTry: true, ReasonCodes: []string{}, CheckedAt: in.CheckedAt}
+	unknownMeasurement := false
 	reasons := map[string]bool{}
 	for _, r := range in.HardReasons {
 		reasons[r] = true
@@ -75,6 +76,9 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 			}
 		}
 		fresh := f.ReadingAt != nil && !in.Now.Before(*f.ReadingAt) && in.Now.Sub(*f.ReadingAt) <= 10*time.Minute && (f.ResetsAt == nil || in.Now.Before(*f.ResetsAt))
+		if f.WindowKey != "check" && (!fresh || f.UsedPercent == nil && f.Remaining == nil) {
+			unknownMeasurement = true
+		}
 		if fresh && (f.UsedPercent != nil || f.Remaining != nil) {
 			out.MeasuredUsage = append(out.MeasuredUsage, f)
 		}
@@ -103,7 +107,7 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 			out.CanTry = false
 		}
 	}
-	if len(out.MeasuredUsage) == 0 {
+	if len(out.MeasuredUsage) == 0 || unknownMeasurement {
 		out.ReasonCodes = append(out.ReasonCodes, UsageUnknownReason)
 	} else {
 		out.State = "ready"

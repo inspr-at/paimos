@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -62,6 +63,7 @@ func TestReadinessProjectionUnknownAndHardFacts(t *testing.T) {
 func readinessWorld(t *testing.T, slug string, now time.Time) limitFixture {
 	t.Helper()
 	f := limitWorldAt(t, slug, 3, now)
+	dbtest.BindRole(t, testDB, f.runner.TenantID, f.runner.ID, "admin")
 	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3 WHERE id=$1`, f.account.ID, f.admin.ID, now); err != nil {
 		t.Fatal(err)
 	}
