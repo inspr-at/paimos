@@ -18,13 +18,17 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
-	ID           string // principals.id (uuid)
-	TenantID     string // tenants.id (uuid)
-	Kind         PrincipalKind
-	Name         string
-	Roles        []string // e.g. "admin", "member"
-	Scopes       []string // authenticated agent key's outer permission ceiling
-	KeyCreatorID string   // creator's live binding further narrows an agent key
+	ID                    string // principals.id (uuid)
+	TenantID              string // tenants.id (uuid)
+	Kind                  PrincipalKind
+	Name                  string
+	Roles                 []string // e.g. "admin", "member"
+	Scopes                []string // authenticated agent key's outer permission ceiling
+	KeyCreatorID          string   // creator's live binding further narrows an agent key
+	KeyID                 string   // authenticated key identity, never the bearer secret
+	OwnerWorkstation      bool     // explicit designation; authz rechecks live binding
+	WorkstationComputerID string
+	WorkstationGeneration int64
 }
 
 type ctxKey struct{}

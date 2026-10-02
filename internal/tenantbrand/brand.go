@@ -134,7 +134,7 @@ func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Prin
 			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		if p.Kind != tenant.Person {
+		if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 			httpapi.WriteError(w, http.StatusForbidden, "person required")
 			return
 		}

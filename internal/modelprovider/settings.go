@@ -129,7 +129,7 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, in Write) (Confi
 	}
 	var out Config
 	err := db.InTenant(db.AllProjects(ctx, "workspace embedding reindex"), s.pool, p.TenantID, func(tx pgx.Tx) error {
-		if p.Kind != tenant.Person {
+		if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 			return fault(403, "person required")
 		}
 		if err := authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}); err != nil {

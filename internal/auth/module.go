@@ -89,6 +89,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("PUT /api/agent-keys/{id}/owner-workstation", m.handleOwnerWorkstation)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -134,10 +135,30 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		if kind == credAgent {
 			if err := m.pairingBoundary(r, p); err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
+				if errors.Is(err, authz.ErrForbidden) {
+					writeForbidden(w)
+					return
+				}
 				agentpairing.WriteError(w, err)
 				return
 			}
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" {
+			scope, controlled := coreAgentScope(r)
+			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
+				scope, controlled = authz.RoutePermissions[r.Pattern], true
+			}
+			if !controlled || scope == "" {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
 				} else {
@@ -176,6 +197,12 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if errors.Is(err, authz.ErrForbidden) {
 					if receiptRoute(r) {
 						writeReceiptNotFound(w)
@@ -188,6 +215,10 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			r = r.WithContext(ctx)
+		}
+		if authz.OwnerWorkstation(p) {
+			m.serveWorkstation(w, r, p, next)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

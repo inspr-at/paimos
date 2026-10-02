@@ -68,4 +68,29 @@
 // business/customer/admin and public-capability paths when a key is presented.
 // Empty scope lists grant nothing. Anonymous public calls retain their normal
 // behavior. Person sessions are governed by role and module checks.
+// AEON-580 adds one explicitly Owner-marked workstation key per tenant. It
+// remains an agent, bound to a connected redeemed computer and its pinned P-256
+// key. Ordinary keys and all person-only rules above remain unchanged unless
+// their permission is in authz.OwnerWorkstationPermission. Marking never grants
+// a role or scopes. Ownership transfer, customer portal authority and decisions
+// on the same agent's approvals remain unavailable. A mark generation fences
+// in-flight requests across unmark/re-mark; all handler transactions recheck the
+// current key, pairing, role and creator under the tenant fence.
+//
+// High-risk writes return 428 with a two-minute, single-use challenge. The proof
+// is standard-base64 ASN.1 ECDSA P-256/SHA-256 over the UTF-8 concatenation of the
+// nonce and action_digest hex strings, passed as Aeon-Step-Up: id.signature.
+// The digest binds tenant/key/agent/computer, method, URI/query, body hash and
+// conditional headers. One pending challenge per key bounds storage. Access
+// audit events record admission/denial, not a claim that the mutation succeeded.
+// Client/device prompting belongs to AEON-581; the backend never accepts boolean
+// consent, a request-supplied public key or person impersonation.
+//
+// DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
+// metadata; workstation_computer_id is a personal device link, located by
+// (tenant_id,principal_id,id). owner_workstation_challenges is tenant scoped;
+// key_id/principal_id/computer_id are personal links, nonce is a short-lived
+// secret, public_key/action_digest/id/expires_at are security metadata. No body,
+// signature, Touch ID biometric or submitted prose is retained. Audit events
+// use the existing append-only events retention and principal locator.
 package auth

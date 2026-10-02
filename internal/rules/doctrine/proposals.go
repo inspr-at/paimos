@@ -561,7 +561,7 @@ func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permissio
 	})
 }
 func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, error) {
-	if actor.Kind != tenant.Person || actor.KeyCreatorID != "" {
+	if (actor.Kind != tenant.Person || actor.KeyCreatorID != "") && !authz.OwnerWorkstation(actor) {
 		return nil, authz.ErrForbidden
 	}
 	var in struct {
@@ -576,6 +576,9 @@ func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, 
 	// Approval intent survives an uncertain merge response. An already merged
 	// PR is an observation, never a new approval attributed to this person.
 	_, err := m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
+		if authz.OwnerWorkstation(actor) && (p.ProposedBy == actor.ID || p.SubmittedBy == actor.ID || p.EditedBy == actor.ID) {
+			return "", authz.ErrForbidden
+		}
 		if in.Head != p.HeadSHA {
 			return "", fail(409, "stale_head", "Reload the PR before approving its current commit.")
 		}

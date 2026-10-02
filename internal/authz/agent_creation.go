@@ -29,7 +29,7 @@ var errAgentRole = errors.New("role is not available for agents in this scope")
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !OwnerWorkstation(p) {
 		apiFail(w, 403, "forbidden", "", "Only people may create agents")
 		return
 	}

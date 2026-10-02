@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ import (
 // resources are reachable; pairing never grants tenant administration.
 func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 	return db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if authz.OwnerWorkstation(p) {
+			_, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
+			return err
+		}
 		paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
 		if err != nil || !paired {
 			return err

@@ -73,7 +73,7 @@ func forceConfirmation(s Session) string {
 	return fmt.Sprintf("force stop %s on %s group %d", s.ID, s.Host, s.ProcessOwnership.GroupID)
 }
 func (m *Module) forceStop(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return nil, workorders.Fail(403, "human force-stop confirmation required")
 	}
 	if err := authz.RequireTx(r.Context(), tx, p, "harness.force_stop", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {

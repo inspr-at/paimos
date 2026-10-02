@@ -84,7 +84,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 			writeFailure(w, fail(400, "invalid_scope", "invalid set UUID"))
 			return
 		}
-		if permission == "rules.publish" && p.Kind != tenant.Person {
+		if permission == "rules.publish" && p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 			writeFailure(w, authz.ErrForbidden)
 			return
 		}
@@ -350,7 +350,7 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 	if err := authz.RequireTx(ctx, tx, p, action, authz.Scope{ProjectID: s.ProjectID, AnyProject: action == "rules.read" && s.ProjectID == ""}); err != nil {
 		return err
 	}
-	if action == "rules.publish" && p.Kind != tenant.Person {
+	if action == "rules.publish" && p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	owner, err := actorOwner(ctx, tx, p)
@@ -426,7 +426,7 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 	}
 	if action != "rules.read" {
 		if s.Layer == "company" {
-			if p.Kind != tenant.Person {
+			if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 				return authz.ErrForbidden
 			}
 			return authz.RequireTx(ctx, tx, p, "rules.publish", authz.Scope{})
