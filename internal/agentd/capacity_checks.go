@@ -64,7 +64,14 @@ type CapacityCheckReport struct {
 }
 type capacityChecksAPI interface {
 	PollCapacityChecks(context.Context) ([]CapacityCheckAccount, error)
+	CapacityCheckHeartbeat(context.Context, string, string, string) error
 	ReportCapacityCheck(context.Context, string, string, string, ProbeStatus, CapacityCheckReport) error
+}
+
+func (r *Remote) CapacityCheckHeartbeat(ctx context.Context, account, daemon, generation string) error {
+	return r.capacityCheckJSON(ctx, http.MethodPost, "/api/agent-accounts/"+url.PathEscape(account)+"/probe", map[string]any{
+		"daemon_id": daemon, "daemon_generation": generation, "available": false, "measurement_only": true,
+	}, nil)
 }
 
 func (r *Remote) PollCapacityChecks(ctx context.Context) ([]CapacityCheckAccount, error) {
@@ -97,7 +104,7 @@ func (r *Remote) ReportCapacityCheck(ctx context.Context, account, daemon, gener
 	if !boundedCapacityResult(report.Result) || report.BindingRevision < 0 || len(report.Facts) > 32 || report.Result != "success" && len(report.Facts) > 0 {
 		return errors.New("invalid capacity check report")
 	}
-	body := map[string]any{"daemon_id": daemon, "daemon_generation": generation, "available": status.OK, "readiness": report}
+	body := map[string]any{"daemon_id": daemon, "daemon_generation": generation, "available": status.OK, "readiness": report, "measurement_only": true}
 	if !status.OK {
 		body["failure"] = ProbeUnavailable
 		if status.Failure == ProbeAuthFailed {
@@ -155,7 +162,7 @@ func (r *Remote) capacityCheckJSON(ctx context.Context, method, path string, bod
 	return nil
 }
 
-// Retry state and pending manual completions survive restarts. No vendor
+// Retry state and every pending completion survive restarts. No vendor
 // payload, credential, owner identity or execution permit is stored here.
 type capacityCheckState struct {
 	Revision           int64                    `json:"binding_revision"`
@@ -309,7 +316,7 @@ func (s *Supervisor) captureCapacityChecks(ctx context.Context, now time.Time) {
 		if !heartbeat {
 			// Commit this generation without a check first; package A intentionally
 			// rolls the whole probe back when an old-generation check accompanies it.
-			if err := s.api.Probe(ctx, local.ID, s.daemonID, s.generation, true); err != nil {
+			if err := api.CapacityCheckHeartbeat(ctx, local.ID, s.daemonID, s.generation); err != nil {
 				logCapacityError("capacity restart heartbeat failed", local.ID, err)
 				continue
 			}
@@ -345,8 +352,9 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 	}
 	manual := checkRequestCurrent(account.PendingCheck, account, s.generation, now) && saved.HandledCheck != account.PendingCheck.ID
 	refresh := s.capacityCheckRefresh[local.ID]
-	// Discard an old-generation completion, never rebind it after restart.
-	if saved.Pending != nil && (saved.Pending.Generation != s.generation || !checkRequestCurrent(account.PendingCheck, account, s.generation, now) || saved.Pending.Report.CheckID != account.PendingCheck.ID) {
+	// Manual requests belong to their original generation/deadline. Automatic
+	// observations remain useful after restart while the binding is unchanged.
+	if saved.Pending != nil && !capacityCompletionCurrent(*saved.Pending, account, s.generation, now) {
 		saved.Pending = nil
 	}
 	pending := saved.Pending
@@ -472,9 +480,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		saved.NextAttempt = now.Add(checkRetry(saved.Failures))
 	}
 	completion := capacityCheckCompletion{Generation: s.generation, Report: report}
-	if manual {
-		saved.Pending = &completion
-	}
+	saved.Pending = &completion
 	s.mu.Lock()
 	s.capacityChecks[local.ID] = saved
 	err = s.saveCapacityChecksLocked()
@@ -488,7 +494,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 		if s.loginRequired[local.ID] {
 			s.probeFailureReasons[local.ID] = ProbeAuthFailed
 		}
-	} else if report.Result == "success" && identityFailure {
+	} else if report.Result == "success" && identityFailure && s.probedAccounts[local.ID] {
 		s.blockedAccounts[local.ID] = false
 		s.loginRequired[local.ID] = false
 		delete(s.probeFailureReasons, local.ID)
@@ -504,6 +510,25 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 	if capture.Result == "success" {
 		s.rememberCapacityCapture(local.ID, capture.Readings)
 	}
+}
+
+func capacityCompletionCurrent(c capacityCheckCompletion, a CapacityCheckAccount, generation string, now time.Time) bool {
+	if c.Report.BindingRevision != a.LinkRevision {
+		return false
+	}
+	if c.Report.CheckID != "" && (c.Generation != generation || !checkRequestCurrent(a.PendingCheck, a, generation, now) || c.Report.CheckID != a.PendingCheck.ID) {
+		return false
+	}
+	for _, fact := range c.Report.Facts {
+		member := false
+		for _, resource := range a.Resources {
+			member = member || resource.ID == fact.ResourceID && resource.BindingRevision == a.LinkRevision
+		}
+		if !member {
+			return false
+		}
+	}
+	return true
 }
 
 func validCapacityCapture(c CapacityCapture, now time.Time) bool {
@@ -585,7 +610,7 @@ func (s *Supervisor) finishCapacityCheck(ctx context.Context, local EnrolledAcco
 	current := false
 	for _, a := range latest {
 		if a.ID == local.ID && currentCheckAccount(local, a, s.daemonID) && a.LinkRevision == completion.Report.BindingRevision {
-			current = completion.Report.CheckID == "" || checkRequestCurrent(a.PendingCheck, a, s.generation, s.capacityNow()) && a.PendingCheck.ID == completion.Report.CheckID
+			current = capacityCompletionCurrent(completion, a, s.generation, s.capacityNow())
 		}
 	}
 	if !current {

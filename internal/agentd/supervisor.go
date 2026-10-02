@@ -347,6 +347,14 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err := s.loadCapacityChecks(); err != nil {
 		return nil, err
 	}
+	if _, checks := s.api.(capacityChecksAPI); checks {
+		if pi, ok := s.adapters[Pi].(*PiAdapter); ok {
+			pi.probeMu.Lock()
+			pi.capacityManaged = true
+			pi.probes = map[string]piProbeResult{}
+			pi.probeMu.Unlock()
+		}
+	}
 	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
 	for _, account := range s.accounts {
 		s.probePendingSince[account.ID] = s.startedAt

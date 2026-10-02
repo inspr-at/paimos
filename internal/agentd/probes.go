@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -241,18 +240,45 @@ func (a *PiAdapter) ProbeStatus(ctx context.Context, key string) (bool, error) {
 }
 
 func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, error) {
+	op, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ctx = op
+	a.probeMu.Lock()
+	managed := a.capacityManaged && a.Providers[key] == "openrouter"
+	a.probeMu.Unlock()
+	if !managed {
+		release, err := a.acquireProbe(ctx, key)
+		if err != nil {
+			return false, err
+		}
+		defer release()
+	}
+	return a.probeOwned(ctx, key, fresh, managed)
+}
+
+// The same bounded owner serializes standalone health requests and captures.
+// Supervised health never enters the network lane, so neither polling nor a
+// fresh launch can bypass the scheduler's persisted measurement retry policy.
+func (a *PiAdapter) acquireProbe(ctx context.Context, key string) (func(), error) {
 	a.probeMu.Lock()
 	if a.probeLocks == nil {
-		a.probeLocks = map[string]*sync.Mutex{}
+		a.probeLocks = map[string]chan struct{}{}
 	}
 	lock := a.probeLocks[key]
 	if lock == nil {
-		lock = &sync.Mutex{}
+		lock = make(chan struct{}, 1)
 		a.probeLocks[key] = lock
 	}
 	a.probeMu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, openrouter.ErrUnavailable
+	}
+}
+
+func (a *PiAdapter) probeOwned(ctx context.Context, key string, fresh, managed bool) (bool, error) {
 	// Report permission errors distinctly, before localHome rejects the profile.
 	if info, err := os.Stat(a.Homes[key]); err == nil && info.IsDir() && info.Mode().Perm()&0077 != 0 {
 		return false, piprobe.ErrPrivateProfile
@@ -291,7 +317,11 @@ func (a *PiAdapter) probe(ctx context.Context, key string, fresh bool) (bool, er
 			// No prompt or completion. The key stays inside the local profile reader.
 			err = launcherReady(ctx, a.Path, node.Path, piprobe.Environment(home, node.Path))
 			if err == nil {
-				credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+				if managed {
+					err = agentsetup.ValidateOpenRouterProfile(home)
+				} else {
+					credits, err = agentsetup.OpenRouterCredits(ctx, home, a.OpenRouter)
+				}
 				// A transport/measurement failure says nothing about the locally
 				// configured key's validity. Keep execution health independent;
 				// typed idle checks report the measurement failure separately.

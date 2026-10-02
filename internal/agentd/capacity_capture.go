@@ -174,6 +174,14 @@ func (a *PiAdapter) CaptureCapacityResult(ctx context.Context, key string) Capac
 	if !a.CanCaptureCapacity(key) {
 		return CapacityCapture{Result: "unsupported"}
 	}
+	op, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ctx = op
+	release, err := a.acquireProbe(ctx, key)
+	if err != nil {
+		return captureError(ctx)
+	}
+	defer release()
 	home, err := localHome(a.Homes, key)
 	if err != nil {
 		return CapacityCapture{Result: "launch_failed"}

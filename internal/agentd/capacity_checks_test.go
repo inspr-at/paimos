@@ -68,6 +68,9 @@ func (a *checkFixtureAPI) Probe(_ context.Context, _, _, generation string, avai
 	}
 	return nil
 }
+func (a *checkFixtureAPI) CapacityCheckHeartbeat(ctx context.Context, account, daemon, generation string) error {
+	return a.Probe(ctx, account, daemon, generation, true)
+}
 func (a *checkFixtureAPI) ReportCapacityCheck(_ context.Context, account, daemon, generation string, status ProbeStatus, report CapacityCheckReport) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

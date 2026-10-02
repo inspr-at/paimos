@@ -114,7 +114,7 @@ func (c Credits) Valid() bool {
 	return true
 }
 func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
-	if len(key) < 8 || len(key) > 1024 || !keyRE.MatchString(key) {
+	if !ValidKey(key) {
 		return nil, ErrKey
 	}
 	var body struct {
@@ -139,6 +139,9 @@ func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
 	}
 	return out, nil
 }
+
+// ValidKey checks local syntax only; it makes no claim about provider acceptance.
+func ValidKey(key string) bool { return len(key) >= 8 && len(key) <= 1024 && keyRE.MatchString(key) }
 
 type Catalog struct {
 	Client  Client

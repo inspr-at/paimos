@@ -310,7 +310,10 @@ type PiAdapter struct {
 	Nodes      map[string]piprobe.Node
 	probeMu    sync.Mutex
 	probes     map[string]piProbeResult
-	probeLocks map[string]*sync.Mutex
+	probeLocks map[string]chan struct{}
+	// In a supervised daemon only the durable capacity scheduler owns /key.
+	// Health and launch qualification inspect the local profile and launcher.
+	capacityManaged bool
 }
 
 type piProbeResult struct {

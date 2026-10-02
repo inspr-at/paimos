@@ -839,9 +839,14 @@ a time and never interrupts a live managed run. Operations have a ten-second
 deadline and bounded owned-process cleanup; unconfirmed cleanup retains the
 local dispatch fence. Measurement failures retry after 1, 2 and 4 minutes, then
 every 30 minutes; the retry deadline survives restart. Check now can request one
-capture before that deadline. Lost manual completions replay the same revision
-and check ID without another capture. A restarted daemon sends a plain heartbeat
-before handling checks, and drops old-generation or expired requests. Consent
+capture before that deadline. Every completion is persisted before delivery.
+Lost automatic observations replay unchanged after restart while their binding
+and resource membership remain current; manual completions keep their original
+generation, revision and check ID and are dropped when expired or invalidated.
+A restarted daemon sends a measurement-only generation heartbeat before handling
+checks. Measurement reports and this heartbeat preserve the health probe's
+timestamp, availability, failure and legacy credit snapshot under the server's
+account write fence, so delayed observations cannot clear a newer health failure. Consent
 and binding are checked again after capture; the final server write enforces
 revocation. Unknown usage never introduces a start limit; identity mismatch
 remains a hard failure. Recovery execution belongs to admission, not this loop.
@@ -858,6 +863,10 @@ remaining credit unknown, and an unavailable measurement does not invalidate a
 locally configured key. No /credits request or management key is introduced;
 null-cap checks and transport errors cannot clear a provider-confirmed 402 stop.
 An explicit zero key cap stays exhausted even when `/key` omits remaining.
+In a supervised daemon the capacity scheduler alone owns `/key`; health polls
+and fresh launch qualification inspect the local profile and launcher without
+another provider request. They cannot bypass the persisted 1/2/4/30-minute
+measurement backoff. Standalone probes and captures share a bounded request owner.
 Legacy Pi credit probes also populate the durable key facts, so replacing the
 credit snapshot with a null cap cannot erase a previously confirmed stop.
 Readings with room expire after ten minutes; quota at 100%, zero key caps and
