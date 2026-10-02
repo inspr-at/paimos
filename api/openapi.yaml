@@ -7671,7 +7671,19 @@ paths:
       security: [{session: []}]
       parameters: [{name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 200}}]
       responses:
-        '200': {description: External matches, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+        '200':
+          description: External matches; the response remains an array. Availability headers identify unavailable providers when results are partial.
+          headers:
+            X-CRM-Provider-Availability:
+              description: JSON array of provider_id and state (available or unavailable); excludes provider errors and credentials.
+              schema: {type: string}
+            X-CRM-Partial-Results:
+              description: True when at least one enabled provider could not be searched.
+              schema: {type: boolean}
+          content: {application/json: {schema: {type: array, items: {type: object}}}}
+        '503':
+          description: Every enabled provider is unavailable; availability headers remain present.
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
   /crm/providers/{providerId}/import:
     post:
       operationId: importCRMProviderCustomer
@@ -7680,6 +7692,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [external_id], properties: {external_id: {type: string}}}}}}
       responses:
         '201': {description: Imported customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {description: External identity already imported; unrelated database errors are not masked.}
   /crm/organisations/{organisationId}/sync:
     post:
       operationId: syncCRMProviderCustomer
@@ -7687,6 +7700,8 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+        '409': {description: Provider unavailable; failure status and audit event were persisted.}
+        '503': {description: Provider unavailable and the authorized failure status could not be persisted.}
   /crm/organisations/{organisationId}/sync-status:
     get:
       operationId: getCRMProviderSyncStatus
@@ -7914,7 +7929,7 @@ paths:
     post:
       operationId: finalizeQuoteDraft
       summary: Freeze and issue the exact saved draft atomically
-      description: Admin person only. Does not send email. Creates an immutable document-v1 snapshot with cent-half-up-v1 pricing and digest plus a scoped public link in the same transaction; existing R4 versions retain r4-v1.
+      description: Admin person only. Does not send email. Creates an immutable document snapshot (canonical document-v2 digest; historical document-v1 is retained) with cent-half-up-v1 pricing and digest plus a scoped public link in the same transaction; existing R4 versions retain r4-v1.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteFinalizeWrite'}}}}
@@ -7947,7 +7962,7 @@ paths:
     patch:
       operationId: setQuoteVisibility
       summary: Archive or restore without deleting history
-      description: Admin person only. quote.visibility_changed is reversible through POST /events/{eventId}/undo while the archived state is unchanged.
+      description: Admin person only. quote.visibility_changed is reversible through POST /events/{eventId}/undo while both the archived state and quote revision are unchanged. Historical events lacking a quote revision cannot be undone; use an explicit visibility change.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
@@ -7966,7 +7981,7 @@ paths:
     post:
       operationId: createQuoteVersion
       summary: Freeze a new offer version and its line items
-      description: Locks the quote and checks expected_revision. Rate, quantity, currency and cost-unit references are copied into a content digest; later rate changes do not rewrite this version.
+      description: Locks the quote and checks expected_revision. Archived quotes are read-only and return 409 without creating a version. Rate, quantity, currency and cost-unit references are copied into a content digest; later rate changes do not rewrite this version.
       security: *auth
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersionWrite'}}}}
@@ -11855,7 +11870,7 @@ components:
         content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         created_by_principal_id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
-        digest_mode: {type: string, enum: [r4-v1, document-v1]}
+        digest_mode: {type: string, enum: [r4-v1, document-v1, document-v2]}
         pricing_mode: {type: string, enum: [rate-4, cent-half-up-v1]}
         document: {$ref: '#/components/schemas/QuoteDocument'}
         offer_no: {type: string}

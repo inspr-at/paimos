@@ -16,29 +16,13 @@ import (
 // is saved. Documents that were already digested are not re-encoded: their
 // content hash covers the bytes as they were frozen.
 
-// normalized returns the definition with empty lists and maps instead of nil.
-func (d profileDefinition) normalized() profileDefinition {
-	if d.Fonts == nil {
-		d.Fonts = []profileFont{}
-	}
-	if d.PositionsTable.Columns == nil {
-		d.PositionsTable.Columns = []profileColumn{}
-	}
-	for _, m := range []*map[string]string{&d.Colors, &d.Typography, &d.Cover, &d.Sections, &d.Labels} {
-		if *m == nil {
-			*m = map[string]string{}
-		}
-	}
-	return d
-}
-
 // normalizedSnapshot copies a snapshot with a normalized definition.
 func normalizedSnapshot(s *documentProfileSnapshot) *documentProfileSnapshot {
 	if s == nil {
 		return nil
 	}
 	out := *s
-	out.Definition = s.Definition.normalized()
+	out.Definition = s.Definition.Normalized()
 	return &out
 }
 
@@ -131,7 +115,7 @@ func checkDocumentJSON(raw []byte) error {
 // marshalProfile encodes a definition for a new profile revision and refuses
 // one the editor could not read.
 func marshalProfile(d profileDefinition) ([]byte, error) {
-	raw, err := json.Marshal(d.normalized())
+	raw, err := json.Marshal(d.Normalized())
 	if err != nil {
 		return nil, err
 	}

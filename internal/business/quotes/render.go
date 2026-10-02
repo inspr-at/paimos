@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
@@ -187,7 +188,7 @@ func (m *Module) export(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if v.DigestMode == "document-v1" {
+	if quotedocument.IsDocument(v.DigestMode) {
 		respond(w, 0, nil, conflict("document export is provided by the document renderer"))
 		return
 	}

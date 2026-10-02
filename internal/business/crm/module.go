@@ -284,6 +284,7 @@ func parseUUID(s string) (string, bool) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	err = providerImportError(err)
 	var he *httpError
 	if errors.As(err, &he) {
 		writeBody(w, he.status, he.code, he.message)
@@ -315,4 +316,13 @@ func writeBody(w http.ResponseWriter, status int, code, message string) {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, message})
+}
+
+// A competing import is a normal conflict; unrelated unique violations remain errors.
+func providerImportError(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "crm_external_identity_unique" {
+		return errConflict
+	}
+	return err
 }

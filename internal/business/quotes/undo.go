@@ -99,6 +99,7 @@ func (m *Module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	}
 	var before, after struct {
 		Archived *bool `json:"archived"`
+		Revision int64 `json:"revision"`
 	}
 	if json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil || before.Archived == nil || after.Archived == nil {
 		return events.Change{}, events.ErrConflict
@@ -107,8 +108,13 @@ func (m *Module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if err != nil {
 		return events.Change{}, conflictOr(err)
 	}
-	if q.Archived != *after.Archived {
+	// Historical events without a revision cannot establish freshness. They
+	// remain audit evidence; an explicit visibility edit is the safe alternative.
+	if after.Revision < 1 || q.Revision != after.Revision || q.Archived != *after.Archived {
 		return events.Change{}, events.ErrConflict
+	}
+	if err := m.undoGate(ctx, tx, p); err != nil {
+		return events.Change{}, err
 	}
 	if *before.Archived {
 		_, err = tx.Exec(ctx, `UPDATE business_quotes SET archived_at=clock_timestamp(),archived_by_principal_id=$2::uuid,revision=revision+1 WHERE quote_node_id=$1::uuid`, id, p.ID)
@@ -118,7 +124,7 @@ func (m *Module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if err != nil {
 		return events.Change{}, err
 	}
-	return events.Change{NodeID: &id, Type: "quote.visibility_changed", Before: map[string]any{"archived": q.Archived}, After: map[string]any{"archived": *before.Archived}}, nil
+	return events.Change{NodeID: &id, Type: "quote.visibility_changed", Before: map[string]any{"archived": q.Archived, "revision": q.Revision}, After: map[string]any{"archived": *before.Archived, "revision": q.Revision + 1}}, nil
 }
 
 // A duplicate is undone by deleting the copy, but only while nobody touched it.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -71,7 +72,7 @@ func writeOffer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, orgID st
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,1,$4::uuid) ON CONFLICT (tenant_id,quote_node_id) DO UPDATE SET document=EXCLUDED.document,draft_revision=quote_drafts.draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=EXCLUDED.updated_by_principal_id`, p.TenantID, id, string(raw), p.ID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,$5,$4::uuid) ON CONFLICT (tenant_id,quote_node_id) DO UPDATE SET document=EXCLUDED.document,minimum_writer_version=EXCLUDED.minimum_writer_version,draft_revision=quote_drafts.draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=EXCLUDED.updated_by_principal_id`, p.TenantID, id, string(raw), p.ID, d.MinimumWriterVersion); err != nil {
 		return err
 	}
 	if o.Status == "draft" {
@@ -99,18 +100,12 @@ func writeOffer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, orgID st
 	// Classic offer days and expiration were interpreted in Vienna regardless
 	// of the target tenant's current numbering preference.
 	zone := "Europe/Vienna"
-	digest, err := sha(struct {
-		Mode        string   `json:"mode"`
-		QuoteNodeID string   `json:"quote_node_id"`
-		Version     int      `json:"version"`
-		OfferNo     string   `json:"offer_no"`
-		Document    Document `json:"document"`
-	}{"document-v1", id, version, o.OfferNo, d})
+	digest, err := quotedocument.Digest(quotedocument.DigestMode, id, version, o.OfferNo, d)
 	if err != nil {
 		return err
 	}
 	amount := fmt.Sprintf("%d.%02d", d.NetTotalCents/100, d.NetTotalCents%100)
-	if _, err = tx.Exec(ctx, `INSERT INTO quote_versions(tenant_id,quote_node_id,version,recipient_contact_node_id,currency,title,subtotal,tax_total,total,content_sha256,created_by_principal_id,digest_mode,pricing_mode) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7::numeric,0,$7::numeric,$8,$9::uuid,'document-v1','cent-half-up-v1')`, p.TenantID, id, version, contact, d.Currency, d.Title, amount, digest, p.ID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO quote_versions(tenant_id,quote_node_id,version,recipient_contact_node_id,currency,title,subtotal,tax_total,total,content_sha256,created_by_principal_id,digest_mode,pricing_mode) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6,$7::numeric,0,$7::numeric,$8,$9::uuid,'document-v2','cent-half-up-v1')`, p.TenantID, id, version, contact, d.Currency, d.Title, amount, digest, p.ID); err != nil {
 		return err
 	}
 	sender, _ := json.Marshal(d.Sender)
@@ -140,15 +135,17 @@ func writeOffer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, orgID st
 		}
 		issuedAt = parsed
 	}
-	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "quote.issued", Before: map[string]any{"state": "draft"}, After: map[string]any{"version": version, "content_sha256": digest, "source_status": o.Status}, At: &issuedAt})
-	if err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO quote_issues(tenant_id,quote_node_id,version,issued_by_principal_id,issued_at,event_id) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`, p.TenantID, id, version, p.ID, issuedAt, ev.ID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE business_quotes SET state='issued',revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
-		return err
-	}
-	return nil
+	return queueImportEvent(ctx, func() error {
+		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "quote.issued", Before: map[string]any{"state": "draft"}, After: map[string]any{"version": version, "content_sha256": digest, "source_status": o.Status}, At: &issuedAt})
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO quote_issues(tenant_id,quote_node_id,version,issued_by_principal_id,issued_at,event_id) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5,$6)`, p.TenantID, id, version, p.ID, issuedAt, ev.ID); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE business_quotes SET state='issued',revision=revision+1 WHERE quote_node_id=$1::uuid`, id); err != nil {
+			return err
+		}
+		return nil
+	})
 }
