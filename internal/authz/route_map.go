@@ -24,12 +24,25 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"POST /api/projects/{projectId}/questions":  "questions.ask",
-	"GET /api/projects/{projectId}/questions":   "questions.read",
-	"GET /api/questions/{questionId}":           "questions.read",
-	"GET /api/questions/{questionId}/status":    "questions.read",
-	"POST /api/questions/{questionId}/decision": "questions.decide",
-	"GET /api/decision-desk":                    "questions.read",
+	"GET /api/model-preferences": "models.read",
+	// Level-specific, person-only authority is rechecked under the mutation fence.
+	"PUT /api/model-preferences/levels/{level}":                  "models.read",
+	"DELETE /api/model-preferences/levels/{level}":               "models.read",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read",
+	"GET /api/work-kinds":                                        "models.read",
+	"POST /api/work-kinds":                                       "model_prefs.manage",
+	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",
+	"DELETE /api/work-kinds/{kindId}":                            "model_prefs.manage",
+	"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
+	"POST /api/models/{id}/retire":                               "models.manage",
+	"DELETE /api/models/{id}/retire":                             "models.manage",
+	"POST /api/projects/{projectId}/questions":                   "questions.ask",
+	"GET /api/projects/{projectId}/questions":                    "questions.read",
+	"GET /api/questions/{questionId}":                            "questions.read",
+	"GET /api/questions/{questionId}/status":                     "questions.read",
+	"POST /api/questions/{questionId}/decision":                  "questions.decide",
+	"GET /api/decision-desk":                                     "questions.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",

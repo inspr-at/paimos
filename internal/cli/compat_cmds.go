@@ -39,18 +39,22 @@ type modelCandidate struct {
 }
 
 type modelResolution struct {
-	Role            string           `json:"role"`
-	AuthorFamily    string           `json:"author_family"`
-	Profile         *modelProfile    `json:"profile"`
-	Ladder          []modelCandidate `json:"ladder"`
-	CommandTemplate string           `json:"command_template"`
-	OwnerRequired   bool             `json:"owner_required"`
-	Source          string           `json:"source"`
+	Role            string                         `json:"role"`
+	AuthorFamily    string                         `json:"author_family"`
+	Profile         *modelProfile                  `json:"profile"`
+	Ladder          []modelCandidate               `json:"ladder"`
+	CommandTemplate string                         `json:"command_template"`
+	OwnerRequired   bool                           `json:"owner_required"`
+	Source          string                         `json:"source"`
+	Preference      *modelregistry.PreferenceTrace `json:"preference,omitempty"`
 }
 
 func (rt *runtime) resolveModel(role, author, harness string) error {
+	return rt.resolveModelForTicket(role, author, harness, "")
+}
+func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) error {
 	role = strings.TrimSpace(role)
-	if !modelRoles[role] {
+	if !modelRoles[role] && !(role == "" && ticket != "") {
 		return usagef("unknown model role %q", role)
 	}
 	author, err := modelregistry.NormalizeAuthorFamily(author)
@@ -64,7 +68,13 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if harness != "" && !modelHarnesses[harness] {
 		return usagef("unsupported harness %q", harness)
 	}
-	q := url.Values{"role": {role}}
+	q := url.Values{}
+	if role != "" {
+		q.Set("role", role)
+	}
+	if ticket != "" {
+		q.Set("ticket", ticket)
+	}
 	if author != "" {
 		q.Set("author_family", author)
 	}
@@ -75,7 +85,7 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if err := rt.do(http.MethodGet, "/api/models/resolve?"+q.Encode(), nil, &result); err != nil {
 		return err
 	}
-	if role == "review-gate" && result.Profile != nil && result.Profile.Family == author {
+	if result.Role == "review-gate" && result.Profile != nil && result.Profile.Family == author {
 		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
 	}
 	var profiles []modelProfile
@@ -103,6 +113,9 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 			"owner_required":   result.OwnerRequired,
 			"source":           "instance",
 			"stale":            false,
+		}
+		if result.Preference != nil {
+			out["preference"] = result.Preference
 		}
 		if result.Profile != nil {
 			out["profile"] = map[string]any{
@@ -134,6 +147,23 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 			}
 			fmt.Fprintf(rt.stdout, "%s: %s\n", label, status)
 		}
+	}
+	if !rt.jsonOut && result.Preference != nil {
+		trace := result.Preference
+		fmt.Fprintf(rt.stdout, "Why: %s · %s · set by %s · providers %s", trace.Kind, trace.Bucket, trace.SetBy, trace.Residency.Value)
+		if trace.LockedBy != "" {
+			fmt.Fprintf(rt.stdout, " · locked by %s", trace.LockedBy)
+		}
+		if trace.Residency.LoosenedLock {
+			fmt.Fprint(rt.stdout, " · warning: loosens a provider lock")
+		}
+		if trace.Fallback != "" {
+			fmt.Fprintf(rt.stdout, " · fallback: %s", trace.Fallback)
+		}
+		if trace.Blocked != "" {
+			fmt.Fprintf(rt.stdout, " · blocked: %s", trace.Blocked)
+		}
+		fmt.Fprintln(rt.stdout)
 	}
 	if result.OwnerRequired {
 		return rt.fail(fmt.Errorf("owner approval required; review gate remains closed"), "")

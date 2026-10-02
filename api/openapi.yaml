@@ -6457,6 +6457,179 @@ paths:
         '200': {description: Revoked grant, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /model-preferences:
+    get:
+      operationId: getModelPreferences
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}:
+    put:
+      operationId: replaceModelPreferenceLevel
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceLevel
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}/rows/{kindId}:
+    put:
+      operationId: setModelPreferenceRow
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceRow
+      security: *auth
+      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. Revision 0 means no stored level. Model locks are enforced.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds:
+    get:
+      operationId: listWorkKinds
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}, description: Last ID from the preceding page.}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createWorkKind
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindWrite'}}}}
+      responses:
+        '201': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}:
+    patch:
+      operationId: updateWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPatch'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: archiveWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}/restore:
+    post:
+      operationId: restoreWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /models/{id}/retire:
+    post:
+      operationId: retireModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirementWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: restoreModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /models:
     get:
       operationId: listModelProfiles
@@ -6487,10 +6660,14 @@ paths:
       description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
+        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate]}}
         - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
+        - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
       responses:
         '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -13861,6 +14038,179 @@ components:
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}
             target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
+    ModelSelector:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      properties:
+        mode: {type: string, enum: [auto, latest, pinned]}
+        profile_id: {type: string, format: uuid}
+        family: {type: string, maxLength: 32}
+        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        effort: {type: string, maxLength: 32}
+        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelPreferenceRow:
+      type: object
+      required: [kind_id, locked, normal, complex]
+      properties:
+        kind_id: {type: string, format: uuid}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceRowWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      description: Both selectors required unless locked=true requests copy-on-lock; project locks are forbidden.
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceLevelWrite:
+      type: object
+      additionalProperties: false
+      required: [revision, residency, residency_locked, prefs_locked]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+    ModelPreferenceLevel:
+      type: object
+      required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
+    ModelPreferenceEffective:
+      type: object
+      required: [selector, profile, label, brand, follows_latest, pinned, today_version]
+      properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+        label: {type: string}
+        brand: {type: string}
+        follows_latest: {type: boolean}
+        pinned: {type: boolean}
+        today_version: {type: string}
+        unavailable_reason: {type: string}
+    ModelPreferenceView:
+      type: object
+      required: [residency, rows, changes]
+      properties:
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - {type: object, properties: {qualifying_routes: {type: integer, minimum: 0}}}
+        rows:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [kind_id, set_by, locked_by, changed_here, reset_to, warnings, normal, complex]
+            properties:
+              kind_id: {type: string, format: uuid}
+              set_by: {type: string}
+              locked_by: {type: string}
+              changed_here: {type: boolean}
+              reset_to: {type: string}
+              warnings: {type: array, items: {type: string}}
+              normal: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+              complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+        changes: {type: integer, minimum: 0}
+    ModelPreferences:
+      type: object
+      required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
+      properties:
+        revision: {type: integer, format: int64}
+        person_id: {type: [string, 'null'], format: uuid}
+        kinds: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        levels:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            person: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceLevel'}, {type: 'null'}]}
+        views:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceView'}
+            person: {$ref: '#/components/schemas/ModelPreferenceView'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceView'}, {type: 'null'}]}
+        can:
+          type: object
+          required: [edit_default, edit_person, edit_project, add_default_kind, add_project_kind]
+          properties:
+            edit_default: {type: boolean}
+            edit_person: {type: boolean}
+            edit_project: {type: boolean}
+            add_default_kind: {type: boolean}
+            add_project_kind: {type: boolean}
+        residency_lock_mode: {type: string, const: warn}
+    ModelPreferenceWriteResult:
+      type: object
+      required: [level, revision, running_outside, residency]
+      properties:
+        level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+        revision: {type: integer, format: int64}
+        running_outside: {type: array, items: {type: string, format: uuid}}
+        residency: {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+    WorkKind:
+      type: object
+      required: [id, slug, label, hint, position]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string, maxLength: 48}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+        system: {type: string, enum: [review, security, other]}
+        position: {type: integer}
+        archived_at: {type: string, format: date-time}
+    WorkKindWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+    WorkKindPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        position: {type: integer, minimum: -1000000, maximum: 1000000}
+    WorkKindPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    ModelRetirementWrite:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 200}
+    ModelRetirement:
+      type: object
+      required: [profile_id, retired]
+      properties:
+        profile_id: {type: string, format: uuid}
+        retired: {type: boolean}
+        reason: {type: string, maxLength: 200}
     ModelProfileWrite:
       type: object
       required: [slug, version, harness, family, model, effort, tier]
@@ -13908,10 +14258,15 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        preference: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        residency: {type: string, enum: [any, eu, local]}
     ModelPreferenceTrace:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        role: {type: string}
+        project_id: {type: string, format: uuid}
+        ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:
           type: object

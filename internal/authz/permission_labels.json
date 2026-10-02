@@ -28,6 +28,7 @@
     "stage": "stages",
     "stage_handoffs": "stage handoffs",
     "inbox": "messages",
+    "model_prefs": "model preferences",
     "models": "models",
     "plugins": "plugins",
     "imports": "imports",

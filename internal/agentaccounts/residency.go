@@ -105,3 +105,33 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	}
 	return ids, nil
 }
+
+// ResidencyRouteCount counts account/profile routes with valid residency and
+// model allowance. Capacity is transient and does not change this evidence
+// count. Load account metadata once for the whole editor view.
+func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (int, error) {
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for profileID, harness := range profiles {
+		fs, err := loadFences(ctx, tx, harness)
+		if err != nil {
+			return 0, err
+		}
+		for _, a := range applyFence(accounts, fs, projectID) {
+			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
+				continue
+			}
+			class, err := ResidencyClass(ctx, tx, a, profileID, now)
+			if err != nil {
+				return 0, err
+			}
+			if modelprefs.Strictness(class) >= modelprefs.Strictness(requirement) {
+				count++
+			}
+		}
+	}
+	return count, nil
+}

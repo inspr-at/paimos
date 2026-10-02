@@ -84,6 +84,10 @@ var ProjectFilteredRoutes = map[string]bool{
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
 var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/work-kinds":                           true,
+	"PATCH /api/work-kinds/{kindId}":                 true,
+	"DELETE /api/work-kinds/{kindId}":                true,
+	"POST /api/work-kinds/{kindId}/restore":          true,
 	"POST /api/queue":                                true,
 	"POST /api/queue/reset":                          true,
 	"POST /api/queue/next":                           true,

@@ -91,6 +91,26 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+## Model preferences
+
+`aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
+complexity and role through Default → You → Project preferences and prints a
+why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
+commands are read-only; role-only `model resolve build` retains its existing
+advisory response.
+
+The API exposes `/api/model-preferences`, level and row PUT/DELETE routes,
+`/api/work-kinds` and profile retirement at `/api/models/{id}/retire`.
+Use a level's returned `revision` for edits and the DELETE `revision` query
+parameter (0 for an absent level). People edit their canonical You slice;
+Default and Project changes require `model_prefs.manage`, and agents only read.
+Provider locks permit lower choices and flag a loosening in the view and trace.
+Tightening stamps active runs without stopping turns; `running_outside` identifies
+starting/running turns outside the new setting. Stamps never loosen. EU/local
+routes require valid account evidence; without it, work waits with `residency`.
+Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
+matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open

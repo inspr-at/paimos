@@ -28,6 +28,9 @@ type WorkQuery struct {
 	TicketResidency  string
 }
 type PreferenceTrace struct {
+	Role                 string                     `json:"role,omitempty"`
+	ProjectID            string                     `json:"project_id,omitempty"`
+	TicketRequirement    string                     `json:"ticket_requirement,omitempty"`
 	Kind                 string                     `json:"kind"`
 	KindSource           string                     `json:"kind_source"`
 	Complexity           string                     `json:"complexity"`
