@@ -167,7 +167,7 @@ func (b *signinLog) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b
 
 func TestCallbackFailureRedirects(t *testing.T) {
 	reset(t)
-	insertTenant(t, "inspr", "INSPR")
+	tid := insertTenant(t, "inspr", "INSPR")
 	issuer := startFakeOIDC(t, "aeon-public")
 	for _, tc := range []struct{ name, code, reason string }{
 		{"denied", "denied", "provider_denied"},
@@ -183,6 +183,7 @@ func TestCallbackFailureRedirects(t *testing.T) {
 		{"token_unavailable", "unavailable", "token_endpoint_unavailable"},
 		{"nonce", "expired", "nonce_mismatch"},
 		{"not_member", "not_member", "tenant_membership"},
+		{"imported_account", "imported_account", "tenant_membership"},
 		{"invalid_token", "failed", "id_token_verification"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -211,7 +212,15 @@ func TestCallbackFailureRedirects(t *testing.T) {
 				q.Del("code")
 			case "discovery":
 				mod.cfg.OIDCIssuer = ""
-			case "nonce", "not_member":
+			case "nonce", "not_member", "imported_account":
+				if tc.name == "imported_account" {
+					if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tid, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,kind,name,email) VALUES($1::uuid,'person','Classic Stranger','stranger@example.com')`, tid)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
 				issuer.allow(tc.name, oauth2.S256ChallengeFromVerifier(payload.Verifier), payload.Nonce, "stranger", "stranger@example.com", "Stranger", tc.name == "nonce")
 			case "token_unavailable", "invalid_token":
 				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

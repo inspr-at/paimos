@@ -1064,3 +1064,26 @@ Write for the reader, not the repository: the theme names what the release is
 about in a few words, the headline says what changes for them in one sentence, the
 intro adds context in two or three. No ticket keys, package names or commit
 jargon; those stay in the rows and the commits.
+
+Status autopilot (AEON-521) is the final post-release check: release publication
+through the journey calls the deterministic hook in the publication transaction.
+Only linked tickets already Done at publication become Delivered; tickets awaiting
+a human check get a skip comment. The hook applies at most 50 tickets, queues the
+rest durably, and the worker drains committed batches every minute. A ticket
+failure is isolated from release settlement; disappeared releases are skipped.
+Verify their Activity reasons and `/api/status-autopilot/changes`; a flagged ticket
+gets a comment and is retried after its check is cleared. Historical releases
+are discovered once; queued work and the daily ticket cursor survive restarts.
+Workspace admins configure the seven limits in Settings → Workspace → Autopilot,
+with Inherit / On / Off per project. The daily UTC job lists triage and cancellation
+suggestions, reminds blocked work, reopens stalled work and accepts deliveries
+after the saved period (30 days by default). Any person comment after delivery
+is conservatively treated as an objection. Automatic changes use the existing
+`POST /api/events/{eventId}/undo`; later edits cause a conflict rather than
+overwriting the ticket. Settings lists all current triage, cancellation, blocked
+and missed-release flags through `/api/status-autopilot/changes?suggestions=true`,
+independent of the latest 50 changes. Project Off runs no rules; workspace Off
+keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
+Progress inactivity uses actual harness/session-branch and review-PR timestamps,
+so a title edit or comment does not keep stalled work in progress. Triage
+autopilot's judgement modes are a separate phase.

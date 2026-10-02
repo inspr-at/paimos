@@ -167,7 +167,7 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 		t.Fatalf("list/count mismatch %d / %d", len(page.Items), got.Total)
 	}
 	for i, n := range page.Items {
-		if n.State == "delivered" && (i == 0 || page.Items[i-1].State != "accepted") {
+		if n.State == "delivered" && (i == 0 || page.Items[i-1].State != "done") {
 			t.Fatalf("delivered workflow order: %s", body)
 		}
 	}
@@ -376,7 +376,7 @@ func TestStateSortFollowsWorkflow(t *testing.T) {
 		}
 		mustNode(t, p, string(raw))
 	}
-	want := []string{"open", "new", "blocked", "active", "in-progress", "qa", "accepted", "delivered", "done", "canceled", "cancelled", "archived", "mystery"}
+	want := []string{"new", "open", "blocked", "active", "in-progress", "qa", "done", "delivered", "accepted", "canceled", "cancelled", "archived", "mystery"}
 	get := func(path string) nodePage {
 		t.Helper()
 		status, body := call(t, &p, http.MethodGet, path, "")
@@ -389,7 +389,7 @@ func TestStateSortFollowsWorkflow(t *testing.T) {
 		}
 		return out
 	}
-	descWant := []string{"archived", "cancelled", "canceled", "done", "delivered", "accepted", "qa", "in-progress", "active", "blocked", "new", "open", "mystery"}
+	descWant := []string{"archived", "cancelled", "canceled", "accepted", "delivered", "done", "qa", "in-progress", "active", "blocked", "open", "new", "mystery"}
 	assertSorted := func(sort, label string, expect []string) {
 		t.Helper()
 		if got := statesOf(get("/api/nodes?within=" + root.ID + "&sort=" + sort + "&limit=100")); strings.Join(got, ",") != strings.Join(expect, ",") {

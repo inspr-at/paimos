@@ -28,6 +28,8 @@ func TestInstructionAllowlistRefusesSecretsAndSymlinks(t *testing.T) {
 		filepath.Join(dir, ".ssh", "AGENTS.md"),
 		filepath.Join(dir, ".claude", "AGENTS.md"),
 		filepath.Join(dir, ".codex", "CLAUDE.md"),
+		filepath.Join(dir, ".gemini", "AGENTS.md"),
+		filepath.Join(dir, ".opencode", "AGENTS.md"),
 		filepath.Join(dir, ".claude", "nested", ".codex", "AGENTS.md"),
 		dir + "/../AGENTS.md",
 	} {

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -542,4 +543,32 @@ func TestKindChangeAppearsInHistory(t *testing.T) {
 		}
 	}
 	t.Fatalf("timeline %#v", page.Items)
+}
+
+func TestStatusAutopilotActivityHasReasonAndIndependentUndo(t *testing.T) {
+	f := setup(t)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='in_progress',created_at=clock_timestamp()-interval '5 days',updated_at=clock_timestamp()-interval '5 days' WHERE id=$1`, f.node)
+		return err
+	})
+	if err := statusautopilot.New(f.d.App).RunTenant(t.Context(), f.p.TenantID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	w := f.call(&f.p, "GET", "/api/nodes/"+f.node+"/activity", "", 200)
+	var page Page
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, item := range page.Items {
+		if item.AutomaticChange != nil {
+			found = true
+			if !item.Author.Automatic || item.Author.Job != "status-autopilot" || item.AutomaticChange.Reason == "" || item.AutomaticChange.From != "in_progress" || item.AutomaticChange.To != "open" {
+				t.Fatalf("bad automatic activity: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("automatic event disappeared from Activity")
+	}
 }

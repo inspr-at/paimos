@@ -7,15 +7,15 @@ export type StatusKey = 'open' | 'new' | 'backlog' | 'blocked' | 'progress' | 'q
 export interface StatusMeta { key: StatusKey; label: string; closed: boolean; order: number }
 
 const STATUS: Record<Exclude<StatusKey, 'other'>, Omit<StatusMeta, 'key'>> = {
-  open: { label: 'Open', closed: false, order: 0 },
-  new: { label: 'New', closed: false, order: 1 },
-  backlog: { label: 'Backlog', closed: false, order: 2 },
+  open: { label: 'Open', closed: false, order: 2 },
+  new: { label: 'New', closed: false, order: 0 },
+  backlog: { label: 'Backlog', closed: false, order: 1 },
   blocked: { label: 'Blocked', closed: false, order: 3 },
   progress: { label: 'In progress', closed: false, order: 4 },
   qa: { label: 'QA', closed: false, order: 5 },
-  accepted: { label: 'Accepted', closed: true, order: 6 },
+  accepted: { label: 'Accepted', closed: true, order: 8 },
   delivered: { label: 'Delivered', closed: true, order: 7 },
-  done: { label: 'Done', closed: true, order: 8 },
+  done: { label: 'Done', closed: true, order: 6 },
   cancelled: { label: 'Cancelled', closed: true, order: 9 },
   archived: { label: 'Archived', closed: true, order: 10 },
 }
@@ -44,7 +44,7 @@ export function statusMeta(state: string): StatusMeta {
 export function statusOptions(knownStates: Iterable<string> = []): { value: string; meta: StatusMeta }[] {
   const known = new Set(knownStates)
   const progress = known.has('in-progress') && !known.has('in_progress') ? 'in-progress' : 'in_progress'
-  return ['new', 'backlog', 'blocked', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
+  return ['new', 'backlog', 'open', 'blocked', progress, 'qa', 'done', 'delivered', 'accepted', 'cancelled', 'archived'].map(value => ({ value, meta: statusMeta(value) }))
 }
 
 export const PRIORITIES = [
@@ -140,7 +140,7 @@ export type SortField = 'key' | 'title' | 'state' | 'priority' | 'updated_at' | 
 export interface SortKey { field: SortField; desc: boolean }
 export const SORT_FIELDS: SortField[] = ['key', 'title', 'state', 'priority', 'updated_at', 'created_at', 'kind', 'assignee', 'eta_ready', 'progress', 'estimate', 'model', 'tokens', 'list_cost', 'paid']
 // What each sort key is called in the Display menu.
-export const SORT_LABELS: Record<SortField, string> = { updated_at: 'Updated', created_at: 'Created', key: 'Key', title: 'Title', state: 'Status', priority: 'Priority', kind: 'Type', assignee: 'Assignee', eta_ready: 'Ready', progress: 'Percent done', estimate: 'Estimate', model: 'Model', tokens: 'Tokens', list_cost: '≈ Cost', paid: 'Paid' }
+export const SORT_LABELS: Record<SortField, string> = { updated_at: 'Updated', created_at: 'Created', key: 'Key', title: 'Title', state: 'Status', priority: 'Priority', kind: 'Type', assignee: 'Assignee', eta_ready: 'Ready', progress: 'Percent done', estimate: 'Estimate', model: 'Model', tokens: 'Tokens', list_cost: 'Cost', paid: 'Paid' }
 export function parseSort(raw: string | null | undefined): SortKey[] {
   if (!raw) return []
   const out: SortKey[] = []

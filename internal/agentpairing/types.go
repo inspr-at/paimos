@@ -216,7 +216,7 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 5 {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 7 {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
 	seen := map[string]bool{}
@@ -226,7 +226,7 @@ func validateDevice(in deviceRequest) error {
 			return fail(400, "invalid_request", "choose exactly one identified account per harness")
 		}
 		switch a.Harness {
-		case "claude", "codex", "cursor", "grok", "pi":
+		case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
 		default:
 			return fail(400, "invalid_request", "unsupported harness")
 		}

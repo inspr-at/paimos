@@ -16,10 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
@@ -204,11 +204,47 @@ func TestReconcileLinkedPrincipalDoesNotChangeClassicAssignment(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := tenantbootstrap.BindOIDC(ctx, d.App, "reconcile-linked", "https://id.example.test", "linked", "Linked", "member")
+	owner, err := tenantbootstrap.BindOIDC(ctx, d.App, "reconcile-linked", "https://id.example.test", "owner", "Owner", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := principallink.New(d.App).Link(ctx, "reconcile-linked", alias, canonical); err != nil {
+	var canonical tenant.Principal
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
+		var identity string
+		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example.test','linked','markus@example.test') RETURNING id::text`).Scan(&identity); err != nil {
+			return err
+		}
+		hash := sha256.Sum256([]byte("reconcile-invite"))
+		if _, err := tx.Exec(ctx, `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
+			SELECT $1::uuid,'markus@example.test',id,$2,now()+interval '7 days',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='member'`, tenantID, hash[:], owner); err != nil {
+			return err
+		}
+		var err error
+		canonical, err = authz.AcceptInvite(ctx, tx, tenantID, identity, "markus@example.test", "Linked", "reconcile-invite")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Importer{Source: source, Writer: PostgresWriter{Pool: d.App}}).RunDelta(ctx, "reconcile-linked", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
+		var count int
+		var linked, issuer, role string
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1::uuid AND i.issuer='paimos-classic' AND i.subject=$2`, tenantID, source.InstanceID()+":7").Scan(&count); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT p.linked_to::text,i.issuer FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, tenantID, alias).Scan(&linked, &issuer); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace'`, tenantID, canonical.ID).Scan(&role); err != nil {
+			return err
+		}
+		if count != 1 || linked != canonical.ID || issuer != "paimos-classic" || role != "member" {
+			t.Fatalf("reimport: count=%d link=%s issuer=%s role=%s", count, linked, issuer, role)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	report, err := ReconcileWithOptions(ctx, source, d.App, attachments.Store{FilesDir: t.TempDir()}, "reconcile-linked", "", ReconcileOptions{})

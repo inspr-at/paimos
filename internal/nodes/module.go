@@ -39,6 +39,7 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 // Mount registers kind and node routes. Paths are the full /api paths the
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/status/help", m.handleStatusHelp)
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
 	mux.HandleFunc("POST /api/kinds", m.requirePermission("kinds.manage", m.handleCreateKind))
 	mux.HandleFunc("GET /api/kinds/{kindId}", m.handleGetKind)

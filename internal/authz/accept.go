@@ -5,12 +5,14 @@ package authz
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/inspr-at/paimos/internal/principallink/apply"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -37,7 +39,8 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	err := tx.QueryRow(ctx, `SELECT i.id::text, i.workspace_role_id::text, i.created_by::text
 		FROM invites i
 		WHERE i.tenant_id=$1::uuid
-		  AND lower(i.email)=lower($2)
+		  AND translate(i.email,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+		      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
 		  AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
 		  AND ($3::bytea IS NULL OR i.token_hash=$3::bytea)
 		ORDER BY i.created_at DESC, i.id
@@ -88,6 +91,22 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 		}
 	}
 	grants = allowed
+	// Use the same tenant lock as manual linking, before examining candidates.
+	// Concurrent invites cannot claim the same imported person or create two
+	// active sign-in members for the same email.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
+		return tenant.Principal{}, err
+	}
+	if err := refuseActiveMember(ctx, tx, tenantID, email); err != nil {
+		if errors.Is(err, errAlreadyMember) {
+			return tenant.Principal{}, ErrNoInvite
+		}
+		return tenant.Principal{}, err
+	}
+	imported, err := importedPeopleForEmail(ctx, tx, tenantID, email, true)
+	if err != nil {
+		return tenant.Principal{}, err
+	}
 	var person tenant.Principal
 	person, err = scanNewPerson(ctx, tx, tenantID, identityID, display, email)
 	if err != nil {
@@ -111,6 +130,23 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 			return tenant.Principal{}, err
 		}
 	}
+	if len(imported) == 1 && imported[0].canLink {
+		out, err := apply.Apply(ctx, tx, tenantID, imported[0].id, person.ID, person.ID)
+		if err != nil {
+			return tenant.Principal{}, err
+		}
+		if out.Changed {
+			var after map[string]any
+			if err := json.Unmarshal(out.After, &after); err != nil {
+				return tenant.Principal{}, err
+			}
+			after["reason"] = "verified_invite_email"
+			after["invite_id"] = inviteID
+			if err := appendEvent(ctx, tx, person, "principal.alias_linked", out.Before, after); err != nil {
+				return tenant.Principal{}, err
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE invites SET accepted_at=now(), accepted_by=$3::uuid
 		WHERE tenant_id=$1::uuid AND id=$2::uuid AND accepted_at IS NULL`, tenantID, inviteID, person.ID); err != nil {
 		return tenant.Principal{}, err
@@ -119,6 +155,62 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 		return tenant.Principal{}, err
 	}
 	return person, nil
+}
+
+// ImportedPeopleForEmail returns at most two unlinked people without a
+// sign-in identity in this tenant. Two means ambiguous: never pick the first.
+// Callers must verify the email before using these IDs for account linking or
+// revealing that an earlier account exists. Matching does not fold aliases,
+// strip plus tags, or infer relationships from a name.
+// Only ASCII case is folded; Unicode case mappings can identify other mailboxes.
+func ImportedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string) ([]string, error) {
+	people, err := importedPeopleForEmail(ctx, tx, tenantID, email, false)
+	ids := make([]string, len(people))
+	for i, person := range people {
+		ids[i] = person.id
+	}
+	return ids, err
+}
+
+type importedPerson struct {
+	id      string
+	canLink bool
+}
+
+func importedPeopleForEmail(ctx context.Context, tx pgx.Tx, tenantID, email string, lock bool) ([]importedPerson, error) {
+	email = strings.TrimSpace(email)
+	if !emailPattern.MatchString(email) {
+		return []importedPerson{}, nil
+	}
+	// Count every unlinked match for ambiguity, including inactive records and
+	// existing link targets. They cannot be auto-linked, but omitting them could
+	// let us claim the wrong person's history by selecting another match.
+	query := `SELECT p.id::text, p.status='active' AND NOT EXISTS (
+		SELECT 1 FROM principals a WHERE a.tenant_id=p.tenant_id AND a.linked_to=p.id)
+		FROM principals p
+		LEFT JOIN identities i ON i.id=p.identity_id
+		WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.linked_to IS NULL
+		  AND (p.identity_id IS NULL OR i.issuer='paimos-classic')
+		  AND translate(coalesce(nullif(p.email,''),i.email,''),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') COLLATE "C"
+		      =translate($2,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')
+		ORDER BY p.id LIMIT 2`
+	if lock {
+		query += ` FOR UPDATE OF p`
+	}
+	rows, err := tx.Query(ctx, query, tenantID, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	people := []importedPerson{}
+	for rows.Next() {
+		var person importedPerson
+		if err := rows.Scan(&person.id, &person.canLink); err != nil {
+			return nil, err
+		}
+		people = append(people, person)
+	}
+	return people, rows.Err()
 }
 
 func scanNewPerson(ctx context.Context, tx pgx.Tx, tenantID, identityID, name, email string) (tenant.Principal, error) {

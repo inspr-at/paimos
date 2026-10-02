@@ -4,6 +4,20 @@
 session advisory lock, and records each completed filename in `schema_migrations`.
 Normally each file and its migration record share one transaction.
 
+AEON-452 keeps `1088_more_harnesses.sql` as one numbered migration but commits
+its CHECK installation, validation and replacement in three transactions.
+Installation uses `NOT VALID` and commits before validation scans, releasing its
+exclusive DDL locks. The old enum checks remain enforced until all replacements
+validate; only the enum predicates are retired, preserving review null-pairing.
+Each phase uses the five-second lock timeout and the migration advisory lock.
+Temporary `schema_migrations` phase records include the exact source digest and
+commit with their phase, so a stopped run resumes without repeating completed
+DDL. Different source bytes on a partial run are refused. Replacement, removal
+of only these temporary records and the completed filename record commit
+together. Other files retain their existing transaction behavior. The regression
+in `more_harnesses_migration_test.go` interrupts after installation, resumes
+validation with a writer lock held, and verifies replay and ledger cleanup.
+
 For an index on a hot table, put `-- aeon:no-transaction` on the **first line**
 (before the SPDX comment) and use exactly one `CREATE INDEX CONCURRENTLY`
 statement per file. `IF NOT EXISTS` is supported. Index and table names must be
@@ -49,6 +63,12 @@ reads and progress sorting use these functions together; a cleanly finished
 child contributes 100 without retaining its stopped session's ETA. Nested epics
 still count as one direct child, and unknown or failed work stays unknown.
 The published `aeon_node_eta` function remains available to previous binaries.
+
+AEON-523's `1080_invited_alias_access.sql` adds `aeon_bind_legacy_uninvited`,
+used by sign-in, import and unlink to preserve an accepted invite's explicit
+access. Linked aliases never seed access, and people with aliases retain their
+explicit bindings without recreating grants from legacy labels. The original legacy binder stays
+available for previous binaries; no published SQL or function is replaced.
 
 Every new migration containing any statement outside the expand-safe allowlist
 must have this standalone line comment in its header, before SQL (after `aeon:no-transaction`

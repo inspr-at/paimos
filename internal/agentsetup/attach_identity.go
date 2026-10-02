@@ -32,7 +32,7 @@ func TrustedAttachExecutable(path, workspace string) (string, os.FileInfo, error
 // physical entrypoint. It does not interpret or execute shell wrappers. Unknown
 // layouts retain their exact file pin rather than trusting a broad bin folder.
 func RecordAttachIdentity(harness, path, workspace string) *AttachIdentity {
-	if harness != "claude" && harness != "codex" && harness != "cursor" {
+	if harness != "claude" && harness != "codex" && harness != "cursor" && harness != "gemini" && harness != "opencode" {
 		return nil
 	}
 	physical, info, err := TrustedAttachExecutable(path, workspace)
@@ -80,6 +80,10 @@ func attachPackage(harness, pkg string) bool {
 		return pkg == "@anthropic-ai/claude-code"
 	case "codex":
 		return pkg == "@openai/codex"
+	case "gemini":
+		return pkg == "@google/gemini-cli"
+	case "opencode":
+		return pkg == "opencode-ai" || pkg == "opencode-darwin-arm64" || pkg == "opencode-darwin-x64" || pkg == "opencode-linux-arm64" || pkg == "opencode-linux-x64" || pkg == "opencode-linux-arm64-musl" || pkg == "opencode-linux-x64-musl"
 	case "cursor":
 		return pkg == "@cursor/agent" || pkg == "@cursor/cli"
 	}

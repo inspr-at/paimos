@@ -12,7 +12,10 @@ COPY NOTICE /src/NOTICE
 COPY Dockerfile /src/Dockerfile
 COPY go.mod /src/go.mod
 COPY version.json /src/version.json
-RUN npm run build
+# Shared data imported by web/src must keep its repository-relative paths.
+COPY internal/authz/permission_labels.json /src/internal/authz/permission_labels.json
+COPY internal/nodes/status_definitions.json /src/internal/nodes/status_definitions.json
+RUN node --test /src/scripts/docker-web-inputs.test.mjs && npm run build
 
 FROM golang:1.26 AS build
 WORKDIR /src

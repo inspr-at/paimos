@@ -38,7 +38,7 @@ func rulesDir(path string) (int, string, error) {
 			return -1, "", errSafeFile
 		}
 		switch low {
-		case ".inspr", ".ssh", ".config", ".aws", ".gnupg", ".paimos", ".aeon", ".codex", ".claude", ".grok", ".pi", ".cursor", "credentials", "transcripts", ".agent-transcripts":
+		case ".inspr", ".ssh", ".config", ".aws", ".gnupg", ".paimos", ".aeon", ".codex", ".claude", ".grok", ".pi", ".cursor", ".gemini", ".opencode", "credentials", "transcripts", ".agent-transcripts":
 			return -1, "", errSafeFile
 		}
 	}
