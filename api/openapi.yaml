@@ -22,6 +22,8 @@ paths:
         requirement/doctrine suggestions never participate. No similarity-based answer is inferred.
         Reused memberships carry From the record provenance and immediate inbox/comment deadlines;
         no additional outcome effect or human-answer grace is created. Always publication belongs to P4.
+        Each matching item accepts at most 100 askers; a full item starts a separate question.
+        An anyway question stays separate while open; a later human-approved Always can be reused.
         Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
         Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
       security: [{session: []}, {agentKey: []}]

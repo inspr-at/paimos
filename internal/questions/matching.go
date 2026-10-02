@@ -21,10 +21,11 @@ type questionMatch struct {
 
 // The caller holds tenant -> tree locks and has checked ask/read permissions.
 // Exact fingerprints include ticket scope, context and every option field. An
-// absent fingerprint (anyway, source-linked, requirement/doctrine) cannot match.
+// Source-linked and requirement/doctrine inputs have no fingerprint. Anyway
+// bypasses the incoming lookup; a subsequently approved Always may be reused.
 func matchQuestion(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, body []byte) (questionMatch, error) {
 	var fingerprint *string
-	if err := tx.QueryRow(ctx, `SELECT aeon_desk_fingerprint($1::jsonb)`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
+	if err := tx.QueryRow(ctx, `SELECT CASE WHEN coalesce($1::jsonb->>'anyway_reason','')='' THEN aeon_desk_fingerprint($1::jsonb) END`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
 		return questionMatch{}, err
 	}
 	// Two active records are ambiguous, even if the text looks similar. Limit
@@ -88,6 +89,7 @@ func matchQuestion(ctx context.Context, tx pgx.Tx, p tenant.Principal, project s
 	err = tx.QueryRow(ctx, `SELECT q.node_id::text,q.revision FROM desk_questions q
  JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id AND n.deleted_at IS NULL
  WHERE q.tenant_id=$1 AND q.project_id=$2 AND aeon_desk_fingerprint(q.input)=$3 AND q.state='open'
+ AND coalesce(q.input->>'anyway_reason','')=''
  AND (SELECT count(*) FROM (SELECT 1 FROM desk_askers s WHERE s.tenant_id=q.tenant_id AND s.question_id=q.node_id LIMIT $4) members)<$4
  ORDER BY q.created_at,q.node_id LIMIT 1 FOR NO KEY UPDATE OF q`, p.TenantID, project, *fingerprint, maxAskers).Scan(&match.questionID, &match.revision)
 	if errors.Is(err, pgx.ErrNoRows) {

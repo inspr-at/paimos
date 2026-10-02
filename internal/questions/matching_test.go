@@ -103,7 +103,6 @@ func TestExactFingerprintCompatibility(t *testing.T) {
 		})
 	}
 	for _, edit := range []func(*Input){
-		func(i *Input) { i.AnywayReason = "New evidence" },
 		func(i *Input) { i.SourceRequestID = uid() },
 		func(i *Input) { i.SourceHandoverID = uid() },
 		func(i *Input) { i.SuggestedOutcome = "requirement" },
@@ -112,8 +111,19 @@ func TestExactFingerprintCompatibility(t *testing.T) {
 		in := input()
 		edit(&in)
 		if fingerprint(in) != nil {
-			t.Fatal("protected/forced-fresh input can match")
+			t.Fatal("protected input can match")
 		}
+	}
+}
+
+func TestAlwaysApprovedAfterAnywayCanBeReused(t *testing.T) {
+	f := newFixture(t)
+	in := input()
+	in.AnywayReason = "Reconsider the earlier answer"
+	source := f.activeAlways(t, in)
+	fresh := f.ask(t, input())
+	if fresh.ID != source.ID || fresh.State != "answered" || fresh.Askers[len(fresh.Askers)-1].FromRecord == nil {
+		t.Fatal("a newly approved Always lost reuse because its original ask was forced fresh")
 	}
 }
 
@@ -400,5 +410,97 @@ func TestMatchingFanoutBound(t *testing.T) {
 	}
 	if next := f.ask(t, input()); next.ID == q.ID || len(next.Askers) != 1 {
 		t.Fatal("full item accepted unbounded fan-out")
+	}
+}
+
+func TestConcurrentReuseCountsUniqueRequestsAndRollback(t *testing.T) {
+	f := newFixture(t)
+	source := f.activeAlways(t, input())
+	start := make(chan struct{})
+	done := make(chan *httptest.ResponseRecorder, 8)
+	var wg sync.WaitGroup
+	for range 4 {
+		in := input()
+		// Two simultaneous deliveries of each request must count as one reuse.
+		for range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				done <- request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", in)
+			}()
+		}
+	}
+	close(start)
+	wg.Wait()
+	close(done)
+	codes := map[int]int{}
+	for w := range done {
+		codes[w.Code]++
+		if w.Code != 200 && w.Code != 201 {
+			t.Fatal("concurrent reuse failed", w.Code, w.Body.String())
+		}
+		if q := question(t, w, w.Code); q.ID != source.ID || q.State != "answered" {
+			t.Fatal("concurrent reuse split the approved answer")
+		}
+	}
+	if codes[200] != 4 || codes[201] != 4 || f.reuseCount(t, source) != 4 {
+		t.Fatal("parallel retries inflated the count", codes)
+	}
+	var members, effects int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_askers WHERE question_id=$1`, source.ID).Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_pending WHERE question_id=$1`, source.ID).Scan(&effects); err != nil {
+		t.Fatal(err)
+	}
+	if members != 5 || effects != 8 {
+		t.Fatal("duplicate memberships or outbox effects")
+	}
+	// Fail after membership + count + outbox were written. Everything rolls back.
+	if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION reject_reuse_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='question.reused' THEN RAISE EXCEPTION 'fixture event failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_reuse_test BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_reuse_test()`); err != nil {
+		t.Fatal(err)
+	}
+	failed := input()
+	if w := request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", failed); w.Code != 500 {
+		t.Fatal("partial reuse reported success")
+	}
+	if f.reuseCount(t, source) != 4 {
+		t.Fatal("failed transaction retained reuse count")
+	}
+	var leaked int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_askers WHERE request_id=$1`, failed.RequestID).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatal("failed reuse retained membership", err)
+	}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_pending WHERE question_id=$1`, source.ID).Scan(&effects); err != nil || effects != 8 {
+		t.Fatal("failed reuse retained pending effects", err)
+	}
+}
+
+func TestPermissionRevocationWinsBeforeMatching(t *testing.T) {
+	f := newFixture(t)
+	source := f.activeAlways(t, input())
+	tx, err := f.d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	var pid int32
+	if err := tx.QueryRow(t.Context(), `SELECT pg_backend_pid() FROM tenants WHERE id=$1 FOR UPDATE`, f.person.TenantID).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.person.TenantID, f.otherAgent.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", input())
+	}()
+	waitForBlocker(t, f, pid)
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if w := <-done; w.Code != 404 || f.reuseCount(t, source) != 0 {
+		t.Fatal("stale project access permitted reuse", w.Code)
 	}
 }

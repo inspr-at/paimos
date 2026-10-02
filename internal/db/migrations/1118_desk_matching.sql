@@ -3,8 +3,7 @@
 CREATE FUNCTION aeon_desk_fingerprint(body jsonb) RETURNS text
 LANGUAGE sql IMMUTABLE STRICT AS $$
  SELECT CASE
-  WHEN coalesce(body->>'anyway_reason','') <> ''
-    OR coalesce(body->>'source_request_id','') <> ''
+  WHEN coalesce(body->>'source_request_id','') <> ''
     OR coalesce(body->>'source_handover_id','') <> ''
     OR coalesce(body->>'suggested_outcome','') IN ('requirement','doctrine')
   THEN NULL
