@@ -36,9 +36,20 @@ func appendRecord(ctx context.Context, tx pgx.Tx, st *session, raw []byte, doc m
 	if doc["contract"] == "aithema.spec.snapshot" {
 		kind = "spec.snapshot"
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO aithema_journal_records(tenant_id,sid,seq,client_event_id,contract,kind,original_bytes,document) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, st.Tenant, st.ID, st.Seq, text(doc["client_event_id"]), text(doc["contract"]), kind, raw, returned)
+	var contentSHA any
+	if kind == "pending_op.content" {
+		contentSHA = text(object(doc["data"])["sha256"])
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO aithema_journal_records(tenant_id,sid,seq,client_event_id,contract,kind,original_bytes,document,content_sha256) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, st.Tenant, st.ID, st.Seq, text(doc["client_event_id"]), text(doc["contract"]), kind, raw, returned, contentSHA)
 	if err != nil {
 		return Record{}, err
+	}
+	if len(raw) > maxInlineBytes {
+		for offset := 0; offset < len(raw); offset += journalChunkBytes {
+			if _, err := tx.Exec(ctx, `INSERT INTO aithema_journal_record_chunks(tenant_id,sid,seq,chunk_offset,bytes) VALUES($1,$2,$3,$4,$5)`, st.Tenant, st.ID, st.Seq, offset, raw[offset:min(offset+journalChunkBytes, len(raw))]); err != nil {
+				return Record{}, err
+			}
+		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE aithema_sessions SET seq=$3 WHERE tenant_id=$1 AND sid=$2`, st.Tenant, st.ID, st.Seq); err != nil {
 		return Record{}, err
@@ -104,6 +115,9 @@ func (s *Store) Request(ctx context.Context, c tokens.Claims, area, action, meth
 
 func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, method string, raw []byte, q url.Values, verifyAtUse func() error) (Result, error) {
 	out := Result{Status: 200}
+	if len(raw) > 1<<20 {
+		return out, fault(413, "too_large")
+	}
 	cap := "aithema.ledger"
 	if area == "journal" {
 		cap = "aithema.journal.read"
@@ -114,7 +128,13 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 			cap = "aithema.authority.read"
 		}
 	}
-	err := s.transaction(ctx, c.TenantID, c.SessionID, area == "ledger" && method == "POST", func(tx pgx.Tx, st *session) error {
+	err := s.transaction(ctx, c.TenantID, c.SessionID, area == "ledger" && method == "POST", func(tx pgx.Tx, st *session) (requestErr error) {
+		defer func() {
+			if requestErr == nil && len(out.Body) > maxResponseBytes {
+				out.Body = nil
+				requestErr = fault(413, "too_large")
+			}
+		}()
 		if verifyAtUse != nil {
 			if err := verifyAtUse(); err != nil {
 				return err
@@ -157,15 +177,25 @@ func (s *Store) request(ctx context.Context, c tokens.Claims, area, action, meth
 			return err
 		}
 		if area == "journal" {
+			stored, err := storedFormat(q)
+			if err != nil || !queryValid(q, "format", "ack", "upload") || q.Has("ack") && q.Get("ack") != "seq" {
+				return fault(400, "invalid_request")
+			}
+			if q.Has("upload") {
+				body, err := s.upload(ctx, tx, st, c, action, raw, q)
+				out.Body = body
+				return err
+			}
 			record, err := s.append(ctx, tx, st, c, action, raw)
 			if err != nil {
 				return err
 			}
-			stored, err := storedFormat(q)
-			if err != nil || !queryValid(q, "format") {
-				return fault(400, "invalid_request")
+			if q.Has("ack") {
+				out.Body, err = sequenceAck(record)
+				return err
+			} else {
+				out.Body = marshal(formatRecord(record, stored))
 			}
-			out.Body = marshal(formatRecord(record, stored))
 			return nil
 		}
 		if !queryValid(q) {
@@ -182,7 +212,7 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	if action == "snapshots" {
 		contract = "aithema.spec.snapshot"
 	}
-	doc, err := decode(raw)
+	doc, err := decodeDocument(raw)
 	if err != nil {
 		return Record{}, err
 	}
@@ -193,13 +223,15 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 	if !uuid(id) {
 		return Record{}, fault(400, "invalid_request")
 	}
-	var prior, document []byte
-	err = tx.QueryRow(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND client_event_id=$3`, st.Tenant, st.ID, id).Scan(&prior, &document)
+	var original, document []byte
+	var aliasDigest *string
+	err = tx.QueryRow(ctx, `SELECT NULL::text,original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND client_event_id=$3
+		UNION ALL SELECT e.wire_sha256,r.original_bytes,r.document FROM aithema_journal_content_events e JOIN aithema_journal_records r USING(tenant_id,sid,seq) WHERE e.tenant_id=$1 AND e.sid=$2 AND e.client_event_id=$3`, st.Tenant, st.ID, id).Scan(&aliasDigest, &original, &document)
 	if err == nil {
-		if !bytes.Equal(raw, prior) {
+		if aliasDigest != nil && digest(raw) != *aliasDigest || aliasDigest == nil && !bytes.Equal(raw, original) {
 			return Record{}, fault(409, "idempotency_conflict")
 		}
-		return Record{Document: document, Bytes: string(prior)}, nil
+		return Record{Document: document, Bytes: string(original)}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Record{}, err
@@ -239,6 +271,15 @@ func (s *Store) append(ctx context.Context, tx pgx.Tx, st *session, c tokens.Cla
 		if number(doc["expected_prev_rev"]) != st.WorkingRev {
 			return Record{}, fault(409, "snapshot_conflict")
 		}
+		if err := s.verifyReferences(ctx, tx, st, doc); err != nil {
+			return Record{}, err
+		}
+	}
+	if doc["kind"] == "pending_op.content" {
+		record, found, err := deduplicateContent(ctx, tx, st, raw, doc)
+		if err != nil || found {
+			return record, err
+		}
 	}
 	record, err := appendRecord(ctx, tx, st, raw, doc)
 	if err != nil {
@@ -264,18 +305,31 @@ func (s *Store) read(ctx context.Context, tx pgx.Tx, st *session, area, action s
 		return nil, err
 	}
 	if action == "cursor" {
-		if !queryValid(q, "format") {
+		if !queryValid(q, "format", "snapshot") || q.Has("snapshot") && q.Get("snapshot") != "seq" {
 			return nil, fault(400, "invalid_request")
 		}
 		var snapshot any
 		if st.SnapshotSeq != nil {
-			var raw, doc []byte
-			if err := tx.QueryRow(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3`, st.Tenant, st.ID, *st.SnapshotSeq).Scan(&raw, &doc); err != nil {
-				return nil, err
+			if q.Has("snapshot") {
+				snapshot = map[string]any{"seq": *st.SnapshotSeq}
+			} else {
+				var raw, doc []byte
+				if err := tx.QueryRow(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND seq=$3 AND octet_length(original_bytes)<=$4`, st.Tenant, st.ID, *st.SnapshotSeq, maxInlineBytes).Scan(&raw, &doc); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						return nil, fault(413, "too_large")
+					}
+					return nil, err
+				}
+				snapshot = formatRecord(Record{Document: doc, Bytes: string(raw)}, stored)
 			}
-			snapshot = formatRecord(Record{Document: doc, Bytes: string(raw)}, stored)
 		}
 		return marshal(map[string]any{"seq": st.Seq, "working_rev": st.WorkingRev, "snapshot": snapshot}), nil
+	}
+	if q.Has("digests") {
+		return contentSequences(ctx, tx, st, q)
+	}
+	if q.Has("offset") || q.Has("length") {
+		return readChunk(ctx, tx, st, q)
 	}
 	if !queryValid(q, "format", "after", "ids") {
 		return nil, fault(400, "invalid_request")
@@ -298,18 +352,41 @@ func (s *Store) read(ctx context.Context, tx pgx.Tx, st *session, area, action s
 			ids = append(ids, n)
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND (CASE WHEN $3::boolean THEN seq=ANY($4::bigint[]) ELSE seq>$5 END) ORDER BY seq`, st.Tenant, st.ID, q.Has("ids"), ids, after)
+	// Inspect only size metadata before fetching any selected large value.
+	var large bool
+	const selection = `tenant_id=$1 AND sid=$2 AND (CASE WHEN $3::boolean THEN seq=ANY($4::bigint[]) ELSE seq>$5 END)`
+	args := []any{st.Tenant, st.ID, q.Has("ids"), ids, after, maxInlineBytes}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM aithema_journal_records WHERE `+selection+` AND octet_length(original_bytes)>$6)`, args...).Scan(&large); err != nil {
+		return nil, err
+	}
+	if large {
+		return nil, fault(413, "too_large")
+	}
+	rows, err := tx.Query(ctx, `SELECT original_bytes,document FROM aithema_journal_records WHERE `+selection+` AND octet_length(original_bytes)<=$6 ORDER BY seq`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	records := []any{}
+	var body bytes.Buffer
+	body.WriteByte('[')
 	for rows.Next() {
 		var raw, doc []byte
 		if err := rows.Scan(&raw, &doc); err != nil {
 			return nil, err
 		}
-		records = append(records, formatRecord(Record{Document: doc, Bytes: string(raw)}, stored))
+		record := marshal(formatRecord(Record{Document: doc, Bytes: string(raw)}, stored))
+		separator := 0
+		if body.Len() > 1 {
+			separator = 1
+		}
+		if body.Len()+separator+len(record)+1 > maxResponseBytes {
+			return nil, fault(413, "too_large")
+		}
+		if separator != 0 {
+			body.WriteByte(',')
+		}
+		body.Write(record)
 	}
-	return marshal(records), rows.Err()
+	body.WriteByte(']')
+	return body.Bytes(), rows.Err()
 }

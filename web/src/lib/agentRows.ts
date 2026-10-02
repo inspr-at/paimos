@@ -17,7 +17,7 @@ import type { LivePage } from './liveAgents.ts'
 import { parsePosition, stampAt, tick } from './position.ts'
 import { wrapRow, type Wire } from './wire.ts'
 
-export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok' | 'gemini' | 'opencode' | 'media' | 'terminal'
 export interface MetadataChange {
   field: 'display_label' | 'model' | 'reasoning_effort'
   previous_value: string | null
@@ -30,13 +30,18 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 
 // A session as the API sends it. Nothing outside the ledger may hold one: see
 // HarnessSession in lib/agents.ts for the type the page works with.
+export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  agent_activity_mode?: 'off' | 'tool_activity' | 'agent_summary'
+  current_activity?: CurrentAgentActivity | null
+  current_activity_history?: CurrentAgentActivity[]
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
   handed_over_to_id?: string; adopted_from_id?: string | null; can_reparent?: boolean
   watch?: import('./attachWatch').AttachStatus
   id: string; project_id: string; agent_principal_id: string
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string
+  generator?: string | null; command?: string | null
   display_label?: string | null
   model?: string | null; reasoning_effort?: string | null; account_label?: string | null; harness_version?: string | null
   brief?: string | null; worktree?: string | null; branch?: string | null; commits?: { sha: string; subject: string }[]

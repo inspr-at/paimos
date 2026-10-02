@@ -76,7 +76,7 @@ func writeErr(w http.ResponseWriter, err error) {
 
 func validHarness(s string) bool {
 	switch s {
-	case "codex", "claude", "pi", "cursor", "grok":
+	case "codex", "claude", "pi", "cursor", "grok", "gemini", "opencode":
 		return true
 	default:
 		return false
@@ -85,7 +85,7 @@ func validHarness(s string) bool {
 
 func validFamily(s string) bool {
 	switch s {
-	case "openai", "anthropic", "xai", "cursor":
+	case "openai", "anthropic", "xai", "cursor", "google", "local":
 		return true
 	default:
 		return false

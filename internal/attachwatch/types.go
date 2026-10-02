@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"path"
 	"strings"
 	"time"
@@ -101,26 +102,28 @@ func (s Snapshot) Valid() bool {
 	if s.Mode == ModeLease {
 		content = s.Transcript == "" && s.FileID == ""
 	}
-	return content && (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok")
+	return content && (s.Platform == "" || s.Platform == "darwin" || s.Platform == "linux") && Text(s.Host, 128) && s.Process.PID > 0 && s.Process.UID >= 0 && Text(s.Process.Started, 128) && PhysicalPath(s.Process.Executable) && PhysicalPath(s.Process.CWD) && (s.Harness == "codex" || s.Harness == "claude" || s.Harness == "cursor" || s.Harness == "grok" || s.Harness == "gemini" || s.Harness == "opencode")
 }
 
 type DeviceRequest struct {
-	LocalConsentProofVersion int      `json:"local_consent_proof_version,omitempty"`
-	LocalAuthNonce           string   `json:"local_auth_nonce,omitempty"`
-	LocalAuthSignature       string   `json:"local_auth_signature,omitempty"`
-	AttachProtocol           int      `json:"attach_protocol,omitempty"`
-	ConsentDigest            string   `json:"consent_digest,omitempty"`
-	LocalConfirmed           bool     `json:"local_confirmed,omitempty"`
-	Operation                string   `json:"operation"`
-	RequestID                string   `json:"request_id"`
-	ComputerID               string   `json:"computer_id"`
-	DeviceProof              string   `json:"device_proof,omitempty"`
-	PollKey                  string   `json:"poll_key"`
-	Snapshot                 Snapshot `json:"snapshot"`
-	Digest                   string   `json:"request_digest"`
-	Sequence                 int64    `json:"sequence,omitempty"`
-	Text                     string   `json:"text,omitempty"`
-	LocalAuthCapability      string   `json:"local_auth_capability,omitempty"`
+	Doing                    *string                 `json:"doing,omitempty"`
+	ToolActivity             *agentactivity.Activity `json:"tool_activity,omitempty"`
+	LocalConsentProofVersion int                     `json:"local_consent_proof_version,omitempty"`
+	LocalAuthNonce           string                  `json:"local_auth_nonce,omitempty"`
+	LocalAuthSignature       string                  `json:"local_auth_signature,omitempty"`
+	AttachProtocol           int                     `json:"attach_protocol,omitempty"`
+	ConsentDigest            string                  `json:"consent_digest,omitempty"`
+	LocalConfirmed           bool                    `json:"local_confirmed,omitempty"`
+	Operation                string                  `json:"operation"`
+	RequestID                string                  `json:"request_id"`
+	ComputerID               string                  `json:"computer_id"`
+	DeviceProof              string                  `json:"device_proof,omitempty"`
+	PollKey                  string                  `json:"poll_key"`
+	Snapshot                 Snapshot                `json:"snapshot"`
+	Digest                   string                  `json:"request_digest"`
+	Sequence                 int64                   `json:"sequence,omitempty"`
+	Text                     string                  `json:"text,omitempty"`
+	LocalAuthCapability      string                  `json:"local_auth_capability,omitempty"`
 }
 
 // ConsentDigest binds approval to this request, its snapshot (including the
@@ -132,6 +135,7 @@ func ConsentDigest(requestID, snapshotDigest, mode string) string {
 func ConsentModeValid(mode string) bool { return mode == ConsentAeon || mode == ConsentLocalAuth }
 
 type View struct {
+	AgentActivityMode        string     `json:"agent_activity_mode,omitempty"`
 	LocalConsentProofVersion int        `json:"local_consent_proof_version,omitempty"`
 	LocalAuthNonce           string     `json:"local_auth_nonce,omitempty"`
 	ConsentMode              string     `json:"consent_mode"`

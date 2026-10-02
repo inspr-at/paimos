@@ -10,6 +10,38 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Ticket work queue
+
+`aeon queue list`, `add <ticket>`, `remove <ticket>`, `move <ticket> <position>`,
+`reset` and `next` manage ticket work on the existing agent run queue. People
+need `run.create` in the ticket's project; coordinator agents need their live
+coordinator role and scoped key. Plain workers cannot manage the queue.
+
+New and Backlog become Open when queued; Blocked retains its place until
+unblocked. Tickets need an estimate, acceptance criteria and a named blocker
+when blocked. `aeon queue readiness <ticket>` returns missing fields and an
+estimate suggestion. `POST /api/queue/{nodeId}/estimate` explicitly applies a
+missing estimate; acceptance criteria and blockers use the existing ticket
+edit/relation APIs. No acceptance evidence is invented.
+
+Priority then FIFO is the default. Manual moves persist until Reset; arrivals
+append during manual order. `add <ticket> --agent UUID --profile UUID` is the
+advanced Start now path, first in that agent's separate line. Optional
+`--account UUID` pins an account and never overrides its allowances. `next`
+routes ready work; existing daemon reservation and fenced claim checks perform
+pickup atomically, move the ticket to In progress and remove its queue marker.
+Ticket API and CLI JSON include `queued: {position, by, at, …}` while waiting.
+Capacity hours are advice, not a reservation or a hard cap.
+
+The project queue and ticket drawer move work using the server's shared
+positions, including Move to top of the displayed project queue. Readiness
+accepts live blocker relations. A failed queue read exposes an error and Retry
+even before any queue snapshot exists. Suggested releases prefer the server's
+expected start; otherwise they use earlier visible work and parallel capacity.
+The hover labels this local estimate: other projects, current runs and blocker
+delays are not included. Unmeasured capacity or an unknown unblock time keeps
+the suggestion empty.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open
@@ -49,6 +81,32 @@ makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
 
+## Link a vendor account to yourself
+
+On a paired computer, select your enrolled login with `paimos use` as usual.
+`paimos harness run` matches that private login home to the existing registry and
+shows one line for an unlinked account: `Link this account to you: <origin>/link
+· code 482 913`. Open `/link`, enter that code and confirm the named account,
+computer and person once. The terminal then says `Linked to Markus` once;
+future launches do not repeat it. Capacity, groups and limits need no form.
+
+For a standalone terminal, run `aeon-agentd link-account --harness claude`
+(or `codex`, `grok`, `cursor`, `pi`). Multiple local logins require
+`--account-id UUID`; `--setup-root PATH` or `--socket PATH` selects private
+pairing state. `harness run` accepts the same optional selectors. The daemon
+verifies the enrolled vendor login through its existing adapter before offering
+the code. Codes last ten minutes and are single-use. An expired offer remains
+expired until `link-account --renew` explicitly requests a new code.
+
+**Your linked accounts** on `/link` and Settings → Accounts offers **Unlink**
+as one action, only for the owner. Ownership is distinct from machine pairing,
+ongoing-use approval and spending authority; none of those controls change when
+a person links or unlinks. Other people on the computer link their own enrolled
+logins using the same flow. The person must be signed in; agent keys cannot
+confirm or unlink. Tenant-scoped, persistent rate limits and revision-bound
+confirmation prevent code guessing, reuse and stale-session approval. Audit
+records carry account and person IDs, never codes or installation proofs.
+
 ## Develop
 
 ```sh
@@ -57,6 +115,25 @@ just test         # Go tests
 just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
+
+The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
+versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
+`go run ./scripts/ci-proof digest --mirror /absolute/controller-owned/mirror.git
+--policy-commit <full-SHA>` computes a diagnostic policy digest for independent
+review. `shadow` uses that commit plus the independently approved
+`--policy-digest`, an `--environment-digest`, and a `--binding` JSON file with
+repository ID, event/delivery/generation, immutable base/candidate/check-target
+SHAs, PR source head/number or group ID/sorted constituent PRs. It emits a full
+pending plan; `--ledger` optionally appends to a private controller-owned JSONL
+file, and `--receipt` records an unsigned observation against an existing plan.
+The mirror must be bare and its policy revision must precede the bound base.
+Every trusted workflow job and shard row is retained, with base/candidate test
+package discovery and complete path/mode/blob fingerprints. Both shard layouts
+are inventory facets in shadow output, not two executor launches. No event
+authentication, executor admission, reusable credit, signatures or check
+publication exists in A; current workflows and runner routing are unchanged.
+Future authority/executor and selection packages must establish those boundaries
+before any omission. Run the foundation tests with `go test ./internal/ciproof`.
 
 Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
@@ -146,6 +223,36 @@ Records use session-scoped client IDs. Exact retries preserve the original resul
 changed bytes return `409 idempotency_conflict`. `records?ids=1,2,3` hydrates
 cited sources, turns and design inputs; `format=stored` also returns the exact
 submitted bytes. `cursor` returns the latest snapshot and replay position.
+
+Journal and snapshot contracts support minor 2 while retaining legacy inline
+pending operations. New `pending_op.content` records and reference snapshots
+require `min_reader: 2`. Content is immutable and deduplicated by SHA-256 within
+each tenant/session; every submitted event ID retains byte-exact conflict
+checking through an alias wire digest, without copying canonical bytes. A reference
+snapshot commits only after its content sequence, digest
+and UTF-8 size match an acknowledged content record in the same session.
+
+Large content and snapshots use the AIT-89 chunk protocol on the existing
+routes: POST with `upload=<original-byte SHA-256>&ack=seq` and a JSON body
+`{offset,total,chunk}` containing canonical base64 of up to 256 KiB. Intermediate
+replies contain `{offset,total}`; only a complete, digest-verified submission
+commits and returns `{seq}`. Offset zero restarts an interrupted upload. Staging
+survives host restarts, permits at most 64 unfinished uploads per session, and
+is discarded on takeover or purge. Staged totals are capped at 16 MiB before
+buffering; every request retains the 1 MiB cap and every response the 4 MiB cap.
+`ack=seq` also works for ordinary writes. `cursor?snapshot=seq` returns a bounded
+snapshot reference; `records?digests=<sha256>` resolves content addresses to
+sequences, and `records?ids=<seq>&offset=<byte offset>&length=262144` returns
+`{seq,offset,total,chunk}` for lossless hydration. The adapter verifies and
+hydrates reference content through these reads; snapshots retain their exact
+reference envelopes. Records larger than 1 MiB require range reads backed by
+durable 256 KiB rows, so Postgres never detoasts the entire large bytea for a
+range. Inline ids/after/cursor reads return 413 too_large for large records or
+a response exceeding 4 MiB; use digest lookup and snapshot=seq to find sequences.
+Migration 1100 installs the replacement check NOT VALID and drops the old check
+in one isolated statement, the only policy exception requiring coordinator review
+before merge/release. Migration 1101 validates after the exclusive lock is released;
+1102 builds the unique content-address index concurrently.
 
 The ledger admits against session, principal/day and tenant/day caps, commits
 one digest-bound claim per hold after a matching worker `budget.hold` journal
@@ -281,6 +388,26 @@ paimos issue list --project AEON
 paimos mcp
 ```
 
+`aeon status help --json` (also `paimos status help --json`) reads
+`GET /api/status/help`: the ordered status definitions, hints, Queued explanation
+and effective workspace rules. `--project KEY` resolves that project's
+Inherit/On/Off override. The help sheet and agents use the same definitions;
+the API reads live Status autopilot limits when its settings tables are present,
+otherwise it explicitly reports the defaults. Queued means Open in the work
+queue (AEON-522), rather than another stored status.
+
+Tickets and tasks can carry `human_check`, nullable text describing what only a
+person can confirm. Create or patch it through the nodes API, and filter lists
+with `human_check=pending` or `none` (prefix `!` to exclude); request
+`facets=human_check` for counts. A person marks it checked with
+`PATCH /api/nodes/{id}` and `{"human_check":null}`. The server records the original
+text, person ID and UTC time in `fields.human_check_completed`; replacing fields
+preserves that provenance and cannot forge it. Only a person can set another
+pending check when it clears a stored completion. Agents may add or edit pending
+checks that have no stored completion. Check and Undo in the ticket use the existing revision
+preconditions. Part B's automation skips pending checks when moving tickets to
+Delivered or Accepted.
+
 `aeon capacity next codex` shows the server's next eligible account and parallel
 capacity; `--json` returns the ordered advice. It never reserves quota. The
 Accounts plan uses that same order: soonest weekly/monthly reset, then larger
@@ -414,11 +541,63 @@ Harness sessions return `model_profile_id` for a unique tenant registry match by
 Estimates are expected **agent hours until ready for review**, separate from a live ETA.
 Set them with `aeon issue create ... --estimate-hours 2`, `aeon issue update AEON-317 --estimate-hours 1.5`, or `aeon issue estimate AEON-317 --hours 1.5 --source agent`. `--estimate 90m` remains an alias. Decimal hours and minutes are accepted; values must be greater than zero and at most 200 hours. The optional source asserts the authenticated principal kind; the server stamps the principal and time. Creating a ticket or task without an estimate prints a non-blocking warning. API callers can PATCH `/api/nodes/{id}` with `{"estimate_hours":2}` to change just the hours, or null to clear them; other fields survive. Do not combine this property with a replacement `fields` document.
 
+Settings → Workspace → **Agent activity** applies to every project: **Off** collects and shows no activity, **Tool activity** uses sanitized tool observations without summary tokens, and **Agent summary** (default) prefers a public phrase for ten minutes, then uses tool activity. Heartbeat and attached-session replies include `agent_activity_mode`; agents should spend summary tokens only when it is `agent_summary`. `harness heartbeat --doing "Running Go tests"` reports a phrase of at most 60 characters. The heartbeat helper reads optional `doing` from its existing status file, anchoring freshness to the file's modification time, so an unchanged file never makes an old phrase fresh. Managed workers can query and report through `aeon_activity`. Hook observations live only in the current generation's existing private state directory. Approved conversation tails classify new tool envelopes; status-only attachment never opens a transcript. Automatic payloads contain only fixed phrases or safe source-file basenames, never raw commands, arguments, environment values or file contents. The agents table shows current activity below the name; details keep up to twenty changes and coordinators summarize their active workers. The existing `activity` busy/idle field remains unchanged; the additive phrase is `current_activity: {text, source, at}`.
+
+Agent summaries, tool basenames and legacy heartbeat notes share one credential filter on the server and browser. It rejects credential words, known key prefixes, opaque tokens, credential URLs, environment assignments, invisible Unicode format characters and combining/enclosing marks. Status-file notes are screened before truncation, incoming notes before storage, and stored activity and histories before display; an unsafe summary falls back to valid tool activity. Legacy notes retain their 120-character limit and control stripping. Activity history follows the session's tenant and project visibility for both reads and writes.
+
 `aeon harness run-heartbeat --status-file .agent-status.json` reads `pct`, `remaining_min` and `note` on every beat. Bound workers send the percent and a ready ETA anchored to the file's modification time plus the remaining minutes, including zero. An unchanged file's ETA can become overdue; after 30 minutes without an update, the CLI warns `stale_progress`. Minutes must be finite numbers from 0 to 524160 (364 days); ETAs outside the server's allowed window are omitted. Workers with `--worktree` default to that worktree's `.agent-status.json`; coordinators read a file only with an explicit `--status-file` and retain their separate live-ETA reporting. Missing, malformed or refused status files never stop the loop. If the server rejects status-file estimates, the CLI retries the heartbeat without those fields. Status reads retain the credential, symlink and hard-link fence.
 
 Heartbeat responses carry non-blocking `warnings`: a working worker gets `missing_progress` after three accepted beats without a fresh percent, a working session with a bound `ticket_node_id` gets `missing_eta` for its role's absent ETA, and a visible bound ticket/task without valid hours gets `ticket_without_estimate`. Unbound workers and coordinators have no missing-ETA warning or UI hint. Warning-query failures are logged and return an empty array without rolling back the heartbeat. Both heartbeat commands print each code to stderr at most once per ten minutes, with receipts retained across reporter restarts. Run-heartbeat uses its private state directory; one-shot heartbeats use private 0700 directories under `~/.aeon`, including when the lease comes from stdin.
 
-Harness status and heartbeat declare `Aeon-Contract: harness-session/1.9`. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 includes `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged.
+Coordinators report **ticket live**, including review, merge and deployment, with
+`aeon harness heartbeat ... --eta-live +20m`. Their ETA does not mean the
+coordinator process has finished. Coordinator beats reject `--progress` and
+`--eta-ready` with an explanation: percent done is derived from their direct
+worker children on the same bound ticket. Active workers and cleanly finished
+workers count equally; unreported progress counts as zero. Failed, removed and
+other-ticket children are excluded; no eligible children leaves progress absent.
+The mean is rounded to the nearest integer and includes children outside the
+current list page. This is a read projection; it never marks a coordinator Done.
+
+Every coordinator can register AI, media and terminal children using the same
+worker lease and parent/ticket/ETA/progress protocol. AI agents keep their
+existing harness (`codex`, `claude`, `pi`, `cursor`, `grok`) and model flags.
+Media uses `--harness media --generator higgsfield/kling3_0`; terminal uses
+`--harness terminal --command ffmpeg`. Public labels are at most 120 ASCII
+characters: letters, digits, `.`, `_`, `:`, `/`, `+`, `-` (terminal also permits
+spaces). Start with a letter or digit; omit surrounding whitespace. These are
+labels, never secrets or executable command arguments. Media/terminal require
+`--role worker`, `--parent-session`, a ticket and a work shape; they neither
+inherit `AEON_MODEL`/`AEON_EFFORT` nor look up the model registry.
+
+For example, while a media job is running, start its reporter:
+
+```sh
+aeon harness run-heartbeat --owner-pid "$job_pid" --state-dir "$job_state_dir" \
+  --project AEON --agent worker --harness media --generator higgsfield/kling3_0 \
+  --parent-session "$coordinator_session" --ticket AEON-501 --work-shape ship \
+  --status-file "$job_status_file" --host "$(hostname -s)"
+```
+
+The terminal equivalent uses `--harness terminal --command ffmpeg`; AI workers
+use their usual harness and model. `harness register` accepts these same family
+and label flags with its usual private registration files. Follow-up one-shot
+heartbeats use the returned session id and lease with `--eta-ready +10m
+--progress 40`, or keep `pct`, `remaining_min` and `note` current in the reporter's
+status file. Each concurrent job needs its own private state directory.
+
+The Sessions table retains its existing design, adds a separate **Host** column,
+and calls the intended result column **Name**. Host identity is the exact
+registered `--host`; `run-heartbeat` defaults to the short OS hostname (the part
+before its first dot), without querying macOS ComputerName. People can click the
+badge or its floating pencil to set **Your name for this computer**. Save applies
+to all rows of that host for that person; **Use '<registered host>'** resets it.
+Labels are stored server-side under tenant/person/host with person-only RLS.
+`GET /api/me/host-labels` reads only your overrides; `PUT` with `{host, label}`
+saves one and a null label resets it. Both require `harness.read`; a project-only
+role with that permission suffices. Agents cannot read or write overrides.
+
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.1`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Reporter pins identify response schemas by their `METHOD /path status` labels.
 `RequiredBump` treats a new required response property as a minor addition:
@@ -560,6 +739,20 @@ One status model covers the computer: it is ready while at least one harness can
 Unknown reason or state tokens from newer daemons remain visible as “Needs attention” with the raw code, without a guessed command; a newer state appears only in `harness_details`, never in the closed legacy map. Unenrolled, revoked, malformed-code and mismatched harness reports are dropped without interrupting fence sync or cleanup; one value-free warning is logged per server instance. Advisory detail extensions and legacy string fixes are accepted, and commands are always rebuilt from known reasons. Malformed JSON shapes still fail validation. Missing reports stay absent, offline reports are labelled as last reported, and a legacy daemon clears prior reports when it omits them. The CLI retains its existing approved physical-executable policy, including Homebrew installations; the stricter ownership and directory checks apply to Node and SDK pins.
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
+
+### Ticket worker scopes
+
+The ticket-worker set is `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `search.read`, and `events.read`. Propose it with this public code:
+
+```text
+aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a072a8d
+```
+
+Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. It never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+
+For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
+
+An authenticated scope-only 403 and `doctor` name the missing scope and its label and show a code to propose it. That single-scope code replaces the dialog selection too; tick any existing permissions you still need before saving. Anonymous, role, and project denials never expose a scope proposal. Codes use explicit sorted identifiers and a v1 CRC32 checksum, so registry additions do not reinterpret an older code. The checksum detects copying mistakes, not trust or approval.
 
 Claude accounts offer **Show Aeon in your Claude status line** in Settings → Accounts.
 Only that explicit opt-in lets the enrolled daemon install `aeon statusline` in
@@ -1068,11 +1261,23 @@ npx playwright install chromium
 npm test
 ```
 
-The Playwright suite starts Vite on port 5175, intercepts all `/api/*` calls,
+The Playwright suite starts Vite on a port derived from the checkout path, intercepts all `/api/*` calls,
 and covers sign-in, auth errors, logout, theme switching, version interactions,
 44 px targets, and viewport overflow. It writes home, sign-in, development
 sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
+
+**Full UI QA** runs the complete `playwright.ui.config.ts` inventory in five
+hosted shards with one browser worker each and zero retries. It runs nightly on
+`main` at 02:37 UTC. To request a full QA, dispatch `full-ui-qa.yml` with an
+optional `ref` (branch, tag or commit; blank defaults to `main`), or add the
+`full-qa` label to a PR. Updates to a labeled PR run the suite again; unrelated
+label additions do not. PR runs test the merge commit. Every shard checks out
+the same resolved commit, including when a manual branch moves during the run.
+The `full-ui-qa` check and Actions summary report the batch result; shard JSON
+reports and failed traces are retained as artifacts for seven days. This is an
+optional QA check; existing required CI checks and PR test selection are unchanged.
+Scheduled/manual triggers become available after the workflow reaches `main`.
 
 Licence: AGPL-3.0-only.
 
@@ -1561,7 +1766,9 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/1.9`:
+The reporter contract is `harness-session/2.1`, declared by the response-only
+`Aeon-Contract` header. Existing reporters keep working without a Pharos or
+Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.

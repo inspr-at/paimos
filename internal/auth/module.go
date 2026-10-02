@@ -448,6 +448,11 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "run.create", true
 		}
 		return scope("work_orders")
+	case "queue":
+		if read {
+			return "nodes.read", true
+		}
+		return "work_orders.read", true
 	case "runs":
 		if read {
 			return "run.read", true
@@ -466,6 +471,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return harnessScope(parts[1:], read), true
 	case "agent-pairing":
+		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
+			return "account.probe", true
+		}
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}

@@ -21,6 +21,10 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	OwnerPersonID        *string             `json:"owner_person_id,omitempty"`
+	OwnerPersonName      string              `json:"owner_person_name,omitempty"`
+	LinkedAt             *time.Time          `json:"linked_at,omitempty"`
+	LinkRevision         int64               `json:"link_revision,omitempty"`
 	BillingMode          string              `json:"billing_mode"`
 	Provider             string              `json:"provider,omitempty"`
 	Model                string              `json:"model,omitempty"`
@@ -193,7 +197,7 @@ func writeErr(w http.ResponseWriter, err error) {
 
 func validHarness(s string) bool {
 	switch s {
-	case "codex", "claude", "pi", "cursor", "grok":
+	case "codex", "claude", "pi", "cursor", "grok", "gemini", "opencode":
 		return true
 	default:
 		return false

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type listPerson struct {
@@ -114,12 +115,14 @@ type listQuery struct {
 	PrioritiesNot []string `json:"priorities_not,omitempty"`
 	AssigneesNot  []string `json:"assignees_not,omitempty"`
 	// Tags, cost units and releases match by name or label, case-insensitively.
-	Tags         []string `json:"tags,omitempty"`
-	TagsNot      []string `json:"tags_not,omitempty"`
-	CostUnits    []string `json:"cost_units,omitempty"`
-	CostUnitsNot []string `json:"cost_units_not,omitempty"`
-	Releases     []string `json:"releases,omitempty"`
-	ReleasesNot  []string `json:"releases_not,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	TagsNot        []string `json:"tags_not,omitempty"`
+	CostUnits      []string `json:"cost_units,omitempty"`
+	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
+	Releases       []string `json:"releases,omitempty"`
+	ReleasesNot    []string `json:"releases_not,omitempty"`
+	HumanChecks    []string `json:"human_checks,omitempty"`
+	HumanChecksNot []string `json:"human_checks_not,omitempty"`
 	// Epics match everything below an epic (its subtree, not the epic itself);
 	// "none" is work under no epic.
 	Epics    []string `json:"epics,omitempty"`
@@ -157,7 +160,7 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
+var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -282,6 +285,9 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if out.Releases, out.ReleasesNot, err = negatedList(r, "release", label); err != nil {
+		return out, err
+	}
+	if out.HumanChecks, out.HumanChecksNot, err = negatedList(r, "human_check", func(value string) (string, bool) { return value, value == "pending" || value == "none" }); err != nil {
 		return out, err
 	}
 	if out.Epics, out.EpicsNot, err = negatedList(r, "epic", personOrNone); err != nil {
@@ -509,7 +515,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var assigneeAvatar bool
 			var leadName, leadKey *string
 			var listSpent, listEst, paidSpent, paidEst *string
-			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
+			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.HumanCheck, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
 			}
@@ -598,8 +604,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				return err
 			}
+			queued, err := workqueue.Load(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
 			for i := range page.Items {
 				page.Items[i].Estimate = estimates[page.Items[i].ID]
+				page.Items[i].Queued = queued[page.Items[i].ID]
 			}
 			planning, err := loadPlanning(ctx, tx, page.Items, q.seen, money)
 			if err != nil {
@@ -836,7 +847,7 @@ const assigneeWorkerEligible = `s.stopped_at IS NULL
 
 // assigneeHarnessLabel is who()'s last resort: the harness word plus " agent".
 const assigneeHarnessLabel = `CASE s.harness WHEN 'codex' THEN 'Codex' WHEN 'claude' THEN 'Claude' WHEN 'pi' THEN 'Pi'
-        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok'
+        WHEN 'cursor' THEN 'Cursor' WHEN 'grok' THEN 'Grok' WHEN 'gemini' THEN 'Gemini CLI' WHEN 'opencode' THEN 'OpenCode'
         ELSE upper(left(s.harness, 1)) || substr(s.harness, 2) END || ' agent'`
 
 // assigneeShownExpr is the name this caller would see for session s: a
@@ -967,6 +978,11 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
 	add(q.Releases, labelMatch("release"))
 	add(q.ReleasesNot, not(labelMatch("release")))
+	checkMatch := func(values []string) string {
+		return `(CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END)=ANY(` + arg(values) + `::text[])`
+	}
+	add(q.HumanChecks, checkMatch)
+	add(q.HumanChecksNot, not(checkMatch))
 	// Epic subtrees: members of the named epics, or of every epic when "none"
 	// is asked for. The walk only runs when an epic filter is set.
 	epicCTE := ""
@@ -1265,6 +1281,10 @@ func facetSQL(q listQuery) (string, []any) {
 	// Tag, cost unit and release counts read fields per row; they are only part
 	// of the query when asked for.
 	extra := ""
+	if want("human_check") {
+		extra += `
+    UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
+	}
 	if want("tag") {
 		extra += `
     UNION ALL SELECT 'tag',coalesce(nullif(btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END),''),'none')
@@ -1405,7 +1425,7 @@ func (m *Module) nodeTree(ctx context.Context, tenantID string, q treeQuery) (tr
 			if err := rows.Scan(
 				&item.node.ID, &item.node.Key, &item.node.KindID, &item.node.Title, &item.node.Body,
 				&fields, &item.node.State, &item.node.ParentID, &position,
-				&item.node.CreatedAt, &item.node.UpdatedAt, &item.node.DeletedAt,
+				&item.node.CreatedAt, &item.node.UpdatedAt, &item.node.DeletedAt, &item.node.HumanCheck,
 				&item.depth, &item.posPath, &item.idPath,
 			); err != nil {
 				return err

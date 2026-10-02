@@ -53,6 +53,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
@@ -60,6 +61,7 @@ import (
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -91,6 +93,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
+		{"GET /api/me/host-labels", "harness.read", false, 200, m.listHostLabels},
+		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
 		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
@@ -108,6 +112,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "harness.worker", true, 200, m.heartbeat},
 		{"GET /api/settings/eta-interval", "settings.manage", false, 200, m.getEtaInterval},
 		{"PUT /api/settings/eta-interval", "settings.manage", false, 200, m.putEtaInterval},
+		{"GET /api/settings/agent-activity", "settings.manage", false, 200, m.getActivityMode},
+		{"PUT /api/settings/agent-activity", "settings.manage", false, 200, m.putActivityMode},
 		{"GET /api/settings/heartbeat-lost", "settings.manage", false, 200, m.getHeartbeatLost},
 		{"PUT /api/settings/heartbeat-lost", "settings.manage", false, 200, m.putHeartbeatLost},
 		{"PUT /api/nodes/{nodeId}/live-eta", "harness.worker", true, 200, m.setLiveEta},
@@ -143,16 +149,23 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
-	CanReparent          *bool `json:"can_reparent,omitempty"`
-	ownerID              *string
-	HandedOverToID       *string                `json:"handed_over_to_id,omitempty"`
-	AdoptedFromID        *string                `json:"adopted_from_id,omitempty"`
-	Controls             []Control              `json:"controls,omitempty"`
-	Watch                *AttachStatus          `json:"watch,omitempty"`
-	ProcessOwnership     *ownedprocess.Identity `json:"process_ownership,omitempty"`
-	ProcessObservedAt    *time.Time             `json:"process_observed_at,omitempty"`
-	ArchivedAt           *time.Time             `json:"archived_at"`
-	RecoveryProcessState *string                `json:"recovery_process_state"`
+	Generator               *string                  `json:"generator,omitempty"`
+	Command                 *string                  `json:"command,omitempty"`
+	AgentActivityMode       string                   `json:"agent_activity_mode,omitempty"`
+	CurrentActivity         *agentactivity.Activity  `json:"current_activity,omitempty"`
+	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
+	doing, toolActivity     *string
+	doingAt, toolActivityAt *time.Time
+	CanReparent             *bool `json:"can_reparent,omitempty"`
+	ownerID                 *string
+	HandedOverToID          *string                `json:"handed_over_to_id,omitempty"`
+	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
+	Controls                []Control              `json:"controls,omitempty"`
+	Watch                   *AttachStatus          `json:"watch,omitempty"`
+	ProcessOwnership        *ownedprocess.Identity `json:"process_ownership,omitempty"`
+	ProcessObservedAt       *time.Time             `json:"process_observed_at,omitempty"`
+	ArchivedAt              *time.Time             `json:"archived_at"`
+	RecoveryProcessState    *string                `json:"recovery_process_state"`
 	StateEvidence
 	ID                                                              string            `json:"id"`
 	ProjectID                                                       string            `json:"project_id"`
@@ -322,27 +335,19 @@ func appendCommits(existing, incoming []Commit) []Commit {
 }
 
 func normalizeActivityNote(raw string) (string, bool) {
-	if !utf8.ValidString(raw) {
-		return "", false
-	}
-	clean := strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, raw))
-	return clean, clean != "" && utf8.RuneCountInString(clean) <= 120
+	return agentactivity.CleanNote(raw)
 }
 
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),model_raw,model_profile_id::text`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp()`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.ModelRaw, &s.ModelProfileID)
+	var activityNow time.Time
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.ownerID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow)
 	if err != nil {
 		return s, err
 	}
@@ -350,6 +355,7 @@ func scanSession(row pgx.Row) (Session, error) {
 		value := int(*progress)
 		s.ProgressPct = &value
 	}
+	projectActivity(&s, activityNow)
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
 	return s, nil
 }
@@ -464,14 +470,8 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
 	return workorders.Record(ctx, tx, p, s.ProjectID, "harness."+kind, before, after)
 }
-func validHarness(v string) bool {
-	switch v {
-	case "codex", "claude", "pi", "cursor", "grok":
-		return true
-	}
-	return false
-}
-func validShape(v string) bool { return v == "ship" || v == "scout" }
+func validHarness(v string) bool { return runkind.Valid(v) }
+func validShape(v string) bool   { return v == "ship" || v == "scout" }
 func validPhase(v string) bool {
 	switch v {
 	case "starting", "working", "yielded", "stopping":
@@ -572,6 +572,8 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 }
 
 type registration struct {
+	Generator  *string `json:"generator"`
+	Command    *string `json:"command"`
 	SucceedsID *string `json:"succeeds_session_id"`
 	rules.ClientReport
 	AgentPrincipalID string  `json:"agent_principal_id"`
@@ -610,6 +612,30 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	}
 	if !workorders.UUID(in.AgentPrincipalID) || !validHarness(in.Harness) || len(in.Host) < 1 || len(in.Host) > 128 || strings.TrimSpace(in.Host) != in.Host || len(in.SessionRef) < 16 || len(in.SessionRef) > 4096 || len(in.WorkerLease) < 32 || len(in.WorkerLease) > 256 || strings.ContainsAny(in.SessionRef+in.WorkerLease, "\r\n") || in.SessionRef == in.WorkerLease {
 		return nil, workorders.Fail(400, "invalid harness registration")
+	}
+	var generator, command string
+	if in.Generator != nil {
+		generator = *in.Generator
+	}
+	if in.Command != nil {
+		command = *in.Command
+	}
+	if err := runkind.Validate(in.Harness, generator, command); err != nil {
+		return nil, workorders.Fail(400, err.Error())
+	}
+	if generator == "" {
+		in.Generator = nil
+	}
+	if command == "" {
+		in.Command = nil
+	}
+	if runkind.Process(in.Harness) {
+		if in.Role != "worker" || in.ParentID == nil || in.TicketNodeID == nil {
+			return nil, workorders.Fail(400, "media and terminal runs require a worker role, parent coordinator and bound ticket")
+		}
+		if in.Model != nil && *in.Model != "" || in.ReasoningEffort != nil && *in.ReasoningEffort != "" {
+			return nil, workorders.Fail(400, "media and terminal runs use generator or command labels, not model or reasoning_effort")
+		}
 	}
 	if in.DisplayLabel != nil {
 		label := strings.TrimSpace(*in.DisplayLabel)
@@ -722,7 +748,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 {
 			return nil, workorders.Fail(409, RegistrationLeaseConflict)
 		}
-		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
+		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || !same(existing.Generator, in.Generator) || !same(existing.Command, in.Command) || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata")
 		}
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
@@ -746,6 +772,12 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, workorders.Fail(409, "archived generation revoked; use a new session reference and worker lease")
 	}
 	if in.ParentID != nil {
+		if runkind.Process(in.Harness) {
+			var coordinator bool
+			if err = tx.QueryRow(ctx, `SELECT role='coordinator' FROM harness_sessions WHERE project_id=$1 AND id=$2`, projectID, *in.ParentID).Scan(&coordinator); err != nil || !coordinator {
+				return nil, workorders.Fail(400, "--parent-session must name a visible coordinator")
+			}
+		}
 		if err = validateParent(ctx, tx, projectID, *in.ParentID, ""); err != nil {
 			return nil, err
 		}
@@ -754,7 +786,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID))
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
 	if err != nil {
 		return nil, registrationConflict(err)
 	}
@@ -879,11 +911,17 @@ func (m *Module) status(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			rows.Close()
 			return nil, err
 		}
-		s.ActivityHistory = append(s.ActivityHistory, item)
+		if clean, valid := normalizeActivityNote(item.Note); valid {
+			item.Note = clean
+			s.ActivityHistory = append(s.ActivityHistory, item)
+		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return nil, err
+	}
+	if err = currentActivityHistory(r.Context(), tx, &s); err != nil {
 		return nil, err
 	}
 	changeRows, err := tx.Query(r.Context(), `SELECT field,previous_value,value,created_at FROM harness_metadata_changes WHERE session_id=$1 ORDER BY id DESC LIMIT 20`, s.ID)
@@ -1045,15 +1083,18 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
 		rules.ClientReport
-		ProcessOwnership *ownedprocess.Identity `json:"process_ownership"`
-		Phase            string                 `json:"phase"`
-		Activity         string                 `json:"activity"`
-		ActivitySequence int64                  `json:"activity_sequence"`
-		ActivityNote     *string                `json:"activity_note"`
-		DisplayLabel     json.RawMessage        `json:"display_label"`
-		EtaReadyAt       json.RawMessage        `json:"eta_ready_at"`
-		EtaLiveAt        json.RawMessage        `json:"eta_live_at"`
-		ProgressPct      json.RawMessage        `json:"progress_pct"`
+		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
+		Phase            string                  `json:"phase"`
+		Activity         string                  `json:"activity"`
+		ActivitySequence int64                   `json:"activity_sequence"`
+		ActivityNote     *string                 `json:"activity_note"`
+		Doing            *string                 `json:"doing"`
+		DoingAt          *time.Time              `json:"doing_at"`
+		ToolActivity     *agentactivity.Activity `json:"tool_activity"`
+		DisplayLabel     json.RawMessage         `json:"display_label"`
+		EtaReadyAt       json.RawMessage         `json:"eta_ready_at"`
+		EtaLiveAt        json.RawMessage         `json:"eta_live_at"`
+		ProgressPct      json.RawMessage         `json:"progress_pct"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -1064,6 +1105,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, workorders.Fail(400, "invalid heartbeat")
 	}
 	ctx := r.Context()
+	if err := lockActivityPolicy(ctx, tx, true); err != nil {
+		return nil, err
+	}
 	s, err := worker(ctx, tx, r, p)
 	if err != nil && lostContact(s) && leaseProof(s, r, p) {
 		// AEON-291: the sweeper closed a silent generation; its own worker is back.
@@ -1089,6 +1133,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if in.ActivitySequence == s.ActivitySequence && in.Activity != s.Activity {
 		return nil, workorders.Fail(409, "divergent activity replay")
 	}
+	if s.AgentActivityMode != agentactivity.Summary {
+		in.ActivityNote = nil
+	}
 	if in.ActivityNote != nil {
 		note, valid := normalizeActivityNote(*in.ActivityNote)
 		if !valid {
@@ -1098,6 +1145,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err := in.ClientReport.Validate(); err != nil {
 		return nil, workorders.Fail(400, err.Error())
+	}
+	if runkind.Process(s.Harness) && (in.Model != nil && *in.Model != "" || in.ReasoningEffort != nil && *in.ReasoningEffort != "") {
+		return nil, workorders.Fail(400, "media and terminal runs use generator or command labels, not model or reasoning_effort")
 	}
 	if err := in.sessionText.normalize(); err != nil {
 		return nil, err
@@ -1162,6 +1212,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
+	if err = reportActivity(ctx, tx, s, in.Doing, in.DoingAt, in.ToolActivity); err != nil {
+		return nil, err
+	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=$6,reasoning_effort=$7,account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14,model_raw=$15,model_profile_id=$16 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label, modelRaw, identity.ProfileID))
 	if err != nil {
 		return nil, err
@@ -1182,6 +1235,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		return nil, err
 	}
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
+		return nil, err
+	}
+	if err = recordCurrentActivity(ctx, tx, p, s); err != nil {
 		return nil, err
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {

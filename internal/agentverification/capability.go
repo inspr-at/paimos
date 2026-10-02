@@ -24,6 +24,8 @@ func For(harness, platform, arch string) Capability {
 		return Capability{false, "unavailable", "Cursor ask mode and an isolated config do not enforce a no-tools policy."}
 	case "pi":
 		return Capability{false, "unavailable", "pi verification has no qualified no-tools policy for extensions and provider configuration."}
+	case "gemini", "opencode":
+		return Capability{false, "unavailable", "ACP mode has no qualified no-tools boundary for inherited plugins, hooks and MCP configuration."}
 	case "grok":
 		if platform == "darwin" && arch == "arm64" {
 			return Capability{true, "no_tools", ""}

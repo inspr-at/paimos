@@ -196,6 +196,8 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 			} else if s.loginRequired[a.ID] {
 				status, reason = "login_required", "login_required"
 				v.LoginRequired = true
+			} else if s.signInUnverified[a.ID] {
+				status, reason = "blocked", ProbeUnverified
 			} else if s.probedAccounts[a.ID] && !s.blockedAccounts[a.ID] {
 				status, reason = "ready", ""
 				v.Ready = true
@@ -487,6 +489,7 @@ func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
 	s.probePendingSince[accountID] = now
 	delete(s.probedAccounts, accountID)
 	delete(s.loginRequired, accountID)
+	delete(s.signInUnverified, accountID)
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.

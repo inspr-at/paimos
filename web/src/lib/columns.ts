@@ -11,7 +11,7 @@
 import type { SortField } from './work.ts'
 import { PLANNING_COLUMNS } from './planning.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
 export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
@@ -29,6 +29,7 @@ export const COLUMNS: ColumnDef[] = [
   { id: 'estimate', label: 'Estimate', sort: 'estimate', width: 96, min: 72, max: 180, end: true },
   // Model name and version, brand mark, effort meter, measured check and +N.
   { id: 'model', label: 'Model', sort: 'model', width: 176, min: 96, max: 260 },
+  { id: 'suggested', label: 'Suggested release', sort: null, width: 152, min: 120, max: 260 },
   // Fixed measured slot follows the value; running estimates carry "~".
   { id: 'tokens', label: 'Tokens', sort: 'tokens', width: 118, min: 84, max: 180, end: true },
   { id: 'list_cost', label: 'Cost', sort: 'list_cost', width: 128, min: 80, max: 170, end: true },
@@ -48,14 +49,14 @@ export const TITLE_TARGET = 960
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+const DROP_ORDER: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
 // Columns only wide tables add on their own.
-const WIDE_EXTRAS: ColumnId[] = ['list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
+const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
 const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
+export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
 
 /** Normalize saved preferences, shared links and saved views without mutating them. */
 export function normalizeColumnIds(ids: readonly unknown[]): ColumnId[] {
@@ -80,7 +81,7 @@ export function automaticColumns(tableWidth: number, present: Present = {}): Col
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : []),
-      ...PLANNING_COLUMNS.filter(id => present[id])]
+      ...PLANNING_COLUMNS.filter(id => present[id]), ...(present.suggested ? ['suggested' as const] : [])]
     const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
     if (present.progress) wide.push('progress')
     if (present.eta) wide.push('eta')

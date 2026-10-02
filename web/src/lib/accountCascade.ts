@@ -10,7 +10,7 @@ import { duration, harnessLabel } from './agentState.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
 export type WorkRole = typeof WORK_ROLES[number]
-export const AUTHOR_FAMILIES = ['openai', 'anthropic', 'xai', 'cursor'] as const
+export const AUTHOR_FAMILIES = ['openai', 'anthropic', 'xai', 'cursor', 'google', 'local'] as const
 export type AuthorFamily = typeof AUTHOR_FAMILIES[number]
 export const UNAVAILABLE_REASONS = ['state', 'probe', 'capacity', 'allowance', 'models'] as const
 export type UnavailableReason = typeof UNAVAILABLE_REASONS[number]
@@ -21,7 +21,7 @@ const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'
 const EFFORT_LABEL: Record<string, string> = {
   off: 'Off', none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
 }
-const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor' }
+const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor', google: 'Google', local: 'Local' }
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 const NAMED_SPANS = [

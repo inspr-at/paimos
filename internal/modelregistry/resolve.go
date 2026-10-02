@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 // Resolution is the role choice exposed by GET /api/models/resolve.
@@ -116,6 +117,9 @@ func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, erro
 			return nil, err
 		}
 		step.Role = role
+		if step.Profile.Harness == "gemini" {
+			step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
+		}
 		out = append(out, step)
 	}
 	return out, rows.Err()

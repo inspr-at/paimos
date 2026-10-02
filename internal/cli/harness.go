@@ -21,16 +21,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(),
+		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
 
@@ -160,7 +162,7 @@ func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, e
 	if known.Harness == "" {
 		return rules.MaxBytes, nil
 	}
-	if !modelHarnesses[known.Harness] {
+	if !runkind.Valid(known.Harness) {
 		return 0, usagef("unsupported session harness %q", known.Harness)
 	}
 	return rules.SessionFileLimit(known.Harness), nil
@@ -323,13 +325,15 @@ func harnessAgentMismatch(name string) error {
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
+	var project, agent, harness, generator, commandLabel, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
 		fs.string(&agent, "agent", 0, "authenticated agent principal name; children use the same agent")
-		fs.string(&harness, "harness", 0, "adapter family")
+		fs.string(&harness, "harness", 0, "execution family: "+runkind.Accepted)
+		fs.string(&generator, "generator", 0, "public media generator label, e.g. higgsfield/kling3_0")
+		fs.string(&commandLabel, "command", 0, "public terminal command label, e.g. ffmpeg")
 		fs.string(&host, "host", 0, "non-secret host label")
 		fs.string(&label, "label", 0, "public session display label (up to 128 characters)")
 		fs.string(&model, "model", 0, "model name")
@@ -353,8 +357,22 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&orderID, "work-order-id", 0, "Aeon work order UUID")
 		fs.strings(&caps, "capability", "comma-separated advertised capabilities")
 	}, run: func([]string) error {
-		if !agentNameRE.MatchString(agent) || !modelHarnesses[harness] || strings.TrimSpace(host) == "" {
-			return usagef("--agent, --harness and --host are required")
+		if !agentNameRE.MatchString(agent) {
+			return usagef("--agent must be a valid agent name")
+		}
+		if err := runkind.Validate(harness, generator, commandLabel); err != nil {
+			return usagef("%s", err)
+		}
+		if strings.TrimSpace(host) == "" {
+			return usagef("--host is required")
+		}
+		if runkind.Process(harness) {
+			if parent == "" || ticket == "" && ticketIDFlag == 0 {
+				return usagef("--harness %s requires --parent-session and --ticket", harness)
+			}
+			if model != "" || effort != "" {
+				return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+			}
 		}
 		if management == "" {
 			management = "managed"
@@ -363,7 +381,7 @@ func (rt *runtime) harnessRegister() *Command {
 			role = "worker"
 		}
 		if management != "managed" && management != "unmanaged" || role != "worker" && role != "coordinator" {
-			return usagef("invalid management or role")
+			return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 		}
 		var err error
 		var ref, lease string
@@ -440,6 +458,8 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		body := map[string]any{"succeeds_session_id": predecessor, "max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersionOrProbe(context.Background(), harness, harnessVersion), "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}
+		putText(body, "generator", generator, true)
+		putText(body, "command", commandLabel, true)
 		attachVendorSessionRef(body, harness, ref, lease, parent, "")
 		var out any
 		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", body, &out)
@@ -522,7 +542,7 @@ func (rt *runtime) harnessBind() *Command {
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
 	var capacityOptions heartbeatCapacity
-	var project, session, agent, leaseFile, phase, activity, activityKind, note, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
+	var project, session, agent, leaseFile, phase, activity, activityKind, note, doing, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
 	label := omittedLabel
@@ -539,6 +559,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
 			fs.string(&note, "note", 0, "current step, at most 120 characters")
+			fs.string(&doing, "doing", 0, "public activity summary, at most 60 characters")
 			fs.string(&model, "model", 0, "model name")
 			fs.string(&effort, "effort", 0, "reasoning effort")
 			fs.string(&accountLabel, "account-label", 0, "subscription or account display name (never a credential)")
@@ -613,7 +634,18 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 				body["display_label"] = label
 			}
 			if note != "" {
-				body["activity_note"] = note
+				clean, valid := agentactivity.CleanNote(note)
+				if !valid {
+					return usagef("--note must be a public activity note of at most 120 characters")
+				}
+				body["activity_note"] = clean
+			}
+			if doing != "" {
+				text, valid := agentactivity.CleanSummary(doing)
+				if !valid {
+					return usagef("--doing must be a public summary of at most 60 characters")
+				}
+				body["doing"] = text
 			}
 			for key, value := range map[string]string{"model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersion, "brief": brief, "worktree": worktree, "branch": branch} {
 				if value != "" {

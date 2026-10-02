@@ -212,10 +212,15 @@ func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET state='revoked' WHERE (computer_id=$1 OR details->>'existing_computer_id'=$1::text) AND state IN ('pending','approved','redeemed')`, id); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return cancelDisconnectedAccountLinks(ctx, tx, id)
 }
 func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
+	if err := cancelDisconnectedAccountLinks(ctx, tx, computer); err != nil {
+		return err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
   AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.account_id=e.account_id AND r.status IN ('starting','running','waiting'))`, computer)
 	if err != nil {
@@ -254,7 +259,7 @@ func disconnectRequest(ctx context.Context, tx pgx.Tx, rec record) error {
 	if rec.Details.ExistingComputerID == "" {
 		return revokeComputer(ctx, tx, *rec.ComputerID)
 	}
-	return nil
+	return cancelDisconnectedAccountLinks(ctx, tx, *rec.ComputerID)
 }
 
 // reportProgress appends agent_pairing.reported for the person who approved

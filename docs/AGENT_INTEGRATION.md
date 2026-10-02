@@ -22,7 +22,77 @@ The supervisor's `serve` command takes `--url`, `--agent-key-file` (an absolute 
 
 Its `control` command sends a fenced local control. Vendor session ids stay on the daemon. Aeon stores the run id and the agent principal.
 
-The daemon adapts Codex, Claude, Pi, Cursor, and Grok locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+The daemon adapts Codex, Claude, Pi, Cursor, Grok, Gemini CLI, and OpenCode locally. The native Grok adapter requires macOS. Aeon sees a harness name, an opaque account key, a family, and bounded usage counters.
+
+### Gemini CLI and OpenCode
+
+Setup accepts `--harness gemini` and `--harness opencode`. Standalone serve accepts
+`--gemini-path` and `--opencode-path`; paired serve uses the approved physical
+installation and interpreter pins. Discovery checks only `--version` and labels
+these candidates as **local profiles**, not authenticated person identities.
+Their explicitly selected HOME must be private and owned. Vendor login remains
+local: run `gemini` or `opencode auth login` normally. Session creation must succeed
+before Aeon sends a prompt; provider authentication can still fail on that prompt.
+Version probes leave discovery **unverified** and daemon accounts blocked with
+`sign_in_unverified`; they never establish sign-in or readiness. Setup cannot
+enroll these candidates as ready until a qualified sign-in probe is available.
+
+Both adapters use ACP version 1 over the existing owned stdio transport, with
+fresh sessions and run-scoped Aeon HTTP MCP tools. Idle inbox delivery starts a
+new turn in the same owned session; a busy turn rejects steer/inbox for retry.
+Interrupt waits for a terminal cancellation receipt. An unapproved permission
+request ends the run; Aeon never chooses a vendor permission option for a person.
+These adapters have no qualified no-tools execution boundary, so pairing
+verification and managed reviews remain unavailable before vendor startup.
+Existing enrollments retain their local profile, but a successful version probe
+does not make them launchable or request another login as if sign-out were proven.
+
+Gemini profiles pin the exact model and numeric thinking budget. The qualified
+2.5 Flash range is 0–24576; 2.5 Pro is 128–32768. The registry exposes
+`effort_level` on the common 0–5 scale: off/0, up to 1024, up to 4096, up to 16384,
+up to 32768, then more; dynamic or named budgets stay unknown. A fresh private
+system settings file applies the pin without rewriting vendor or workspace
+configuration. OpenCode profiles require `provider/model`; efforts are actual
+provider variants, with `default` where no variant is selected. ACP startup
+checks the vendor's returned model and effort selections before prompting.
+`paimos harness invoke --harness gemini|opencode --model MODEL --effort EFFORT
+[--review] -- PROMPT` renders the registry's terminal run/review command.
+Its review flag selects vendor plan mode; it does not qualify managed no-tools
+review or override person controls.
+
+Gemini ACP completed-turn counters include cache reads in input and expose
+reasoning separately; the normalized output includes reasoning. Mixed-model
+Gemini turns remain unattributed. OpenCode's pinned ACP implementation returns
+only its last assistant step: tool turns therefore omit throughput instead of
+claiming complete totals. Cumulative USD updates remain available; context
+occupancy (`used`/`size`) is never counted as throughput. Native metadata captures
+can use `session-usage-parse --source gemini|opencode` with the existing complete
+capture/checkpoint contract. Gemini JSON telemetry requires one fixed model;
+OpenCode `step_finish` parts deduplicate by stable part ID and count every step.
+Heartbeat captures are explicitly named `gemini.jsonl` or `opencode.jsonl` in the
+worker state directory; vendor credentials and databases are never read. No
+quota-neutral capacity API has been qualified; missing capacity stays unknown.
+Qualification tests use local protocol fixtures, not paid vendor calls. Real CLI
+installation, login and no-tools qualification remain separate evidence gates.
+Attach recognizes recorded vendor installation roots and native executable pins.
+A generic Node interpreter does not prove a Gemini process's identity, so such
+attachments are refused. Native Gemini attachment remains unqualified.
+
+Skill rendering uses the vendor directories
+[`.gemini/skills`](https://geminicli.com/docs/cli/skills/) and
+[`.opencode/skills`](https://opencode.ai/v2/docs/skills).
+Always-on Gemini previews suggest
+[`GEMINI.md`](https://geminicli.com/docs/cli/gemini-md/); OpenCode uses `AGENTS.md`.
+Rules import accepts both harness selectors while refusing their private vendor
+stores. Rendering preserves exact bytes; installing a preview remains explicit.
+
+The closed reporter harness enum changes the declared status/heartbeat contract
+from `harness-session/1.9` to `harness-session/2.0`. Existing fields and routes keep
+their shape. `Aeon-Contract` is a response header, not a required request header:
+historical registration and heartbeat bodies still work without it. Pharos and
+Janus do not decode the harness-session enum, so no coordinated rollout is
+required for their existing reporters. The worker does not update those
+repositories or deploy this draft.
 
 ### Default worker launch
 
@@ -86,7 +156,7 @@ Run the guide’s complete instance-bound command from the intended project fold
 
 `pair` runs setup, displays the code and waits for browser approval and daemon connectivity. It offers the current physical folder for explicit confirmation and installed, signed-in harness accounts for selection. Bare `pair` asks for the instance origin on first use; a resumed pairing keeps its saved origin and folder. The guide supplies the default tenant. No credentials are requested or printed. JSON automation must supply `--workspace` and `--harness` explicitly instead of answering prompts.
 
-Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs a read-only sign-in check for every supported vendor tool found on PATH before offering choices; explicit `--harness` flags probe only those selections.
+Start from the intended project folder, not your home folder: the default private state lives beneath your home and must stay outside the working folder. An invalid choice is rejected before confirmation or state creation; use `--workspace /absolute/project/folder` to select the intended folder explicitly. Interactive discovery performs read-only sign-in checks for vendor tools that expose one; Gemini CLI and OpenCode offer an explicitly selected local profile with unverified sign-in. Explicit `--harness` flags probe only those selections.
 
 `--state-root` is optional for `pair`, `setup`, `status`, `disconnect` and `add-harness`. The defaults are `~/Library/Application Support/aeon/paired` on macOS and `$XDG_STATE_HOME/aeon/paired` on Linux (or `~/.local/state/aeon/paired` when unset). Missing directories, including parents, are created with mode `0700`; existing unsafe permissions, symlinks, repository paths and paths inside the working folder are rejected without repair. No manual `mkdir` is needed. Advanced `--workspace`, repeated `--harness`, `--tenant`/`--tenant-id`, and `--state-root` overrides remain available. To maintain multiple pairings, use a distinct private state root for each.
 
@@ -691,6 +761,8 @@ Claude in-run stream readings remain the source paths from AEON-297.
 | Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
+| Gemini CLI | Approved local profile `home` → `HOME` / `GEMINI_CLI_HOME` | Not available: quota-neutral API unqualified |
+| OpenCode | Approved local profile `home` → `HOME` and private XDG directories | Not available: provider capacity unqualified |
 
 Homes come from each approved local registry/runtime account, not from directory
 crawling or credential extraction. Cursor uses the same explicit home for its

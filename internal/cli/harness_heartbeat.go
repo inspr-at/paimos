@@ -20,9 +20,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
 	"github.com/inspr-at/paimos/internal/version"
 )
@@ -78,6 +80,9 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	LinkAccountID     string
+	LinkSetupRoot     string
+	LinkSocket        string
 	StatusFile        string
 	Capacity          heartbeatCapacity
 	OwnerPID          int
@@ -86,6 +91,8 @@ type heartbeatOptions struct {
 	Project           string
 	Agent             string
 	Harness           string
+	Generator         string
+	CommandLabel      string
 	Host              string
 	Label             string
 	Model             string
@@ -95,6 +102,7 @@ type heartbeatOptions struct {
 	Brief             string
 	Worktree          string
 	Branch            string
+	Doing             string
 	Note              string
 	Phase             string
 	Activity          string
@@ -141,7 +149,9 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
-			fs.string(&o.Harness, "harness", 0, "adapter family")
+			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
+			fs.string(&o.Generator, "generator", 0, "public media generator label")
+			fs.string(&o.CommandLabel, "command", 0, "public terminal command label")
 			fs.string(&o.Host, "host", 0, "non-secret host label")
 			fs.string(&o.Label, "label", 0, "session display label used until a name source has one")
 			fs.string(&o.Model, "model", 0, "model name, or AEON_MODEL when omitted")
@@ -153,6 +163,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.StatusFile, "status-file", 0, "JSON status: pct, remaining_min and note (workers default to WORKTREE/.agent-status.json)")
 			fs.string(&o.Branch, "branch", 0, "branch name")
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
+			fs.string(&o.Doing, "doing", 0, "public activity summary, at most 60 characters; agent_summary mode only")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
 			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
@@ -165,7 +176,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 			fs.string(&o.Transcript, "transcript", 0, "Claude Code session transcript JSONL for usage and its title")
-			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, or grok")
+			fs.string(&o.UsageSource, "usage-source", 0, "usage log family: claude, codex, cursor, grok, gemini, or opencode")
 			fs.string(&o.UsageFile, "usage-file", 0, "explicit usage log; credential paths are rejected")
 			fs.string(&o.UsageID, "usage-id", 0, "vendor session or thread id used to locate the usage log")
 			fs.string(&o.CodexHome, "codex-home", 0, "Codex home (default $CODEX_HOME or ~/.codex)")
@@ -204,10 +215,10 @@ func (o *heartbeatOptions) normalize() {
 	if o.Activity == "" {
 		o.Activity = "busy"
 	}
-	if strings.TrimSpace(o.Model) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Model) == "" {
 		o.Model = os.Getenv("AEON_MODEL")
 	}
-	if strings.TrimSpace(o.Effort) == "" {
+	if !runkind.Process(o.Harness) && strings.TrimSpace(o.Effort) == "" {
 		o.Effort = os.Getenv("AEON_EFFORT")
 	}
 	if o.CodexIndex == "" {
@@ -246,6 +257,11 @@ func (o *heartbeatOptions) applyRuntimeDefaults() {
 }
 
 func (o *heartbeatOptions) prepare() error {
+	if o.Doing != "" {
+		if _, valid := agentactivity.CleanSummary(o.Doing); !valid {
+			return usagef("--doing must be a public summary of at most 60 characters")
+		}
+	}
 	o.normalize()
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
@@ -253,19 +269,36 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" || !agentNameRE.MatchString(o.Agent) || !modelHarnesses[o.Harness] {
-		return usagef("--project, --agent and --harness are required")
+	if strings.TrimSpace(o.Project) == "" {
+		return usagef("--project is required")
+	}
+	if !agentNameRE.MatchString(o.Agent) {
+		return usagef("--agent must be a valid agent name")
+	}
+	if err := runkind.Validate(o.Harness, o.Generator, o.CommandLabel); err != nil {
+		return usagef("%s", err)
+	}
+	if runkind.Process(o.Harness) {
+		if o.Parent == "" || o.Ticket == "" {
+			return usagef("--harness %s requires --parent-session and --ticket", o.Harness)
+		}
+		if o.Role != "worker" {
+			return usagef("--role must be worker for media and terminal runs")
+		}
+		if o.Model != "" || o.Effort != "" {
+			return usagef("--model and --effort are for AI agents; use --generator for media or --command for terminal")
+		}
 	}
 	if o.Interval < 1 || o.Interval > 3600 {
 		return usagef("--interval must be 1-3600 seconds")
 	}
 	if !heartbeatPhases[o.Phase] {
-		return usagef("invalid --phase")
+		return usagef("--phase must be starting, working, yielded or stopping")
 	}
 	if heartbeatText(o.Activity, 40) == "" {
 		o.Activity = ""
 	} else if !heartbeatActs[o.Activity] {
-		return usagef("invalid --activity")
+		return usagef("--activity must be busy, idle or throttled")
 	}
 	if o.SourceSession != "" && !validUUID(o.SourceSession) {
 		return usagef("--source-session must be a UUID")
@@ -277,7 +310,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("invalid parent session")
 	}
 	if o.Management != "managed" && o.Management != "unmanaged" || o.Role != "worker" && o.Role != "coordinator" {
-		return usagef("invalid management or role")
+		return usagef("--management must be managed or unmanaged; --role must be worker or coordinator")
 	}
 	if o.Host == "" {
 		host, err := os.Hostname()
@@ -310,7 +343,7 @@ func (o *heartbeatOptions) prepare() error {
 		return usagef("--subscription-label requires subscription billing")
 	}
 	switch o.UsageSource {
-	case "", "claude", "codex", "cursor", "grok":
+	case "", "claude", "codex", "cursor", "grok", "gemini", "opencode":
 	default:
 		return usagef("invalid --usage-source")
 	}
@@ -822,6 +855,8 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	putText(body, "generator", o.Generator, true)
+	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
 	putText(body, "model", heartbeatText(o.Model, 128), true)
 	putText(body, "reasoning_effort", heartbeatText(o.Effort, 40), true)
@@ -1154,8 +1189,25 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if note == "" {
 		note = status.Note
 	}
-	if note != "" {
+	if note != "" && (session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary) {
 		body["activity_note"] = note
+	}
+	if session.disk.ActivityMode != agentactivity.Off {
+		if raw, err := session.hold.readFile("activity.json", 512); err == nil {
+			var observed hookActivity
+			if json.Unmarshal(raw, &observed) == nil && observed.Session == session.id && observed.Activity.Source == "auto" && agentactivity.ValidAuto(observed.Activity.Text) && !observed.Activity.At.After(now) && now.Sub(observed.Activity.At) < agentactivity.Fresh {
+				body["tool_activity"] = observed.Activity
+			}
+		}
+	}
+	if session.disk.ActivityMode == agentactivity.Summary {
+		doing, at := status.Doing, status.ModifiedAt
+		if o.Doing != "" {
+			doing, at = o.Doing, session.disk.RegisteredAt
+		}
+		if doing != "" && !at.IsZero() && !at.After(now) && now.Sub(at) < agentactivity.Fresh {
+			body["doing"], body["doing_at"] = doing, at
+		}
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
@@ -1167,6 +1219,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
+		Mode     string                    `json:"agent_activity_mode"`
 		Warnings []harness.EstimateWarning `json:"warnings"`
 	}
 	postBeat := func() error {
@@ -1208,6 +1261,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		session.disk.Sequence--
 		return err
+	}
+	if agentactivity.Mode(response.Mode) {
+		session.disk.ActivityMode = response.Mode
+		payload, _ := json.Marshal(map[string]string{"session_id": session.id, "mode": response.Mode})
+		_ = session.hold.writeFile("activity-mode.json", payload)
 	}
 	if label, ok := body["display_label"].(string); ok {
 		session.disk.LabelSent = true
@@ -1657,7 +1715,7 @@ func heartbeatText(raw string, max int) string {
 
 func heartbeatNote(raw string) string {
 	clean := heartbeatText(raw, 1<<20)
-	if clean == "" {
+	if clean == "" || !agentactivity.SafeText(clean) {
 		return ""
 	}
 	if utf8.RuneCountInString(clean) <= heartbeatNoteMax {
@@ -1667,6 +1725,7 @@ func heartbeatNote(raw string) string {
 }
 
 type agentStatus struct {
+	Doing      string
 	Note       string
 	Progress   *int
 	Remaining  *float64
@@ -1696,6 +1755,7 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 	}
 	var doc struct {
 		Note      string          `json:"note"`
+		Doing     string          `json:"doing"`
 		Pct       json.RawMessage `json:"pct"`
 		Remaining json.RawMessage `json:"remaining_min"`
 	}
@@ -1703,6 +1763,9 @@ func readAgentStatus(o heartbeatOptions) (agentStatus, bool) {
 		return agentStatus{}, false
 	}
 	status := agentStatus{Note: heartbeatNote(doc.Note), ModifiedAt: st.ModTime().UTC()}
+	if text, valid := agentactivity.CleanSummary(doc.Doing); valid {
+		status.Doing = text
+	}
 	valid := true
 	if len(doc.Pct) > 0 && string(doc.Pct) != "null" {
 		var n int
