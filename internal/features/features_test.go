@@ -93,7 +93,7 @@ func setup(t *testing.T) fixture {
 	for _, item := range []struct {
 		p       tenant.Principal
 		id, key string
-	}{{f.admin, f.project, "FLAG"}, {f.admin, f.hidden, "HIDDEN"}, {f.other, f.foreign, "FOREIGN"}} {
+	}{{f.admin, f.project, "FLAG-1"}, {f.admin, f.hidden, "HIDDEN-1"}, {f.other, f.foreign, "FOREIGN-1"}} {
 		if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, item.p.TenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,state)
                 SELECT $1,$2,$3,id,'Flag project','active' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, item.p.TenantID, item.id, item.key)
