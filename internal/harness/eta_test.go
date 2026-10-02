@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -314,7 +315,7 @@ func TestHarnessReporterOmitsUnusedEta(t *testing.T) {
 		{"heartbeat", decode(t, beat), beat.Header().Get("Aeon-Contract")},
 		{"status", decode(t, status), status.Header().Get("Aeon-Contract")},
 	} {
-		if tc.got != "harness-session/2.0" {
+		if tc.got != reportercontract.HarnessSession {
 			t.Fatalf("%s Aeon-Contract = %q", tc.name, tc.got)
 		}
 		for _, key := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale"} {

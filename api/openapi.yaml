@@ -4884,6 +4884,81 @@ paths:
       description: Session detail, including at most 20 recent activity notes and metadata changes, newest first.
       responses:
         '200': {description: Session detail, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+  /harness-sessions/pause:
+    post:
+      operationId: pauseAllHarnessSessions
+      description: Person-only harness.control. Up to 200 owned (or administered) pause-capable generations across visible authorized projects; repeat when more is true. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Durable transitions and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
+        '403': {description: Person and authorized project access required}
+  /harness-sessions/resume:
+    post:
+      operationId: resumeAllHarnessSessions
+      description: Person-only harness.control. Up to 200 owned (or administered) generations across visible authorized projects; repeat when more is true. Project permission and ownership are checked separately for each project. Coordinators use the project endpoint.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Durable transitions, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessResume'}}, more: {type: boolean}}}}}}
+        '403': {description: Person and authorized project access required}
+  /projects/{projectId}/harness-sessions/{sessionId}/pause:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: pauseHarnessSession
+      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Managed sessions must advertise inbox delivery; unsupported harnesses return 409. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseRequest'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/pause-plan:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: planHarnessPause
+      description: Requires harness.worker and the exact worker lease. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPausePlan'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/resume:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resumeHarnessSession
+      description: Requires harness.control. People control their owned generations (or project admins); coordinators control their direct children using their own lease. Pause is a cooperative stop control, never a process signal. Resume persists a continuation request; supplying a fresh registration creates its successor atomically.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessResumeRequest'}}}}
+      responses:
+        '200': {description: Durable idempotent transition, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessResume'}}}}
+        '400': {description: Invalid payload}
+        '403': {description: 'Ownership, scope or worker proof rejected'}
+        '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/pause:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: pauseProjectHarnessSessions
+      description: Applies to up to 200 pause-capable generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Managed generations without inbox delivery remain running and are reported in skipped (up to 200, with skipped_more indicating omitted reports); they do not consume the pause limit.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Controlled and skipped generations, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatchResult'}}}}
+        '403': {description: Scope or coordinator proof rejected}
+  /projects/{projectId}/harness-sessions/resume:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resumeProjectHarnessSessions
+      description: Applies to up to 200 eligible generations controlled by this person or proven coordinator in this project. Repeat when more is true. Excluded session UUIDs are preserved. Resume returns durable launch recipes; each successor registers with fresh private proofs and succeeds_session_id.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessPauseBatch'}}}}
+      responses:
+        '200': {description: Controlled generations, content: {application/json: {schema: {type: object, required: [items, more], properties: {items: {type: array, items: {$ref: '#/components/schemas/HarnessResume'}}, more: {type: boolean}}}}}}
+        '403': {description: Scope or coordinator proof rejected}
   /projects/{projectId}/harness-sessions/{sessionId}/reparent:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5331,6 +5406,30 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/stop:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: markHarnessStopped
+      description: Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [stopped, process_exited, process_failed, ownership_lost, force_stopped, token_budget_exhausted, turn_budget_exhausted, paused]}
+                handover: {$ref: '#/components/schemas/HarnessHandover'}
+      responses:
+        '200': {description: Closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid stop reason or handover}
+        '403': {description: Exact worker proof required}
+        '409': {description: Missing planned pause or divergent replay}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/yield:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -5339,7 +5438,7 @@ paths:
     post:
       security: *auth
       operationId: yieldHarnessSession
-      description: 'Managed worker claims every pending owned control in sequence. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
       requestBody:
         required: true
         content:
@@ -5670,7 +5769,7 @@ paths:
       summary: Tenant-wide harness sessions, newest first
       description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
       parameters:
-        - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped]}}
+        - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped, paused]}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: agent, in: query, schema: {type: string, format: uuid}}
         - {name: project, in: query, schema: {type: string, format: uuid}}
@@ -8251,7 +8350,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.2']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.0']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.1']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -12096,7 +12195,7 @@ components:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
       properties:
-        succeeds_session_id: {type: [string, 'null'], format: uuid, description: Explicit stopped or heartbeat-lost coordinator predecessor owned by the same principal in this project.}
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: 'Explicit stopped or heartbeat-lost coordinator, or paused worker with a durable resume request, owned by the same principal in this project.'}
         max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
         rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80, description: "Aeon CLI or agentd version reporting the capability."}
         agent_principal_id: {type: string, format: uuid}
@@ -12369,11 +12468,108 @@ components:
         agent_principal_id: {type: string, format: uuid}
         stopped_at: {type: [string, 'null'], format: date-time}
         archived_at: {type: [string, 'null'], format: date-time}
+    HarnessPauseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 240}
+        deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
+        coordinator_session_id: {type: string, format: uuid, description: Agents must prove a live parent coordinator using X-Aeon-Worker-Lease.}
+    HarnessPauseBatch:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 240}
+        deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
+        coordinator_session_id: {type: string, format: uuid}
+        except: {type: array, maxItems: 200, items: {type: string, format: uuid}}
+    HarnessPauseBatchResult:
+      type: object
+      required: [items, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessSession'}}
+        more: {type: boolean, description: More pause-capable generations remain; repeat the request. Skipped generations do not consume this limit.}
+        skipped: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessPauseSkippedSession'}}
+        skipped_more: {type: boolean, description: More unsupported generations were omitted from the bounded skipped report.}
+    HarnessPauseSkippedSession:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, reason]
+      description: A controlled managed generation that lacks inbox delivery. No pause or control is created; the session remains running. Only public identifiers and its optional display label are returned.
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        display_label: {type: string, maxLength: 128}
+        reason: {type: string, enum: [inbox_delivery_unavailable]}
+    HarnessPausePlan:
+      type: object
+      additionalProperties: false
+      required: [control_id, handover_point]
+      properties:
+        control_id: {type: string, format: uuid}
+        handover_point: {type: string, minLength: 1, maxLength: 1000}
+    HarnessHandover:
+      type: object
+      additionalProperties: false
+      required: [state, next_steps, open_questions, worktree_state]
+      description: Worker finishes or rolls back the current step, commits WIP on its own branch, then supplies this note with stop reason paused. Stored in the session and as a bound-ticket comment in one transaction. No credentials or private registration references.
+      properties:
+        state: {type: string, minLength: 1, maxLength: 4000}
+        next_steps: {type: array, minItems: 1, maxItems: 20, items: {type: string, minLength: 1, maxLength: 1000}}
+        open_questions: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 1000}}
+        worktree_state: {type: string, enum: [committed, clean, rolled_back]}
+        commit_sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$', description: Required when worktree_state is committed.}
+    HarnessPause:
+      type: object
+      required: [control_id, state, requested_by_principal_id, requested_at, reason, deadline_at]
+      properties:
+        control_id: {type: string, format: uuid}
+        state: {type: string, enum: [requested, planned, paused, resume_requested, resumed, cancelled]}
+        requested_by_principal_id: {type: string, format: uuid}
+        requested_at: {type: string, format: date-time}
+        reason: {type: string}
+        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. An overdue requested or planned pause becomes cancelled and its control completes with reason pause_deadline_expired, allowing a new pause. Checked on heartbeat, session/control reads, new pause requests and the periodic sweep. Expiry never signals a process; a separate hard-stop executor must use the existing exact process ownership protocol.'}
+        handover_point: {type: string}
+        planned_at: {type: string, format: date-time}
+        paused_at: {type: string, format: date-time}
+        handover: {$ref: '#/components/schemas/HarnessHandover'}
+        resume_requested_at: {type: string, format: date-time}
+        successor_session_id: {type: string, format: uuid}
+    HarnessContinuation:
+      type: object
+      required: [succeeds_session_id, handover, brief]
+      properties:
+        succeeds_session_id: {type: string, format: uuid}
+        handover: {$ref: '#/components/schemas/HarnessHandover'}
+        brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
+    HarnessResumeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        coordinator_session_id: {type: string, format: uuid}
+        registration:
+          type: object
+          additionalProperties: false
+          required: [harness_session_ref, worker_lease]
+          properties:
+            harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+            worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+            host: {type: string, minLength: 1, maxLength: 128}
+    HarnessResume:
+      type: object
+      required: [session, continuation, registration]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        continuation: {$ref: '#/components/schemas/HarnessContinuation'}
+        registration: {$ref: '#/components/schemas/HarnessRegistration', description: Public recipe without private proofs or old run binding. Retains generator and command labels from the paused session; a continuation with different run-kind labels is rejected. Caller supplies fresh harness_session_ref and worker_lease.}
+        successor: {$ref: '#/components/schemas/HarnessSession'}
     HarnessSession:
       type: object
       description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
       required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
       properties:
+        pause: {$ref: '#/components/schemas/HarnessPause', description: Durable cooperative stop request and handover. Delivered on every heartbeat until closure.}
+        continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:
           type: array
           description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.

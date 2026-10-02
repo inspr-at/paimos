@@ -17,6 +17,7 @@ import (
 )
 
 type SessionRequestPayload struct {
+	Pause           bool   `json:"pause,omitempty"`
 	DisplayLabel    string `json:"display_label,omitempty"`
 	Model           string `json:"model,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`

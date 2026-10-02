@@ -160,7 +160,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Note, "note", 0, "current step, at most 120 characters")
 			fs.string(&o.Phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&o.Activity, "activity", 0, "busy, idle or throttled")
-			fs.string(&o.Succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
+			fs.string(&o.Succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 			fs.string(&o.Parent, "parent-session", 0, "parent public session UUID")
 			fs.string(&o.Ticket, "ticket", 0, "ticket node key")
 			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
@@ -1192,6 +1192,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
 		Warnings []harness.EstimateWarning `json:"warnings"`
+		Pause    *harness.Pause            `json:"pause"`
 	}
 	postBeat := func() error {
 		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
@@ -1263,6 +1264,7 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	} else if reported {
 		session.disk.CapacityStarted = true
 	}
+	rt.printHeartbeatPause(session.id, response.Pause, o.PrintControls)
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}

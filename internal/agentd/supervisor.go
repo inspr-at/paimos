@@ -1909,7 +1909,14 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 			}
 		}
 		entry.mu.Unlock()
-		if err := s.api.HeartbeatHarness(ctx, session, phase); err != nil {
+		var pause *HarnessPause
+		var err error
+		if api, ok := s.api.(pauseHeartbeatAPI); ok {
+			pause, err = api.HeartbeatHarnessPause(ctx, session, phase)
+		} else {
+			err = s.api.HeartbeatHarness(ctx, session, phase)
+		}
+		if err != nil {
 			return err
 		}
 		entry.mu.Lock()
@@ -1918,6 +1925,11 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 			entry.metadataPending = entry.metadataPending[1:]
 		}
 		entry.mu.Unlock()
+		if phase == "working" && pause != nil {
+			if err := s.deliverHarnessPause(ctx, entry, pause); err != nil {
+				return err
+			}
+		}
 		if change.seq == 0 {
 			return nil
 		}

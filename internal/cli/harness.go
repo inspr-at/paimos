@@ -31,7 +31,7 @@ import (
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
+		rt.harnessRegister(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
 
@@ -348,7 +348,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
-		fs.string(&succeeds, "succeeds", 0, "stopped or heartbeat-lost predecessor coordinator UUID")
+		fs.string(&succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
 		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
@@ -546,6 +546,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 	const omittedLabel = "\x00"
 	label := omittedLabel
 	var sequence, cursor int
+	var controlID, handoverPoint, handoverFile string
 	var commits []string
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -576,8 +577,12 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 			fs.string(&deliveryID, "delivery-id", 0, "leased delivery UUID")
 			fs.int(&cursor, "cursor", "sent-event cursor")
 			fs.string(&level, "effective-level", 0, "simple")
+		case "pause-plan":
+			fs.string(&controlID, "control-id", 0, "pause control UUID from heartbeat")
+			fs.string(&handoverPoint, "handover-point", 0, "planned safe stopping point")
 		case "mark-stopped":
 			fs.string(&reason, "reason", 0, "stop reason")
+			fs.string(&handoverFile, "handover-file", 0, "handover JSON required with --reason paused")
 		}
 	}, run: func([]string) error {
 		if err := capacityOptions.validate(); err != nil {
@@ -682,11 +687,28 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 				level = "simple"
 			}
 			body = map[string]any{"delivery_id": deliveryID, "cursor": cursor, "effective_level": level}
+		case "pause-plan":
+			if !validUUID(controlID) || strings.TrimSpace(handoverPoint) == "" {
+				return usagef("--control-id and --handover-point required")
+			}
+			body["control_id"], body["handover_point"] = controlID, handoverPoint
 		case "mark-stopped":
 			if reason == "" {
 				reason = "stopped"
 			}
 			body = map[string]any{"reason": reason}
+			if reason == "paused" {
+				if handoverFile == "" {
+					return usagef("--handover-file required with --reason paused")
+				}
+				note, err := rt.readHandover(handoverFile)
+				if err != nil {
+					return err
+				}
+				body["handover"] = note
+			} else if handoverFile != "" {
+				return usagef("--handover-file requires --reason paused")
+			}
 		}
 		path := harnessPath(id, session) + "/" + kind
 		if kind == "mark-stopped" {

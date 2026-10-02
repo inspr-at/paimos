@@ -229,6 +229,11 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 }
 
 func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
+	_, err := r.HeartbeatHarnessPause(ctx, s, phase)
+	return err
+}
+
+func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
 	sequence := s.ActivitySequence
 	if sequence == 0 {
 		sequence = 1
@@ -250,7 +255,11 @@ func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase s
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
-	return r.harnessWorker(ctx, s, "/heartbeat", body, nil)
+	var out struct {
+		Pause *HarnessPause `json:"pause"`
+	}
+	err := r.harnessWorker(ctx, s, "/heartbeat", body, &out)
+	return out.Pause, err
 }
 
 func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {
