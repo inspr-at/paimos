@@ -502,18 +502,21 @@ func TestFix2PooledDaemonOwnControlFields(t *testing.T) {
 	var sibling Account
 	callStatus(t, f.mod, &other, token, "POST", "/api/agent-accounts", `{"account_key":"peer","harness":"codex","daemon_id":"peer-daemon","label":"Peer"}`, 201, &sibling)
 	ownFixtureAccount(t, peer, &sibling)
-	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('a',64) WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}); err != nil {
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('a',64),quota_pool_fingerprint=repeat('a',64) WHERE id=ANY($1::uuid[])`, []string{f.account.ID, sibling.ID}); err != nil {
 		t.Fatal(err)
 	}
 	var check AccountCheck
 	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/check", requestBody("pooled", 0), 202, &check)
 	f.runner.Scopes = []string{"account.read", "account.probe"}
-	var rows []Account
+	var rows []struct {
+		Account
+		DetailsRedacted bool `json:"details_redacted"`
+	}
 	callStatus(t, f.mod, &f.runner, issueKey(t, f.runner, f.runner.Scopes), "GET", "/api/agent-accounts?include_checks=true", "", 200, &rows)
 	if len(rows) != 1 || rows[0].PendingCheck == nil || rows[0].PendingCheck.ID != check.ID || len(rows[0].ReadinessResources) != 1 {
 		t.Fatalf("daemon lost its own capture: %+v", rows)
 	}
-	if len(rows[0].Windows) != 0 {
+	if len(rows[0].Windows) != 0 || !rows[0].DetailsRedacted {
 		t.Fatalf("pooled quota was disclosed: %+v", rows)
 	}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "timeout"}}), 200, nil)
