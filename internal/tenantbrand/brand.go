@@ -143,6 +143,13 @@ func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Prin
 		}
 		var out any
 		err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			if write {
+				// A brand may not have a row yet; all name and logo variants
+				// share this fence so event preimages reflect the last commit.
+				if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, p.TenantID+":tenant-brand"); err != nil {
+					return err
+				}
+			}
 			if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 				return err
 			}

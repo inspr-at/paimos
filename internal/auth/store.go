@@ -110,7 +110,10 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+		// Email-based enrollment, including bootstrap authority, requires proof
+		// of mailbox ownership. Existing issuer/subject members resolved above
+		// keep signing in independently of this enrollment-only condition.
+		if !emailVerified || slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
 			// An invite enrolls only a verified email. The token may select which
 			// invite, but it never substitutes for that address.
 			if emailVerified {
@@ -130,6 +133,25 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 					return errImportedNotMember
 				}
 			}
+			return errNotMember
+		}
+		// Bootstrap is a one-time enrollment, not a standing mailbox grant.
+		// Serialize the check with enrollment and use the append-only binding
+		// event as its durable completion marker. Profile/role changes cannot
+		// reopen it. Existing and operator-pinned issuer/subject memberships
+		// have already resolved above; imported profiles are not OIDC members.
+		var lockedTenant string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
+			return err
+		}
+		var enrolled bool
+		if err := tx.QueryRow(ctx, `SELECT
+			EXISTS (SELECT 1 FROM events WHERE tenant_id=$1::uuid AND type='tenant.principal_bound') OR
+			EXISTS (SELECT 1 FROM principals p JOIN identities i ON i.id=p.identity_id
+				WHERE p.tenant_id=$1::uuid AND p.kind='person' AND i.issuer<>'paimos-classic')`, tenantID).Scan(&enrolled); err != nil {
+			return err
+		}
+		if enrolled {
 			return errNotMember
 		}
 		p, err = scanPrincipal(tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles)

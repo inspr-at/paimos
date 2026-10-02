@@ -25,6 +25,7 @@ var Registry = makeRegistry()
 func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
+		{"recurrences", "manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},
@@ -133,6 +134,8 @@ func builtinPermissions(key string) []string {
 			allow = p.Key != "ownership.transfer"
 		case "member":
 			switch resource {
+			case "recurrences":
+				allow = true
 			case "rules":
 				allow = p.Key != "rules.publish"
 			case "kinds", "models", "plugins", "members":

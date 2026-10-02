@@ -63,7 +63,7 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
 		// Serialize with role edits, demotion and legacy named-key creation.
-		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+		if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
 		if err := requireTx(ctx, tx, p, "keys.manage", Scope{}); err != nil {

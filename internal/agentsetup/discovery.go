@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -66,7 +67,7 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
+	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Stdin = bytes.NewReader(c.Input)
 	cmd.Env = c.Env
 	if c.Dir != "" {
@@ -94,7 +95,10 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	if c.StatusStderr {
 		cmd.Stderr = io.MultiWriter(stderr, snippet)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := ownedprocess.Run(ctx, cmd); err != nil {
+		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+			return nil, errors.New("local command cleanup unconfirmed")
+		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated), command: probeCommandName(c.Path)}
