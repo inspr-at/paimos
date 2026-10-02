@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/lanedispatch"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -47,11 +48,20 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		}
 	}
 	for _, e := range ordered {
+		if owned, err := lanedispatch.Owned(r.Context(), tx, e.NodeID); err != nil {
+			return nil, err
+		} else if owned {
+			continue
+		}
 		t, err := queueLoadTicket(r.Context(), tx, e.NodeID, true)
 		if err != nil {
 			return nil, err
 		}
-		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
+		blocked, err := workqueue.LiveBlocked(r.Context(), tx, t.ID)
+		if err != nil {
+			return nil, err
+		}
+		if blocked || workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
 			continue
 		}
 		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
@@ -179,14 +189,42 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	if err != nil {
 		return false, err
 	}
+	var ticketRevision time.Time
+	if err = attempt.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE id=$1`, t.ID).Scan(&ticketRevision); err != nil {
+		return false, err
+	}
+	projectID := ""
+	if t.ProjectID != nil {
+		projectID = *t.ProjectID
+	}
+	// Legacy projectless queue entries retain their contract; lanes are always project-scoped.
+	if projectID != "" {
+		dispatch, err := lanedispatch.Claim(ctx, attempt, p, lanedispatch.Request{ProjectID: projectID, TicketNodeID: t.ID, TicketRevision: ticketRevision, RunID: &v.ID, Phase: "coordinator_requested"})
+		if err != nil {
+			return false, err
+		}
+		if dispatch == nil {
+			return false, nil
+		}
+	}
 	if err = workorders.Record(ctx, attempt, p, t.ID, "queue.routed", v, target); err != nil {
 		return false, err
 	}
 	return true, attempt.Commit(ctx)
 }
 func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
+	if owned, err := lanedispatch.OwnedOrder(ctx, tx, v.OrderID); err != nil {
+		return err
+	} else if owned {
+		return workorders.Fail(409, "lane execution enforcement is pending")
+	}
 	if v.QueueNodeID == nil || v.Status != "queued" {
 		return nil
+	}
+	if owned, err := lanedispatch.Owned(ctx, tx, *v.QueueNodeID); err != nil {
+		return err
+	} else if owned {
+		return workorders.Fail(409, "lane execution enforcement is pending")
 	}
 	t, err := queueLoadTicket(ctx, tx, *v.QueueNodeID, true)
 	if err != nil {
@@ -195,7 +233,11 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}
-	if workqueue.State(t.State) != "open" || !readiness(t).Ready {
+	blocked, err := workqueue.LiveBlocked(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	if blocked || workqueue.State(t.State) != "open" || !readiness(t).Ready {
 		return workorders.Fail(409, "ticket is not ready for pickup")
 	}
 	var earlier bool

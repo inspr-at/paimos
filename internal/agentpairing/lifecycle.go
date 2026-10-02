@@ -16,10 +16,18 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock is acquired before work-order/run/account locks by every paired
+// Lock takes the tenant fence before pairing and work-order/run/account locks.
+// Tenant-first ordering is shared with lane scheduling and access mutations;
+// pairing lifecycle writes must not hold pairing while waiting for an event
+// counter on a tenant held by a scheduler waiting for pairing.
+// It is acquired by every paired
 // dispatch, claim, probe, settlement and lifecycle mutation. This serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
 func Lock(ctx context.Context, tx pgx.Tx) error {
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid FOR NO KEY UPDATE`).Scan(&id); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
 	return err
 }

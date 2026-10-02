@@ -117,6 +117,20 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 	}
 }
 
+// RequireMutationTx rechecks the exact bearer ceiling and live project role
+// inside the final write, after the caller's tenant/tree/resource fences. Some
+// callers carry no scopes in Principal; authorizeKey has verified this one
+// permission against the stored key, so present only that verified ceiling.
+func RequireMutationTx(r *http.Request, tx pgx.Tx, p tenant.Principal, permission string, scope authz.Scope) error {
+	if err := authorizeKey(r, tx, p, permission); err != nil {
+		return err
+	}
+	if p.Kind == tenant.Agent {
+		p.Scopes = append(append([]string{}, p.Scopes...), permission)
+	}
+	return authz.RequireTx(r.Context(), tx, p, permission, scope)
+}
+
 func authorizeKey(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) error {
 	if p.Kind == tenant.Person {
 		return nil

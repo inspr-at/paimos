@@ -125,6 +125,8 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["dispatchId"] != "":
+		return "lane_dispatch", values["dispatchId"]
 	case values["laneId"] != "":
 		return "node", values["laneId"]
 	case values["recurrenceId"] != "":
@@ -234,6 +236,11 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	var query string
 	args := []any{id}
 	switch kind {
+	case "lane_dispatch":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		query = `SELECT project_id::text FROM lane_dispatches WHERE id=$1::uuid`
 	case "recurrence":
 		if !uuidPattern.MatchString(id) {
 			return "", nil

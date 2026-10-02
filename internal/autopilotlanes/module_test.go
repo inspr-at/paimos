@@ -247,12 +247,12 @@ func TestLanePolicyLifecycleAndTrustBoundaries(t *testing.T) {
 	release, _ := f.ticket(t, f.project, "release", map[string]any{})
 	var rel Lane
 	f.call(t, f.owner, "POST", "/api/projects/"+f.project+"/autopilot-lanes", createInput{Name: "Build release", Scope: &Scope{Kind: "release", ReleaseNodeID: &release}, Policy: testPolicy()}, 201, &rel)
-	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+rel.ID+"/resume", actionInput{ExpectedRevision: 1}, 409, nil)
+	f.call(t, f.owner, "POST", "/api/autopilot-lanes/"+rel.ID+"/resume", actionInput{ExpectedRevision: 1}, 200, &rel)
 	wrongRelease, _ := f.ticket(t, f.otherProject, "release", map[string]any{})
-	f.call(t, f.owner, "PATCH", "/api/autopilot-lanes/"+rel.ID, patchInput{ExpectedRevision: 1, Scope: &Scope{Kind: "release", ReleaseNodeID: &wrongRelease}}, 404, nil)
+	f.call(t, f.owner, "PATCH", "/api/autopilot-lanes/"+rel.ID, patchInput{ExpectedRevision: rel.Revision, Scope: &Scope{Kind: "release", ReleaseNodeID: &wrongRelease}}, 404, nil)
 	var preview Preview
 	f.call(t, f.owner, "GET", "/api/autopilot-lanes/"+rel.ID+"/preview", nil, 200, &preview)
-	if preview.ExecutionAvailable || len(preview.Items) != 0 || !includes(preview.MissingDecisions, "release_order_integration_pending") {
+	if preview.ExecutionAvailable || len(preview.Items) != 0 || !includes(preview.MissingDecisions, "release_preview_pending") {
 		t.Fatalf("release preview %+v", preview)
 	}
 }

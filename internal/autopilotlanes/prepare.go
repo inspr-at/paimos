@@ -59,6 +59,11 @@ func (m *Module) prepare(w http.ResponseWriter, r *http.Request) {
 		if err = executionAuthority(ctx, tx, p, l); err != nil {
 			return err
 		}
+		if l.Scope.Kind == "release" {
+			if err = candidateInScope(ctx, tx, l, in.TicketNodeID); err != nil {
+				return err
+			}
+		}
 		var kind, state, title, body string
 		var fields []byte
 		var revision time.Time

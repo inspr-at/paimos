@@ -6,6 +6,68 @@ info:
 servers:
   - url: /api
 paths:
+  /autopilot-lanes/{laneId}/schedule:
+    post:
+      operationId: scheduleAutopilotLane
+      description: >-
+        Person-only autopilot.manage plus current execution authority of caller and lane owner.
+        Revision-checked bounded selection from person-queued tickets, explicit person preparation
+        intents, or a building release's ordered members. Live blocks links precede item order.
+        Acquires exclusive dispatch ownership, shared with coordinator pickup, under tenant/tree
+        locks. Returns one durable request and exclusions; never creates or launches agents,
+        reserves budgets or grants daemon claims. Scan truncation is explicit. Body at most 16 KiB.
+      security: [{session: []}]
+      parameters:
+        - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneAction'}}}}
+      responses:
+        '200': {description: Selection result without launch authority, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotScheduleResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /autopilot-dispatches/{dispatchId}:
+    get:
+      operationId: getAutopilotDispatch
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: dispatchId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Project-visible dispatch requiring autopilot.read, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotDispatch'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /autopilot-dispatches/{dispatchId}/preparation:
+    post:
+      operationId: submitAutopilotPreparation
+      description: >-
+        Submit bounded structured preparation output as a person or live coordinator with nodes.write.
+        Rechecks owner execution authority, lane scope and lane/ticket/dispatch revisions inside the
+        write. Existing criteria and estimates are never overwritten. With existing criteria a missing
+        estimate is applied automatically; new criteria remain a draft in needs_person. No launch.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: dispatchId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotPreparationResult'}}}}
+      responses:
+        '200': {description: Saved preparation result, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotDispatch'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /autopilot-dispatches/{dispatchId}/accept:
+    post:
+      operationId: acceptAutopilotPreparation
+      description: Person-only autopilot.manage and nodes.write. Accept or reject a revision-bound criteria draft; acceptance makes a dispatch request, never launches work.
+      security: [{session: []}]
+      parameters:
+        - {name: dispatchId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, accept], properties: {expected_revision: {type: integer, minimum: 1}, accept: {type: boolean}}}}}}
+      responses:
+        '200': {description: Decision saved, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotDispatch'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/autopilot-lanes:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -24,8 +86,8 @@ paths:
       operationId: createAutopilotLane
       description: >-
         Person-only autopilot.manage in the project. Creates a disabled project child node and policy,
-        owned by the caller. Queued tickets only; release scope is stored for AEON-596 without another
-        migration, but release activation/preparation is unavailable in this slice. No scheduler or launch.
+        owned by the caller. Intake is person-queued tickets or ordered members of a building release.
+        Scheduling produces requests only; daemon launch and enforcement are separate.
         Every write is authorized inside its mutation transaction and emits an event. Body at most 16 KiB.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AutopilotLaneCreate'}}}}
@@ -70,8 +132,8 @@ paths:
         Read-only bounded advisory samples in the shared ticket queue order, with exclusions,
         proposed role-ladder route, uncalibrated estimate basis, next window and missing decisions.
         Does not reserve budget/slots, settle usage, change estimates or launch. Account readiness,
-        locked policy and execution enforcement must be rechecked by AEON-599/600. Release scope
-        reports unavailable until AEON-596 supplies its ordered items. No Status autopilot dependency.
+        locked policy and execution enforcement must be rechecked before launch by AEON-600. Release
+        previews are pending; schedule uses the building release's persisted ordered members. No Status autopilot dependency.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: laneId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8991,6 +9053,40 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    AutopilotDispatch:
+      type: object
+      required: [id, project_id, lane_id, ticket_node_id, ticket_revision, lane_revision, run_id, phase, revision, draft_criteria, draft_estimate_hours, requested_by_principal_id, created_at, launched]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        lane_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_revision: {type: string, format: date-time}
+        lane_revision: {type: integer, minimum: 0}
+        run_id: {type: [string, 'null'], format: uuid}
+        phase: {type: string, enum: [requested, preparation_requested, needs_person, coordinator_requested, completed, cancelled]}
+        revision: {type: integer, minimum: 1}
+        draft_criteria: {type: array, maxItems: 32, items: {type: string, maxLength: 1000}}
+        draft_estimate_hours: {type: number, minimum: 0, maximum: 200}
+        requested_by_principal_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        launched: {type: boolean, description: "Always false in scheduler/preparation responses; these are requests, never launch grants."}
+    AutopilotPreparationResult:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, estimate_hours]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        estimate_hours: {type: number, exclusiveMinimum: 0, maximum: 200}
+        criteria: {type: array, maxItems: 32, items: {type: string, minLength: 1, maxLength: 1000}}
+    AutopilotScheduleResult:
+      type: object
+      required: [dispatch, skipped, truncated, reason]
+      properties:
+        dispatch: {oneOf: [{$ref: '#/components/schemas/AutopilotDispatch'}, {type: 'null'}]}
+        skipped: {type: array, maxItems: 200, items: {type: object, required: [ticket_node_id, reason], properties: {ticket_node_id: {type: string, format: uuid}, reason: {type: string}}}}
+        truncated: {type: boolean}
+        reason: {type: string}
     AutopilotLaneScope:
       type: object
       additionalProperties: false

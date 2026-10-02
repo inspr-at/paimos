@@ -212,6 +212,24 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+Lane scheduling is separate from Status autopilot. A person activates a project
+lane for queued tickets or a building release's ordered members. Explicit Prepare
+intents also authorize preparation of the selected ticket after queue refusal;
+lanes never pull unrelated backlog work. `POST /api/autopilot-lanes/{laneId}/schedule`
+checks the policy revision, work window, live blockers and existing work, then
+reserves one workflow request per ticket. Dependencies take precedence over the
+shared queue or release order. Overlap uses `fields.autopilot_lane_id`, otherwise
+lane priority (lower first) and stable ID. Scans are bounded and report truncation.
+
+Coordinator routing shares dispatch ownership. Pending lane requests cannot be
+added again, removed from the queue, routed by a coordinator, created as direct
+runs or claimed by a daemon. Requests create no agents, launch grants or budget
+holds: AEON-600 must supply enforcement before automatic execution. Structured
+preparation output at `/api/autopilot-dispatches/{dispatchId}/preparation` may fill
+a missing estimate when criteria exist. New criteria wait in `needs_person` for
+a person to accept at `/accept`. Ticket, lane and dispatch revisions fence both
+steps; existing human estimates and criteria remain authoritative.
+
 ## Local models for in-app AI
 
 Workspace AI is off by default. A person with `settings.manage` can open

@@ -14,7 +14,9 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/lanedispatch"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -112,10 +114,15 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			if route.pattern != "GET /api/runs" && route.pattern != "GET /api/runs/{runId}" {
+				if err := lanedispatch.LockTenant(r.Context(), tx, p.TenantID); err != nil {
+					return nil, err
+				}
+			}
 			if err := agentpairing.Lock(r.Context(), tx); err != nil {
 				return nil, err
 			}
-			if route.pattern == "POST /api/runs/{runId}/claim" {
+			if route.pattern == "POST /api/runs/{runId}/claim" || route.pattern == "POST /api/work-orders/{workOrderId}/runs" {
 				if err := queueLock(r.Context(), tx); err != nil {
 					return nil, err
 				}
@@ -223,6 +230,7 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
    OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND (w.kind<>'review' OR $4::bool) AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
+	 AND NOT EXISTS(SELECT 1 FROM lane_dispatches d JOIN nodes lane_order ON lane_order.tenant_id=d.tenant_id AND lane_order.id=agent_runs.work_order_id WHERE d.lane_id IS NOT NULL AND d.phase NOT IN ('completed','cancelled') AND (d.ticket_node_id=agent_runs.queue_node_id OR d.ticket_node_id=lane_order.parent_id))
 	 AND (queue_node_id IS NULL OR ((queue_target_agent_id IS NOT NULL OR queue_routed_at IS NOT NULL)
 	 AND EXISTS(SELECT 1 FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id AND ticket.deleted_at IS NULL AND ticket.state='open')))
 	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,
@@ -277,6 +285,23 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = workorders.CanEdit(p, o); err != nil {
 		return nil, err
 	}
+	var projectID *string
+	if err = tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&projectID); err != nil {
+		return nil, err
+	}
+	scope := authz.Scope{}
+	if projectID != nil {
+		scope.ProjectID = *projectID
+	}
+	if err = workorders.RequireMutationTx(r, tx, p, "run.create", scope); err != nil {
+		return nil, err
+	}
+	if owned, err := lanedispatch.OwnedOrder(ctx, tx, o.NodeID); err != nil {
+		return nil, err
+	} else if owned {
+		return nil, workorders.Fail(409, "ticket belongs to a lane dispatch")
+	}
+
 	if o.Kind == "review" {
 		return nil, workorders.Fail(409, "review runs are pinned; request a new review")
 	}

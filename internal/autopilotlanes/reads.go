@@ -182,7 +182,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, nil, fail(400, "invalid preview cursor"))
 		return
 	}
-	out := Preview{Items: []PreviewItem{}, MissingDecisions: []string{"scheduler_and_execution_enforcement_pending", "account_readiness_and_locked_policy_recheck_required", "person_working_target_required"}, BudgetBasis: "subscription agent-hours per window: summed owned-process elapsed time; quota reserve retained; usage and holds not measured here"}
+	out := Preview{Items: []PreviewItem{}, MissingDecisions: []string{"execution_enforcement_pending", "account_readiness_and_locked_policy_recheck_required", "person_working_target_required"}, BudgetBasis: "subscription agent-hours per window: summed owned-process elapsed time; quota reserve retained; usage and holds not measured here"}
 	err = m.transaction(r, p, false, func(ctx context.Context, tx pgx.Tx) error {
 		// One policy/queue snapshot; tree writers (queue moves included) cannot
 		// change ordering midway through the advisory read.
@@ -214,7 +214,7 @@ func (m *Module) preview(w http.ResponseWriter, r *http.Request) {
 			out.MissingDecisions = append(out.MissingDecisions, "outside_work_window")
 		}
 		if l.Scope.Kind == "release" {
-			out.MissingDecisions = append(out.MissingDecisions, "release_order_integration_pending")
+			out.MissingDecisions = append(out.MissingDecisions, "release_preview_pending")
 			return nil
 		}
 		rows, err := tx.Query(ctx, workqueue.CTE+`SELECT q.queue_node_id::text,n.updated_at,q.id::text,q.key,left(q.title,512),q.state,k.slug,left(n.body,2048),left(q.fields::text,65537),p.kind='person',q.model_profile_id::text,coalesce(q.queue_target_agent_id::text,''),q.queue_position,
