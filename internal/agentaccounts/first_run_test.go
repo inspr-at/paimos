@@ -703,6 +703,7 @@ func TestRecoveryWithoutReadingResumesFirstRun(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{"account_key": "reread", "harness": "claude", "daemon_id": "daemon-a", "label": "Main", "max_parallel_runs": 2}), 201, &a)
+	ownFixtureAccount(t, person, &a)
 	probe := func(g string) {
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", encoded(t, map[string]any{"daemon_id": "daemon-a", "daemon_generation": g, "available": true}), 200, nil)
 	}

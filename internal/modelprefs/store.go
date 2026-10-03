@@ -220,6 +220,17 @@ func RunRequirement(ctx context.Context, tx pgx.Tx, runID string) (RunPolicy, er
 // belong to 502b. It serializes writers and durably re-stamps active runs before
 // returning. Caller and audit actor remain the session principal.
 func SaveScope(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Scope, error) {
+	s, err := SaveScopeOnly(ctx, tx, p, s)
+	if err != nil {
+		return s, err
+	}
+	_, err = Restamp(ctx, tx, p, s)
+	return s, err
+}
+
+// SaveScopeOnly lets an atomic editor write finish its rows before restamping
+// runs and taking the event counter (the final lock in the transaction).
+func SaveScopeOnly(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Scope, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-prefs:'||current_setting('aeon.tenant_id'),0))`); err != nil {
 		return s, err
 	}
@@ -232,7 +243,6 @@ func SaveScope(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Sco
 	if err != nil {
 		return s, err
 	}
-	_, err = Restamp(ctx, tx, p, s)
 	return s, err
 }
 func PutRow(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope, kindID string, row Row) error {
@@ -258,36 +268,79 @@ type RestampedRun struct {
 	AccountID, ProfileID  *string
 }
 
-// Restamp includes pre-link starter ids through the canonical lookup. It never
-// stops a turn; callers can report starting/running accounts outside the fence.
-func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([]RestampedRun, error) {
-	out := []RestampedRun{}
-	err := withRoutingVisibility(ctx, tx, func() error {
-		rows, err := tx.Query(ctx, `SELECT r.id::text,r.status,r.account_id::text,r.model_profile_id::text,coalesce(r.residency,'any')
+// activeScopeRuns locks the bounded active set before any updates or events.
+func activeScopeRuns(ctx context.Context, tx pgx.Tx, scope Scope) ([]RestampedRun, error) {
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.status,r.account_id::text,r.model_profile_id::text,coalesce(r.residency,'any')
    FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
    WHERE r.status IN ('queued','starting','running','waiting') AND r.purpose='managed' AND
    ($1='default' OR ($1='person' AND `+CanonicalPersonSQL("r.prefs_person_id")+`=$2::uuid)
-    OR ($1='project' AND n.project_id=$3::uuid)) ORDER BY r.id`, scope.Level, scope.PersonID, scope.ProjectID)
+    OR ($1='project' AND n.project_id=$3::uuid)) ORDER BY r.id LIMIT 10001 FOR NO KEY UPDATE OF r`, scope.Level, scope.PersonID, scope.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	var runs []RestampedRun
+	for rows.Next() {
+		var r RestampedRun
+		if err = rows.Scan(&r.ID, &r.Status, &r.AccountID, &r.ProfileID, &r.Residency); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(runs) > 10000 {
+		return nil, &ScopeTooLarge{}
+	}
+	return runs, nil
+}
+
+// SnapshotRunRequirements records the effective floor before a preference write.
+// This prevents a loosening from catching up a stale stamp after a person link.
+func SnapshotRunRequirements(ctx context.Context, tx pgx.Tx, scope Scope) (map[string]string, error) {
+	before := map[string]string{}
+	err := withRoutingVisibility(ctx, tx, func() error {
+		runs, err := activeScopeRuns(ctx, tx, scope)
 		if err != nil {
 			return err
 		}
-		var runs []RestampedRun
-		for rows.Next() {
-			var r RestampedRun
-			if err = rows.Scan(&r.ID, &r.Status, &r.AccountID, &r.ProfileID, &r.Residency); err != nil {
-				rows.Close()
+		for _, run := range runs {
+			policy, err := RunRequirement(ctx, tx, run.ID)
+			if err != nil {
 				return err
 			}
-			runs = append(runs, r)
+			before[run.ID] = policy.Residency
 		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
+		return nil
+	})
+	return before, err
+}
+
+// Restamp includes pre-link starter ids through the canonical lookup. It never
+// stops a turn; callers can report starting/running accounts outside the fence.
+func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([]RestampedRun, error) {
+	return RestampAfter(ctx, tx, p, scope, nil)
+}
+
+// RestampAfter only advances a stamp when the write tightens the previous live
+// requirement. A nil snapshot preserves the internal catch-up operation.
+func RestampAfter(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope, before map[string]string) ([]RestampedRun, error) {
+	out := []RestampedRun{}
+	err := withRoutingVisibility(ctx, tx, func() error {
+		runs, err := activeScopeRuns(ctx, tx, scope)
+		if err != nil {
 			return err
 		}
+		changes := []events.Change{}
 		for _, r := range runs {
 			policy, err := RunRequirement(ctx, tx, r.ID)
 			if err != nil {
 				return err
+			}
+			if old, ok := before[r.ID]; ok && Strictness(policy.Residency) <= Strictness(old) {
+				continue
 			}
 			if Strictness(policy.Residency) <= Strictness(r.Residency) {
 				continue
@@ -298,10 +351,13 @@ func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([
     status IN ('queued','starting','running','waiting')`, r.ID, Stamp(r.Residency)); err != nil {
 				return err
 			}
-			if _, err = events.Append(ctx, tx, p, events.Change{Type: "run.residency_restamped", Before: map[string]string{"run_id": r.ID, "residency": before}, After: map[string]string{"run_id": r.ID, "residency": r.Residency}}); err != nil {
+			changes = append(changes, events.Change{Type: "run.residency_restamped", Before: map[string]string{"run_id": r.ID, "residency": before}, After: map[string]string{"run_id": r.ID, "residency": r.Residency}})
+			out = append(out, r)
+		}
+		for _, change := range changes {
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
 				return fmt.Errorf("record restamp: %w", err)
 			}
-			out = append(out, r)
 		}
 		return nil
 	})

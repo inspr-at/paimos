@@ -24,7 +24,20 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"GET /api/agents/plan": "agents.plan.read",
+	"GET /api/model-preferences": "models.read",
+	// Level-specific, person-only authority is rechecked under the mutation fence.
+	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
+	"GET /api/work-kinds":                                        "models.read",
+	"POST /api/work-kinds":                                       "model_prefs.manage",
+	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",
+	"DELETE /api/work-kinds/{kindId}":                            "model_prefs.manage",
+	"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
+	"POST /api/models/{id}/retire":                               "models.manage",
+	"DELETE /api/models/{id}/retire":                             "models.manage",
+	"GET /api/agents/plan":                                       "agents.plan.read",
 	// Read-only people enter with nodes.read. Recurrence handlers still require
 	// recurrences.manage for agents, including their explicit role and key scope.
 	"GET /api/recurrences":                         "nodes.read|recurrences.manage",
@@ -172,6 +185,9 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/tags/{tagId}":                                               "tags.manage",
 	"DELETE /api/time-entries/{id}":                                          "hours.write",
 	"DELETE /api/views/{viewId}":                                             "views.write",
+	"GET /api/agent-accounts/readiness":                                      "account.read",
+	"POST /api/agent-accounts/{accountId}/check":                             "account.manage",
+	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",
 	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
@@ -576,6 +592,15 @@ var RoutePermissions = map[string]string{
 	"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker":                    "harness.read",
 	"GET /api/settings/inbox-delivery":                                                          "settings.read",
 	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
+}
+
+// Tier reads, worker reports and person decisions use the existing session permissions.
+func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision"] = "harness.control"
 }
 
 func PermissionForPattern(pattern string) (string, bool) {
