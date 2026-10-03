@@ -85,8 +85,18 @@ const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_
 // Keep the trigger's geometry and labels until its popover closes. Actual
 // options still read live filters, including selections/exclusions made now.
 const presented = ref(props.filters)
-watch([() => props.filters, open, dateAnchor, menuAnchor], () => {
-  if (!open.value && !dateAnchor.value && !menuAnchor.value) presented.value = props.filters
+// Resolving a person's name or an epic's title can finish after the menu opens.
+// Snapshot the words too, for the visible label, accessible name and clip-tip.
+const resolvedLabels = computed(() => new Map(DIMENSIONS.map(({ key }) => [key, {
+  plain: included(props.filters[key]).map(value => props.label(key, value)),
+  not: excluded(props.filters[key]).map(value => props.label(key, value)),
+}])))
+const presentedLabels = ref(resolvedLabels.value)
+watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () => {
+  if (!open.value && !dateAnchor.value && !menuAnchor.value) {
+    presented.value = props.filters
+    presentedLabels.value = resolvedLabels.value
+  }
 }, { flush: 'sync' })
 const primary = computed(() => dimensions.value.filter(d => d.primary || presented.value[d.key].length))
 const active = computed(() => activeDimensions(presented.value).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
@@ -118,9 +128,7 @@ function chooseFilter(choice: Dimension | 'date') {
   void nextTick(() => { if (choice === 'date') dateAnchor.value = anchor; else openMenu(choice, anchor) })
 }
 function filterText(dimension: Dimension, full = false) {
-  const words = (values: string[]) => values.map(value => props.label(dimension, value))
-  const plain = words(included(presented.value[dimension]))
-  const not = words(excluded(presented.value[dimension]))
+  const { plain, not } = presentedLabels.value.get(dimension)!
   const shorten = (parts: string[]) => !full && parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ')
   return [plain.length ? shorten(plain) : '', not.length ? `not ${shorten(not)}` : ''].filter(Boolean).join(' · ')
 }

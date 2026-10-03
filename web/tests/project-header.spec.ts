@@ -132,6 +132,100 @@ test('filter triggers stay still until the popover closes and removals clear rea
   await expect(page).not.toHaveURL(/tag=/)
 })
 
+for (const dimension of ['assignee', 'epic'] as const) {
+  test(`delayed ${dimension} labels stay frozen until the filter popover closes`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const data = fixtures()
+    data.preferences['list:display'] = { headerGraph: false }
+    const person = data.people.find(person => person.id !== me.id)!
+    person.name = 'Verantwortliche für mandantenübergreifende Berechtigungsverwaltung'
+    // Keep the assigned record for the name resolver, outside the visible list.
+    data.nodes.find(node => node.id === 'n-3')!.state = 'done'
+    const epic = data.nodes.find(node => node.id === 'n-epic')!
+    epic.title = 'Mandantenübergreifende Berechtigungsverwaltung und Betriebsprüfung'
+    const value = dimension === 'assignee' ? person.id : epic.id
+    const title = dimension === 'assignee' ? 'Assignee' : 'Epic'
+    const placeholder = dimension === 'assignee' ? 'Someone' : 'An epic'
+    const resolved = dimension === 'assignee' ? person.name : epic.title
+    let release!: () => void, requested!: () => void
+    const response = new Promise<void>(resolve => { release = resolve })
+    const request = new Promise<void>(resolve => { requested = resolve })
+    await mockWork(page, data, { hold: ({ path, query }) => {
+      const resolver = dimension === 'assignee'
+        ? query.get('assignee') === value && query.get('limit') === '1'
+        : query.get('kind') === 'epic'
+      if (path === '/api/nodes' && resolver) return { until: response, computed: requested }
+    } })
+    try {
+      await page.goto(`/p/PHAROS?${dimension}=${value}`)
+      const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
+      const trigger = toolbar.locator(`.facet-btn[data-dim="${dimension}"]`)
+      await expect(trigger).toHaveAccessibleName(`Edit ${title} filter: ${placeholder}`)
+      await trigger.click()
+      const dialog = page.getByRole('dialog', { name: `Filter by ${title}`, exact: true })
+      await expect(dialog).toBeVisible()
+      await request
+      await expectStableControls({
+        controls: { trigger, search: search(page), priority: toolbar.locator('.facet-btn[data-dim="priority"]'), more: toolbar.getByRole('button', { name: 'Filter by more' }), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }), new: toolbar.getByRole('button', { name: 'New ticket', exact: true }) },
+        interactions: [{ name: 'resolve the selected label while its menu is open', run: async () => {
+          release()
+          // The option proves the response reached Vue; no sleep or timing guess.
+          await expect(dialog.getByRole('checkbox', { name: new RegExp(resolved) })).toBeVisible()
+        } }],
+      })
+      await expect(trigger).toHaveAccessibleName(`Edit ${title} filter: ${placeholder}`)
+      await expect(trigger).toHaveAttribute('data-tip', `${title}: ${placeholder}`)
+      await expect(trigger.locator('.facet-value')).toHaveText(` · ${placeholder}`)
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+      await expect(trigger).toHaveAccessibleName(`Edit ${title} filter: ${resolved}`)
+      await expect(trigger).toHaveAttribute('data-tip', `${title}: ${resolved}`)
+      await expect(trigger.locator('.facet-value')).toHaveText(` · ${resolved}`)
+      await trigger.click()
+      await expect(dialog.getByRole('checkbox', { name: new RegExp(resolved) })).toBeChecked()
+    } finally { release() }
+  })
+}
+
+test.describe('phone fold touch target', () => {
+  test.use({ hasTouch: true, isMobile: true })
+  for (const theme of ['light', 'dark']) {
+    test(`the whole 44px phone fold target accepts taps in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 900 })
+      const data = fixtures()
+      data.preferences.theme = { choice: theme }
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await expect(page.locator('.project-page')).toHaveClass(/header-compact/)
+      const button = fold(page)
+      await expect(button).toBeVisible()
+      await expectStableControls({ controls: { fold: button, breadcrumb: page.getByRole('navigation', { name: 'Breadcrumb' }), search: page.locator('.search-pill'), appbar: page.locator('.app-header') },
+        interactions: [1, 43].map((offset, index) => ({ name: `tap ${index === 0 ? 'top' : 'bottom'} of the target`, run: async () => {
+          const rect = (await button.boundingBox())!
+          expect(rect.width).toBeGreaterThanOrEqual(44)
+          expect(rect.height).toBeGreaterThanOrEqual(44)
+          const point = { x: rect.x + rect.width / 2, y: rect.y + offset }
+          expect(await button.evaluate((element, point) => element.contains(document.elementFromPoint(point.x, point.y)), point), 'the edge is hittable, not clipped by an ancestor').toBe(true)
+          await page.touchscreen.tap(point.x, point.y)
+          await expect(page.locator('.project-page')).toHaveClass(index === 0 ? /header-collapsed/ : /header-compact/)
+        } })),
+      })
+      await button.focus()
+      await expect(button).toBeFocused()
+      expect(await button.evaluate(element => {
+        const rect = element.getBoundingClientRect()
+        for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor)
+          if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+          const clip = ancestor.getBoundingClientRect()
+          if (clip.top > rect.top - 3 || clip.bottom < rect.bottom + 3 || clip.left > rect.left - 3 || clip.right < rect.right + 3) return false
+        }
+        return true
+      }), 'ancestors leave room for the keyboard focus ring').toBe(true)
+    })
+  }
+})
+
 test('device preference persists across projects and reloads, but separates people and tenants', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures()); await page.goto('/p/PHAROS')

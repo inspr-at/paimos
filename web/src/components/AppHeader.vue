@@ -424,6 +424,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .place .needs-badge { top: 2px; right: 0; }
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }
+  /* The fold button's full touch target and focus ring must clear its trail. */
+  .crumbs:has(> .phone-header-fold) { height: 44px; overflow: visible; }
   .crumbs > :not(:last-child) { display: none; }
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }

@@ -659,7 +659,9 @@ the physical Period key; Escape and scrolling do not unfold or fold the header.
 The choice stays on this device, separately for each person and workspace,
 across projects; row height and saved views remain independent. Active filter
 buttons show their values (counts on narrower desktops), with individual remove
-actions and Clear all; their labels update after the filter popover closes.
+actions and Clear all; their labels, including names arriving asynchronously,
+update after the filter popover closes. The phone fold badge keeps its full
+44 px touch height and an unclipped keyboard focus ring.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after
