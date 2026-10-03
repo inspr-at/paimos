@@ -26,6 +26,8 @@ type BuildWindow struct {
 	Timezone string       `json:"timezone"`
 	Slots    []WindowSlot `json:"slots"`
 }
+
+// Days uses time.Weekday: 0 is Sunday, 6 is Saturday.
 type WindowSlot struct {
 	Days []int  `json:"days"`
 	From string `json:"from"`
@@ -69,7 +71,7 @@ func clockMinute(s string) (int, error) {
 }
 func windowMinutes(w *BuildWindow) ([10080]bool, error) {
 	var out [10080]bool
-	if len(w.Timezone) == 0 || len(w.Timezone) > 128 || len(w.Slots) > 32 || w.Slots == nil {
+	if len(w.Timezone) == 0 || w.Timezone == "Local" || len(w.Timezone) > 128 || len(w.Slots) > 32 || w.Slots == nil {
 		return out, errors.New("invalid build window")
 	}
 	if _, err := time.LoadLocation(w.Timezone); err != nil {

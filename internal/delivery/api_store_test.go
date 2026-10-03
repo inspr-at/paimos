@@ -291,6 +291,7 @@ func TestCompletedRecoveryUsesLatestCompletionAfterAdoptionAndSurvivesCut(t *tes
 		if id == old {
 			at = adopted.Add(-time.Minute)
 		}
+		f.exec(t, `UPDATE nodes SET updated_at=$2 WHERE id=$1`, id, f.clock)
 		f.exec(t, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after,at) VALUES($1,$2,$3,'node.updated','{"state":"open"}','{"state":"done"}',$4)`, f.tenant, f.person.ID, id, at)
 	}
 	page, e := f.store.Items(t.Context(), f.person, f.project, "", ReadOptions{CompletedUnplaced: true, Limit: 1})
@@ -364,5 +365,89 @@ func TestSnapshotCancellationReturnsNoPartialBytes(t *testing.T) {
 	got := dbtest.Await(t, parent, done)
 	if !errors.Is(got.e, context.Canceled) || len(got.r.Raw) != 0 {
 		t.Fatalf("partial cancelled export %d %v", len(got.r.Raw), got.e)
+	}
+}
+
+type eventQueryCounter struct{ queries atomic.Int32 }
+
+func (c *eventQueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(q.SQL, "FROM events") {
+		c.queries.Add(1)
+	}
+	return ctx
+}
+func (*eventQueryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func TestOverviewDoesNotLookUpCompletionEvents(t *testing.T) {
+	f := newStoreFixture(t)
+	f.item(t, "task", "TSK-1", "done", "", "")
+	counter := &eventQueryCounter{}
+	cfg := f.d.App.Config()
+	cfg.ConnConfig.Tracer = counter
+	pool, e := pgxpool.NewWithConfig(t.Context(), cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer pool.Close()
+	out, e := NewStore(pool).Overview(t.Context(), f.person, f.project, "")
+	if e != nil || len(out.Active) != 2 || counter.queries.Load() != 0 {
+		t.Fatalf("overview=%+v err=%v event queries=%d", out, e, counter.queries.Load())
+	}
+	if _, present := out.Backlog["done"]; present {
+		t.Fatal("overview exposed a done backlog count")
+	}
+}
+func TestAdoptionInventoryIsPermissionScopedAndIncludesDeletedOnlyForOperators(t *testing.T) {
+	f := newStoreFixture(t)
+	f.exec(t, `INSERT INTO delivery_adoption_jobs(tenant_id,project_node_id,instance_id,rollout_artifact_ref,executing_principal_id,authorizing_principal_id,rollout_authorization_ref,state,reason_code,reason_message) VALUES($1,$2,'test','release:E',$3,$3,'authorization:test','refused','deleted_project','Repair this project')`, f.tenant, f.legacy, f.person.ID)
+	f.exec(t, `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, f.legacy)
+	owner, e := f.store.Adoptions(t.Context(), f.person, ReadOptions{Limit: 1})
+	if e != nil || owner.Status != "needs_attention" || owner.Counts["refused"] != 1 || owner.Counts["adopted"] != 2 || owner.NextCursor == "" {
+		t.Fatalf("inventory=%+v %v", owner, e)
+	}
+	seen := map[string]bool{}
+	for {
+		for _, v := range owner.Items {
+			if seen[v.ProjectID] {
+				t.Fatal("duplicate inventory row")
+			}
+			seen[v.ProjectID] = true
+		}
+		if owner.NextCursor == "" {
+			break
+		}
+		owner, e = f.store.Adoptions(t.Context(), f.person, ReadOptions{Limit: 1, Cursor: owner.NextCursor})
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	if len(seen) != 3 || !seen[f.legacy] {
+		t.Fatal("operator lost refused deleted project")
+	}
+	dbtest.BindRole(t, f.d, f.tenant, f.person.ID, "member")
+	member, e := f.store.Adoptions(t.Context(), f.person, ReadOptions{})
+	if e != nil || len(member.Items) != 2 || member.Counts["refused"] != 0 {
+		t.Fatalf("member inventory=%+v %v", member, e)
+	}
+	if _, e := f.store.Adoptions(t.Context(), f.agent, ReadOptions{}); !errors.Is(e, authz.ErrForbidden) {
+		t.Fatalf("agent without read scope saw inventory: %v", e)
+	}
+}
+func TestCutLostResponseReplaysOriginalRevisionWithoutEvents(t *testing.T) {
+	f := newStoreFixture(t)
+	f.item(t, "task", "TSK-1", "done", f.release, "V")
+	frozen := f.freeze(t, f.release)
+	in := TransitionRequest{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: frozen.Revision, Action: "cut", VersionScheme: "legacy", Version: "1.2.3"}
+	cut, e := f.store.Transition(t.Context(), f.person, in)
+	if e != nil {
+		t.Fatal(e)
+	}
+	before := f.scalar(t, `SELECT count(*) FROM events`)
+	replayed, e := f.store.Transition(t.Context(), f.person, in)
+	if e != nil || replayed.Revision != cut.Revision || f.scalar(t, `SELECT count(*) FROM events`) != before {
+		t.Fatalf("lost response replay=%+v %v", replayed, e)
+	}
+	in.VersionScheme = "inspr-calendar-v1"
+	if _, e := f.store.Transition(t.Context(), f.person, in); e == nil {
+		t.Fatal("replay silently changed scheme")
 	}
 }

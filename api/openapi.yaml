@@ -38,6 +38,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: verifyProjectDelivery
+      security: [{session: []}, {agentKey: []}]
       description: Read-only persisted adoption verification from the instance controller; never repairs or switches mode. Missing controller is a visible 503.
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -128,7 +129,7 @@ paths:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
-        - {name: state, in: query, schema: {type: string, enum: [planned, building, frozen, released, abandoned]}}
+        - {name: state, in: query, schema: {type: string, enum: [planned, building, frozen, released, abandoned, active]}}
       responses:
         '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleasePage'}}}}
         '400': {$ref: '#/components/responses/Error'}

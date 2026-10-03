@@ -216,6 +216,9 @@ func (rt *runtime) releaseCommand(name string) *Command {
 			return rt.releaseOutput(http.MethodPut, "/api/nodes/"+id+"/ships-in", in)
 		}
 		if name == "settings" && defaults {
+			if len(args) != 0 {
+				return usagef("--defaults takes --project only; omit RELEASE")
+			}
 			return rt.releaseDefaults(projectID, settings, file, deadline, clearDeadline, expected)
 		}
 		if len(args) == 0 {

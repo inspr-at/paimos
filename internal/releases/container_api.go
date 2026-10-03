@@ -224,6 +224,10 @@ func (m *module) containerEdit(w http.ResponseWriter, r *http.Request) {
 	if !decodeContainer(w, r, &in) {
 		return
 	}
+	if in.Title == nil && in.Body == nil && in.Visibility == nil && len(in.Deadline) == 0 && len(in.Settings) == 0 {
+		httpapi.WriteError(w, 400, "a release edit is required")
+		return
+	}
 	if in.Revision < 1 || in.Title != nil && (strings.TrimSpace(*in.Title) == "" || len(*in.Title) > 512) || in.Body != nil && len(*in.Body) > 65536 || in.Visibility != nil && *in.Visibility != "internal" && *in.Visibility != "published" {
 		httpapi.WriteError(w, 400, "invalid release edit")
 		return
@@ -293,7 +297,7 @@ func (m *module) containerAction(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch action {
 	case "rank":
-		if in.Before != "" && !uuid.MatchString(in.Before) || in.After != "" && !uuid.MatchString(in.After) {
+		if in.Before != "" && !uuid.MatchString(in.Before) || in.After != "" && !uuid.MatchString(in.After) || in.Before == edit.ReleaseID || in.After == edit.ReleaseID {
 			httpapi.WriteError(w, 400, "invalid rank neighbours")
 			return
 		}
@@ -453,5 +457,15 @@ func (m *module) containerBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := m.store.PlaceWithRevision(r.Context(), p, r.PathValue("projectId"), requests)
+	var conflict *delivery.Conflict
+	if errors.As(err, &conflict) {
+		items := make([]map[string]any, 0, len(requests))
+		for _, request := range requests {
+			items = append(items, map[string]any{"item_id": request.ItemID, "placed": false, "code": "batch_not_applied", "reason": "Batch rolled back: " + conflict.Message})
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpapi.WriteJSON(w, 409, map[string]any{"error": conflict.Message, "code": conflict.Code, "placed": 0, "items": items})
+		return
+	}
 	containerResponse(w, out, err)
 }

@@ -146,3 +146,45 @@ func TestAdoptionReportingBoundaryAndNoSynchronousApply(t *testing.T) {
 		t.Fatalf("persisted report %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestPlacementBatchReturnsAtomicRefusalPerItem(t *testing.T) {
+	f := adoptFixture(t)
+	first := f.existing("task", f.project, "First", "open")
+	second := f.existing("task", f.project, "Second", "open")
+	body := fmt.Sprintf(`{"release_id":%q,"expected_release_revision":1,"position":"top","items":[{"id":%q,"expected_revision":0},{"id":%q,"expected_revision":1}]}`, f.release, first, second)
+	w := f.request(f.person, "POST", "/api/projects/"+f.project+"/ships-in/batch", body)
+	if w.Code != 409 {
+		t.Fatalf("batch %d %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Placed int `json:"placed"`
+		Items  []struct {
+			ID     string `json:"item_id"`
+			Placed bool   `json:"placed"`
+			Code   string `json:"code"`
+		} `json:"items"`
+	}
+	if e := json.Unmarshal(w.Body.Bytes(), &result); e != nil {
+		t.Fatal(e)
+	}
+	if result.Placed != 0 || len(result.Items) != 2 || result.Items[0].Placed || result.Items[0].Code != "batch_not_applied" {
+		t.Fatal("batch claimed partial success")
+	}
+	var count int
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM ships_in WHERE item_node_id=ANY($1::uuid[])`, []string{first, second}).Scan(&count)
+	})
+	if count != 0 {
+		t.Fatal("failed batch persisted first item")
+	}
+	body = strings.Replace(body, fmt.Sprintf(`"id":%q,"expected_revision":1`, second), fmt.Sprintf(`"id":%q,"expected_revision":0`, second), 1)
+	w = f.request(f.person, "POST", "/api/projects/"+f.project+"/ships-in/batch", body)
+	if w.Code != 200 {
+		t.Fatalf("top batch retry %d %s", w.Code, w.Body.String())
+	}
+	var placed delivery.PlacementResult
+	_ = json.Unmarshal(w.Body.Bytes(), &placed)
+	if len(placed.Items) != 2 || placed.Items[0].ItemID != first || placed.Items[1].ItemID != second || placed.Items[0].Rank >= placed.Items[1].Rank || placed.ReleaseRevision != 2 {
+		t.Fatalf("top batch order=%+v", placed)
+	}
+}
