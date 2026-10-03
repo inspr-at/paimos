@@ -2729,6 +2729,20 @@ paths:
         All other operations require the paired bearer and registered poll_key; lifecycle
         proof alone is rejected. Neither daemon nor server persists the poll key. Codes never
         appear in URL paths or queries; approval links use a fragment removed by the web app.
+        If process memory lost the registration, an authenticated principal for a connected
+        computer with valid attach scope receives 403 with attach_refusal=poll_key_unknown.
+        This is distinct from an incorrect key, revoked pairing, draining enrollment or
+        foreign tenant, which never authorize automatic registration. The daemon may register
+        once and replay the rejected operation once, with serialized, bounded jittered backoff.
+        Registration still ends earlier approvals and watches; recovery never resumes them.
+        Unknown-key eligibility checks have a separate in-memory budget of 30 attempts per
+        minute per authenticated computer principal, checked before database eligibility reads.
+        Recovery does not spend the tenant-wide attach request budget. A capped recovery
+        returns 429 with code=attach_recovery_limited and Retry-After in seconds; it does
+        not authorize registration. The daemon honors valid Retry-After delays before any
+        further exchange or registration. The server retains at most 4096 live recovery
+        budgets across tenants; at capacity, new principals are refused until an existing
+        slot expires, including principals from other tenants (accepted AEON-608 limitation).
         Requests, activation and every poll
         repeat the immutable kernel-observed snapshot. Lease is 60 seconds and cannot
         be resurrected. The server pins the owner's consent_mode at person approval.
@@ -2751,11 +2765,11 @@ paths:
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
         Owner diagnostics are additive: errors retain their existing code and error fields
         and may include attach_refusal (version_mismatch, pairing_revoked, ticket_not_visible,
-        code_expired, draining, or enrollment_unavailable). Draining or removed enrollments
+        code_expired, draining, enrollment_unavailable, or poll_key_unknown). Draining or removed enrollments
         refuse new attachment authority, including status-only attachment of a running process.
         Registration authenticates the computer lifecycle proof before
-        reporting version mismatch; later operations authenticate the registered poll key
-        and computer principal before reporting a cause. Unauthenticated and foreign callers
+        reporting version mismatch; apart from poll_key_unknown, later operations authenticate
+        the registered poll key and computer principal before reporting a cause. Unauthenticated and foreign callers
         receive generic refusals without attach_refusal. Revoked bearer credentials remain
         unauthenticated; only the locally authenticated interactive helper offers pairing-repair guidance.
       requestBody:
@@ -2789,17 +2803,23 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
         '429':
           description: >-
-            Attempt or stream quota exceeded, or (error code attach_live_limit) the person
+            Attempt or stream quota exceeded, or (error code attach_recovery_limited) the
+            computer recovery budget is exhausted; honor Retry-After before retrying.
+            Alternatively (error code attach_live_limit) the person
             already has 32 attach requests waiting or approved. Declining, approving into a
             session or letting one expire frees a slot; a retry of an existing request is
             still answered. The daemon prints this case in plain words.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying a capped operation
+              schema: {type: string, pattern: '^[1-9][0-9]*$'}
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   error: {type: string}
-                  code: {type: string, examples: [attach_live_limit, rate_limited]}
+                  code: {type: string, examples: [attach_live_limit, attach_recovery_limited, rate_limited]}
   /agent-pairing/attach/lookup:
     post:
       operationId: lookupAttach
@@ -10075,8 +10095,8 @@ components:
         error: {type: string}
         attach_refusal:
           type: string
-          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable]
-          description: Optional fixed cause, disclosed only after authenticating this computer's proof and principal. Includes no identifiers or request contents.
+          enum: [version_mismatch, pairing_revoked, ticket_not_visible, code_expired, draining, enrollment_unavailable, poll_key_unknown]
+          description: Optional fixed cause. Poll_key_unknown requires the owning computer principal and valid attach scope; other causes require the computer proof and principal. Includes no identifiers or request contents.
     AttachDeviceRequest:
       type: object
       additionalProperties: false

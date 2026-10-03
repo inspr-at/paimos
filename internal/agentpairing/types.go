@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -178,6 +179,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	if e.Status == 429 {
 		w.Header().Set("Retry-After", "5")
+		var recovery *attachRecoveryLimited
+		if errors.As(err, &recovery) {
+			w.Header().Set("Retry-After", strconv.Itoa(recovery.retryAfter))
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	body := map[string]string{"error": e.Message, "code": e.Code}
