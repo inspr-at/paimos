@@ -109,3 +109,44 @@ it('sums permitted dashboard amounts exactly and deduplicates shared account win
   expect(total.allowance.windows).toHaveLength(1)
   expect(total.totals.unreported_sessions).toBe(first.totals.unreported_sessions + second.totals.unreported_sessions)
 })
+
+it('preserves partial allowance coverage and its permitted windows from the wire', () => {
+  const dashboard = usageDashboard('reported')
+  const window = { window_id: 'permitted', account_id: 'shared-account', used: null, headroom: null, hard_remaining: null, provisional: true }
+  Object.assign(dashboard.allowance, { state: 'partial', truncated: false, windows: [window] })
+  const total = sumBriefingUsage([dashboard])
+  expect(total.allowance).toMatchObject({ state: 'partial', truncated: false, windows: [window] })
+  expect(total.truncated).toBe(false)
+})
+
+it('marks mixed visible and withheld project allowances partial in either order', () => {
+  const visible = usageDashboard('reported'), withheld = usageDashboard('reported')
+  const window = { window_id: 'permitted', account_id: 'shared-account' }
+  const account = { account_id: 'private-account', label: 'Private account', harness: 'codex', account_state: 'ready' }
+  Object.assign(visible.allowance, { state: 'visible', windows: [window] })
+  Object.assign(withheld.allowance, { state: 'withheld', windows: [], accounts: [account] })
+  for (const dashboards of [[visible, withheld, visible], [withheld, visible, withheld]]) {
+    expect(sumBriefingUsage(dashboards).allowance).toEqual({ state: 'partial', truncated: false, windows: [window], accounts: [account] })
+  }
+})
+
+it('keeps allowance truncation independent from usage totals, including withheld windows', () => {
+  for (const state of ['partial', 'withheld']) {
+    const dashboard = usageDashboard('reported'), complete = usageDashboard('reported')
+    Object.assign(dashboard.allowance, { state, truncated: true, windows: [] })
+    const total = sumBriefingUsage([dashboard, complete])
+    expect(total.allowance).toMatchObject({ state, truncated: true, windows: [] })
+    expect(total.truncated).toBe(false)
+  }
+})
+
+it('keeps complete, absent and withheld allowances distinct without inventing partial coverage', () => {
+  for (const state of ['visible', 'none', 'withheld']) {
+    const dashboard = usageDashboard('reported'), absent = usageDashboard('reported')
+    Object.assign(dashboard.allowance, { state, windows: [] })
+    expect(sumBriefingUsage([dashboard, absent]).allowance).toMatchObject({ state, truncated: false, windows: [] })
+  }
+  const usageOnly = usageDashboard('reported')
+  usageOnly.truncated = true
+  expect(sumBriefingUsage([usageOnly])).toMatchObject({ truncated: true, allowance: { state: 'none', truncated: false } })
+})

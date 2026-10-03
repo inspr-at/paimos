@@ -290,6 +290,7 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
+	var completionErr *committedProbeError
 	err := m.inReadinessWrite(r.Context(), p, func(tx pgx.Tx) error {
 		scopes, err := keyScopes(r.Context(), tx, r, p)
 		if err != nil {
@@ -310,10 +311,18 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		var reportErr error
 		out, reportErr = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
+		if errors.As(reportErr, &completionErr) {
+			return nil
+		}
 		return reportErr
 	})
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if completionErr != nil {
+		w.Header().Set("X-Aeon-Write-Committed", "true")
+		writeErr(w, completionErr.rejection)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)

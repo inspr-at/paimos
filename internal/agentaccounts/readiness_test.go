@@ -589,6 +589,103 @@ func TestFix2PendingCheckExpiry(t *testing.T) {
 	callStatus(t, after, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: first.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 409, nil)
 }
 
+func TestFix3RestartFirstReportCarriesOldCheck(t *testing.T) {
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	f := readinessWorld(t, "fix3-restart", now)
+	path := "/api/agent-accounts/" + f.account.ID
+	var check AccountCheck
+	callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("old", 0), 202, &check)
+	if check.DaemonGeneration == nil || *check.DaemonGeneration != "g1" {
+		t.Fatalf("fixture must bind the pending check to g1: %+v", check)
+	}
+	var resource string
+	if err := adminPool.QueryRow(t.Context(), `SELECT resource_id::text FROM account_readiness_memberships WHERE account_id=$1`, f.account.ID).Scan(&resource); err != nil {
+		t.Fatal(err)
+	}
+	later := fixedClockModule{Module: New(appPool), at: now.Add(time.Minute)}
+	used := 37.0
+	report := ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "restart", Source: "harness", ObservedAt: later.at, ReadingAt: &later.at, UsedPercent: &used, CreditState: "unknown"}}}
+	probe := probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g2", Available: true, Readiness: &report}
+	mux := http.NewServeMux()
+	later.Mount(mux)
+	r := httptest.NewRequest("POST", path+"/probe", strings.NewReader(encoded(t, probe)))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.runner))
+	r.Header.Set("Authorization", "Bearer "+f.token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	var rejection struct{ Code string }
+	if err := json.Unmarshal(w.Body.Bytes(), &rejection); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 409 || rejection.Code != "stale_binding" || w.Header().Get("X-Aeon-Write-Committed") != "true" {
+		t.Fatalf("stale completion must report its committed heartbeat: %d %s %s", w.Code, w.Header().Get("X-Aeon-Write-Committed"), w.Body.String())
+	}
+	var heartbeat time.Time
+	var generation string
+	var available bool
+	if err := adminPool.QueryRow(t.Context(), `SELECT last_probe_at,last_daemon_generation,last_probe_ok FROM agent_accounts WHERE id=$1`, f.account.ID).Scan(&heartbeat, &generation, &available); err != nil {
+		t.Fatal(err)
+	}
+	if !heartbeat.Equal(later.at) || generation != "g2" || !available {
+		t.Fatalf("first restarted heartbeat rolled back: %v %s %t", heartbeat, generation, available)
+	}
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='invalidated' AND result IS NULL`, check.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1`, resource) != 0 {
+		t.Fatal("stale completion or facts were retained")
+	}
+	f.runner.Scopes = []string{"account.read", "account.probe"}
+	var accounts []Account
+	callStatus(t, later, &f.runner, issueKey(t, f.runner, f.runner.Scopes), "GET", "/api/agent-accounts?include_checks=true", "", 200, &accounts)
+	if len(accounts) != 1 || accounts[0].PendingCheck != nil {
+		t.Fatalf("old-generation check still polled: %+v", accounts)
+	}
+	var fresh AccountCheck
+	callStatus(t, later, &f.admin, "", "POST", path+"/check", requestBody("new", 0), 202, &fresh)
+	if fresh.ID == check.ID || fresh.DaemonGeneration == nil || *fresh.DaemonGeneration != "g2" {
+		t.Fatalf("fresh check did not bind the committed generation: %+v", fresh)
+	}
+	report.CheckID = fresh.ID
+	callStatus(t, later, &f.runner, f.token, "POST", path+"/probe", encoded(t, probe), 200, nil)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks WHERE id=$1 AND state='completed' AND result='success'`, fresh.ID) != 1 || scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE resource_id=$1 AND window_key='restart' AND used_percent=37`, resource) != 1 {
+		t.Fatal("fresh completion or its measurement was lost")
+	}
+}
+
+func TestFix3ExpiredPendingReceiptRejected(t *testing.T) {
+	for _, operation := range []string{"replay", "completion"} {
+		t.Run(operation, func(t *testing.T) {
+			now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+			f := readinessWorld(t, "fix3-expiry-"+operation, now)
+			path := "/api/agent-accounts/" + f.account.ID
+			var check AccountCheck
+			callStatus(t, f.mod, &f.admin, "", "POST", path+"/check", requestBody("first", 0), 202, &check)
+			assertPending := func() {
+				t.Helper()
+				if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_checks c JOIN agent_accounts a ON a.id=c.account_id AND a.tenant_id=c.tenant_id WHERE c.id=$1 AND c.state='pending' AND c.binding_revision=a.link_revision AND c.daemon_generation='g1' AND a.last_daemon_generation='g1' AND c.result IS NULL`, check.ID) != 1 {
+					t.Fatal("expiry fixture must remain pending with matching binding and generation")
+				}
+			}
+			assertPending()
+			if !check.ExpiresAt.Equal(now.Add(CheckTTL)) {
+				t.Fatalf("expiry does not match original request: %+v", check)
+			}
+			after := fixedClockModule{Module: New(appPool), at: check.ExpiresAt}
+			var rejection struct{ Code string }
+			if operation == "replay" {
+				callStatus(t, after, &f.admin, "", "POST", path+"/check", requestBody("first", 0), 409, &rejection)
+			} else {
+				callStatus(t, after, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success"}}), 409, &rejection)
+			}
+			if rejection.Code != "stale_binding" {
+				t.Fatalf("expiry failed for another reason: %+v", rejection)
+			}
+			assertPending()
+			if scalar(t, f.admin, `SELECT count(*) FROM account_readiness_facts WHERE reported_by_account_id=$1`, f.account.ID) != 0 {
+				t.Fatal("expired receipt wrote capture facts")
+			}
+		})
+	}
+}
+
 func TestFix2SharedResourceReadingErrorsStayPerAccount(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	f := readinessWorld(t, "fix2-errors", now)
