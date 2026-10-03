@@ -16,8 +16,7 @@ const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let focusObserver: MutationObserver | undefined
-let touched: { element: HTMLElement; text: string } | null = null
-let keyFrame = 0
+let sourceObserver: MutationObserver | undefined
 
 function find(node: EventTarget | null): HTMLElement | null {
   if (!(node instanceof Element)) return null
@@ -30,14 +29,25 @@ function find(node: EventTarget | null): HTMLElement | null {
 }
 async function show(element: HTMLElement) {
   const value = element.dataset.tip
-  if (!value) return
+  if (!value || !element.isConnected) { hide(); return }
+  clearTimeout(timer)
+  if (target !== element) {
+    sourceObserver?.disconnect()
+    sourceObserver = new MutationObserver(() => {
+      if (target !== element) return
+      if (!element.isConnected || !element.dataset.tip) hide()
+      else if (element.dataset.tip !== text.value) void show(element)
+    })
+    // Observe removals too: a record can leave the DOM without pointerout or
+    // focusout. Attribute filtering keeps unrelated name updates inexpensive.
+    sourceObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tip'] })
+  }
   target = element
   layer.value = element.closest<HTMLElement>('dialog[open]')
   text.value = value
   await nextTick()
   if (target !== element || !element.isConnected) { if (target === element) hide(); return }
   const rect = element.getBoundingClientRect()
-  if (rect.bottom < 0 || rect.top > innerHeight) { hide(); return }
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
   // Menu entries say why beside the menu, so the entries around stay readable.
@@ -55,7 +65,7 @@ async function show(element: HTMLElement) {
   x.value = Math.round(Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8))
   y.value = Math.round(below.value ? rect.bottom + 8 : rect.top - height - 8)
 }
-function hide() { clearTimeout(timer); target = null; text.value = '' }
+function hide() { clearTimeout(timer); sourceObserver?.disconnect(); target = null; text.value = '' }
 function over(event: PointerEvent) {
   if (event.pointerType === 'touch') return
   const element = find(event.target)
@@ -63,76 +73,68 @@ function over(event: PointerEvent) {
   hide()
   if (element) timer = setTimeout(() => void show(element), 380)
 }
-function revealFocused(focused: Element) {
+function revealFocus(focused: Element) {
   if (document.activeElement !== focused || !focused.matches(':focus-visible')) return
   const element = find(focused)
-  if (element) void show(element)
+  if (element?.dataset.tip) void show(element)
   else hide()
 }
 function focusIn(event: FocusEvent) {
   focusObserver?.disconnect()
   const focused = event.target
   if (!(focused instanceof Element)) return
-  const reveal = () => revealFocused(focused)
-  // Grids and comboboxes keep focus on their root while arrows change the
-  // active row. Reveal its clipped name without adding extra Tab stops.
-  focusObserver = new MutationObserver(reveal)
-  focusObserver.observe(focused, { attributes: true, subtree: true, attributeFilter: ['aria-activedescendant', 'data-tip'] })
-  reveal()
+  let name = find(focused)
+  let value = name?.dataset.tip
+  // Async results may mount at the same active index; resize/text observers
+  // may make that row clipped later. Remember the source identity and value
+  // so tooltip DOM mutations cannot reopen a deliberately dismissed tip.
+  focusObserver = new MutationObserver(() => {
+    const current = find(focused)
+    const currentValue = current?.dataset.tip
+    if (current === name && currentValue === value) return
+    name = current; value = currentValue
+    revealFocus(focused)
+  })
+  focusObserver.observe(document.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['aria-activedescendant', 'data-tip', 'data-clip-tip'] })
+  revealFocus(focused)
 }
-function focusOut() { focusObserver?.disconnect(); cancelAnimationFrame(keyFrame); keyFrame = 0; hide() }
-function pointerDown(event: PointerEvent) {
-  if (find(event.target) !== touched?.element) touched = null
+function keydown(event: KeyboardEvent) {
   hide()
+  // An arrow at a list boundary need not change aria-activedescendant.
+  // Refresh after the owning component has processed that navigation.
+  if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+    const focused = document.activeElement
+    if (focused?.hasAttribute('aria-activedescendant')) void nextTick(() => revealFocus(focused))
+  }
 }
-function key(event: KeyboardEvent) {
-  touched = null; hide()
-  cancelAnimationFrame(keyFrame); keyFrame = 0
-  const focused = document.activeElement
-  if (event.key === 'Escape' || !(focused instanceof Element) || !focused.hasAttribute('aria-activedescendant')) return
-  // The input retains focus while Vue patches its options. Re-read the active
-  // name after that patch, including searches whose active option id stays 0.
-  keyFrame = requestAnimationFrame(() => { keyFrame = 0; revealFocused(focused) })
-}
-function scrolled() {
-  // Native focus may scroll its row after focusin has revealed the name.
-  if (target && find(document.activeElement) === target) void show(target)
-  else hide()
-}
+function focusOut() { focusObserver?.disconnect(); hide() }
 function touch(event: MouseEvent) {
+  // Touch's compatibility mouse events can move focus after pointerup. Reveal
+  // after click, so that focusout cannot immediately erase the tapped name.
   if (!('pointerType' in event) || event.pointerType !== 'touch') return
   const element = find(event.target)
-  if (!element?.hasAttribute('data-clip-tip')) return
-  if (!(event.target instanceof Node) || !element.contains(event.target)) return
-  const full = element.dataset.tip ?? ''
-  // The first tap reveals the name before its link/button can act. A second
-  // tap activates the same name; a changed name starts a new disclosure.
-  if (!touched || touched.element !== element || touched.text !== full) {
-    touched = { element, text: full }
-    event.preventDefault(); event.stopPropagation()
-    void show(element)
-  } else { touched = null; hide() }
+  if (element?.hasAttribute('data-clip-tip')) void show(element)
 }
 onMounted(() => {
   document.addEventListener('pointerover', over)
   document.addEventListener('focusin', focusIn)
   document.addEventListener('focusout', focusOut)
-  document.addEventListener('pointerdown', pointerDown)
-  document.addEventListener('click', touch, true)
-  document.addEventListener('keydown', key)
-  document.addEventListener('scroll', scrolled, true)
+  document.addEventListener('pointerdown', hide)
+  document.addEventListener('click', touch)
+  document.addEventListener('keydown', keydown)
+  document.addEventListener('scroll', hide, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerover', over)
   document.removeEventListener('focusin', focusIn)
   document.removeEventListener('focusout', focusOut)
-  document.removeEventListener('pointerdown', pointerDown)
-  document.removeEventListener('click', touch, true)
-  document.removeEventListener('keydown', key)
-  document.removeEventListener('scroll', scrolled, true)
-  clearTimeout(timer)
+  document.removeEventListener('pointerdown', hide)
+  document.removeEventListener('click', touch)
+  document.removeEventListener('keydown', keydown)
+  document.removeEventListener('scroll', hide, true)
+  hide()
   focusObserver?.disconnect()
-  cancelAnimationFrame(keyFrame)
 })
 </script>
 
