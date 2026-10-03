@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem, type WorkNode } from '../../lib/api'
 import { keyPrefixOf, keyQuery, ticketResults, type TicketResult } from '../../lib/palette'
@@ -173,7 +174,7 @@ let lastChoice = 'relates'
         >
           <StatusIcon :state="result.state" :size="12" />
           <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+          <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
           <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
           <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
@@ -231,5 +232,11 @@ let lastChoice = 'relates'
   .search .field { height: 44px; font-size: 16px; }
   .option { min-height: 44px; }
   .foot { display: none; }
+}
+
+@media (max-width: 720px) {
+  .option { height: 52px; min-height: 52px; }
+  .title { line-height: 18px; }
+  .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
 }
 </style>

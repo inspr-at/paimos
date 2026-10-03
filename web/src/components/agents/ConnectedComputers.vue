@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import {
   PairingError, agentUpdateAdvice, activeRunIds, applyComputerListRefresh, computerRemoval, describeComputerStatus, removeComputer, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, disconnectComputer, disconnectConfirm,
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
-  platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
+  touchIDConfirmation, platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
 import { onAccessChange } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
@@ -293,7 +294,7 @@ function assign(error: unknown, fallback: string) {
         <div class="identity">
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
-            <p class="name">{{ computer.computer_name }}</p>
+            <p v-clip-tip class="name">{{ computer.computer_name }}</p>
             <p class="meta">
               <span class="where">{{ platformCaption(computer.platform, computer.arch) }}</span>
               <template v-if="computer.workspace_path">
@@ -301,6 +302,7 @@ function assign(error: unknown, fallback: string) {
                 <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
               </template>
             </p>
+            <p class="meta">{{ touchIDConfirmation(computer) }}</p>
             <p v-if="agentUpdateAdvice(computer)" class="agent-update" role="status">{{ agentUpdateAdvice(computer) }}</p>
           </div>
         </div>
@@ -351,7 +353,7 @@ function assign(error: unknown, fallback: string) {
       <ul v-if="revokedOpen" id="revoked-list" class="revoked-list">
         <li v-for="computer in revoked" :key="keyOf(computer)" :title="`${statusOf(computer).detail} ${statusOf(computer).next}`">
           <span class="glyph small"><AppIcon name="monitor" :size="14" /></span>
-          <span class="revoked-name">{{ computer.computer_name }}</span>
+          <span v-clip-tip class="revoked-name">{{ computer.computer_name }}</span>
           <span class="revoked-meta">{{ [platformCaption(computer.platform, computer.arch), lastActive(computer)].filter(Boolean).join(' · ') }}</span>
           <button v-if="removal(computer).allowed" type="button" class="btn sm ghost remove-computer" :disabled="!!busy" @click="remove(computer)">{{ busy === `remove:${keyOf(computer)}` ? 'Removing…' : 'Remove' }}<span class="sr-only"> {{ computer.computer_name }}</span></button>
           <span v-else-if="removal(computer).reason" class="revoked-reason">{{ removal(computer).reason }}</span>
@@ -451,10 +453,10 @@ function assign(error: unknown, fallback: string) {
 .revoked-toggle .chev { transition: transform .2s ease; }
 .revoked-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .revoked-toggle .chev { transition: none; } }
-.revoked-list { display: grid; margin: 0; padding: 0 0 4px; list-style: none; }
+.revoked-list { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0 0 4px; list-style: none; }
 .revoked-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 40px; padding: 4px 6px; color: var(--ink-2); font-size: 13px; }
 .glyph.small { width: 26px; height: 26px; border-radius: 7px; }
-.revoked-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 550; }
+.revoked-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 550; }
 .revoked-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .revoked-list .remove-computer, .revoked-reason { margin-left: auto; flex: none; }
 .revoked-reason { color: var(--ink-3); font-size: 12px; }
@@ -473,6 +475,7 @@ function assign(error: unknown, fallback: string) {
 .revoke:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
 @media (max-width: 720px) {
   .computers { padding: 4px 4px 6px; }
+  .revoked-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; line-height: 18px; }
   .sheet { display: none; }
   .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness actions" "status actions"; row-gap: 4px; }
   .computer.has-reports { grid-template-areas: "id actions" "harness harness" "status status"; }

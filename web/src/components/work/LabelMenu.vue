@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -71,7 +72,7 @@ function keydown(event: KeyboardEvent) {
       <p class="eyebrow">Labels</p>
       <input v-model="term" class="field label-search" placeholder="Find or add a label…" aria-label="Find or add a label" data-autofocus />
       <div class="options" role="group" aria-label="Labels">
-        <button v-if="term.trim() && !exact" type="button" class="option create" @click="create"><AppIcon name="plus" :size="13" />Add “{{ term.trim() }}”</button>
+        <button v-if="term.trim() && !exact" type="button" class="option create" @click="create"><AppIcon name="plus" :size="13" /><span v-clip-tip class="name">Add “{{ term.trim() }}”</span></button>
         <button
           v-for="label in shown" :key="label.name" type="button" role="checkbox" class="option" :aria-checked="state(label) === 'all' ? 'true' : state(label) === 'some' ? 'mixed' : 'false'"
           :data-clip-tip="label.name"
@@ -79,7 +80,7 @@ function keydown(event: KeyboardEvent) {
         >
           <span class="box" :class="state(label)" aria-hidden="true"><AppIcon v-if="state(label) === 'all'" name="check" :size="11" /><AppIcon v-else-if="state(label) === 'some'" name="minus" :size="11" /></span>
           <i class="tag-dot" :data-color="label.color || undefined" aria-hidden="true" />
-          <span class="name">{{ label.name }}</span>
+          <span v-clip-tip class="name">{{ label.name }}</span>
           <span class="on mono">{{ state(label) === 'some' ? `${label.on}/${count}` : '' }}</span>
         </button>
         <p v-if="!shown.length && !term.trim()" class="none">No labels in this project yet. Type one to add it.</p>
@@ -118,4 +119,10 @@ function keydown(event: KeyboardEvent) {
 .tag-dot[data-color="purple"] { background: #8a6cc2; }
 .tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
 .tag-dot[data-color="pink"] { background: #c7679a; }
+
+@media (max-width: 720px) {
+  .option { height: 52px; min-height: 52px; }
+  .name { line-height: 18px; }
+  .name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>

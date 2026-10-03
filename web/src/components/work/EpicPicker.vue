@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { listNodes, type ListItem } from '../../lib/api'
 import { highlight } from '../../lib/work'
@@ -59,7 +60,7 @@ function keydown(event: KeyboardEvent) {
       >
         <StatusIcon :state="epic.state" :size="12" />
         <span class="key">{{ epic.key }}</span>
-        <span class="title"><template v-for="(part, i) in highlight(epic.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+        <span v-clip-tip="epic.title" class="title"><template v-for="(part, i) in highlight(epic.title, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
         <AppIcon v-if="epic.id === current" name="check" :size="14" class="tick" />
       </button>
       <p v-if="loading && !epics.length" class="note" role="status">Looking for epics…</p>
@@ -82,4 +83,10 @@ function keydown(event: KeyboardEvent) {
 .none-mark { width: 12px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .note { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 .note.error { color: var(--danger); }
+
+@media (max-width: 720px) {
+  .option { height: 52px; min-height: 52px; }
+  .title { line-height: 18px; }
+  .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>
