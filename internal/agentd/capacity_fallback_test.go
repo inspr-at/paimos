@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
 )
 
@@ -148,12 +149,15 @@ func TestCapacityAccountInventoryIsDisplayOnly(t *testing.T) {
 	home := privateCapacityHome(t)
 	codex := NewCodexAdapter("/unused", map[string]string{"private-a": home, "private-b": home})
 	codex.SetExpectedEmails(map[string]string{"private-a": "one@example.test", "private-b": "two@example.test"})
-	s := &Supervisor{accounts: []EnrolledAccount{
+	s, _, _ := testSupervisor(t)
+	s.accounts = []EnrolledAccount{
 		{ID: "2", Key: "private-b", Harness: Codex, Metadata: &AccountMetadata{Label: "Shared label", Plan: "Pro"}},
 		{ID: "1", Key: "private-a", Harness: Codex, Metadata: &AccountMetadata{Label: "Shared label", Plan: "Pro"}},
 		{ID: "3", Key: "private-cursor", Harness: Cursor},
 		{ID: "4", Key: "private-grok", Harness: Grok},
-	}, adapters: map[string]Adapter{Codex: codex, Cursor: NewCursorAdapter("/unused", nil), Grok: NewGrokAdapter()}, capacityLast: map[string]time.Time{"1": time.Now().UTC()}}
+	}
+	s.adapters = map[string]Adapter{Codex: codex, Cursor: NewCursorAdapter("/unused", nil), Grok: NewGrokAdapter()}
+	s.capacityLast = map[string]time.Time{"1": time.Now().UTC()}
 	got := s.CapacityAccounts("")
 	if len(got) != 4 || got[0].AccountID != "1" || got[1].AccountID != "2" || got[0].LastReadAt == nil || got[1].LastReadAt != nil || got[2].Fallback != "not available headless" {
 		t.Fatal(got)
@@ -170,6 +174,52 @@ func TestCapacityAccountInventoryIsDisplayOnly(t *testing.T) {
 	cursor := s.adapters[Cursor].(*CursorAdapter)
 	if len(cursor.CaptureCapacity(t.Context(), "private-cursor")) != 0 {
 		t.Fatal("headless Cursor fabricated quota")
+	}
+}
+
+func TestCapacityInventoryExcludesRevokedAndKeepsUnboundAccountBlocked(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	s.accounts = []EnrolledAccount{
+		{ID: "revoked", Key: "old", Harness: Claude},
+		{ID: "unbound", Key: "missing", Harness: Claude, DependencyBlocked: true, PinReason: "binding_missing"},
+		{ID: "current", Key: "current", Harness: Claude},
+	}
+	s.adapters[Claude] = &ClaudeAdapter{Homes: map[string]string{"current": privateCapacityHome(t)}}
+	s.probedAccounts["current"] = true
+	if err := PersistFence(s.state.Path(), s.daemonID, "revoked"); err != nil {
+		t.Fatal(err)
+	}
+	got := s.CapacityAccounts("")
+	if len(got) != 2 || got[0].AccountID != "current" || got[0].State != "ready" || got[1].AccountID != "unbound" || got[1].State != "blocked" || got[1].Reason != "binding_missing" {
+		t.Fatalf("stale account advertised or current account blocked: %+v", got)
+	}
+	if detail := s.Lifecycle("").HarnessDetails[Claude]; detail.State != "ready" {
+		t.Fatalf("old account blocked current Claude account: %+v", detail)
+	}
+	if got := s.CapacityAccounts("revoked"); len(got) != 0 {
+		t.Fatal("revoked account survived filter", got)
+	}
+	if err := PersistFence(s.state.Path(), s.daemonID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.CapacityAccounts(""); len(got) != 0 {
+		t.Fatal("disconnected computer advertised live accounts", got)
+	}
+}
+
+func TestCapacityInventoryExplainsPrivateProfile(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	home := privateCapacityHome(t)
+	if err := os.Chmod(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	s.accounts = []EnrolledAccount{{ID: "claude", Key: "local", Harness: Claude}}
+	s.adapters[Claude] = &ClaudeAdapter{Homes: map[string]string{"local": home}}
+	s.blockedAccounts["claude"] = true
+	s.probeReasonDetails = map[string]string{"claude": agentsetup.ProbeProfilePrivate}
+	got := s.CapacityAccounts("")
+	if len(got) != 1 || got[0].State != "blocked" || got[0].ReasonDetail != agentsetup.ProbeProfilePrivate || got[0].Fallback != "not available: account profile must be private (mode 0700)" {
+		t.Fatalf("profile permission failure mislabeled as missing binding: %+v", got)
 	}
 }
 

@@ -331,6 +331,7 @@ type ProbeStatus struct {
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string
+	ReasonDetail      string // Fixed publishable phrase; never raw vendor output.
 }
 
 const (

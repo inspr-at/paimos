@@ -15,17 +15,21 @@ import (
 // scan of vendor credential directories. Paths, keys and provider IDs stay local.
 // Fallback describes capability, not whether an account has quota remaining.
 type CapacityAccountStatus struct {
-	AccountID  string     `json:"account_id"`
-	Harness    string     `json:"harness"`
-	Label      string     `json:"label,omitempty"`
-	Plan       string     `json:"plan,omitempty"`
-	Fallback   string     `json:"fallback"`
-	LastReadAt *time.Time `json:"last_read_at,omitempty"`
+	AccountID    string     `json:"account_id"`
+	Harness      string     `json:"harness"`
+	Label        string     `json:"label,omitempty"`
+	Plan         string     `json:"plan,omitempty"`
+	Fallback     string     `json:"fallback"`
+	State        string     `json:"state,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	ReasonDetail string     `json:"reason_detail,omitempty"`
+	LastReadAt   *time.Time `json:"last_read_at,omitempty"`
 }
 
 // CapacityAccounts is a display-only projection of all enrolled config homes.
 // Multiple accounts of one vendor remain separate even when labels coincide.
 func (s *Supervisor) CapacityAccounts(accountID string) []CapacityAccountStatus {
+	status := s.Lifecycle(accountID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []CapacityAccountStatus{}
@@ -33,7 +37,14 @@ func (s *Supervisor) CapacityAccounts(accountID string) []CapacityAccountStatus 
 		if accountID != "" && a.ID != accountID {
 			continue
 		}
+		// Revoked accounts remain in runtime ownership until cleanup settles;
+		// their dispatch fence is authoritative, not the old config entry.
+		if fenced, err := s.readFence(a.ID); status.AllFenced || fenced || err != nil {
+			continue
+		}
 		v := CapacityAccountStatus{AccountID: a.ID, Harness: a.Harness, Fallback: "not available"}
+		detail := status.AccountStatuses[a.ID]
+		v.State, v.Reason, v.ReasonDetail = detail.State, detail.Reason, detail.ReasonDetail
 		if a.Metadata != nil {
 			if validHarnessValue(a.Metadata.Label, 128) {
 				v.Label = a.Metadata.Label
@@ -65,6 +76,9 @@ func (a *CodexAdapter) CapacitySupport(key string) string {
 }
 func (a *ClaudeAdapter) CapacitySupport(key string) string {
 	if _, err := localHome(a.Homes, key); err != nil {
+		if err == errAccountHomePrivate {
+			return "not available: account profile must be private (mode 0700)"
+		}
 		return "not available: account binding missing"
 	}
 	if a.CanCaptureCapacity(key) {

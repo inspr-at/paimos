@@ -56,6 +56,8 @@ the original nine areas. Shared harness/model observations in
 `internal/modelreport/` belong to S2 (agent runtime), alongside their harness,
 daemon and model-registry callers. Assigned context files also require manifest entries;
 use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
+Account quota privacy policy and its tests (`internal/accountprivacy/**`)
+belong to S1, alongside agent accounts and authorization.
 
 ```bash
 AUDIT_DIR=tmp/code-health
@@ -1015,6 +1017,44 @@ eligible accounts, without changing its budget. Short windows still constrain
 every admission.
 Workspace readers can request advice across their accounts; paired agents and
 keys with only `account.probe` see only accounts registered by that agent.
+
+Usage lists configured accounts even before a reading or successful verification,
+with their current computer/account readiness and any reported repair. A failed
+computer lookup retains the last account inventory and marks it incomplete. Cursor,
+Grok and Pi do not expose a supported limit reading; their rows say so instead
+of promising a reading after the first run. Release-qualified Codex idle capture
+uses the enrolled Node interpreter, checks the account identity in that same
+process, and reads `account/rateLimits/read` without starting a prompt. The first
+idle capture is eligible after a successful probe; subsequent attempts are
+spaced at least five minutes apart. No production Codex idle capability is yet
+qualified; its native readings currently come from a run. Revoked local accounts with a dispatch fence
+are excluded from `aeon-agentd capacity`; an enrolled but unbound account stays
+visible as blocked and cannot prevent a healthy sibling account from working.
+
+Workspace **Low-quota warnings** settings default to an early notice at 10%
+remaining and an urgent notice at 3%. Both are whole percentages from 1–50,
+with urgent below early (`GET/PUT /api/settings/quota-warnings`,
+`settings.manage`; writes require a person). Only measured readings no more
+than ten minutes old, before their reset, qualify; a balance without a
+percentage denominator cannot produce a percentage warning. Receipts persist
+per resource or confirmed login pool, window, reset and threshold across
+computers and recovery. A simultaneous crossing produces only the urgent
+notice. A newer measured recovery clears the notice; clock passage alone
+withholds expired details without claiming recovery. A durable quota/window
+observation watermark includes healthy readings and reset transitions, so a
+delayed reading from another computer cannot undo newer recovery evidence.
+Current availability is separate from notice deduplication: urgent → recovery
+→ early still shows limited availability without sending another notice in
+the same reset. `/agents` names affected
+active sessions with a recorded run/account binding. Their parent lead receives
+a durable project-specific inbox summary without quota figures, accepted with
+a queued delivery receipt and deadline. Unread summaries expire through the
+inbox sweeper or fail when their recipient session ends. Exact figures
+on `/agents` follow current owner sharing, including every pooled sibling.
+The internal notice step works for reporting daemons without project access;
+it sends only to leads with current access and restores the reporter's scope.
+A restarted daemon's committed heartbeat still evaluates accepted fresh
+measurements for notices while rejecting the previous generation's check facts.
 
 Matching login fingerprints are hints. In Settings → Accounts, open an account
 and choose **Pool with…**, then confirm the named accounts use the same vendor
@@ -2033,6 +2073,15 @@ On phones, List and Outline share a bottom-centred updates chip above the safe
 area, footer and selection sheet, with scroll clearance for the last row; the
 desktop action stays in the table header. Lazy pages retain the server's order.
 
+At widths up to 900 px, Filters includes Display controls for sorting, row
+height, columns and model display. Saved column visibility and order also apply
+to phone cards: optional values appear below Key and Title; Automatic restores
+the compact phone layout. Attachment Compare reserves its opacity control slot
+across Side by side, Slider and Onion skin so the mode buttons stay in place.
+Phone Compare and column reorder buttons have separate 44 px touch targets.
+Selection scroll clearance follows the measured bulk toolbar height, including
+Queue and Release, so the final ticket can scroll fully above the toolbar.
+
 The auth adapter is isolated in `web/src/lib/api.ts`. It expects `/api/me` to return
 `{ principal: { id, name, email? }, tenant: { id, name }, dev_mode?: boolean, oidc_display_name?: string }`.
 A 401 clears identity and routes to sign-in. Development email sign-in is
@@ -2229,6 +2278,18 @@ Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification
 on that same computer without interrupting claimed work.
+
+Failed Claude sign-in checks include an allowlisted `reason_detail` in
+`aeon-agentd status --json` and the person account views. No raw vendor output,
+credential paths or arbitrary error strings are published. In particular,
+Claude's default profile can be discovered while its directory has vendor-created
+`0755` permissions, but the daemon requires a private profile before it runs the
+sign-in check. This leaves verification queued with `probe_failed`. For that
+specific diagnostic the operator repair is `chmod 700 "$HOME/.claude"`; the next
+successful probe clears the reason and permits the existing verification to
+proceed. Aeon does not change the vendor profile's permissions automatically.
+Claude's quota reading still depends on supported native capture or a managed
+run; fixing sign-in does not fabricate an allowance reading.
 
 New pairing-owned macOS launchd services write diagnostics to
 `~/Library/Logs/aeon-agentd/{stdout,stderr}.log` in a private `0700` directory.
@@ -3000,8 +3061,18 @@ input and mandatory request ID; `ask_status` accepts `{question_id}`.
 
 The additive API is documented in `api/openapi.yaml`: project question create/list,
 question get/status/person decision and a permission-filtered `/decision-desk`
-question projection. `questions.ask` and `questions.read` are explicit agent key
-scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
+question projection. Answered lists accept `state=answered&order=desc` (AEON-611):
+newest current answer first, with question ID as the tie-breaker. Follow the
+bounded `next_cursor` using `cursor`, with the same tenant, principal and project;
+permissions are checked again per page. Descending reads require offset zero.
+The Decided view follows these cursors; “Load 100 more” resumes the saved cursor
+with one page request. Refresh rechecks its loaded pages from the newest decision,
+so a fresh answer stays available for correction. Continuation keeps questions
+before protected requests, hides action requests projected into questions, and
+preserves decisions recorded in the desk while that page is loading. Decisions
+committed during pagination may require a refresh from the first page. Default and
+Open reads keep oldest-first creation order. `questions.ask` and `questions.read`
+are explicit agent key scopes; `questions.decide` is person-only. Owner/admin/member roles receive all
 three, viewer receives read, guest/customer receive none. Existing keys gain no
 new scopes. Agents read only questions they asked, with only their memberships.
 Generic node/knowledge CRUD cannot modify question/decision authority.

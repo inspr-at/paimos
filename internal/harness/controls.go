@@ -150,7 +150,10 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result a
 		if old.Kind == "tier" && s.Activity != "idle" {
 			continue
 		}
-		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,clock_timestamp()+interval '45 seconds') WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN clock_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
+		// The row is already locked. Use one statement timestamp for the claim
+		// and its deadline: separate clock samples can exceed the 45-second
+		// authorization window by the time between evaluations.
+		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=statement_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,statement_timestamp()+interval '45 seconds') WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN statement_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
 		if e != nil {
 			return nil, e
 		}

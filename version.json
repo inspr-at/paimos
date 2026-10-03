@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261003065316.0.0",
+  "version": "261003095616.0.0",
   "release_channel": "stable",
-  "release_sequence": 121,
-  "codename": "Awake Alpha",
-  "reserved_at": "2026-10-03T06:53:16Z",
-  "ticket": "AEON-620",
+  "release_sequence": 122,
+  "codename": "Benign Byte",
+  "reserved_at": "2026-10-03T09:56:16Z",
+  "ticket": "AEON-627",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
