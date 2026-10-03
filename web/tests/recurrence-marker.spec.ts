@@ -36,6 +36,65 @@ async function setup(page: Page, manage = true, locale = 'en-GB') {
   return { data, errors, calls, recurrenceReads }
 }
 
+test.describe('touch permission changes', () => {
+  test.use({ hasTouch: true })
+
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const change of ['grant', 'revoke'] as const) {
+    test(`${change} keeps the recurring pill and ticket content still at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      const { data, errors } = await setup(page, true, 'de-AT')
+      const ticket = data.nodes.find(node => node.id === 'n-1')!
+      ticket.project = 'p-aeon'; ticket.parent_id = 'p-aeon'; ticket.key = 'AEON-99'
+      let allowed = change === 'revoke'
+      let releasePermissions!: () => void
+      const permissionBarrier = new Promise<void>(resolve => { releasePermissions = resolve })
+      let permissionRequested!: () => void
+      const requested = new Promise<void>(resolve => { permissionRequested = resolve })
+      await page.route('**/api/me/permissions**', async route => {
+        if (new URL(route.request().url()).searchParams.get('project_id') !== 'p-pharos') return route.fallback()
+        permissionRequested()
+        if (change === 'grant') await permissionBarrier
+        const grants = mockEffectivePermissions('member', 'p-pharos')
+        if (allowed) grants.workspace.permissions.push('recurrences.manage')
+        await route.fulfill({ json: grants })
+      })
+      try {
+        await page.goto('/p/AEON/AEON-99')
+        await requested
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+        const pill = workspace(page).locator('.recurring-pill')
+        const line = workspace(page).locator('.recurrence-provenance')
+        await expect(line).toContainText('Website audit')
+        await expect(workspace(page).locator(`${allowed ? 'a' : 'span'}.recurring-pill`)).toBeVisible()
+        mkdirSync(shots, { recursive: true })
+        const screenshot = (state: string) => page.screenshot({ path: join(shots, `ticket-touch-${change}-${state}-${width}-${theme}.png`) })
+        await screenshot('before')
+        await expectStableControls({
+          controls: {
+            'recurring pill': pill,
+            'header actions': workspace(page).getByRole('button', { name: 'More actions', exact: true }),
+            'copy key': workspace(page).getByRole('button', { name: 'Copy AEON-99', exact: true }),
+            'provenance below the header': line,
+          },
+          scrollAreas: { ticket: workspace(page) },
+          interactions: [{ name: `${change} source management permission`, run: async () => {
+            allowed = change === 'grant'
+            if (allowed) releasePermissions()
+            else await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+            await expect(workspace(page).locator(`${allowed ? 'a' : 'span'}.recurring-pill`)).toBeVisible()
+            await expect(line.getByRole('link', { name: 'Website audit', exact: true })).toHaveCount(allowed ? 1 : 0)
+          } }],
+        })
+        expect((await pill.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        await expect(pill).toContainText('Wiederkehrend')
+        await screenshot('after')
+        expect(errors).toEqual([])
+      } finally { releasePermissions() }
+    })
+  }
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`option B has a stable 22 px slot and header at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })

@@ -253,6 +253,8 @@ directly rather than substituted with the first page's first schedule. Retired
 sources keep their markers; withheld provenance clears the marker and source editor.
 Source editing becomes available when delayed management permissions arrive, without
 reloading the recurrence details; revocation closes the editor and cancels pending edits.
+The header pill keeps the same size through permission loading, grant and revocation;
+on touch devices both the marker and link reserve a minimum 44 px height.
 Status help and `aeon status help --json` share the same marker definition.
 Management requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires

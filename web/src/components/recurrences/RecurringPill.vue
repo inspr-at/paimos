@@ -22,5 +22,5 @@ const destination = computed(() => ({ path: `/p/${encodeURIComponent(props.recur
 .recurring-pill svg { flex: none; color: var(--gold); }
 a.recurring-pill:hover { background: color-mix(in srgb, var(--gold) 15%, transparent); }
 .recurring-pill:focus-visible { outline: 1px solid var(--gold); outline-offset: 3px; }
-@media (pointer: coarse) { a.recurring-pill { min-height: 44px; } }
+@media (pointer: coarse) { .recurring-pill { min-height: 44px; } }
 </style>
