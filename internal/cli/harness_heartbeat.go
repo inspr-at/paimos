@@ -1575,6 +1575,7 @@ func applyHeartbeatRequests(o heartbeatOptions, dep heartbeatDeps, session *hear
 			}
 			session.disk.RequestedModel, session.disk.RequestedEffort = model, effort
 			session.disk.ModelFlagAtRequest, session.disk.EffortFlagAtRequest = o.Model, o.Effort
+			session.disk.RequestedModelBaseline = captureHeartbeatModelBaseline(ctx, o, session)
 		}
 	}
 }

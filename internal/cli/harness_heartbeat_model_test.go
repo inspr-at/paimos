@@ -13,7 +13,7 @@ import (
 )
 
 func TestRunHeartbeatFollowsSessionModel(t *testing.T) {
-	for _, source := range []string{"claude", "codex", "app-server"} {
+	for _, source := range []string{"claude", "codex"} {
 		t.Run(source, func(t *testing.T) {
 			var calls []hbCall
 			srv := heartbeatFixture(t, &calls, "", "")
@@ -31,13 +31,6 @@ func TestRunHeartbeatFollowsSessionModel(t *testing.T) {
 				first = `{"type":"turn_context","payload":{"model":"claude-sonnet","effort":"low"}}` + "\n"
 				second = `{"type":"turn_context","payload":{"model":"claude-opus","effort":"high"}}` + "\n"
 				opts.UsageFile = path
-			} else if source == "app-server" {
-				opts.Harness = "codex"
-				path = filepath.Join(dir, "capture.jsonl")
-				opts.SourceSession = transcriptSessionID
-				opts.Capacity = heartbeatCapacity{Source: "codex", File: path, Account: transcriptEntryID}
-				first = `{"result":{"model":"claude-sonnet","reasoningEffort":"low","thread":{"id":"` + transcriptSessionID + `"}}}` + "\n"
-				second = `{"method":"turn/started","params":{"threadId":"` + transcriptSessionID + `","model":"claude-opus","effort":"high"}}` + "\n"
 			} else {
 				opts.Transcript = path
 			}

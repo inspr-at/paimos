@@ -62,6 +62,8 @@ type heartbeatDisk struct {
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
+
+	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
 }
 
 // heartbeatCodexCursor is the Codex scan context that must survive between

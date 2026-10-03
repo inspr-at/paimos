@@ -5,8 +5,10 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -22,12 +24,18 @@ func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSess
 		model, effort = s.disk.RequestedModel, s.disk.RequestedEffort
 	} else {
 		s.disk.RequestedModel, s.disk.RequestedEffort = "", ""
+		s.disk.RequestedModelBaseline = nil
 	}
 	observedModel, observedEffort := readHeartbeatModel(ctx, o, s)
 	if observedModel != "" {
+		if observedModel != model {
+			// An effort belongs to its model, never to a different request.
+			effort = ""
+		}
 		model = observedModel
-		// Actual transcript evidence supersedes an applied request's prediction.
+		// Only evidence after the request baseline supersedes its prediction.
 		s.disk.RequestedModel, s.disk.RequestedEffort = "", ""
+		s.disk.RequestedModelBaseline = nil
 	}
 	if observedEffort != "" {
 		effort = observedEffort
@@ -51,45 +59,104 @@ func acceptHeartbeatModel(s *heartbeatSession, body map[string]any) {
 }
 
 func readHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSession) (string, string) {
-	if ctx.Err() != nil || o.Harness != "claude" && o.Harness != "codex" {
+	target, kind, ok := heartbeatModelTarget(ctx, o, s)
+	if !ok {
 		return "", ""
 	}
 	id := o.UsageID
 	if id == "" {
 		id = o.SourceSession
 	}
-	if o.Harness == "codex" && o.Capacity.Source == "codex" && o.Capacity.File != "" {
-		if model, effort := readHeartbeatModelFile(ctx, o.Capacity.File, "codex", harnessCodexStream, id); model != "" {
-			return model, effort
+	var offset int64
+	if s.disk.RequestedModel != "" {
+		baseline := s.disk.RequestedModelBaseline
+		if baseline == nil || baseline.FileHash != heartbeatModelFileHash(target) {
+			// A legacy request, unavailable file or replaced source has no
+			// observation fence yet. Establish it without replaying history.
+			s.disk.RequestedModelBaseline = heartbeatModelFileBaseline(target, kind)
+			return "", ""
 		}
+		offset = baseline.Offset
+	}
+	return readHeartbeatModelFileSince(ctx, target.Path, target.Source, kind, id, offset)
+}
+
+// Each harness has one authoritative session log. Codex capacity captures
+// are shared and may contain older thread-start responses; never use them
+// as either an override or a fallback for the bound rollout.
+func heartbeatModelTarget(ctx context.Context, o heartbeatOptions, s *heartbeatSession) (usageTarget, harnessFileKind, bool) {
+	if ctx.Err() != nil || o.Harness != "claude" && o.Harness != "codex" {
+		return usageTarget{}, 0, false
 	}
 	target, err := resolveSessionHeartbeatUsage(o, s)
 	if err != nil || target.Source != o.Harness || target.Path == "" {
-		return "", ""
+		return usageTarget{}, 0, false
 	}
 	kind, ok := harnessKindForSource(target.Source)
 	if !ok {
-		return "", ""
+		return usageTarget{}, 0, false
 	}
-	return readHeartbeatModelFile(ctx, target.Path, target.Source, kind, id)
+	abs, ok := resolveHarnessPath(kind, target.Path)
+	if !ok {
+		return usageTarget{}, 0, false
+	}
+	target.Path = abs
+	return target, kind, true
+}
+
+// Persist only an opaque source identity and byte boundary, never raw records.
+type heartbeatModelBaseline struct {
+	FileHash string `json:"file_hash"`
+	Offset   int64  `json:"offset"`
+}
+
+func heartbeatModelFileHash(target usageTarget) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(target.Source+"\x00"+target.Path)))
+}
+
+func heartbeatModelFileBaseline(target usageTarget, kind harnessFileKind) *heartbeatModelBaseline {
+	info, err := statHarnessFile(kind, target.Path)
+	if err != nil {
+		return nil
+	}
+	return &heartbeatModelBaseline{FileHash: heartbeatModelFileHash(target), Offset: info.Size()}
+}
+
+func captureHeartbeatModelBaseline(ctx context.Context, o heartbeatOptions, s *heartbeatSession) *heartbeatModelBaseline {
+	target, kind, ok := heartbeatModelTarget(ctx, o, s)
+	if !ok {
+		return nil
+	}
+	return heartbeatModelFileBaseline(target, kind)
 }
 
 func readHeartbeatModelFile(ctx context.Context, path, source string, kind harnessFileKind, id string) (string, string) {
+	return readHeartbeatModelFileSince(ctx, path, source, kind, id, 0)
+}
+
+func readHeartbeatModelFileSince(ctx context.Context, path, source string, kind harnessFileKind, id string, offset int64) (string, string) {
 	f, err := openHarnessFile(kind, path)
 	if err != nil {
 		return "", ""
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil {
+	if err != nil || offset < 0 || offset > info.Size() {
 		return "", ""
 	}
 	// Look at the newest records, independently of the usage cursor/backlog.
 	// Oversized and incomplete lines cannot hide a later valid record.
 	const maxTail = 16 << 20
-	start := max(int64(0), info.Size()-maxTail)
+	start := max(int64(0), info.Size()-maxTail, offset)
 	reader := bufio.NewReaderSize(io.NewSectionReader(f, start, info.Size()-start), heartbeatUsageLineMax)
-	discard := start > 0
+	discard := false
+	if start > 0 {
+		var previous [1]byte
+		if _, err := f.ReadAt(previous[:], start-1); err != nil {
+			return "", ""
+		}
+		discard = previous[0] != '\n'
+	}
 	model, effort := "", ""
 	for ctx.Err() == nil {
 		line, err := reader.ReadSlice('\n')
@@ -143,7 +210,6 @@ func heartbeatModelLine(source string, line []byte, sessionID string) (string, s
 		Params    struct {
 			identity
 			ThreadID string `json:"threadId"`
-			ToModel  string `json:"toModel"`
 			Thread   struct {
 				identity
 				ID string `json:"id"`
@@ -178,8 +244,6 @@ func heartbeatModelLine(source string, line []byte, sessionID string) (string, s
 			if v.Model == "" {
 				v = record.Params.identity
 			}
-		case record.Method == "model/rerouted":
-			v.Model = record.Params.ToModel
 		case record.Method == "thread/tokenUsage/updated":
 			v = record.Params.identity
 		case record.Method == "" && record.Result.Thread.ID != "":
@@ -197,7 +261,9 @@ func heartbeatModelLine(source string, line []byte, sessionID string) (string, s
 		if thread == "" {
 			thread = record.Result.Thread.ID
 		}
-		if sessionID != "" && thread != "" && thread != sessionID {
+		// Rollout turn_context is scoped by its bound file. Shared app-server
+		// records require both sides of an explicit, matching thread binding.
+		if record.Type != "turn_context" && (sessionID == "" || thread == "" || thread != sessionID) {
 			return "", ""
 		}
 	}
