@@ -221,6 +221,12 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
  JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id WHERE e.account_id=$1`, a.ID).Scan(&computer, &revision); err != nil {
 				t.Fatal(err)
 			}
+			// The evidence-only fixture does not navigate back from the request
+			// to its computer. Complete that binding for the real lifecycle API.
+			if _, err := adminPool.Exec(t.Context(), `UPDATE agent_pairing_requests SET computer_id=$1
+ WHERE id=(SELECT request_id FROM agent_pairing_computers WHERE id=$1)`, computer); err != nil {
+				t.Fatal(err)
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			blocker, blockerPID := evidenceBlocker(t, ctx)
