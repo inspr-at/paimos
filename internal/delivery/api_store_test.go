@@ -42,12 +42,12 @@ func TestCumulativeCaptureCutWindowCarryForwardAndReopenedWait(t *testing.T) {
 	f := newStoreFixture(t)
 	own := f.item(t, "task", "TSK-1", "done", f.release, "V")
 	f.exec(t, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, own, benefitFields)
-	old := f.addRelease(t, f.project, "REL-3", "internal", "released", "F")
-	waiting := f.addRelease(t, f.project, "REL-4", "internal", "released", "G")
-	gap := f.addRelease(t, f.project, "REL-5", "internal", "released", "H")
+	old := f.addRelease(t, f.project, "REL-3", "internal", "frozen", "F")
+	waiting := f.addRelease(t, f.project, "REL-4", "internal", "frozen", "G")
+	gap := f.addRelease(t, f.project, "REL-5", "internal", "frozen", "H")
 	f.exec(t, `UPDATE project_delivery SET adopted_at=$2 WHERE project_node_id=$1`, f.project, f.clock.Add(-time.Hour))
-	f.exec(t, `UPDATE project_releases SET released_at=$2 WHERE release_node_id=ANY($1::uuid[])`, []string{old.ID, waiting.ID}, f.clock.Add(-2*time.Hour))
-	f.exec(t, `UPDATE project_releases SET released_at=$2 WHERE release_node_id=$1`, gap.ID, f.clock.Add(time.Minute))
+	f.exec(t, `UPDATE project_releases SET state='released',released_at=$2 WHERE release_node_id=ANY($1::uuid[])`, []string{old.ID, waiting.ID}, f.clock.Add(-2*time.Hour))
+	f.exec(t, `UPDATE project_releases SET state='released',released_at=$2 WHERE release_node_id=$1`, gap.ID, f.clock.Add(time.Minute))
 	carried := f.item(t, "ticket", "TK-1", "done", old.ID, "V")
 	reopened := f.item(t, "ticket", "TK-2", "open", waiting.ID, "V")
 	later := f.item(t, "task", "TSK-2", "done", gap.ID, "V")
@@ -113,8 +113,8 @@ func TestInternalOnlyCaptureAndReservationGates(t *testing.T) {
 	for _, schemeVersion := range [][2]string{{"legacy", "1.2.3-rc.1"}, {"inspr-calendar-v1", "26.10.03"}, {"inspr-calver-3", "261003120000.0.0"}} {
 		t.Run(schemeVersion[0], func(t *testing.T) {
 			f := newStoreFixture(t)
-			internal := f.addRelease(t, f.project, "REL-3", "internal", "released", "F")
-			f.exec(t, `UPDATE project_releases SET released_at=$2 WHERE release_node_id=$1`, internal.ID, f.clock.Add(-time.Minute))
+			internal := f.addRelease(t, f.project, "REL-3", "internal", "frozen", "F")
+			f.exec(t, `UPDATE project_releases SET state='released',released_at=$2 WHERE release_node_id=$1`, internal.ID, f.clock.Add(-time.Minute))
 			id := f.item(t, "task", "TSK-1", "done", internal.ID, "V")
 			f.exec(t, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, id, benefitFields)
 			r := cutFixture(t, f, schemeVersion[0], schemeVersion[1])
@@ -275,5 +275,94 @@ func TestReleaseReadsKeysetsRollupAndOverviewNoRecovery(t *testing.T) {
 	overview, e := f.store.Overview(t.Context(), f.person, f.project, "")
 	if e != nil || len(overview.Active) != 2 || overview.Backlog["done"] != 0 {
 		t.Fatalf("overview=%+v %v", overview, e)
+	}
+}
+
+func TestCompletedRecoveryUsesLatestCompletionAfterAdoptionAndSurvivesCut(t *testing.T) {
+	f := newStoreFixture(t)
+	adopted := f.clock.Add(-time.Hour)
+	f.exec(t, `UPDATE project_delivery SET adopted_at=$2 WHERE project_node_id=$1`, f.project, adopted)
+	tail := f.item(t, "task", "TSK-1", "done", "", "")
+	backlog := f.item(t, "ticket", "TK-1", "done", "", "V")
+	early := f.item(t, "task", "TSK-2", "done", f.next, "V")
+	old := f.item(t, "ticket", "TK-2", "done", "", "")
+	for i, id := range []string{tail, backlog, early, old} {
+		at := adopted.Add(time.Duration(i+1) * time.Minute)
+		if id == old {
+			at = adopted.Add(-time.Minute)
+		}
+		f.exec(t, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after,at) VALUES($1,$2,$3,'node.updated','{"state":"open"}','{"state":"done"}',$4)`, f.tenant, f.person.ID, id, at)
+	}
+	page, e := f.store.Items(t.Context(), f.person, f.project, "", ReadOptions{CompletedUnplaced: true, Limit: 1})
+	if e != nil || page.Count != 2 || len(page.Items) != 1 || page.Items[0].ItemID != backlog || page.NextCursor == "" {
+		t.Fatalf("unplaced %+v %v", page, e)
+	}
+	next, e := f.store.Items(t.Context(), f.person, f.project, "", ReadOptions{CompletedUnplaced: true, Limit: 1, Cursor: page.NextCursor})
+	if e != nil || len(next.Items) != 1 || next.Items[0].ItemID != tail {
+		t.Fatalf("next %+v %v", next, e)
+	}
+	later, e := f.store.Items(t.Context(), f.person, f.project, f.release, ReadOptions{CompletedLater: true})
+	if e != nil || later.Count != 1 || later.Items[0].ItemID != early || later.Items[0].ReleaseID != f.next {
+		t.Fatalf("later %+v %v", later, e)
+	}
+	r := cutFixture(t, f, "legacy", "2.0")
+	if r.Recovery == nil || r.Recovery.Unplaced != 2 || r.Recovery.Later != 1 || r.Recovery.Incomplete {
+		t.Fatalf("omitted counts=%+v", r.Recovery)
+	}
+	again, e := f.store.Items(t.Context(), f.person, f.project, "", ReadOptions{CompletedUnplaced: true})
+	if e != nil || again.Count != 2 {
+		t.Fatal("cut lost skipped recovery evidence")
+	}
+}
+func TestPreviewPagesRetainOriginalMembershipAndFields(t *testing.T) {
+	f := newStoreFixture(t)
+	f.exec(t, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,state,fields) SELECT $1,$2,'TSK-'||i,'Task',$3,'done',$4::jsonb FROM generate_series(1,501) i`, f.tenant, f.kinds["task"], f.project, benefitFields)
+	f.exec(t, `INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,release_node_id,rank,source,placed_by) SELECT $1,$2,id,$3,'V'||lpad(split_part(key,'-',2),4,'0')||'V','person',$4 FROM nodes WHERE tenant_id=$1 AND project_id=$2 AND key LIKE 'TSK-%'`, f.tenant, f.project, f.release, f.person.ID)
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.Contains(q, "aeon_release_note_group(n.fields)") })
+	store := NewStore(pool).WithClock(func() time.Time { return f.clock })
+	type answer struct {
+		r SnapshotResult
+		e error
+	}
+	done := make(chan answer, 1)
+	go func() { r, e := store.NoteSnapshot(ctx, f.person, f.project, f.release); done <- answer{r, e} }()
+	barrier.Wait(t, ctx)
+	f.exec(t, `UPDATE nodes SET fields=jsonb_build_object('benefit_en',repeat('x',2200000)) WHERE tenant_id=$1 AND project_id=$2 AND key='TSK-501'`, f.tenant, f.project)
+	f.exec(t, `UPDATE ships_in SET release_node_id=$2,revision=revision+1 WHERE item_node_id=(SELECT id FROM nodes WHERE tenant_id=$1 AND key='TSK-501')`, f.tenant, f.next)
+	barrier.Release()
+	got := dbtest.Await(t, ctx, done)
+	if got.e != nil {
+		t.Fatal(got.e)
+	}
+	s := decodePreview(t, got.r)
+	if len(s.Tickets) != 501 || s.Tickets[500].Key != "TSK-501" || !strings.Contains(string(s.Tickets[500].Fields), "Keep the exact text.") {
+		t.Fatal("page crossed the snapshot")
+	}
+	seen := map[string]bool{}
+	for _, ticket := range s.Tickets {
+		if seen[ticket.ID] {
+			t.Fatal("duplicate page member")
+		}
+		seen[ticket.ID] = true
+	}
+}
+func TestSnapshotCancellationReturnsNoPartialBytes(t *testing.T) {
+	f := newStoreFixture(t)
+	f.item(t, "task", "TSK-1", "done", f.release, "V")
+	pool, barrier, parent := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.Contains(q, "note_preflight") })
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	type answer struct {
+		r SnapshotResult
+		e error
+	}
+	done := make(chan answer, 1)
+	go func() { r, e := NewStore(pool).NoteSnapshot(ctx, f.person, f.project, f.release); done <- answer{r, e} }()
+	barrier.Wait(t, parent)
+	cancel()
+	barrier.Release()
+	got := dbtest.Await(t, parent, done)
+	if !errors.Is(got.e, context.Canceled) || len(got.r.Raw) != 0 {
+		t.Fatalf("partial cancelled export %d %v", len(got.r.Raw), got.e)
 	}
 }

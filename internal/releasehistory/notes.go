@@ -114,8 +114,8 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 type ProjectSnapshotBinding struct{ TenantID, ProjectID, ReleaseID, VersionScheme, Version string }
 
 func ProjectNotesFromSnapshot(raw []byte, expected ProjectSnapshotBinding, source string) (*Notes, error) {
-	if len(raw) > 16<<20 {
-		return nil, fmt.Errorf("ticket snapshot exceeds 16 MiB")
+	if len(raw) > 12<<20 {
+		return nil, fmt.Errorf("ticket snapshot exceeds 12 MiB")
 	}
 	var s NoteSnapshot
 	d := json.NewDecoder(bytes.NewReader(raw))

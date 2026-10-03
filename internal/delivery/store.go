@@ -42,18 +42,19 @@ func (s *Store) WithClock(now func() time.Time) *Store {
 }
 
 type Release struct {
-	ProjectID     string     `json:"project_id"`
-	ID            string     `json:"release_id"`
-	Visibility    string     `json:"visibility"`
-	Sequence      int        `json:"sequence,omitempty"`
-	State         string     `json:"state"`
-	Rank          string     `json:"rank"`
-	Revision      int64      `json:"revision"`
-	EntryClosesAt *time.Time `json:"entry_closes_at"`
-	VersionScheme string     `json:"version_scheme,omitempty"`
-	Version       string     `json:"version,omitempty"`
-	CutAt         *time.Time `json:"cut_at,omitempty"`
-	ReleasedAt    *time.Time `json:"released_at,omitempty"`
+	Recovery      *RecoveryCounts `json:"recovery,omitempty"`
+	ProjectID     string          `json:"project_id"`
+	ID            string          `json:"release_id"`
+	Visibility    string          `json:"visibility"`
+	Sequence      int             `json:"sequence,omitempty"`
+	State         string          `json:"state"`
+	Rank          string          `json:"rank"`
+	Revision      int64           `json:"revision"`
+	EntryClosesAt *time.Time      `json:"entry_closes_at"`
+	VersionScheme string          `json:"version_scheme,omitempty"`
+	Version       string          `json:"version,omitempty"`
+	CutAt         *time.Time      `json:"cut_at,omitempty"`
+	ReleasedAt    *time.Time      `json:"released_at,omitempty"`
 }
 
 const releaseColumns = `project_node_id::text,release_node_id::text,visibility,coalesce(sequence,0),state,rank,revision,entry_closes_at,coalesce(version_scheme,''),coalesce(version,''),cut_at,released_at`
@@ -272,6 +273,12 @@ func (s *Store) Plan(ctx context.Context, p tenant.Principal, in PlanRequest) (R
 			r, err = scanRelease(w.tx.QueryRow(w.ctx, `UPDATE project_releases SET entry_closes_at=$4 WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3 RETURNING `+releaseColumns, p.TenantID, w.project, r.ID, in.EntryClosesAt))
 			if err != nil {
 				return err
+			}
+		}
+		// The creation event describes the final optional position/deadline.
+		for i := range w.changes {
+			if w.changes[i].Type == "release.planned" && w.changes[i].NodeID != nil && *w.changes[i].NodeID == r.ID {
+				w.changes[i].After = r
 			}
 		}
 		out = r

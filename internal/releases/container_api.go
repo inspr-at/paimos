@@ -95,16 +95,26 @@ func containerOptions(w http.ResponseWriter, r *http.Request) (delivery.ReadOpti
 	return out, true
 }
 func (m *module) containerMount(mux *http.ServeMux) {
-	for _, path := range []string{"/api/projects/{projectId}/delivery", "/api/projects/{projectId}/delivery/overview", "/api/projects/{projectId}/delivery/adoption-report", "/api/projects/{projectId}/delivery/verify", "/api/projects/{projectId}/releases", "/api/projects/{projectId}/releases/{releaseId}", "/api/projects/{projectId}/releases/{releaseId}/items", "/api/projects/{projectId}/backlog", "/api/delivery/adoptions"} {
-		mux.HandleFunc("GET "+path, m.containerRead)
-	}
+	mux.HandleFunc("GET /api/projects/{projectId}/delivery", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/delivery/overview", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/delivery/adoption-report", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/delivery/verify", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/items", m.containerRead)
+	mux.HandleFunc("GET /api/projects/{projectId}/backlog", m.containerRead)
+	mux.HandleFunc("GET /api/delivery/adoptions", m.containerRead)
+
 	mux.HandleFunc("PATCH /api/projects/{projectId}/delivery", m.containerDefaults)
 	mux.HandleFunc("POST /api/projects/{projectId}/delivery/adopt", m.containerAdopt)
 	mux.HandleFunc("POST /api/projects/{projectId}/releases", m.containerPlan)
 	mux.HandleFunc("PATCH /api/projects/{projectId}/releases/{releaseId}", m.containerEdit)
-	for _, suffix := range []string{"state", "cut", "publish", "close", "rank"} {
-		mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/"+suffix, m.containerAction)
-	}
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/state", m.containerAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/cut", m.containerAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/publish", m.containerAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/close", m.containerAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/rank", m.containerAction)
+
 	mux.HandleFunc("PUT /api/nodes/{nodeId}/ships-in", m.containerPlace)
 	mux.HandleFunc("POST /api/projects/{projectId}/ships-in/batch", m.containerBatch)
 }

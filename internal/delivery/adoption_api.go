@@ -67,9 +67,12 @@ func scanJob(row pgx.Row) (AdoptionJob, error) {
 	return j, err
 }
 func statusTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) (DeliveryStatus, error) {
+	return inventoryStatusTx(ctx, tx, p, project, false)
+}
+func inventoryStatusTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, includeInactive bool) (DeliveryStatus, error) {
 	out := DeliveryStatus{ProjectID: project, Mode: "journey"}
 	var defaults []byte
-	err := tx.QueryRow(ctx, `SELECT n.title,coalesce(d.revision,0),coalesce(d.next_sequence,0),coalesce(d.build_defaults,'{}'::jsonb),d.project_node_id IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='project' LEFT JOIN project_delivery d ON d.tenant_id=n.tenant_id AND d.project_node_id=n.id WHERE n.tenant_id=$1 AND n.id=$2 AND n.deleted_at IS NULL`, p.TenantID, project).Scan(&out.Title, &out.Revision, &out.NextSequence, &defaults, new(bool))
+	err := tx.QueryRow(ctx, `SELECT n.title,coalesce(d.revision,0),coalesce(d.next_sequence,0),coalesce(d.build_defaults,'{}'::jsonb),d.project_node_id IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND (k.slug='project' OR $3) LEFT JOIN project_delivery d ON d.tenant_id=n.tenant_id AND d.project_node_id=n.id WHERE n.tenant_id=$1 AND n.id=$2 AND (n.deleted_at IS NULL OR $3)`, p.TenantID, project, includeInactive).Scan(&out.Title, &out.Revision, &out.NextSequence, &defaults, new(bool))
 	if err != nil {
 		return out, err
 	}
@@ -123,15 +126,23 @@ func (s *Store) Adoptions(ctx context.Context, p tenant.Principal, opt ReadOptio
 	switch opt.State {
 	case "", "pending", "checking", "backing_up", "applying", "adopted", "refused", "retry_wait":
 	default:
-		return out, errors.New("invalid adoption state")
+		return out, invalidInput("invalid adoption state")
 	}
 	err = s.read(ctx, p, "", func(ctx context.Context, tx pgx.Tx) error {
-		// Check each project's actual releases.read grant in SQL before counts or
+		if err := authz.RequireTx(ctx, tx, p, "releases.read", authz.Scope{AnyProject: true}); err != nil {
+			return err
+		}
+		// Check each project's actual releases.read grant before counts or
 		// pagination; project visibility by itself is not release-read authority.
-		inventory := `FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='project' LEFT JOIN delivery_adoption_jobs j ON j.tenant_id=n.tenant_id AND j.project_node_id=n.id LEFT JOIN project_delivery d ON d.tenant_id=n.tenant_id AND d.project_node_id=n.id WHERE n.tenant_id=$1 AND n.deleted_at IS NULL`
-		// Permission-scoped visibility is established by RequireTx on each bounded
+		operator := authz.RequireTx(ctx, tx, p, "roles.manage", authz.Scope{}) == nil
+		canRead, e := authz.ReadPermissionCheckerTx(ctx, tx, p, "releases.read")
+		if e != nil {
+			return e
+		}
+		inventory := `FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id LEFT JOIN delivery_adoption_jobs j ON j.tenant_id=n.tenant_id AND j.project_node_id=n.id LEFT JOIN project_delivery d ON d.tenant_id=n.tenant_id AND d.project_node_id=n.id WHERE n.tenant_id=$1 AND (k.slug='project' OR ($2 AND j.project_node_id IS NOT NULL)) AND (n.deleted_at IS NULL OR $2)`
+		// Permission-scoped visibility is established from current grants for each bounded
 		// inventory id; denied ids never contribute to private aggregates.
-		rows, e := tx.Query(ctx, `SELECT n.id::text,coalesce(j.state,'pending'),d.project_node_id IS NOT NULL,j.project_node_id IS NOT NULL `+inventory+` ORDER BY n.id LIMIT 10001`, p.TenantID)
+		rows, e := tx.Query(ctx, `SELECT n.id::text,coalesce(j.state,'pending'),d.project_node_id IS NOT NULL,j.project_node_id IS NOT NULL `+inventory+` ORDER BY n.id LIMIT 10001`, p.TenantID, operator)
 		if e != nil {
 			return e
 		}
@@ -162,7 +173,7 @@ func (s *Store) Adoptions(ctx context.Context, p tenant.Principal, opt ReadOptio
 			if i == 10000 {
 				break
 			}
-			if e = authz.RequireTx(ctx, tx, p, "releases.read", authz.Scope{ProjectID: v.id}); e != nil {
+			if e = canRead(v.id); e != nil {
 				if errors.Is(e, authz.ErrForbidden) {
 					continue
 				}
@@ -183,16 +194,49 @@ func (s *Store) Adoptions(ctx context.Context, p tenant.Principal, opt ReadOptio
 			if state == "refused" || state == "retry_wait" {
 				attention = true
 			}
-			if v.id > c.ID && (opt.State == "" || state == opt.State) && len(ids) < limit+1 {
-				ids = append(ids, v.id)
+
+		}
+		ids = []string{}
+		rows, e = tx.Query(ctx, `SELECT n.id::text,coalesce(j.state,'pending'),d.project_node_id IS NOT NULL,j.project_node_id IS NOT NULL `+inventory+` AND n.id>$3::uuid AND ($4='' OR CASE WHEN d.project_node_id IS NOT NULL THEN 'adopted' ELSE coalesce(j.state,'pending') END=$4) ORDER BY n.id LIMIT 501`, p.TenantID, operator, c.ID, opt.State)
+		if e != nil {
+			return e
+		}
+		pageEntries := []entry{}
+		for rows.Next() {
+			var v entry
+			if e = rows.Scan(&v.id, &v.state, &v.adopted, &v.discovered); e != nil {
+				rows.Close()
+				return e
 			}
+			pageEntries = append(pageEntries, v)
 		}
-		if len(ids) > limit {
-			ids = ids[:limit]
-			out.NextCursor = encodeCursor(pageCursor{Scope: scope, ID: ids[limit-1]})
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return e
 		}
+		lastScanned := ""
+		for i, v := range pageEntries {
+			if i == 500 {
+				out.NextCursor = encodeCursor(pageCursor{Scope: scope, ID: lastScanned})
+				break
+			}
+			lastScanned = v.id
+			if e = canRead(v.id); e != nil {
+				if errors.Is(e, authz.ErrForbidden) {
+					continue
+				}
+				return e
+			}
+			if len(ids) == limit {
+				out.NextCursor = encodeCursor(pageCursor{Scope: scope, ID: ids[len(ids)-1]})
+				break
+			}
+			ids = append(ids, v.id)
+		}
+
 		for _, id := range ids {
-			v, e := statusTx(ctx, tx, p, id)
+			v, e := inventoryStatusTx(ctx, tx, p, id, operator)
 			if e != nil {
 				return e
 			}
@@ -217,7 +261,7 @@ func (s *Store) AdoptionReport(ctx context.Context, p tenant.Principal, project,
 	out := AdoptionReport{}
 	limit, err := pageLimit(limit, 200)
 	if err != nil || len(cursor) > 2048 {
-		return out, errors.New("invalid report page")
+		return out, invalidInput("invalid report page")
 	}
 	if reporter == nil {
 		return out, ErrAdoptionUnavailable

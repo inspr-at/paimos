@@ -85,7 +85,6 @@ paths:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
-      security: [{session: []}, {agentKey: []}]
       operationId: requestDeliveryAdoption
       description: Person with releases.deploy and journey.manage. Revision-fenced preview or retry of the automatic instance job; never applies caller mappings.
       security: [{session: []}, {agentKey: []}]
@@ -229,7 +228,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: rankProjectRelease
       description: Person-only rank change; published rank must preserve sequence order.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -250,7 +248,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: transitionProjectRelease
       description: Lifecycle only. Never authorizes spending; never directly targets released.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -271,7 +268,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: cutProjectRelease
       description: Frozen published release; scheme-tagged version, exact pair replay, sequence order and atomic rollover.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -292,7 +288,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: publishProjectRelease
       description: Exact product history reservation or non-product person attestation; cumulative cut-window capture capped at 12 MiB. Calls PublishTx in this transaction.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -313,7 +308,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: closeProjectRelease
       description: Internal close atomically rolls unfinished rows into nearest open internal successor and checks remaining completion and pending-total cap.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -333,7 +327,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: placeShipsIn
       description: Final-transaction authorization, project/row/release CAS, no agent promotion, deadline/freeze checks and pending-total cap.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementRequest'}}}}
@@ -352,7 +345,6 @@ paths:
       security: [{session: []}, {agentKey: []}]
       operationId: batchPlaceShipsIn
       description: All-or-nothing batch of at most 100. Captured project and destination release revision required; returns destination revision for the next Include page.
-      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementBatch'}}}}
@@ -17196,6 +17188,13 @@ components:
         rank: {type: string, maxLength: 32}
         revision: {type: integer, minimum: 1}
         sequence: {type: integer, minimum: 1}
+        recovery:
+          type: object
+          required: [completed_unplaced, completed_later, incomplete]
+          properties:
+            completed_unplaced: {type: integer, minimum: 0, maximum: 5000}
+            completed_later: {type: integer, minimum: 0, maximum: 5000}
+            incomplete: {type: boolean}
         entry_closes_at: {type: [string, 'null'], format: date-time}
         version_scheme: {type: string}
         version: {type: string}
@@ -17375,8 +17374,6 @@ components:
         reservation_basis: {type: string, enum: [history, attested]}
         reservation_ref: {type: string, maxLength: 512}
         released_by: {type: string, format: uuid}
-        omitted_completed: {type: integer, minimum: 0}
-        omitted_incomplete: {type: boolean}
     DeliveryReleasePage:
       type: object
       required: [items]

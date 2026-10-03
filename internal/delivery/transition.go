@@ -59,7 +59,8 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 		if in.Action == "cut" && old.CutAt != nil {
 			if old.State == "frozen" && old.VersionScheme == in.VersionScheme && old.Version == in.Version {
 				out = old
-				return nil
+				out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, old)
+				return err
 			}
 			return ErrTransition
 		}
@@ -191,6 +192,13 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 		if in.Action == "close" {
 			typ = "release.closed"
 		}
+		if in.Action == "freeze" || in.Action == "cut" || in.Action == "close" {
+			out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, out)
+			if err != nil {
+				return err
+			}
+		}
+
 		w.audit(typ, old.ID, old, out)
 		return nil
 	})
@@ -432,6 +440,11 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 		}
 		// PublishTx may re-enter the tree lock, already held exclusively from
 		// the start. It runs before our audit flush; no lock upgrade occurs.
+		out.Recovery, err = recoveryCounts(w.ctx, w.tx, p, out)
+		if err != nil {
+			return err
+		}
+
 		if err = proof.Settle(w.ctx, w.tx, out); err != nil {
 			return err
 		}

@@ -271,7 +271,7 @@ type ItemPage struct {
 	Incomplete bool       `json:"incomplete"`
 }
 
-const itemColumns = `e.item_node_id::text,e.project_node_id::text,coalesce(e.release_node_id::text,''),coalesce(e.rank,''),e.revision,e.expedite,e.due_on::text,n.updated_at,n.key,n.title,e.kind,e.state,e.created_at,` + estimateSQL + `,coalesce((SELECT a.id::text FROM nodes a JOIN node_kinds ak ON ak.tenant_id=a.tenant_id AND ak.id=a.kind_id WHERE a.tenant_id=n.tenant_id AND a.id=n.parent_id AND ak.slug='epic'),''),coalesce(e.release_rank,'')`
+const itemColumns = `e.item_node_id::text,e.project_node_id::text,coalesce(e.release_node_id::text,''),coalesce(e.rank,''),e.revision,e.expedite,e.due_on::text,n.updated_at,n.key,n.title,e.kind,e.state,e.created_at,` + estimateSQL + `,coalesce((WITH RECURSIVE ancestors AS (SELECT n.parent_id AS id,1 AS depth UNION ALL SELECT a.parent_id,ancestors.depth+1 FROM ancestors JOIN nodes a ON a.tenant_id=n.tenant_id AND a.id=ancestors.id WHERE ancestors.depth<64) SELECT a.id::text FROM ancestors JOIN nodes a ON a.tenant_id=n.tenant_id AND a.id=ancestors.id JOIN node_kinds ak ON ak.tenant_id=a.tenant_id AND ak.id=a.kind_id WHERE ak.slug='epic' AND a.deleted_at IS NULL ORDER BY ancestors.depth LIMIT 1),''),coalesce(e.release_rank,'')`
 
 func scanItem(row pgx.Row) (ItemView, error) {
 	var v ItemView
@@ -382,6 +382,9 @@ func recoveryItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, 
 	rank := ""
 	if release != "" {
 		if err = tx.QueryRow(ctx, `SELECT rank FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3`, p.TenantID, project, release).Scan(&rank); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return out, ErrNotFound
+			}
 			return out, err
 		}
 	}
@@ -422,4 +425,31 @@ func recoveryItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, 
 		out.NextCursor = encodeCursor(pageCursor{Scope: scope, ID: v.ItemID, At: *v.CompletedAt})
 	}
 	return out, nil
+}
+
+// RecoveryCounts describes omitted completed work; freeze/cut/close never
+// silently pull it into a release. A single bounded population feeds both
+// headings and event lookup happens only after the candidate admission cap.
+type RecoveryCounts struct {
+	Unplaced   int  `json:"completed_unplaced"`
+	Later      int  `json:"completed_later"`
+	Incomplete bool `json:"incomplete"`
+}
+
+func recoveryCounts(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Release) (*RecoveryCounts, error) {
+	out := &RecoveryCounts{}
+	err := tx.QueryRow(ctx, `WITH candidates AS MATERIALIZED (
+ SELECT e.*,n.updated_at FROM `+Effective+` e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.item_node_id
+ JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id
+ WHERE e.tenant_id=$1 AND e.project_node_id=$2 AND e.kind IN ('ticket','task')
+ AND e.state IN ('done','accepted','delivered') AND n.updated_at>=d.adopted_at
+ AND (e.release_node_id IS NULL OR e.release_state IN ('planned','building','frozen'))
+ ORDER BY n.updated_at DESC,e.item_node_id DESC LIMIT 5001), recovered AS MATERIALIZED (
+ SELECT e.* FROM (SELECT * FROM candidates ORDER BY updated_at DESC,item_node_id DESC LIMIT 5000) e
+ JOIN project_delivery d ON d.tenant_id=e.tenant_id AND d.project_node_id=e.project_node_id
+ JOIN LATERAL (SELECT at FROM events ev WHERE ev.tenant_id=e.tenant_id AND ev.node_id=e.item_node_id
+ AND ev.after->>'state' IN ('done','accepted','delivered') AND ev.before->>'state' IS DISTINCT FROM ev.after->>'state'
+ ORDER BY ev.id DESC LIMIT 1) episode ON episode.at>d.adopted_at)
+ SELECT count(*) FILTER(WHERE release_node_id IS NULL), count(*) FILTER(WHERE release_rank>$3 COLLATE "C" AND release_state IN ('planned','building','frozen')),(SELECT count(*) FROM candidates)>5000 FROM recovered`, p.TenantID, r.ProjectID, r.Rank).Scan(&out.Unplaced, &out.Later, &out.Incomplete)
+	return out, err
 }
