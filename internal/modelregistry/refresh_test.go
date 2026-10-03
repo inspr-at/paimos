@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -309,13 +311,26 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	sol := profileBySlug(profiles, "codex-6-1-sol-high")
 	until := time.Now().Add(time.Hour)
 	inRegistry(t, p, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='fixture' WHERE id=$1`, account); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='fixture',capacity_owner=$2 WHERE id=$1`, account, p.ID); err != nil {
+			return err
+		}
+		// Model-health expiry must not depend on the real weekday or hour.
+		schedule := capacity.DefaultSchedule("UTC")
+		for i := range schedule.Week {
+			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		schedule.Reserve = capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '2 days','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
+		_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='owner override',valid_until=$2 WHERE profile_id=$1`, sol.ID, until)
 		return err
 	})
 	if got := send(agent, o, 200); got.Recorded != 1 {
@@ -347,12 +362,19 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2 WHERE id=$1`, account, now.Add(25*time.Hour)); err != nil {
 			return err
 		}
+		health, err := agentaccounts.HarnessHealthAt(t.Context(), tx, now.Add(25*time.Hour))
+		if err != nil {
+			return err
+		}
+		if health["codex"].Dispatchable != 1 {
+			t.Fatalf("expiry fixture account unavailable: %+v", health["codex"])
+		}
 		out, err = resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now.Add(25*time.Hour))
 		if err != nil {
 			return err
 		}
 		if out.Profile == nil || out.Profile.ID != sol.ID {
-			t.Fatal("suppression/override did not expire")
+			t.Fatalf("suppression/override did not expire: %+v", out.Ladder)
 		}
 		return nil
 	})
