@@ -65,7 +65,12 @@ export function useKnowledge(projectId: Ref<string | null>, filters: Ref<Knowled
       if (request === generation && captured === identity.value) { loading.value = false; searching.value = false }
     }
   }
-  const load = () => read(false)
+  const load = () => {
+    // Explicit refreshes also invalidate a cached inactive tab. Its next
+    // activation must read again even when the filters have not changed.
+    loadedFor = ''; stop(); loading.value = false; searching.value = false
+    return read(false)
+  }
   const loadMore = () => read(true)
   const renderLimited = computed(() => !!cursor.value && items.value.length >= 2000)
   watch([identity, active], ([key, on], before) => {

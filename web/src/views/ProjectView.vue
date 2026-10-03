@@ -148,15 +148,20 @@ const scopeOwner = computed(() => `${session.identity?.tenant.id ?? ''}:${sessio
 const scopePicker = ref<InstanceType<typeof ReleaseScopePicker>>()
 const planningView = ref<InstanceType<typeof ReleasePlanning>>()
 function deliveryApplied() {
+  void knowledge.load()
   if (section.value === 'tickets') { void list.load(); if (outlineActive.value) void outline.reload() }
-  if (section.value === 'knowledge') { void knowledge.load(); void knowledgeTab.value?.reloadGraph() }
+  if (section.value === 'knowledge') void knowledgeTab.value?.reloadGraph()
 }
 function deliveryCommitted(change: DeliveryCommit) {
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
   const focusedRow = active?.closest('tr.ticket-row')
   const captured = deliveryLive.identity.value, capturedSection = section.value
   planningView.value?.committed(change)
-  if (change.kind === 'placement') list.committedDelivery(change.result)
+  if (change.kind === 'placement') {
+    list.committedDelivery(change.result)
+    // Linked Knowledge membership follows own moves and their compensation.
+    if (!knowledgeActive.value && projectScope.value.kind !== 'all') void knowledge.load()
+  }
   // Moving a keyed DOM row can blur its button. Restore only that surviving
   // control in the same view, and never replace focus taken by another control.
   if (change.kind === 'placement' && active && focusedRow) void nextTick(() => {

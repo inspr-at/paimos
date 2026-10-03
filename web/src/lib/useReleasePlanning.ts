@@ -185,13 +185,16 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
       const known = Object.values(work).flatMap(state => state.items).find(it => it.item_id === placement.item_id) ?? ownRows.get(placement.item_id)
       if (!known) continue
       if (ownRows.size >= 101 && !ownRows.has(placement.item_id)) ownRows.delete(ownRows.keys().next().value!)
-      ownRows.set(placement.item_id, { ...known, ...placement })
+      // Go omits empty placement fields. Their absence clears the old value,
+      // including when Undo returns a row to the unranked Backlog tail.
+      const updated = { ...known, ...placement, release_id: placement.release_id, rank: placement.rank }
+      ownRows.set(placement.item_id, updated)
       const source: PlanningSource = known.release_id ? `release:${known.release_id}` : known.rank ? 'backlog:ranked' : 'backlog:tail'
       const destination: PlanningSource = placement.release_id ? `release:${placement.release_id}` : placement.rank ? 'backlog:ranked' : 'backlog:tail'
       for (const state of Object.values(work)) state.items = state.items.filter(it => it.item_id !== placement.item_id)
       const target = work[destination]
       if (target?.loaded && rendered.value < WORK_RENDER_LIMIT) {
-        target.items.push({ ...known, ...placement })
+        target.items.push(updated)
         target.items.sort((a, b) => compare(destination === 'backlog:tail' ? a.created_at : a.rank ?? '', destination === 'backlog:tail' ? b.created_at : b.rank ?? '') || compare(a.item_id, b.item_id))
       }
       if (source !== destination) {

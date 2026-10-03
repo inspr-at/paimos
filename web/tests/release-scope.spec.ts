@@ -25,7 +25,7 @@ async function setup(page: Page, theme = 'light') {
       for (const source of sources) if (!source.closed) for (const fn of source.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) })
     } })
   })
-  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases', graphChanged: false, noteDeleted: false, noteArchived: false }
+  const calls: { path: string; query: URLSearchParams }[] = [], state = { reverse: false, mode: 'releases', graphChanged: false, noteDeleted: false, noteArchived: false, noteDetached: false }
   await page.route('**/api/projects/p-pharos/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname, query = url.searchParams
     calls.push({ path, query })
@@ -56,6 +56,7 @@ async function setup(page: Page, theme = 'light') {
     calls.push({ path: url.pathname, query })
     let items = [{ id: 'note-release', title: 'Notiz zur langfristigen Release-Planung', type: 'runbook', kind: 'runbook', status: 'active', state: 'active', slug: 'release-plan', key: 'RUN-1', excerpt: '', link_count: 1, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, created_at: '2026-10-03T12:00:00Z', updated_at: '2026-10-03T12:00:00Z', updated_by: null, imported: false }, { id: 'note-backlog', title: 'Backlog context', type: 'memory', kind: 'memory', status: 'proposed', state: 'proposed', slug: 'backlog-context', key: 'MEM-1', excerpt: '', link_count: 1, project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, created_at: '2026-10-03T12:00:00Z', updated_at: '2026-10-03T12:00:00Z', updated_by: null, imported: false }]
     const scope = query.get('ships_in')
+    if (scope === id && state.noteDetached) items = items.filter(it => it.id !== 'note-release')
     if (state.noteDeleted) items = items.filter(it => it.id !== 'note-release')
     if (state.noteArchived) items = items.map(it => it.id === 'note-release' ? { ...it, status: 'archived', state: 'archived' } : it)
     if (scope) items = items.filter(it => it.id === (scope === 'none' ? 'note-backlog' : 'note-release'))
@@ -136,6 +137,40 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     expect(h.errors).toEqual([])
   })
 }
+for (const change of ['foreign deletion applied', 'own placement committed'] as const) test(`${change} on Tickets refreshes inactive Knowledge with identical filters`, async ({ page }) => {
+  const h = await setup(page)
+  await page.goto(`/p/PHAROS/knowledge?ships_in=${id}`)
+  await expect(page.locator('.k-row')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /^All knowledge/ }).locator('.k-kind-count')).toHaveText('1')
+  const reads = () => h.calls.filter(call => call.path === '/api/knowledge').length
+  const initialReads = reads()
+  await page.getByRole('tab', { name: 'Tickets', exact: true }).click()
+  await expect(page).toHaveURL(url => url.pathname.endsWith('/tickets') && url.searchParams.get('ships_in') === id)
+  await expect(page.locator('.ticket-row').first()).toBeVisible()
+  if (change === 'foreign deletion applied') {
+    h.state.noteDeleted = true
+    await page.evaluate(() => { (window as unknown as { emitDelivery: (event: unknown) => void }).emitDelivery({ id: 81, type: 'knowledge.deleted', node_changes: [{ id: 'note-release', project_id: 'p-pharos', change: 'deleted' }] }) })
+    const apply = page.getByRole('button', { name: /1 change · Apply/ })
+    await expect(apply).toBeVisible(); await apply.click()
+    await expect(apply).toHaveCount(0)
+  } else {
+    h.state.noteDetached = true
+    await page.locator('.project-page').evaluate(el => {
+      const instance = (el as unknown as { __vueParentComponent: { provides: Record<symbol, unknown> } }).__vueParentComponent
+      const key = Object.getOwnPropertySymbols(instance.provides).find(key => key.description === 'delivery-actions')!
+      const actions = instance.provides[key] as { begin(): string; commit(identity: string, change: unknown): boolean }
+      if (!actions.commit(actions.begin(), { kind: 'placement', result: { items: [{ item_id: 'n-1', project_id: 'p-pharos', rank: 'V', revision: 2, expedite: false, due_on: null }], undo_event_id: 82 } })) throw new Error('Own placement was discarded')
+    })
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled()
+  }
+  expect(reads()).toBe(initialReads)
+  await page.getByRole('tab', { name: 'Knowledge', exact: true }).click()
+  await expect(page).toHaveURL(url => url.pathname.endsWith('/knowledge') && url.searchParams.get('ships_in') === id && !url.searchParams.has('type') && !url.searchParams.has('q'))
+  await expect(page.locator('.k-row')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^All knowledge/ }).locator('.k-kind-count')).toHaveText('0')
+  expect(reads()).toBe(initialReads + 1)
+  expect(h.errors).toEqual([])
+})
 test('foreign Knowledge archive, deletion and Undo remain held until Apply', async ({ page }) => {
   const h = await setup(page); await page.goto(`/p/PHAROS/knowledge?ships_in=${id}`)
   const rows = page.locator('.k-row'), count = page.locator('.k-count')

@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import { useReleasePlanning } from '../src/lib/useReleasePlanning'
 import { planningListItem, planningQuery, type PlanningAnswer, type PlanningContext, type PlanningOverview, type PlanningRead, type PlanningSource, type ItemPage, type PlanningRelease } from '../src/lib/deliveryPlanning'
 import { filtersFromQuery } from '../src/lib/ticketList'
+import type { PlacementReceipt } from '../src/lib/deliveryChanges'
 const context: PlanningContext = { project: 'project', person: 'person', scope: 'all', query: 'view=planning&hide_closed=true' }
 const counts = (shown = 1, hidden = 0) => ({ matched_count: shown + hidden, shown_count: shown, hidden_count: hidden, hidden_finished: hidden, hidden_exit: 0, incomplete: false })
 const release = (id: string, shown = 1): PlanningRelease => ({ project_id: 'project', release_id: id, title: id, state: 'planned', visibility: 'internal', rank: id, revision: 1, matches: counts(shown), rollup: { units: shown, completed: 0, open_hours: shown }, build_summary: { budget_outlook: 'unknown' } })
@@ -30,6 +31,42 @@ describe('release planning query', () => {
   })
 })
 describe('bounded release reads', () => {
+  it('serialized Backlog receipts clear release identity and Undo restores rollups without reads', async () => {
+    const h = harness(); h.state.reset(context); h.requests[0]!.resolve(overview(1)); await settle()
+    h.state.expand('0'); h.state.expand('backlog')
+    const original = { ...page(1, 'owned').items[0]!, release_id: '0', rank: 'V' }
+    h.requests[1]!.resolve({ ...page(1), items: [original] }); await settle()
+    const moved: PlacementReceipt = JSON.parse('{"items":[{"item_id":"owned0","project_id":"project","rank":"W","revision":2,"expedite":false,"due_on":null}],"undo_event_id":42}')
+    h.state.committed({ kind: 'placement', result: moved })
+    expect(h.state.work['backlog:ranked']?.items[0]?.release_id).toBeUndefined()
+    expect(h.state.overview.value?.backlog.ranked).toBe(1)
+    expect(h.state.overview.value?.active[0]?.rollup).toEqual({ units: 0, completed: 0, open_hours: 0 })
+    const restored: PlacementReceipt = JSON.parse('{"items":[{"item_id":"owned0","project_id":"project","release_id":"0","rank":"V","revision":3,"expedite":false,"due_on":null}],"undo_event_id":null}')
+    h.state.committed({ kind: 'placement', result: restored })
+    expect(h.state.work['release:0']?.items[0]).toMatchObject({ release_id: '0', rank: 'V', revision: 3 })
+    expect(h.state.work['backlog:ranked']?.items).toEqual([])
+    expect(h.state.overview.value?.active[0]?.rollup).toEqual({ units: 1, completed: 0, open_hours: 1 })
+    expect(h.state.overview.value?.backlog.ranked).toBe(0)
+    expect(h.state.overview.value?.backlog_matches?.ranked).toEqual(counts(0))
+    expect(h.requests).toHaveLength(2); h.state.dispose()
+  })
+  it('serialized unranked Undo clears the moved rank and restores the Backlog tail counts', async () => {
+    const h = harness(); h.state.reset(context)
+    const answer = overview(1); answer.active[0] = release('0', 0); answer.backlog.tail = 1; answer.backlog_matches!.tail = counts(1)
+    h.requests[0]!.resolve(answer); await settle(); h.state.expand('0'); h.state.expand('backlog')
+    const original = { ...page(1, 'tail').items[0]!, rank: undefined }
+    h.requests[1]!.resolve({ ...page(1), items: [original] }); await settle()
+    const moved: PlacementReceipt = JSON.parse('{"items":[{"item_id":"tail0","project_id":"project","release_id":"0","rank":"V","revision":2,"expedite":false,"due_on":null}],"undo_event_id":42}')
+    h.state.committed({ kind: 'placement', result: moved })
+    const restored: PlacementReceipt = JSON.parse('{"items":[{"item_id":"tail0","project_id":"project","revision":3,"expedite":false,"due_on":null}],"undo_event_id":null}')
+    h.state.committed({ kind: 'placement', result: restored })
+    expect(h.state.work['backlog:tail']?.items[0]?.rank).toBeUndefined()
+    expect(h.state.work['backlog:tail']?.items[0]?.release_id).toBeUndefined()
+    expect(h.state.overview.value?.backlog).toEqual({ ranked: 0, tail: 1 })
+    expect(h.state.overview.value?.backlog_matches?.tail).toEqual(counts(1))
+    expect(h.state.overview.value?.active[0]?.rollup.units).toBe(0)
+    expect(h.requests).toHaveLength(2); h.state.dispose()
+  })
   it('makes one overview request with no member fan-out, then lazily opens multiple rows', async () => {
     const h = harness(); h.state.reset(context); expect(h.requests.map(r => r.source)).toEqual(['overview'])
     h.requests[0]!.resolve(overview()); await settle(); expect(h.requests).toHaveLength(1)

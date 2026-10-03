@@ -12,6 +12,37 @@ function setup() {
   return { scope, project, owner, live, changes, apply }
 }
 describe('exact own receipts and held changes', () => {
+  it('reconciles a pending Undo after a newer move, preserving that move receipt and foreign events', async () => {
+    const h = setup(); h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(17) })
+    let finish!: (response: Response) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const undo = h.live.undoLast()
+    h.live.receive(event(21)); h.live.receive(event(22))
+    const newer = { ...move(23), items: [{ ...move().items[0]!, item_id: 'other-item' }] }
+    h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: newer })
+    expect(h.live.undo.value?.id).toBe(23); expect(h.live.pending.value).toBe(0)
+    finish(new Response(JSON.stringify({ id: 21, undo_of: 17, type: 'ships_in.changed', after: { members: move().items } }), { status: 201 }))
+    await undo
+    expect(h.changes).toHaveLength(3)
+    expect(h.changes[2]).toEqual({ kind: 'placement', result: { items: move().items, undo_event_id: null } })
+    expect(h.live.undo.value?.id).toBe(23); expect(h.live.undoBusy.value).toBe(false)
+    expect(h.live.pending.value).toBe(1); expect(h.live.error.value).toBe('')
+    h.live.receive(event(21)); expect(h.live.pending.value).toBe(1)
+    h.scope.stop()
+  })
+  it('reports a pending Undo refusal after a newer move without losing the newer receipt', async () => {
+    const h = setup(); h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(17) })
+    let finish!: (response: Response) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const undo = h.live.undoLast()
+    h.live.actions.commit(h.live.actions.begin(), { kind: 'placement', result: move(23) })
+    finish(new Response(JSON.stringify({ error: 'Placement changed again' }), { status: 409 }))
+    await undo
+    expect(h.live.error.value).toBe('Placement changed again')
+    expect(h.live.undo.value?.id).toBe(23); expect(h.changes).toHaveLength(2)
+    expect(h.live.undoBusy.value).toBe(false); expect(h.apply).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
   it('deduplicates an echo before or after commit, while same-actor other actions stay held', () => {
     const h = setup(), identity = h.live.actions.begin()
     h.live.receive(event(7)); h.live.receive(event(8)); expect(h.live.pending.value).toBe(0)

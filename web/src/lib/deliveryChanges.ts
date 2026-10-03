@@ -5,7 +5,7 @@ import { NODE_EVENTS } from './liveNodes'
 import type { PlanningItem, PlanningRelease } from './deliveryPlanning'
 
 export interface PlacementReceipt {
-  items: { item_id: string; project_id: string; release_id?: string; rank: string; revision: number; expedite: boolean; due_on: string | null }[]
+  items: { item_id: string; project_id: string; release_id?: string; rank?: string; revision: number; expedite: boolean; due_on: string | null }[]
   release_revision?: number; release_ranks?: Record<string, string>; release_revisions?: Record<string, number>; undo_event_id: number | null
 }
 export type DeliveryCommit = { kind: 'placement'; result: PlacementReceipt } | { kind: 'rank'; result: Pick<PlanningRelease, 'release_id' | 'project_id' | 'revision' | 'rank'> & Partial<PlanningRelease> & { undo_event_id: number | null } } | { kind: 'lifecycle' }
@@ -114,14 +114,17 @@ export function useDeliveryChanges(project: Ref<string | null>, owner: Ref<strin
     try {
       const response = await api(`/events/${receipt.id}/undo`, { method: 'POST', signal: AbortSignal.timeout(10000) })
       const body = await response.json().catch(() => ({}))
-      if (receipt.identity !== identity.value || undo.value?.id !== receipt.id) return
+      if (receipt.identity !== identity.value) return
       if (!response.ok) throw new APIError(response.status, body.error || 'This action changed again and could not be undone.', body)
       // The compensating response also has its exact event id. Discard only that echo.
       if (body.undo_of !== receipt.id || !Number.isSafeInteger(body.id)) throw new Error('Undo returned an invalid event receipt')
       remember(body.id)
       if (body.type === 'ships_in.changed' && Array.isArray(body.after?.members)) options.committed?.({ kind: 'placement', result: { items: body.after.members, release_revisions: body.after.release_revisions, release_ranks: body.after.release_ranks, undo_event_id: null } })
       else if (body.type === 'release.reranked' && body.after?.release_id) options.committed?.({ kind: 'rank', result: { ...body.after, undo_event_id: null } })
-      undo.value = null; version.value++
+      // A newer commit can replace the offered Undo while this request runs.
+      // Its receipt stays available; this compensation still reaches the view.
+      if (undo.value?.id === receipt.id) undo.value = null
+      version.value++
     } catch (e) { if (receipt.identity === identity.value) error.value = e instanceof Error ? e.message : 'Undo failed' }
     finally { if (receipt.identity === identity.value) { undoBusy.value = false; flushBuffered() } }
   }

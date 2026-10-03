@@ -7,9 +7,24 @@ import { releaseScope, type ReleaseScope } from '../src/lib/releaseScope'
 import { filtersFromQuery as ticketFilters, filtersFromView, filtersToQuery } from '../src/lib/ticketList'
 import type { SavedView } from '../src/lib/api'
 vi.mock('../src/lib/knowledge', async original => ({ ...await original<object>(), listKnowledge: vi.fn() }))
-afterEach(() => vi.clearAllMocks())
+afterEach(() => vi.resetAllMocks())
 const page = (id: string, cursor = ''): KnowledgePage => ({ items: [{ id, type: 'runbook', status: 'active', updated_at: '2026-10-03T12:00:00Z', title: id, slug: id, key: id } as KnowledgeItem], total: 250, next_cursor: cursor, truncated: false, counts: { type: { runbook: 250 }, status: { active: 250 } } })
 const flush = async () => { await nextTick(); await nextTick() }
+it('an inactive refresh invalidates identical-filter Knowledge without fetching until reactivation', async () => {
+  vi.mocked(listKnowledge).mockResolvedValueOnce(page('deleted-note')).mockResolvedValueOnce({ ...page('unused'), items: [], total: 0, counts: { type: {}, status: {} } })
+  const scoped = effectScope(), active = ref(true), filters = ref(filtersFromQuery({}))
+  const state = scoped.run(() => useKnowledge(ref('project'), filters, active, ref<ReleaseScope>({ kind: 'backlog' }), ref('person')))!
+  await flush(); expect(state.items.value.map(item => item.id)).toEqual(['deleted-note'])
+  active.value = false; await flush()
+  await state.load()
+  expect(listKnowledge).toHaveBeenCalledTimes(1)
+  expect(state.items.value.map(item => item.id)).toEqual(['deleted-note'])
+  active.value = true; await flush()
+  expect(listKnowledge).toHaveBeenCalledTimes(2)
+  expect(state.items.value).toEqual([]); expect(state.total.value).toBe(0)
+  expect(state.typeCounts.value).toEqual({}); expect(state.loaded.value).toBe(true)
+  scoped.stop()
+})
 it('restores Knowledge after a Tickets round trip with different per-tab filters', async () => {
   vi.mocked(listKnowledge).mockResolvedValue(page('retained-note'))
   const scoped = effectScope(), active = ref(true), filters = ref(filtersFromQuery({ type: 'runbook' }))
