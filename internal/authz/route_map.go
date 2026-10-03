@@ -24,6 +24,17 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// Theme handlers decide person ownership or workspace settings authority
+	// again inside the final fenced mutation transaction.
+	"GET /api/themes":                      "profile.read|profile.portal_read",
+	"GET /api/themes/{themeId}":            "profile.read|profile.portal_read",
+	"GET /api/me/theme":                    "profile.read|profile.portal_read",
+	"POST /api/themes":                     "profile.write|profile.portal_write|settings.manage",
+	"PATCH /api/themes/{themeId}":          "profile.write|profile.portal_write|settings.manage",
+	"DELETE /api/themes/{themeId}":         "profile.write|profile.portal_write|settings.manage",
+	"POST /api/themes/{themeId}/duplicate": "profile.write|profile.portal_write|settings.manage",
+	"PUT /api/me/theme":                    "profile.write|profile.portal_write",
+
 	"GET /api/model-preferences": "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
 	"PUT /api/model-preferences/levels/{level}":                                 "models.read|model_prefs.manage",

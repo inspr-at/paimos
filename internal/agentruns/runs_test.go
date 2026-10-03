@@ -506,6 +506,7 @@ func TestClaimRejectsStaleProbeAndReplacedGeneration(t *testing.T) {
 
 func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	f := setup(t)
+	baseline := f.count(t, f.person, `SELECT count(*) FROM events`)
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_work_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
 		 IF NEW.type='work_order.created' THEN RAISE EXCEPTION 'test event failure' USING ERRCODE='XX000'; END IF;
@@ -521,7 +522,11 @@ func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	}
 	f.call(t, f.person, "POST", "/api/work-orders", map[string]any{"title": "Must roll back", "criteria": []string{"not persisted"}}, 500, nil)
 	for _, table := range []string{"work_orders", "work_criteria", "nodes", "events", "node_key_counters"} {
-		if f.count(t, f.person, `SELECT count(*) FROM `+table) != 0 {
+		want := int64(0)
+		if table == "events" {
+			want = baseline
+		}
+		if f.count(t, f.person, `SELECT count(*) FROM `+table) != want {
 			t.Fatalf("%s survived failed event", table)
 		}
 	}

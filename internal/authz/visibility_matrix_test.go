@@ -22,6 +22,7 @@ type matrixWorld struct {
 	knowledgeA, knowledgeB string
 	org                    string
 	people                 map[string]tenant.Principal
+	bootstrapEvents        int
 }
 
 // The project data every matrix row reads: nodes, knowledge, relations,
@@ -38,6 +39,9 @@ func newMatrixWorld(t *testing.T) *matrixWorld {
 	w := &matrixWorld{d: dbtest.Open(t), people: map[string]tenant.Principal{}}
 	ctx := dbtest.Seed(t.Context())
 	if err := w.d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('p2-matrix','P2 matrix') RETURNING id::text`).Scan(&w.tid); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1 AND node_id IS NULL`, w.tid).Scan(&w.bootstrapEvents); err != nil {
 		t.Fatal(err)
 	}
 	err := db.InTenant(ctx, w.d.App, w.tid, func(tx pgx.Tx) error {
@@ -184,7 +188,7 @@ func TestProjectVisibilityMatrix(t *testing.T) {
 		relations, comments, attachments, journey, search int
 		workspaceEvents                                   int
 	}
-	all := want{everything, []string{"GA-1", "GB-1"}, 2, 2, 2, 2, 7, 2}
+	all := want{everything, []string{"GA-1", "GB-1"}, 2, 2, 2, 2, 7, 2 + w.bootstrapEvents}
 	projectA := want{onlyA, []string{"GA-1"}, 1, 1, 1, 1, 3, 0}
 	nothing := want{nil, nil, 0, 0, 0, 0, 0, 0}
 	guestA := projectA
