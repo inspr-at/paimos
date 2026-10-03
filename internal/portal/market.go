@@ -141,7 +141,13 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	}
 	var out any
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockPortalTenant(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
+			return err
+		}
+		if err := lockPortalTree(r.Context(), tx); err != nil {
 			return err
 		}
 		// The market row guard allows publication only after this person check.
@@ -149,7 +155,14 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 			return err
 		}
 		var applyErr error
-		out, applyErr = fn(r.Context(), tx, p)
+		ctx := r.Context()
+		if id := r.PathValue("productId"); id != "" {
+			if !uuidPattern.MatchString(id) {
+				return errClosed
+			}
+			ctx = context.WithValue(ctx, productContextKey{}, id)
+		}
+		out, applyErr = fn(ctx, tx, p)
 		return applyErr
 	})
 	if errors.Is(err, authz.ErrForbidden) {
@@ -159,6 +172,10 @@ func (m *Module) manage(w http.ResponseWriter, r *http.Request, fn func(context.
 	var se statusError
 	if errors.As(err, &se) {
 		fail(w, se.status, se.msg)
+		return
+	}
+	if errors.Is(err, errClosed) {
+		fail(w, http.StatusNotFound, "not found")
 		return
 	}
 	if errors.Is(err, errNoProduct) {
@@ -180,13 +197,18 @@ func (m *Module) readMarket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) createCompetitor(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		var in struct {
-			Name string `json:"name"`
-		}
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid competitor"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid competitor"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		name, ok := plainLabel(in.Name, 80)
 		if !ok {
 			return nil, statusError{status: http.StatusBadRequest, msg: "Name that competitor."}
@@ -207,16 +229,21 @@ func (m *Module) createCompetitor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) patchCompetitor(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name      *string `json:"name"`
+		Published *bool   `json:"published"`
+	}
+	if !m.decodeAdminInput(w, r, func() error {
+		if err := decodeEdit(r, &in); err != nil || (in.Name == nil && in.Published == nil) {
+			return statusError{status: http.StatusBadRequest, msg: "invalid competitor"}
+		}
+		return nil
+	}) {
+		return
+	}
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		id := r.PathValue("competitorId")
 		if !uuidPattern.MatchString(id) {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid competitor"}
-		}
-		var in struct {
-			Name      *string `json:"name"`
-			Published *bool   `json:"published"`
-		}
-		if err := decodeEdit(r, &in); err != nil || (in.Name == nil && in.Published == nil) {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid competitor"}
 		}
 		productID, err := portalProductID(ctx, tx)
@@ -262,13 +289,18 @@ func (m *Module) deleteCompetitor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) createAspect(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		var in struct {
-			Label string `json:"label"`
-		}
+	var in struct {
+		Label string `json:"label"`
+	}
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid aspect"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid aspect"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		label, ok := plainLabel(in.Label, 120)
 		if !ok {
 			return nil, statusError{status: http.StatusBadRequest, msg: "Name what you compare."}
@@ -306,15 +338,20 @@ func (m *Module) createAspect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) patchAspect(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Label string `json:"label"`
+	}
+	if !m.decodeAdminInput(w, r, func() error {
+		if err := decodeEdit(r, &in); err != nil {
+			return statusError{status: http.StatusBadRequest, msg: "invalid aspect"}
+		}
+		return nil
+	}) {
+		return
+	}
 	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		id := r.PathValue("aspectId")
 		if !uuidPattern.MatchString(id) {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid aspect"}
-		}
-		var in struct {
-			Label string `json:"label"`
-		}
-		if err := decodeEdit(r, &in); err != nil {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid aspect"}
 		}
 		label, ok := plainLabel(in.Label, 120)
@@ -349,11 +386,16 @@ func (m *Module) deleteAspect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) putCell(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
-		var in cellWrite
+	var in cellWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid cell"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid cell"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		productID, err := portalProductID(ctx, tx)
 		if err != nil {
 			return nil, err
@@ -363,10 +405,15 @@ func (m *Module) putCell(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) approveCell(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := emptyWishBody(r); err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid cell"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid cell"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		id := r.PathValue("cellId")
 		if !uuidPattern.MatchString(id) {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid cell"}
@@ -403,10 +450,15 @@ func (m *Module) approveCell(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) closeCorrection(w http.ResponseWriter, r *http.Request) {
-	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := emptyWishBody(r); err != nil {
-			return nil, statusError{status: http.StatusBadRequest, msg: "invalid correction"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid correction"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.manage(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (any, error) {
 		id := r.PathValue("correctionId")
 		if !uuidPattern.MatchString(id) {
 			return nil, statusError{status: http.StatusBadRequest, msg: "invalid correction"}
@@ -442,9 +494,15 @@ func (m *Module) submitCorrection(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "cross-site correction denied")
 		return
 	}
-	in, err := decodeCorrection(r)
-	if err != nil {
-		fail(w, http.StatusBadRequest, "invalid correction")
+	var in correctionIntake
+	if !decodePortalInput(w, r, func() error {
+		var err error
+		in, err = decodeCorrection(r)
+		if err != nil {
+			return statusError{http.StatusBadRequest, "invalid correction"}
+		}
+		return nil
+	}) {
 		return
 	}
 	competitor, aspect, statement, source, err := correctionText(in)
@@ -460,17 +518,17 @@ func (m *Module) submitCorrection(w http.ResponseWriter, r *http.Request) {
 	}
 	discarded := strings.TrimSpace(in.Website) != ""
 	err = db.InTenant(db.AllProjects(r.Context(), "public portal correction"), m.pool, tenantID, func(tx pgx.Tx) error {
-		open, err := portalOpen(r.Context(), tx)
-		if err != nil || !open {
-			if err != nil {
-				return err
-			}
-			return errClosed
-		}
-		productID, err := publishedProduct(r.Context(), tx)
+		product, err := publicWriteProduct(r.Context(), tx, r.PathValue("productSlug"))
 		if err != nil {
 			return err
 		}
+		if err := checkProductBinding(r, product); err != nil {
+			return err
+		}
+		if err := allowParticipation(product, false); err != nil {
+			return err
+		}
+		productID := product.ProductID
 		if discarded {
 			return nil
 		}
@@ -510,6 +568,11 @@ func (m *Module) submitCorrection(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errClosed) {
 		fail(w, http.StatusNotFound, "not found")
+		return
+	}
+	var se statusError
+	if errors.As(err, &se) {
+		fail(w, se.status, se.msg)
 		return
 	}
 	if err != nil {
@@ -919,18 +982,19 @@ func appendProductEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, prod
 }
 
 func portalProductID(ctx context.Context, tx pgx.Tx) (string, error) {
-	var id string
-	err := tx.QueryRow(ctx, `
-		SELECT n.id::text
-		FROM nodes n
-		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE k.slug = 'portal_product' AND n.parent_id IS NULL AND n.deleted_at IS NULL
-		ORDER BY (n.state = 'published') DESC, n.position, n.key
-		LIMIT 1`).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) || !uuidPattern.MatchString(id) {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if id := productForContext(ctx); id != "" {
+		p, err := loadProductSettings(ctx, tx, id, false)
+		if err != nil {
 			return "", err
 		}
+		return p.ProductID, nil
+	}
+	var id string
+	err := tx.QueryRow(ctx, `SELECT p.product_id::text FROM portal_products p
+        JOIN nodes n ON n.tenant_id=p.tenant_id AND n.id=p.product_id
+        JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+        WHERE p.is_default AND n.parent_id IS NULL AND n.deleted_at IS NULL AND k.slug='portal_product'`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errNoProduct
 	}
 	return id, err

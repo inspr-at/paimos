@@ -56,6 +56,9 @@ func portalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 // settings.manage. Everyone else, including an agent whose scopes name that
 // permission, leaves it unset so the database trigger refuses the write.
 func armPortalModeration(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid FOR NO KEY UPDATE`); err != nil {
+		return err
+	}
 	actor, err := principalForPortal(ctx, tx, p)
 	if err != nil {
 		if errors.Is(err, errPortalDenied) || errors.Is(err, pgx.ErrNoRows) {

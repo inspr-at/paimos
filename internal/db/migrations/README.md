@@ -211,3 +211,41 @@ transaction after 1100 releases its exclusive lock; 1102 builds the unique conte
 index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
+
+AEON-619 (1138) adds tenant-RLS product settings and per-product project links.
+It records the previously selected product as the explicit default, preserves
+published products in `legacy` participation, and binds existing browser ballots
+to their original product. New products are unpublished with participation
+`disabled`; registered activation is refused until B3+B8+B7's reviewed gate.
+Legacy portal/pacing tables and response fields remain. The old pace row mirrors
+into its bound product link; new writes keep the default's legacy adapter current.
+The tenant-loop backfill and mirror delete have an exact-byte policy exception
+for coordinator review. DSAR inventory is absent at this base; these new settings
+and link identifiers are tenant metadata, while ballot hashes remain pseudonymous
+personal data under the existing vote-table contract.
+
+AEON-619 fix round 2 keeps migration 1138 branch-only and updates its exact-byte
+exception for coordinator review. Nested and soft-deleted products are backfilled
+unpublished with participation disabled. Becoming an eligible root through move,
+restore or kind change registers settings idempotently; later moves and restores
+preserve the existing slug, default choice and participation settings.
+
+Catalog and participation responses expose `X-Portal-Binding` (`product UUID:settings
+revision`) without adding JSON fields. The public page echoes this binding on its
+policy read and every wish, correction and vote. Final writes compare it under the
+tenant/tree/product fences and return 409 without writing if the displayed product
+or settings revision changed. Older clients may omit it. Portal input decoders
+run before transaction locks and retain their byte limits, with a 10-second body
+read deadline; transactional authorization still runs under the tenant fence.
+
+Fix-round verification: regression-only commit `ccc537dd` keeps the production
+code at `090e1f87` and reproduces stale submissions, locked body reads, missing
+move registration and dormant backfill. The four new browser regressions also
+fail on that baseline. Fixed code at `9128e3b7` passes the remote portal suite,
+web build/lint and 1,332 web unit tests. The affected node/database/HTTP and strict
+reporter-contract suites pass at `4f31a2d2`; the migration guard and all 24 checker
+tests pass. The targeted local portal spec passes all 13 tests with no remaining
+owned processes. Remote browsers remain disabled pending OPS-247, so Linux
+Chromium and previous-binary runtime compatibility remain coordinator gates.
+These are local worker results, not merge, release, deployment or activation
+approval. No approved design decision was changed.

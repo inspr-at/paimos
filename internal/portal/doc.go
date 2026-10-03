@@ -2,6 +2,19 @@
 
 // Package portal is the public product portal (AEON-125).
 //
+// Products, their catalogs and wishes are tenant-configured nodes. An explicit
+// tenant default preserves old URLs; product slugs select independent catalogs,
+// comparison and project links. portal_products settings default unpublished
+// with participation disabled. Migration preserves existing published products
+// in legacy mode and binds browser ballots to their original product. Policy,
+// publication and default changes share tenant/tree fences with intake, voting
+// and node moves. Registered activation is gated off until B3+B8+B7 are ready;
+// its projection never counts browser ballots. A separate no-store participation
+// endpoint exposes unavailable controls and anonymous history, preserving the
+// exact existing catalog, roadmap and release JSON shapes for strict consumers.
+// Each response resolves its product once, so a concurrent default change
+// cannot pair one product's catalog with another product's project projection.
+//
 // A product, its catalog and its wishes are tenant-configured nodes. Anonymous
 // visitors receive no principal and no project visibility. The public handler
 // is a narrow service read: it returns a fixed column list for published
@@ -14,7 +27,7 @@
 // support it, and a smaller sample is absent rather than zero. The
 // tenant setting defaults off, and a closed portal answers the same 404 as an
 // unknown address. Published release notes are the frozen snapshot for the
-// one project linked on the pace screen, and only after that link turns
+// project linked to this product on the pace screen, and only after that link turns
 // release history on. A pace link alone publishes nothing. The public roadmap
 // is a separate whitelist (pill, benefit, target, status) for tickets a person
 // approved. It does not wait for release history. A shipped ticket already
