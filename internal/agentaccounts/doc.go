@@ -45,8 +45,11 @@
 // People read with account.read; only the linked owning person (account.manage)
 // or the connected paired host's bound runtime key (account.probe) may write.
 // An unpaired registering key, workspace admin or key creator is not implicitly
-// an owner. Writes recheck live permissions under tenant -> pairing -> account
-// locks and append account.residency_evidence_updated as the final operation.
+// an owner. Writes share the pairing -> tree -> tenant -> account lock order with
+// readiness and pairing lifecycle operations, rechecking live permissions inside
+// the final transaction. The tenant fence uses NO KEY UPDATE so FK share locks
+// remain compatible. Writes append account.residency_evidence_updated last;
+// advisory GETs avoid write fences.
 // Evidence names covered profiles, inference/storage/log country sets, explicit
 // local execution, verification/expiry times and an opaque proof reference;
 // optional retention days and training opt-out are retained as declarations.
@@ -188,4 +191,45 @@
 // window responses expose provisional=true when a window has no positive
 // measurement for its unit or a settled reservation lacked one. Historical
 // zero telemetry cannot prove measured zero, so it remains provisional.
+// AEON-478 package A adds GET /agent-accounts/readiness (keyset pagination),
+// POST /{accountId}/check (person owner + account.manage; revision-bound,
+// idempotent/coalesced, persisted 60-second gap), and PUT /{accountId}/sharing.
+// Migration 1135 stores opaque resource memberships, per-window facts, durable
+// wait/backoff/early-recovery markers and check receipts. Unknown measurements
+// carry usage_unknown_reserve_not_enforceable and never impose a start budget.
+// Check requests express early-recovery intent only: package B consumes it
+// atomically with automatic recovery, and rechecks launch/admission authority.
+// account_readiness_check_waits freezes the resource/window/wait IDs at the
+// original click; a pending retry cannot authorize a later wait. B compares
+// that snapshot with the canonical fact wait and early_recovery_used marker.
+// Package C opts into GET /agent-accounts?include_checks=true with account.read
+// and account.probe, and reports through the existing scoped probe's optional
+// readiness object (check ID, binding revision, bounded result, at most 32 facts).
+// Revocation, relinking, archival and generation changes invalidate pending
+// checks. A provider-confirmed no-reset 402 survives all ordinary check reports;
+// only evidenced successful recovery inference may replenish it.
+// Owners and enrolling daemons see account details; teammates (including admins)
+// require the owner's sharing setting. HTTP account responses and event/SSE
+// replay apply current server-side redaction. Required old shapes remain valid
+// (empty windows/history, null timestamps); projections mark details_redacted.
+// This package supplies no daemon launch, admission permits, or UI. Existing
+// ledgers remain unchanged; rollback disables new callers and retains history.
+//
+// Pending captures expire after five minutes from their original requested_at;
+// aliases never renew them. Polling and reports reject expired captures, new
+// keys invalidate them and request fresh work, and old keys return 409.
+// Restart reports advance daemon generation even when carrying an old check:
+// the heartbeat commits, completion/facts are rejected with 409 stale_binding
+// and X-Aeon-Write-Committed, and the daemon refreshes pending work.
+// Account-local capture errors never affect peers.
+// Owners/registered daemons retain their own check result/controls while
+// pooled quota detail remains withheld until all resource owners share it.
+// Legacy readings and key caps use the account's canonical local membership;
+// positive key caps with unknown total balance still carry UsageUnknownReason.
+// Availability-only advice uses historical state enums. Dashboard windows and
+// harness reset details use the same current accountprivacy policy. Dashboard
+// allowances consider at most 1024 windows, mark truncation explicitly, and
+// report partial when visible windows omit withheld or truncated windows. If a
+// successful mutation's response cannot be delivered safely, the error states
+// "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
 package agentaccounts

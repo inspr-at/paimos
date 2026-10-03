@@ -112,6 +112,11 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(owners(path, config), ['S1'])
 
+    def test_service_tiers_belong_to_agent_runtime(self):
+        config = load(HERE / 'slices.json')
+        for path in ('internal/servicetier/tier.go', 'internal/servicetier/tier_test.go'):
+            self.assertEqual(owners(path, config), ['S2'])
+
 
 class MergeTests(unittest.TestCase):
     def test_tool_theme_sampling_and_individual_override(self):

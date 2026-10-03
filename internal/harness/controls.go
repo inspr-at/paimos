@@ -145,7 +145,10 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	claimed := []offered{}
 	for _, old := range pending {
-		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN clock_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
+		if old.Kind == "tier" && s.Activity != "idle" {
+			continue
+		}
+		c, e := scanControl(tx.QueryRow(ctx, `UPDATE harness_controls SET state='claimed',claimed_at=clock_timestamp(),expires_at=CASE WHEN kind='tier' THEN least(expires_at,clock_timestamp()+interval '45 seconds') WHEN request_payload->>'stop_now'='true' OR request_payload->>'level'='pause_quickly' THEN clock_timestamp()+interval '45 seconds' ELSE expires_at END,expected_ownership=CASE WHEN request_payload->>'stop_now'='true' THEN $2::jsonb ELSE expected_ownership END WHERE id=$1 RETURNING `+controlColumns, old.ID, s.ProcessOwnership))
 		if e != nil {
 			return nil, e
 		}
@@ -282,6 +285,26 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		}
 		if c.ExpiresAt == nil || !c.ExpiresAt.After(now) {
 			return nil, workorders.Fail(409, "setting authorization expired")
+		}
+		if c.Kind == "tier" {
+			authorized, e := controlRequesterAuthorized(r, tx, p, s, c)
+			if e != nil {
+				return nil, e
+			}
+			if !authorized {
+				return nil, workorders.Fail(409, "tier authorization revoked")
+			}
+			if err = validateTier(ctx, tx, s, c.Value); err != nil {
+				return nil, err
+			}
+			old := s
+			s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET service_tier=$2,service_tier_revision=service_tier_revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, c.Value))
+			if err != nil {
+				return nil, err
+			}
+			if err = record(ctx, tx, p, s, "tier_changed", old, s); err != nil {
+				return nil, err
+			}
 		}
 		if c.Kind == "rename" {
 			old := s

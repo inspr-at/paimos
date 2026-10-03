@@ -3,6 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { setupUsage, NOW } from './usage-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { watchErrors } from './work-fixtures'
+import { usageDashboard } from './usage-data'
 
 const START = new Date(NOW - 24 * 3600_000).toISOString()
 const AT = new Date(NOW - 3600_000).toISOString()
@@ -149,6 +150,32 @@ test('empty complete window is quiet and offers no invented next step', async ({
   await expect(page.getByText('No completion or delivery recorded in this window.')).toBeVisible()
   await expect(page.getByText('No person action in the sources that answered.')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Recommended next step' })).toHaveCount(0)
+})
+
+for (const truncated of [false, true]) test(`partial account budgets show permitted windows and omissions (truncated=${truncated})`, async ({ page }) => {
+  const errors = watchErrors(page), data = await setup(page)
+  const dashboard = usageDashboard('reported')
+  Object.assign(dashboard.allowance, { state: 'partial', truncated, windows: [{
+    account_id: uuid, label: 'Permitted budget', harness: 'codex', account_state: 'ready',
+    window_id: '45400000-0000-4000-8000-000000000002', unit: 'requests', allowance: 100,
+    used: null, reserved: 2, pace_model: 'steady', burst_ratio: '1', starts_at: START, ends_at: AT,
+    provisional: true, pace_cap: 50, headroom: null, hard_remaining: null,
+  }], accounts: [{ account_id: '45400000-0000-4000-8000-000000000003', label: 'Private account', harness: 'codex', account_state: 'ready' }] })
+  await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
+  await page.goto('/briefing')
+  const costs = page.getByRole('region', { name: 'What it cost' })
+  await expect(costs.getByRole('heading', { name: 'Accounts now' })).toBeVisible()
+  await expect(costs.getByRole('link', { name: 'Permitted budget' })).toHaveAttribute('href', '/agents')
+  await expect(costs.getByText('Usage not reported · provisional', { exact: true })).toBeVisible()
+  await expect(costs.locator('time')).toHaveAttribute('datetime', AT)
+  await expect(costs).toContainText('Account budget coverage is partial. Only permitted windows are shown; other windows may be withheld.')
+  const truncation = costs.getByText('Account budget windows are truncated. Additional windows are omitted; account coverage may be incomplete.', { exact: true })
+  if (truncated) await expect(truncation).toBeVisible()
+  else await expect(truncation).toHaveCount(0)
+  await expect(costs).not.toContainText('No account budget windows recorded.')
+  await expect(costs).not.toContainText('Private account')
+  await expect.poll(() => data.writes.length).toBe(1)
+  expect(errors).toEqual([])
 })
 
 test('mobile dark briefing fits, has no colored edge accents and keeps all sections usable', async ({ page }) => {
