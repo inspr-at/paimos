@@ -50,7 +50,9 @@ Unknown code extensions can be added to `code_extensions`/`code_names`;
 new packages need explicit ownership. Ambiguous ownership and unassigned
 code fail with exit 1, malformed inputs with exit 2. The map covers deploy
 Compose, root/web embeds, web configuration and end-to-end tests as well as
-the original nine areas. Assigned context files also require manifest entries;
+the original nine areas. Shared harness/model observations in
+`internal/modelreport/` belong to S2 (agent runtime), alongside their harness,
+daemon and model-registry callers. Assigned context files also require manifest entries;
 use `read`, `generated`, `vendored` or `not-code` with a nonnegative line count.
 
 ```bash
