@@ -3,11 +3,64 @@
 package agentsetup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/agentsecurity"
 )
+
+func TestPairingRetryPolicyAndSafeFirstCause(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		cause string
+		retry bool
+	}{
+		{&APIError{Code: "unavailable", StatusCode: 503}, "http_503", true},
+		{&APIError{Code: "rate_limited", StatusCode: 429}, "http_429", true},
+		{&APIError{StatusCode: 408}, "http_408", true},
+		{&APIError{Code: "unreachable"}, "unreachable", true},
+		{context.DeadlineExceeded, "timeout", true},
+		{&APIError{Code: "forbidden", StatusCode: 403}, "http_403", false},
+		{&APIError{Code: "pairing_revoked", StatusCode: 410}, "http_410", false},
+		{&APIError{Code: "unavailable", StatusCode: 422}, "http_422", false},
+		{&APIError{Code: "conflict", StatusCode: 409}, "http_409", false},
+		{ErrBusy, "store_busy", true},
+		{agentsecurity.ErrDenied, "keychain_denied", false},
+		{ErrCollision, "state_collision", false},
+		{errors.New("fixture private response"), "unclassified", false},
+	} {
+		err := &pairingSyncError{err: tc.err, detail: PairingServerUnavailable}
+		if PairingFailureCause(err) != tc.cause || PairingRetryable(err) != tc.retry {
+			t.Errorf("wrong safe cause or retry policy for %s", tc.cause)
+		}
+	}
+}
+
+func TestStatusKeepsAccountHealthSeparateFromExpiredVerification(t *testing.T) {
+	e, api, local, opts, _ := engineFixture(t)
+	approveFixture(t, e, api, opts)
+	s, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.View.Enrollments[0].VerificationState = "failed"
+	s.View.Enrollments[0].VerificationError = "verification expired"
+	if err := e.save(s, false); err != nil {
+		t.Fatal(err)
+	}
+	local.states[""] = LocalStatus{DaemonID: s.View.DaemonID, State: "drained", Ready: true,
+		AccountStatuses: map[string]HarnessDetail{testAccount: {State: "ready"}},
+		HarnessDetails:  map[string]HarnessDetail{"claude": {State: "ready"}},
+		HarnessStatuses: map[string]string{"claude": "ready"},
+	}
+	p, err := e.Status(t.Context())
+	if err != nil || p.AccountStatuses[testAccount].State != "ready" || p.HarnessDetails["claude"].State != "ready" || p.Stage == "login_required" {
+		t.Fatal("verification failure changed account sign-in state", err)
+	}
+}
 
 func TestSyncFencesAcceptsTombstoneAndChangedLiveLabels(t *testing.T) {
 	e, api, local, opts, _ := engineFixture(t)

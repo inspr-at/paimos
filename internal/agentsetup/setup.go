@@ -123,6 +123,7 @@ type Progress struct {
 	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
 	HarnessDetails        map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses       map[string]string        `json:"harness_statuses,omitempty"`
+	AccountStatuses       map[string]HarnessDetail `json:"account_statuses,omitempty"`
 	VersionStatus         string                   `json:"version_status,omitempty"`
 	AccountingState       string                   `json:"accounting_state,omitempty"`
 	Schema                string                   `json:"schema"`
@@ -156,7 +157,7 @@ type LocalStatus struct {
 
 // SavedOptions exposes only noncredential choices to resume the local command.
 func (e *Engine) SavedOptions() (Options, error) {
-	s, err := e.load()
+	s, err := e.loadSnapshot(true)
 	if err != nil {
 		return Options{}, err
 	}

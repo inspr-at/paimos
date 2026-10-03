@@ -18,6 +18,42 @@ import (
 func vaultedName(name string) bool          { return name == snapshotName || name == "runtime.key" }
 func (s *Store) vaultID(name string) string { return Hash([]byte(s.path)) + "/" + name }
 
+// Read-only clients never compete for the migration lock. Keychain returns a
+// complete item; legacy snapshots are read through an owned, read-only inode.
+// An ACL denial never falls back to disk, and conflicting legacy state still
+// fails closed. Migration/cleanup belongs exclusively to a writable opener.
+func (s *Store) readVaultSnapshot(name string, max int64) ([]byte, error) {
+	raw, vaultErr := s.vault.Read(s.vaultID(name))
+	if vaultErr != nil && !errors.Is(vaultErr, os.ErrNotExist) {
+		return nil, vaultErr
+	}
+	if int64(len(raw)) > max {
+		return nil, ErrUnsafePath
+	}
+	f, err := s.openFile(name, unix.O_RDONLY, name == snapshotName)
+	if errors.Is(err, os.ErrNotExist) {
+		return raw, vaultErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	legacy, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil || int64(len(legacy)) > max {
+		return nil, ErrUnsafePath
+	}
+	if vaultErr == nil {
+		if !bytes.Equal(raw, legacy) && !allZero(legacy) {
+			return nil, ErrCollision
+		}
+		return raw, nil
+	}
+	if !validVaultContent(name, legacy) {
+		return nil, ErrUnsafePath
+	}
+	return legacy, nil
+}
+
 // readVault runs under Store.mu. A failed ACL check never falls back to disk.
 // Migration is restart-safe: persist and verify the Keychain item first, then
 // overwrite and unlink only the exact private inode whose bytes were imported.

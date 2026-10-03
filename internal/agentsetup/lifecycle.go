@@ -361,6 +361,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		if err == nil && local.DaemonID == v.DaemonID {
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
+			p.AccountStatuses = local.AccountStatuses
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
 			// A Claude hold keeps its own stage: repin is a Claude-only flow.

@@ -25,17 +25,19 @@ var (
 	ErrUnsafePath = errors.New("setup path is not a private, owned physical path")
 	ErrCollision  = errors.New("setup file already exists; refusing to overwrite unrelated state")
 	ErrBusy       = errors.New("another setup operation owns this computer state")
+	ErrReadOnly   = errors.New("pairing store is read-only")
 )
 
 // Store anchors every access at an opened directory descriptor. No pathname
 // lookup follows symlinks, including ancestors; no regular file may be linked.
 // The advisory lock serializes cooperating helpers, not hostile same-UID code.
 type Store struct {
-	vault agentsecurity.Vault
-	mu    sync.Mutex
-	root  *os.File
-	lock  *os.File
-	path  string
+	readOnly bool
+	vault    agentsecurity.Vault
+	mu       sync.Mutex
+	root     *os.File
+	lock     *os.File
+	path     string
 }
 
 func validName(name string) bool {
@@ -48,6 +50,16 @@ func OpenStore(path string, create bool) (*Store, error) {
 	s, err := openDirectory(path, create, true)
 	if err == nil {
 		s.vault = agentsecurity.DefaultVault()
+	}
+	return s, err
+}
+
+// OpenStoreReadOnly preserves path/owner/ACL checks, but never creates locks,
+// migrates legacy capabilities, or changes an existing Keychain item.
+func OpenStoreReadOnly(path string) (*Store, error) {
+	s, err := OpenStore(path, false)
+	if err == nil {
+		s.readOnly = true
 	}
 	return s, err
 }
@@ -152,6 +164,9 @@ func (s *Store) lockNamed(name string) (*os.File, error) {
 // The injectable syscall keeps EINTR and replacement races testable without a
 // process-global hook. Lock files are permanent: never unlink or rename them.
 func (s *Store) lockNamedWithFlock(name string, flock func(int, int) error) (_ *os.File, resultErr error) {
+	if s.readOnly {
+		return nil, ErrReadOnly
+	}
 	defer func() {
 		if resultErr != nil {
 			resultErr = fmt.Errorf("acquire state lock %s: %w", filepath.Join(s.path, name), resultErr)
@@ -296,6 +311,7 @@ func (s *Store) readSnapshot() ([]byte, error) { return s.readFile(snapshotName,
 func (s *Store) Read(name string, max int64) ([]byte, error) { return s.readFile(name, max, false) }
 
 func (s *Store) readFile(name string, max int64, snapshotRead bool) (_ []byte, resultErr error) {
+	snapshotRead = snapshotRead || s.readOnly && name == snapshotName
 	defer func() {
 		if resultErr != nil {
 			if s.vault == nil && runtime.GOOS == "darwin" && vaultedName(name) && errors.Is(resultErr, os.ErrNotExist) {
@@ -307,6 +323,9 @@ func (s *Store) readFile(name string, max int64, snapshotRead bool) (_ []byte, r
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.vault != nil && vaultedName(name) {
+		if s.readOnly || snapshotRead {
+			return s.readVaultSnapshot(name, max)
+		}
 		return s.readVault(name, max)
 	}
 	f, err := s.openFile(name, unix.O_RDONLY, snapshotRead)
@@ -327,6 +346,9 @@ func (s *Store) readFile(name string, max int64, snapshotRead bool) (_ []byte, r
 // Write commits a complete file durably. createOnly uses the platform's atomic
 // exclusive rename; interruption never leaves a second hardlink to an identity.
 func (s *Store) Write(name string, raw []byte, createOnly bool) (resultErr error) {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	defer func() {
 		if resultErr != nil {
 			resultErr = fmt.Errorf("write private state %s: %w", filepath.Join(s.path, name), resultErr)
@@ -386,6 +408,9 @@ func (s *Store) Write(name string, raw []byte, createOnly bool) (resultErr error
 // RemoveExact is only for pairing-owned artifacts with recorded content
 // identity. Vendor homes, workspaces, foreign state and unknown files never fit.
 func (s *Store) RemoveExact(name, digest string) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.vault != nil && vaultedName(name) {

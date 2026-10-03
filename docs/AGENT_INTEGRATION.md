@@ -727,6 +727,62 @@ not supply that hardware or ACL qualification.
 
 ### Diagnosing paired daemon startup (AEON-667)
 
+Round-3 account probe trace: `pairedAdapters` takes Claude's executable and
+profile from the approved runtime account's `path` and `home`; Node and SDK
+come from the runtime's `node_path` and `claude_sdk_path`. `resolved` validates
+their physical installations before `probeResolved` invokes that exact Claude
+executable with `auth status --json`. This probe does not invoke the SDK bridge
+or wrap a native CLI in Node; an npm launcher's shebang finds the pinned Node
+directory first on PATH. The working directory is inherited from `serve`.
+PATH consists only of the pinned Node directory, the Claude executable's
+directory, `/usr/bin` and `/bin`; LANG/LC_ALL are `C`. For the default
+`$HOME/.claude` profile, HOME is the user's home and CLAUDE_CONFIG_DIR is absent.
+A separate profile gets HOME and CLAUDE_CONFIG_DIR set to that approved profile.
+USER, LOGNAME and TMPDIR now retain the parent login session's values, when
+present. Credential, provider and loader variables remain excluded.
+
+The installed native Claude artifact selects its Keychain account using USER
+with OS-user lookup as fallback. The previous environment removed USER even
+though OPS's successful minimal-shell check included it. Synthetic probes now
+prove that this context survives both probe and SDK launch; those tests fail
+against the prior implementation. This establishes the environment difference,
+not a confirmed cause on mbp2607: no real pairing, vendor login or Keychain was
+accessed by the worker. `authMethod: "claude.ai"` was already accepted. Bounded,
+duplicate-free JSON must confirm loggedIn and the approved email; a different
+email or API-key login still fails closed, now with its own value-free detail.
+An expired verification remains separate from account sign-in readiness.
+
+Plain `status` now includes ready harnesses and every approved account, including
+distinct states for siblings of one harness. It uses `OpenStoreReadOnly` for
+both snapshot and saved-option/version reads: no migration, lock creation,
+Keychain write or plaintext erasure. ACL denial, conflicting legacy state,
+symlinks, hardlinks and ownership checks remain enforced. Previously even
+`readSnapshot` entered `readVault` and acquired `keychain-migration.lock`, so a
+status client could make the serving daemon's read/save fail with `ErrBusy`.
+
+During a running daemon's lifecycle sync, network errors, HTTP 408/429/5xx and
+local lock contention are retryable. Each tick reserves a separate five-second
+budget for reconciliation and still performs account health probes after such
+a failure; it does not fetch queued work, claim work or launch a run. Fresh
+dispatch resumes only after successful reconciliation and runtime validation.
+Cold-start lifecycle preflight still fails closed. Each distinct failure phase
+and safe cause logs once per daemon lifetime as `pairing_sync_failed`, with
+`first_cause` (for example `http_503`, `store_busy`, `keychain_denied`) and
+`retryable`. Raw server bodies and error text are never logged.
+
+For OPS's next signed-candidate run: keep the existing service drained/stopped,
+run one candidate on the approved root, and call `status` during the run.
+Expect explicit `harness codex ready` / `harness cursor ready` lines when their
+probes succeed, plus an account line for every enrollment. Claude should become
+ready if the removed login environment caused the failure; otherwise its line
+distinguishes signed-out, different-identity and API-key results without showing
+identities or credentials. A retained verification failure may still head the
+output and does not negate ready account lines. Status reads must not introduce
+migration-lock failures. Any remaining pairing failure carries the new safe
+first cause; transient failures keep probing while dispatch remains blocked,
+and recovery clears that block on the next successful tick. Real hardened-runtime
+and Keychain behavior still requires this OPS run.
+
 `aeon-agentd serve --setup-root /physical/approved/root` logs startup failures
 with `slog`, including the logical file or operation and its path. It never logs
 file contents. Missing files retain `errors.Is(err, os.ErrNotExist)` semantics;

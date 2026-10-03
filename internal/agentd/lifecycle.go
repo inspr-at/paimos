@@ -92,7 +92,7 @@ func (s *Supervisor) readFence(account string) (bool, error) {
 
 func (s *Supervisor) dispatchAllowed(account string) bool {
 	s.mu.Lock()
-	closing := s.closing
+	closing := s.closing || s.pairingFailure != ""
 	s.mu.Unlock()
 	if closing {
 		return false
@@ -105,6 +105,14 @@ func (s *Supervisor) dispatchAllowed(account string) bool {
 		fenced, err = s.readFence(account)
 	}
 	return err == nil && !fenced
+}
+
+func (s *Supervisor) probeAllowed() bool {
+	s.mu.Lock()
+	closing := s.closing
+	s.mu.Unlock()
+	fenced, err := s.readFence("")
+	return !closing && err == nil && !fenced
 }
 
 func (s *Supervisor) Drain(req DrainRequest) (LifecycleStatus, error) {

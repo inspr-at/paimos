@@ -450,19 +450,36 @@ func (s *Supervisor) Status() []Record {
 // harness session, so they cannot race a separate principal-wide inbox poll.
 // A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
+	return s.pollOnce(ctx, true)
+}
+
+// ProbeOnce refreshes account health without queue reads, claims or launches.
+// It is safe during a retryable lifecycle outage; durable fences still apply.
+func (s *Supervisor) ProbeOnce(ctx context.Context) error {
+	return s.pollOnce(ctx, false)
+}
+
+func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 	diagnostic := ""
 	defer func() { s.reportPollDiagnostic(diagnostic) }()
-	// Recover no-launch claims before a fresh probe changes account generation.
-	recoveryErr := s.recoverUnlaunched(ctx)
-	s.settlePending(ctx)
-	if !s.dispatchAllowed("") {
+	var recoveryErr error
+	var runs []Run
+	if dispatch {
+		// Recover no-launch claims before a fresh probe changes generation.
+		recoveryErr = s.recoverUnlaunched(ctx)
+		s.settlePending(ctx)
+	}
+	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
 		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
-	runs, err := s.api.Queued(ctx)
-	if err != nil {
-		diagnostic = "queue_unavailable"
-		return err
+	if dispatch {
+		var err error
+		runs, err = s.api.Queued(ctx)
+		if err != nil {
+			diagnostic = "queue_unavailable"
+			return err
+		}
 	}
 	failures := []error{recoveryErr}
 	s.mu.Lock()

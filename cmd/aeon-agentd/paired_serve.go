@@ -259,32 +259,41 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 // Repeated failures remain visible in status without flooding service stderr.
 type pairedDiagnostics struct{ seen map[string]bool }
 
-func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string) {
+func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string, err error) {
 	detail = agentsetup.SafePairingDetail(detail)
 	s.SetPairingFailure(detail)
-	if detail == "" || d.seen[detail] {
+	cause := agentsetup.PairingFailureCause(err)
+	key := detail + ":" + cause
+	if detail == "" || d.seen[key] {
 		return
 	}
 	if d.seen == nil {
 		d.seen = map[string]bool{}
 	}
-	d.seen[detail] = true
-	slog.Warn("agentd pairing diagnostic", "reason", agentsetup.PairingSyncFailed, "cause", detail)
+	d.seen[key] = true
+	slog.Warn("agentd pairing diagnostic", "reason", agentsetup.PairingSyncFailed, "cause", detail, "first_cause", cause, "retryable", agentsetup.PairingRetryable(err))
 }
 
 func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics) (agentsetup.RuntimeConfig, error) {
-	if err := syncPairing(ctx, root, c.Origin, s); err != nil {
-		diagnostics.report(s, agentsetup.PairingFailureDetail(err))
+	// Reserve time for account health checks even if lifecycle HTTP times out.
+	op, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err := syncPairing(op, root, c.Origin, s)
+	cancel()
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingFailureDetail(err), err)
+		if agentsetup.PairingRetryable(err) {
+			return c, errors.Join(err, s.ProbeOnce(ctx))
+		}
 		return c, err
 	}
 	next, _, err := agentsetup.ReadRuntime(root)
 	if err != nil {
-		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable)
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
 		return c, err
 	}
 	current, err := pollPairedRuntime(ctx, s, root, c, next)
 	if err != nil {
-		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable)
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
 	}
 	return current, err
 }

@@ -200,11 +200,19 @@ func TestPairedSyncTombstoneProbesAndFailureDiagnostics(t *testing.T) {
 		t.Fatal("next reconciliation did not publish the actual blocker", projected)
 	}
 	setMode("offline")
-	for range 2 {
+	for i := range 2 {
 		if err := tick(); err == nil {
 			t.Fatal("offline sync unexpectedly succeeded")
 		}
 		assertFailure(agentsetup.PairingServerUnavailable)
+		for _, adapter := range adapters {
+			if adapter.(*syncProbeAdapter).probes != i+2 {
+				t.Fatal("retryable server failure suppressed account health probe")
+			}
+		}
+		if err := s.StartRun(t.Context(), agentd.Run{}); !errors.Is(err, agentd.ErrDraining) {
+			t.Fatal("pairing outage did not fence direct dispatch", err)
+		}
 	}
 	setMode("healthy")
 	changed := c
@@ -231,6 +239,9 @@ func TestPairedSyncTombstoneProbesAndFailureDiagnostics(t *testing.T) {
 	}
 	if strings.Count(logs.String(), "level=WARN") != 3 || strings.Count(logs.String(), "reason=pairing_sync_failed") != 3 || strings.Contains(logs.String(), "fixture private") || strings.Contains(logs.String(), root) {
 		t.Fatal("warning was not bounded, deduplicated and value-free")
+	}
+	if !strings.Contains(logs.String(), "first_cause=http_503 retryable=true") || !strings.Contains(logs.String(), "first_cause=account_unapproved retryable=false") {
+		t.Fatal("first safe cause or retry policy missing")
 	}
 }
 
