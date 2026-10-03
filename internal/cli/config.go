@@ -19,14 +19,16 @@ type fileConfig struct {
 }
 
 type fileInstance struct {
-	URL    string `yaml:"url"`
-	APIKey string `yaml:"api_key,omitempty"`
+	AgentdStateRoot string `yaml:"agentd_state_root,omitempty"`
+	URL             string `yaml:"url"`
+	APIKey          string `yaml:"api_key,omitempty"`
 }
 
 type resolvedInstance struct {
-	Name   string
-	URL    string
-	APIKey string
+	AgentdStateRoot string
+	Name            string
+	URL             string
+	APIKey          string
 }
 
 func (rt *runtime) configFile() (string, error) {
@@ -191,7 +193,7 @@ func (rt *runtime) resolve() (resolvedInstance, error) {
 	if err != nil {
 		return resolvedInstance{}, err
 	}
-	return resolvedInstance{Name: name, URL: inst.URL, APIKey: key}, nil
+	return resolvedInstance{Name: name, URL: inst.URL, APIKey: key, AgentdStateRoot: inst.AgentdStateRoot}, nil
 }
 
 func pickInstance(cfg fileConfig, flag string) (string, fileInstance, error) {

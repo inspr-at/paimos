@@ -97,6 +97,7 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
   accountsForbidden?: boolean
@@ -123,12 +124,18 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
+    if (path === '/api/agents/plan' && method === 'GET') {
+      const stored = options.workingPreference?.()
+      const running: Record<string, number> = {}
+      for (const session of data.sessions) if (!session.stopped_at && session.phase !== 'stopped') running[session.harness] = (running[session.harness] ?? 0) + 1
+      return route.fulfill({ json: { total: stored?.total ?? stored?.cap ?? 15, limits: stored?.limits ?? {}, principal_id: data.me, running, running_total: Object.values(running).reduce((n, x) => n + x, 0), source: stored?.total !== undefined ? 'plan' : stored ? 'legacy' : 'default', updated_at: null } })
+    }
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
     if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
@@ -223,6 +230,19 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       all = newest ? all.filter(m => !after || m.sent_event_id < after).reverse() : all.filter(m => m.sent_event_id > after)
       const page = all.slice(0, limit)
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
+    }
+    if (path === '/api/decision-desk/projection') {
+      const now = Date.now()
+      const items = [
+        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/agents?needs=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
+        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/agents?needs=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
+      ].sort((a, b) => {
+        const bucket = (i: typeof a) => i.held ? i.kind === 'approval' ? 0 : 1 : 2
+        return bucket(a) - bucket(b) || Date.parse(String(a.held && a.kind === 'approval' ? a.expires_at : a.created_at)) - Date.parse(String(b.held && b.kind === 'approval' ? b.expires_at : b.created_at)) || a.id.localeCompare(b.id)
+      })
+      const offset = Number(q.get('cursor') ?? 0), limit = Number(q.get('limit') ?? 100)
+      const hasMore = offset + limit < items.length
+      return route.fulfill({ json: { items: items.slice(offset, offset + limit), counts: { open: items.length, held: items.filter(i => i.held).length, chores: 0 }, has_more: hasMore, ...(hasMore ? { next_cursor: String(offset + limit) } : {}), as_of: new Date(now).toISOString() } })
     }
     if (path === '/api/approvals') return route.fulfill({ json: data.approvals })
     const decision = /^\/api\/approvals\/([^/]+)\/(decision|revoke)$/.exec(path)

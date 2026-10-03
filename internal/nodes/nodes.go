@@ -267,7 +267,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			fields, err = canonicalEstimate(ctx, tx, p, "", fields, nil)
 		}
 		if err == nil {
-			fields, err = canonicalRouteFields(p, kind.Slug, fields, nil)
+			fields, err = canonicalTicketRouteFields(ctx, tx, p, kind.Slug, parentID, fields, nil)
 		}
 		if err == nil {
 			fields, err = suggestEstimateRoute(ctx, tx, p, kind.Slug, in.Title, parentID, fields, nil)
@@ -473,7 +473,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 				fields, err = canonicalEstimate(ctx, tx, p, id, fields, current.Fields)
 			}
 			if err == nil {
-				fields, err = canonicalRouteFields(p, kind.Slug, fields, current.Fields)
+				fields, err = canonicalTicketRouteFields(ctx, tx, p, kind.Slug, current.ParentID, fields, current.Fields)
 			}
 			if err == nil {
 				title := current.Title

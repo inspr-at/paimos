@@ -9,8 +9,10 @@ import AppIcon from '../AppIcon.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
+import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import StatusAutopilot from './StatusAutopilot.vue'
 import AgentActivityCard from './AgentActivityCard.vue'
+import QuotaWarningCard from './QuotaWarningCard.vue'
 
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
@@ -65,6 +67,7 @@ const saveLost = () => lost.save()
         <div><dt>Your role</dt><dd>{{ role }}</dd></div>
       </dl>
     </SettingsCard>
+    <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />
     <SettingsCard v-if="estimate.state.ready" title="Estimates" icon="clock" anchor="estimates">
@@ -86,6 +89,7 @@ const saveLost = () => lost.save()
     <!-- Both timing controls stay above feedback that grows downward. -->
     <p v-if="estimate.state.error" id="eta-error" class="timing-error" role="alert">Estimates: {{ estimate.state.error }}</p>
     <p v-if="lost.state.error" id="lost-error" class="timing-error" role="alert">Silent sessions: {{ lost.state.error }}</p>
+    <QuotaWarningCard v-if="can('settings.manage')" />
     <AgentActivityCard v-if="can('settings.manage')" />
     <StatusAutopilot v-if="can('settings.manage')" />
     <SettingsCard v-if="can('members.read')" title="People and agents" icon="users" anchor="members">
