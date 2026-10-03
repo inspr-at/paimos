@@ -1941,6 +1941,10 @@ the node's current project and commits metadata and audit events together.
 Attachment writes use a shared tenant lock: access edits are fenced while
 other resource writers can finish their tenant foreign-key checks. Retained
 principal import/backfill paths take tree, tenant, then alias locks in that order.
+Pairing, readiness and residency mutations acquire pairing, tree, then the tenant
+access fence before account/resource rows, retaining final-transaction permission
+checks. Their tenant fence uses `FOR NO KEY UPDATE`; access-only writers may omit
+pairing/tree but must never acquire them after tenant. Event counters remain last.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty

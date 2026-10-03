@@ -16,16 +16,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock acquires the tenant authorization fence, then the pairing fence, before
-// tree/work-order/run/account locks. Every paired dispatch, claim, probe,
-// settlement and lifecycle mutation uses this order, including callers that
-// re-enter Lock after already acquiring both fences. NO KEY UPDATE permits
-// tenant FK checks while serializing role changes with transaction-local auth.
+// Lock acquires pairing, then tree, then the tenant authorization fence before
+// work-order/run/account rows. Shipped node, queue and knowledge writers already
+// take pairing before tree; project/recurrence/operator writers take tree before
+// tenant. Access-only writers take tenant without later entering pairing/tree.
+// Re-entry is safe only after this complete prefix is held. NO KEY UPDATE keeps
+// tenant FK checks compatible while final-transaction RequireTx sees live grants.
 func Lock(ctx context.Context, tx pgx.Tx) error {
-	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`)
 	return err
 }
 

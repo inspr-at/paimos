@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestProjectFencesPermitTenantForeignKeys(t *testing.T) {
+func TestProjectFencesPreserveTenantModes(t *testing.T) {
 	for name, lock := range map[string]func(context.Context, pgx.Tx, string) error{
 		"mutation": LockProjectMutation,
 		"write":    LockProjectWrite,
@@ -23,9 +23,9 @@ func TestProjectFencesPermitTenantForeignKeys(t *testing.T) {
 				if err := lock(ctx, tx, f.actor.TenantID); err != nil {
 					return err
 				}
-				// Both helpers must permit the key-share lock taken by a tenant
-				// foreign key, while fencing every authority writer. SHARE is not
-				// sufficient: it can later need an upgrade under the tree lock.
+				// Preserve the shipped modes: membership mutations use UPDATE;
+				// resource writes use SHARE, compatible with FK checks and other
+				// readers but excluding every authority writer.
 				for _, mode := range []string{"KEY SHARE", "NO KEY UPDATE", "SHARE", "UPDATE"} {
 					probe, err := f.d.Admin.Begin(ctx)
 					if err != nil {
@@ -33,9 +33,9 @@ func TestProjectFencesPermitTenantForeignKeys(t *testing.T) {
 					}
 					_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR `+mode+` NOWAIT`, f.actor.TenantID)
 					_ = probe.Rollback(ctx)
-					if mode == "KEY SHARE" {
+					if name == "write" && (mode == "KEY SHARE" || mode == "SHARE") {
 						if err != nil {
-							t.Errorf("tenant foreign-key check blocked by project fence: %v", err)
+							t.Errorf("compatible tenant %s check blocked by project fence: %v", mode, err)
 						}
 					} else {
 						var pe *pgconn.PgError

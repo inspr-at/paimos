@@ -18,9 +18,9 @@ import (
 )
 
 // Exercise both project authorization helpers through their HTTP writers while
-// a real pairing caller owns tenant/pairing but has not yet acquired the tree.
-// A tenant waiter must leave the tree free, or the resumed caller deadlocks.
-func TestProjectWritesSerializeWithPairingBeforeTree(t *testing.T) {
+// a real pairing caller owns pairing/tree but has not yet acquired tenant.
+// A tree waiter must leave tenant free, or the resumed caller deadlocks.
+func TestProjectWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 	for _, pairedWrite := range []string{"queue", "terminal-node"} {
 		for _, projectWrite := range []string{"membership", "attachment"} {
 			t.Run(pairedWrite+"/"+projectWrite, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestProjectWritesSerializeWithPairingBeforeTree(t *testing.T) {
  VALUES($1,$2,repeat('ab',32),'fixture.txt','text/plain',7,$3) RETURNING id::text`, f.person.TenantID, ticket, f.person.ID).Scan(&attachment)
 				})
 				pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
-					return strings.Contains(query, "pg_advisory_xact_lock") && strings.Contains(query, "aeon-pairing:")
+					return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))")
 				})
 				ctx, cancel := context.WithCancel(ctx)
 				defer cancel()
@@ -73,20 +73,16 @@ func TestProjectWritesSerializeWithPairingBeforeTree(t *testing.T) {
 					method, path, body = "PATCH", "/api/attachments/"+attachment, `{"caption":"updated"}`
 				}
 				projectResponse, projectDone := start(method, path, body)
-				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "transactionid" {
-					t.Fatalf("project writer did not wait on the pairing caller's tenant fence: lock=%q", lock)
+				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "advisory" {
+					t.Fatalf("project writer did not wait on the pairing caller's tree fence: lock=%q", lock)
 				}
 				probe, err := f.d.Admin.Begin(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer probe.Rollback(context.Background())
-				var treeFree bool
-				if err := probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, f.person.TenantID).Scan(&treeFree); err != nil {
-					t.Fatal(err)
-				}
-				if !treeFree {
-					t.Fatal("project writer waiting for tenant already holds tree lock")
+				if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.person.TenantID); err != nil {
+					t.Fatalf("tree waiter must leave tenant free: %v", err)
 				}
 				if err := probe.Rollback(ctx); err != nil {
 					t.Fatal(err)

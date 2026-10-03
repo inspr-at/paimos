@@ -175,7 +175,7 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 	return tx, pid
 }
 
-func TestResidencyEvidenceTenantLockPrecedesPairingLock(t *testing.T) {
+func TestResidencyEvidencePairingAndTreePrecedeTenantLock(t *testing.T) {
 	reset(t)
 	owner, host, profile, token, mod := groupFixture(t)
 	a := groupAccount(t, mod, owner, host, token, "lock-order", "daemon", "Order", "test")
@@ -191,14 +191,20 @@ func TestResidencyEvidenceTenantLockPrecedesPairingLock(t *testing.T) {
 	if w != nil || !strings.Contains(query, "FROM tenants") {
 		t.Fatalf("write did not stop at tenant fence: response=%v query=%s", w, query)
 	}
-	// A writer waiting on the tenant must not already own pairing. A raw
-	// advisory try-lock isolates this assertion from the production helper.
+	// A tenant waiter must already hold both preceding fences. Raw try-locks
+	// isolate this assertion from the production helper.
 	var free bool
 	if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID).Scan(&free); err != nil {
 		t.Fatal(err)
 	}
-	if !free {
-		t.Fatal("tenant waiter already holds pairing lock")
+	if free {
+		t.Fatal("tenant waiter has not acquired pairing first")
+	}
+	if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, owner.TenantID).Scan(&free); err != nil {
+		t.Fatal(err)
+	}
+	if free {
+		t.Fatal("tenant waiter has not acquired tree first")
 	}
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -230,16 +236,16 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			blocker, blockerPID := evidenceBlocker(t, ctx)
-			// Hold only pairing: the first writer must own tenant while queued
-			// here, and the next writer must queue behind that tenant owner.
-			if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID); err != nil {
+			// Hold tree: evidence must own pairing while queued here, and the
+			// next writer must queue behind that pairing owner without tenant.
+			if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, owner.TenantID); err != nil {
 				t.Fatal(err)
 			}
 			now := time.Now()
 			evidence := startEvidenceRequest(t, ctx, mod, owner, "", "PUT", a.ID, evidenceAt(profile, now))
 			w, query := evidenceBlockedOrDone(t, ctx, blockerPID, evidence)
-			if w != nil || !strings.Contains(query, "aeon-pairing:") {
-				t.Fatalf("evidence did not reach pairing barrier: response=%v query=%s", w, query)
+			if w != nil || !strings.Contains(query, "pg_advisory_xact_lock") || strings.Contains(query, "aeon-pairing:") {
+				t.Fatalf("evidence did not reach tree barrier: response=%v query=%s", w, query)
 			}
 			var evidencePID int
 			if err := adminPool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE datname=current_database()
@@ -270,8 +276,8 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 				err := adminPool.QueryRow(ctx, `SELECT query,pg_blocking_pids(pid) FROM pg_stat_activity
  WHERE datname=current_database() AND pid<>$1 AND ($1=ANY(pg_blocking_pids(pid)) OR $2=ANY(pg_blocking_pids(pid)))`, evidencePID, blockerPID).Scan(&query, &blockers)
 				if err == nil {
-					if !strings.Contains(query, "FROM tenants") || !slices.Contains(blockers, evidencePID) {
-						t.Fatalf("%s bypassed tenant owner: query=%s blockers=%v evidence_pid=%d", operation, query, blockers, evidencePID)
+					if !strings.Contains(query, "aeon-pairing:") || !slices.Contains(blockers, evidencePID) {
+						t.Fatalf("%s bypassed pairing owner: query=%s blockers=%v evidence_pid=%d", operation, query, blockers, evidencePID)
 					}
 					break
 				}
