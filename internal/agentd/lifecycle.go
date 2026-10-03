@@ -224,7 +224,8 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 			}
 		}
 		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
-		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason})
+		v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.probeReasonDetails[a.ID])
+		perHarness[a.Harness] = append(perHarness[a.Harness], harnessAccountState{id: a.ID, status: status, reason: reason, detail: v.AccountStatuses[a.ID].ReasonDetail})
 	}
 	assignHarnessReports(&v, perHarness)
 	// One ready harness keeps the computer ready. Blocks stay per account and
@@ -300,7 +301,7 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 // harnessAccountState is one account's contribution to its harness report.
 // The type stays at package scope because a function cannot declare a named type.
 type harnessAccountState struct {
-	id, status, reason string
+	id, status, reason, detail string
 }
 
 // assignHarnessReports keeps a harness ready when any account can work, and
@@ -312,37 +313,19 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 	priority := map[string]int{"draining": 1, "checking": 2, "login_required": 3, "blocked": 4, "ready": 5}
 	for harness, accounts := range perHarness {
 		ids := make([]string, 0, len(accounts))
-		ready := false
 		var pending []agentsetup.AccountAttention
 		for _, account := range accounts {
 			ids = append(ids, account.id)
-			if account.status == "ready" {
-				ready = true
+			if account.status != "blocked" && account.status != "login_required" {
+				continue
 			}
+			reason := account.reason
+			if reason == "" {
+				reason = account.status
+			}
+			pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason, ReasonDetail: account.detail})
 		}
-		if ready {
-			for _, account := range accounts {
-				if account.status != "blocked" && account.status != "login_required" {
-					continue
-				}
-				reason := account.reason
-				if reason == "" {
-					reason = account.status
-				}
-				pending = append(pending, agentsetup.AccountAttention{AccountID: account.id, Reason: reason})
-			}
-			if attention := agentsetup.PartialAttention(harness, ids, "ready", pending); len(attention.Accounts) > 0 {
-				if detail, ok := agentsetup.HarnessReport(harness, "ready", ""); ok {
-					detail.Attention = attention.Accounts
-					detail.AttentionCount = attention.Count
-					detail.AttentionTruncated = attention.Truncated
-					v.HarnessStatuses[harness] = "ready"
-					v.HarnessDetails[harness] = detail
-					continue
-				}
-			}
-		}
-		bestStatus, bestReason := "", ""
+		bestStatus, bestReason, bestDetail := "", "", ""
 		bestPriority := 0
 		for _, account := range accounts {
 			rank := priority[account.status]
@@ -350,6 +333,7 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 				bestPriority = rank
 				bestStatus = account.status
 				bestReason = account.reason
+				bestDetail = account.detail
 			}
 		}
 		if bestStatus == "" {
@@ -357,6 +341,9 @@ func assignHarnessReports(v *LifecycleStatus, perHarness map[string][]harnessAcc
 		}
 		v.HarnessStatuses[harness] = bestStatus
 		if detail, ok := agentsetup.HarnessReport(harness, bestStatus, bestReason); ok {
+			detail = detail.WithProbeDetail(harness, bestDetail)
+			attention := agentsetup.PartialAttention(harness, ids, bestStatus, pending)
+			detail.Attention, detail.AttentionCount, detail.AttentionTruncated = attention.Accounts, attention.Count, attention.Truncated
 			v.HarnessDetails[harness] = detail
 		} else {
 			delete(v.HarnessDetails, harness)
@@ -493,6 +480,7 @@ func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
 	delete(s.loginRequired, accountID)
 	delete(s.signInUnverified, accountID)
 	delete(s.probeFailureReasons, accountID)
+	delete(s.probeReasonDetails, accountID)
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
