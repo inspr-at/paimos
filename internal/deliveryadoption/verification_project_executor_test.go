@@ -25,13 +25,16 @@ func projectOnlyVerificationFixture(t *testing.T, route string) (*fixture, tenan
 		root = f.node(t, "epic", "EP-1", f.project, "open")
 		f.sql(t, `UPDATE nodes SET parent_id=$2 WHERE id=$1`, member, root)
 	}
-	// Adopt the destination through its own workspace authority first. The
-	// source job must actually be adopted by the project-only executor.
+	// Discovery records authority for both jobs. Give this project executor a
+	// temporary destination binding for its adoption, then revoke that binding
+	// before adopting the source and checking any move/Undo evidence.
+	executor := projectExecutor(t, f)
+	f.sql(t, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='owner'`, executor.TenantID, executor.ID, destination)
 	j := f.prepare(t, destination)
 	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
 		t.Fatal(err)
 	}
-	executor := projectExecutor(t, f)
+	f.sql(t, `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='project' AND scope_id=$2`, executor.ID, destination)
 	reader := adoptionProjectReader(t, f)
 	j = f.prepare(t, f.project)
 	if _, err := f.s.apply(t.Context(), f.a, j); err != nil {
