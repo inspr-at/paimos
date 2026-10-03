@@ -12,6 +12,10 @@ images use explicit release versions; there is no `latest` tag.
 
 ## Pause and wind down agents
 
+The Agents header groups Start agent and Attach a running session under New.
+More agent actions includes Pause all, Resume all, Wind down and Agent keys.
+Closing a dialog opened from either menu returns focus to its header trigger.
+
 The Agents page offers Pause and Stop now per controllable session, plus quiet
 Pause all and Resume all actions. Pause asks for a level and an optional handover
 note; Pause all supports per-agent overrides and Keep running. A lead can include

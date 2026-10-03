@@ -44,7 +44,13 @@ const windDown = ref<InstanceType<typeof WindDownPanel>>()
 const sessionList = ref<InstanceType<typeof SessionList>>()
 const headerMenu = ref<{ type: 'add' | 'more'; anchor: HTMLElement } | null>(null)
 function headerAction(type: 'add' | 'more', event: Event) { headerMenu.value = headerMenu.value?.type === type ? null : { type, anchor: event.currentTarget as HTMLElement } }
-function menuAction(action: () => void) { headerMenu.value = null; action() }
+function menuAction(action: () => void) {
+  const anchor = headerMenu.value?.anchor
+  headerMenu.value = null
+  // Dialogs remember the durable header trigger, rather than a removed menu item.
+  anchor?.focus({ preventScroll: true })
+  action()
+}
 function menuKeys(event: KeyboardEvent) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
