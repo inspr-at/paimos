@@ -3,6 +3,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -197,5 +198,124 @@ func TestPlanningCustomHideDoesNotMislabelOpenWorkAsExit(t *testing.T) {
 	page, err := f.store.Items(t.Context(), f.person, f.project, f.release, planningOpt(t, "hide_state=open"))
 	if err != nil || page.Matches.Hidden != 1 || page.Matches.Other != 1 || page.Matches.Exit != 0 || page.Matches.Finished != 0 {
 		t.Fatalf("custom Hide categories: %+v %v", page, err)
+	}
+}
+
+// Summaries belong to the selected page and its authorized snapshot, including
+// continuations and both Backlog partitions. Unknown estimates remain absent.
+func TestPlanningItemPageTicketSummaries(t *testing.T) {
+	f := newStoreFixture(t)
+	var epic, parent string
+	f.run(t, func(ctx context.Context, tx pgx.Tx) error {
+		epic = f.node(t, ctx, tx, "epic", "CTX-1", f.project)
+		parent = f.node(t, ctx, tx, "ticket", "CTX-2", epic)
+		_, err := tx.Exec(ctx, `UPDATE nodes SET title='Epic context' WHERE id=$1`, epic)
+		return err
+	})
+	rich := f.item(t, "task", "CTX-3", "open", f.release, "V")
+	f.exec(t, `UPDATE nodes SET parent_id=$2,fields=jsonb_build_object('assignee_id',$3::text) WHERE id=$1`, rich, parent, f.actor)
+	f.exec(t, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,eta_ready_at,eta_reported_at,progress_pct)
+   VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',decode('01','hex'),decode('02','hex'),'working',now()+interval '1 hour',now(),42)`, f.tenant, f.project, f.agent.ID, rich)
+	blank := f.item(t, "ticket", "CTX-4", "open", f.release, "B")
+	assertPage := func(opt ReadOptions, release string) ItemPage {
+		t.Helper()
+		page, err := f.store.Items(t.Context(), f.person, f.project, release, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	opt := planningOpt(t, "hide_closed=false&q=CTX-3")
+	assertRich := func(page ItemPage) {
+		t.Helper()
+		if len(page.Items) != 1 || page.Items[0].ItemID != rich {
+			t.Fatalf("selected rich page: %+v", page)
+		}
+		raw, err := json.Marshal(page.Items[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		var ep struct{ ID, Key, Title string }
+		if err = json.Unmarshal(got["epic"], &ep); err != nil || ep.ID != epic || ep.Key != "CTX-1" || ep.Title != "Epic context" {
+			t.Fatalf("missing epic context: %s (%v)", raw, err)
+		}
+		var par struct {
+			ID, Key string
+			Kind    string `json:"kind_slug"`
+		}
+		if err = json.Unmarshal(got["parent"], &par); err != nil || par.ID != parent || par.Key != "CTX-2" || par.Kind != "ticket" {
+			t.Fatalf("missing task parent: %s (%v)", raw, err)
+		}
+		var person struct{ ID, Name string }
+		if err = json.Unmarshal(got["assignee"], &person); err != nil || person.ID != f.actor || person.Name != "Reader" {
+			t.Fatalf("missing assignee: %s (%v)", raw, err)
+		}
+		var estimate struct {
+			Progress int    `json:"progress_pct"`
+			Ready    string `json:"eta_ready_at"`
+		}
+		if err = json.Unmarshal(got["eta"], &estimate); err != nil || estimate.Progress != 42 || estimate.Ready == "" {
+			t.Fatalf("missing reported progress/ETA: %s (%v)", raw, err)
+		}
+	}
+	assertRich(assertPage(opt, f.release))
+	opt = planningOpt(t, "hide_closed=false&kind=!epic&q=CTX-")
+	opt.Limit = 1
+	first := assertPage(opt, f.release)
+	if len(first.Items) != 1 || first.Items[0].ItemID != blank || first.NextCursor == "" {
+		t.Fatalf("continuation fixture: %+v", first)
+	}
+	decode := func(item ItemView) map[string]json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	unknown := decode(first.Items[0])
+	if _, ok := unknown["eta"]; ok {
+		t.Fatalf("fabricated ETA for unreported ticket: %+v", unknown)
+	}
+	opt.Cursor = first.NextCursor
+	assertRich(assertPage(opt, f.release))
+	f.exec(t, `UPDATE ships_in SET release_node_id=NULL WHERE item_node_id=$1`, rich)
+	opt = planningOpt(t, "hide_closed=false&q=CTX-3")
+	opt.Part = "ranked"
+	assertRich(assertPage(opt, ""))
+	f.exec(t, `DELETE FROM ships_in WHERE item_node_id=$1`, rich)
+	opt.Part = "tail"
+	assertRich(assertPage(opt, ""))
+	// Native null unassignment wins over all fallbacks and never invents a person.
+	f.exec(t, `UPDATE nodes SET fields='{"assignee":null}' WHERE id=$1`, rich)
+	page := assertPage(opt, "")
+	unknown = decode(page.Items[0])
+	if string(unknown["assignee"]) != "null" {
+		t.Fatalf("unassignment: %+v", unknown)
+	}
+	// The legacy response retains its shape, without authoritative summary nulls.
+	legacy := assertPage(ReadOptions{Part: "tail"}, "")
+	found := false
+	for _, item := range legacy.Items {
+		if item.ItemID != rich {
+			continue
+		}
+		found = true
+		for _, key := range []string{"parent", "epic", "assignee", "eta"} {
+			if _, ok := decode(item)[key]; ok {
+				t.Fatalf("legacy projection unexpectedly includes %s", key)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("legacy fixture lost the asserted item")
 	}
 }

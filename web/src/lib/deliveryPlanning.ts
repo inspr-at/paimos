@@ -28,6 +28,7 @@ export interface PlanningItem {
   item_id: string; project_id: string; release_id?: string; revision: number; node_revision: string
   rank?: string; key: string; title: string; kind: string; state: string; created_at: string
   estimated_hours: number | null; epic_id?: string; expedite: boolean; due_on: string | null
+  parent?: ListItem['parent']; epic?: ListItem['epic']; assignee?: ListItem['assignee']; eta?: ListItem['eta']
 }
 export interface ItemPage { items: PlanningItem[]; next_cursor?: string; matches?: MatchCounts; count: number; incomplete: boolean }
 export type PlanningSource = 'overview' | 'active' | 'released' | 'backlog:ranked' | 'backlog:tail' | `release:${string}`
@@ -93,14 +94,14 @@ export function hiddenCopy(counts?: MatchCounts) {
   const parts = [counts.hidden_finished ? `${counts.hidden_finished} finished` : '', counts.hidden_exit ? `${counts.hidden_exit} cancelled or archived` : '', counts.hidden_other ? `${counts.hidden_other} other` : ''].filter(Boolean)
   return `${counts.incomplete ? 'At least ' : ''}${parts.join(', ') || counts.hidden_count} hidden by Hide closed`
 }
-// Delivery pages currently omit rich ticket summaries. Leave progress, ETA and
-// assignee unknown; no extra node requests and no fabricated completion percent.
+// Reuse the bounded page summaries; unknown estimates stay absent and older
+// servers remain compatible, without any per-ticket requests.
 export function planningListItem(item: PlanningItem): ListItem {
   return {
     id: item.item_id, key: item.key, kind_id: '', kind_slug: item.kind, kind_label: item.kind,
     title: item.title, body: '', fields: item.estimated_hours === null ? {} : { estimate_hours: item.estimated_hours },
-    state: item.state, parent_id: item.epic_id || item.project_id, parent: null,
+    state: item.state, parent_id: item.parent?.id || item.epic_id || item.project_id, parent: item.parent ?? null,
     position: item.rank || '', created_at: item.created_at, updated_at: item.node_revision,
-    priority: null, assignee: null, children_count: 0, project: null,
+    priority: null, assignee: item.assignee ?? null, epic: item.epic, eta: item.eta, children_count: 0, project: null,
   }
 }

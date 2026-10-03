@@ -17510,6 +17510,34 @@ components:
         estimated_hours: {type: [number, 'null']}
         epic_id: {type: string, format: uuid}
         completed_at: {type: string, format: date-time}
+        parent:
+          description: Authorized direct parent from the planning page snapshot; null when absent or unavailable. Planning reads only.
+          type: [object, 'null']
+          required: [id, key, title, kind_slug]
+          properties:
+            id: {type: string, format: uuid}
+            key: {type: string}
+            title: {type: string}
+            kind_slug: {type: string}
+        epic:
+          description: Authorized nearest epic, including a task's ticket epic. Planning reads only; null when absent.
+          type: [object, 'null']
+          required: [id, key, title]
+          properties:
+            id: {type: string, format: uuid}
+            key: {type: string}
+            title: {type: string}
+        assignee:
+          description: Resolved stored assignee using the same native/unassignment and import mapping as the ticket list. Planning reads only; null when unassigned.
+          type: [object, 'null']
+          required: [id, name, has_avatar]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            has_avatar: {type: boolean}
+        eta:
+          description: Reported progress and ready/live ETA for the bounded planning page, using the ticket-list projection. Absent when unknown.
+          $ref: '#/components/schemas/TicketEta'
     DeliveryItemPage:
       type: object
       required: [items, count, incomplete]

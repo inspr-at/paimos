@@ -62,7 +62,9 @@ type Query struct {
 	IDs []string `json:"ids,omitempty"`
 }
 
-const assigneeJoin = ` LEFT JOIN LATERAL (
+// AssigneeJoin resolves the stored assignee of node n for bounded page summaries.
+// Native values (including null unassignment) take precedence over imports.
+const AssigneeJoin = ` LEFT JOIN LATERAL (
     SELECT CASE
             WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
             WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END AS native,
@@ -264,7 +266,7 @@ func SQL(q Query, sortFields bool) (string, []any) {
 		}
 	}
 	projection += deliveryProjection
-	assigneeSQL, assigneeID := assigneeJoin, "assignee.id::text"
+	assigneeSQL, assigneeID := AssigneeJoin, "assignee.id::text"
 	assigneePredicate := `AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
             OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))`
 	needsAssignee := len(q.Assignees)+len(q.AssigneesNot) > 0 || slices.Contains(q.FacetNames, "assignee") || slices.ContainsFunc(q.Sort, func(key SortKey) bool { return key.Name == "assignee" })

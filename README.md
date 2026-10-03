@@ -37,8 +37,13 @@ stay above growing content. Search and Hide use P5’s whole-query server counts
 changing scope/query/person invalidates cursors and late responses. Passive
 insertions above hovered/focused rows wait until those controls are left or
 **Show loaded** is chosen. Capped counts and stale/failed reads stay explicit.
-Item progress/ETA/assignee and epic titles are not supplied by the current
-delivery item response and remain unknown; no per-ticket read is added.
+Expand all includes loaded Upcoming and Released rows within the same queue
+and render bounds. Collapsing clears that source’s pagination history before
+reopening. Delayed saved expansions use the passive-insertion guard too.
+Planning item pages batch authorized parent/epic and stored assignee summaries
+plus reported progress/ETA for the selected rows in the same read snapshot;
+unknown estimates stay absent and no per-ticket HTTP read is added. Legacy
+item reads omit these additive summaries.
 Breadcrumb/picker, write actions, lifecycle sheets and the journey adoption
 card remain assigned to the other P6 packages.
 

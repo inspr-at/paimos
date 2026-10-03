@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/releasehistory/codename"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workquery"
@@ -207,7 +208,83 @@ func planningItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, 
 		it := out.Items[limit-1]
 		out.NextCursor = encodeCursor(pageCursor{Scope: scope, Rank: it.Rank, ID: it.ItemID, At: it.CreatedAt})
 	}
+	// Close the page reader before batching its summaries on the same snapshot.
+	rows.Close()
+	if err = planningItemSummaries(ctx, tx, p, project, out.Items); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// The page has already applied nodes.read, project RLS, filters and LIMIT.
+// Resolve only selected IDs, then load ETA in one batch, never the whole query.
+func planningItemSummaries(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, items []ItemView) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	epicIDs := make([]string, len(items))
+	byID := make(map[string]int, len(items))
+	for i := range items {
+		ids[i] = items[i].ItemID
+		epicIDs[i] = zeroUUID(items[i].EpicID)
+		byID[ids[i]] = i
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id::text,
+  pn.id::text,pn.key,pn.title,pk.slug,
+  en.id::text,en.key,en.title,
+  assignee.id::text,assignee.name,
+  EXISTS(SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id=n.tenant_id AND avatar.principal_id=assignee.id AND avatar.avatar_hashes <> '{}'::jsonb)
+ FROM unnest($3::uuid[],$4::uuid[]) selected(id,epic_id)
+ JOIN nodes n ON n.tenant_id=$1 AND n.id=selected.id AND n.project_id=$2 AND n.deleted_at IS NULL
+ LEFT JOIN nodes pn ON pn.tenant_id=n.tenant_id AND pn.id=n.parent_id AND (pn.id=$2 OR pn.project_id=$2) AND pn.deleted_at IS NULL
+ LEFT JOIN node_kinds pk ON pk.tenant_id=pn.tenant_id AND pk.id=pn.kind_id
+ LEFT JOIN nodes en ON en.tenant_id=n.tenant_id AND en.id=selected.epic_id AND en.project_id=$2 AND en.deleted_at IS NULL
+ `+workquery.AssigneeJoin, p.TenantID, project, ids, epicIDs)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var parentID, parentKey, parentTitle, parentKind, epicID, epicKey, epicTitle, assigneeID, assigneeName *string
+		var hasAvatar bool
+		if err = rows.Scan(&id, &parentID, &parentKey, &parentTitle, &parentKind, &epicID, &epicKey, &epicTitle, &assigneeID, &assigneeName, &hasAvatar); err != nil {
+			rows.Close()
+			return err
+		}
+		item := &items[byID[id]]
+		item.ItemSummaries = &ItemSummaries{}
+		var parent *ItemParent
+		if parentID != nil {
+			parent = &ItemParent{*parentID, *parentKey, *parentTitle, *parentKind}
+		}
+		item.Parent = parent
+		var epic *ItemEpic
+		if epicID != nil {
+			epic = &ItemEpic{*epicID, *epicKey, *epicTitle}
+		}
+		item.Epic = epic
+		var person *ItemAssignee
+		if assigneeID != nil {
+			person = &ItemAssignee{*assigneeID, *assigneeName, hasAvatar}
+		}
+		item.Assignee = person
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	views, err := eta.Load(ctx, tx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if view, ok := views[items[i].ItemID]; ok {
+			items[i].Eta = &view
+		}
+	}
+	return nil
 }
 
 func planningReleases(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, opt ReadOptions) (ReleasePage, error) {

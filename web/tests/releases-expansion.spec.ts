@@ -8,8 +8,8 @@ const rid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0'
 const first = rid(1), second = rid(2), history = rid(3)
 const label = 'Verbesserungen für die langfristige und nachvollziehbare Planung gemeinsamer Releases'
 const at = '2026-10-03T12:00:00Z'
-type Work = PlanningItem & { assignee?: string }
-const item = (n: number, release: string | undefined, state = 'backlog', title = `Work ${n}`, rank: string | undefined = String(n)): Work => ({ item_id: rid(1000 + n), project_id: 'p-pharos', release_id: release, key: `PHAROS-${1000 + n}`, title, kind: n % 3 ? 'ticket' : 'task', state, rank, revision: rank ? 1 : 0, node_revision: at, created_at: at, estimated_hours: 1, expedite: false, due_on: null, assignee: n % 2 ? 'mira' : 'lin' })
+type Work = PlanningItem & { filterAssignee: string }
+const item = (n: number, release: string | undefined, state = 'backlog', title = `Work ${n}`, rank: string | undefined = String(n)): Work => ({ item_id: rid(1000 + n), project_id: 'p-pharos', release_id: release, key: `PHAROS-${1000 + n}`, title, kind: n % 3 ? 'ticket' : 'task', state, rank, revision: rank ? 1 : 0, node_revision: at, created_at: at, estimated_hours: 1, expedite: false, due_on: null, filterAssignee: n % 2 ? 'mira' : 'lin', assignee: { id: n % 2 ? 'mira' : 'lin', name: n % 2 ? 'Mira' : 'Lin' } })
 const release = (n: number, title: string, state: PlanningRelease['state'] = 'planned'): PlanningRelease => ({ release_id: rid(n), project_id: 'p-pharos', title, display_name: title, visibility: n === 2 ? 'internal' : 'published', state, rank: String(n), revision: 1, version: state === 'released' ? '261003120000.0.0' : '', rollup: { units: 3, completed: 1, open_hours: 2 }, build_summary: { budget_outlook: 'unknown' } })
 const emptyCounts = (): MatchCounts => ({ matched_count: 0, shown_count: 0, hidden_count: 0, hidden_finished: 0, hidden_exit: 0, incomplete: false })
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve }); return { wait, release } }
@@ -20,6 +20,9 @@ async function setup(page: Page, options: { theme?: string; hold?: { source: str
   const calls: { source: string; query: URLSearchParams }[] = []
   const releases = [release(1, label, 'building'), release(2, 'Audit sweep'), ...Array.from({ length: 54 }, (_, i) => release(3 + i, i === 0 ? 'Historical needle marketing name' : `Published story ${i + 1}`, 'released'))]
   const members = [item(1, first, 'in_progress', 'Improve clarity'), item(2, first, 'done', 'Finished work'), item(3, first, 'cancelled', 'Cancelled work'), item(4, second), item(5, undefined, 'done', 'Completed ranked backlog'), item(6, undefined, 'cancelled', 'Cancelled new backlog', undefined)]
+  members[0]!.parent = { id: rid(900), key: 'PHAROS-900', title: 'Gemeinsame Epic-Planung', kind_slug: 'epic' }
+  members[0]!.epic = { id: rid(900), key: 'PHAROS-900', title: 'Gemeinsame Epic-Planung' }
+  members[0]!.eta = { progress_pct: 42, eta_ready_at: '2026-10-03T14:00:00Z', finished: false }
   members[5]!.rank = undefined
   members.push(...Array.from({ length: 215 }, (_, i) => item(100 + i, history, i === 214 ? 'done' : 'backlog', i >= 212 ? 'needle member' : `History work ${i + 1}`)))
   const closed = (state: string) => ['done', 'accepted', 'delivered', 'cancelled', 'canceled', 'archived'].includes(state)
@@ -27,7 +30,7 @@ async function setup(page: Page, options: { theme?: string; hold?: { source: str
   const accepts = (value: string, values: string[]) => (!values.some(v => !v.startsWith('!')) || values.includes(value)) && !values.includes(`!${value}`)
   function matching(query: URLSearchParams, list: Work[]) {
     const q = (query.get('q') ?? '').toLowerCase()
-    return list.filter(w => (!q || `${w.key} ${w.title}`.toLowerCase().includes(q)) && accepts(w.state, values(query, 'work_state')) && accepts(w.kind, values(query, 'kind')) && accepts(w.assignee ?? '', values(query, 'assignee')))
+    return list.filter(w => (!q || `${w.key} ${w.title}`.toLowerCase().includes(q)) && accepts(w.state, values(query, 'work_state')) && accepts(w.kind, values(query, 'kind')) && accepts(w.filterAssignee, values(query, 'assignee')))
   }
   function shown(query: URLSearchParams, list: Work[]) { return query.get('hide_closed') === 'false' ? list : list.filter(w => values(query, 'hide_state').length ? !values(query, 'hide_state').includes(w.state) : !closed(w.state)) }
   function counts(query: URLSearchParams, list: Work[]): MatchCounts {
@@ -87,7 +90,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark']) {
       { name: 'collapse all', run: async () => { await page.getByRole('button', { name: 'Collapse all', exact: true }).click(); await expect(frame(page).locator('.planning-work')).toHaveCount(0) } },
       { name: 'history continuation', run: async () => { await page.getByRole('button', { name: 'Load more released releases' }).click(); await expect(frame(page).locator('.release-row')).toHaveCount(56) } },
     ] })
-    await chevron.click(); await expect(block(page, first).locator('.hidden-count')).toHaveText('1 finished, 1 cancelled or archived hidden by Hide closed')
+    await chevron.click(); await expect(block(page, first).locator('.parent-chip')).toHaveCSS('opacity', '1'); await expect(block(page, first).locator('.hidden-count')).toHaveText('1 finished, 1 cancelled or archived hidden by Hide closed')
     const releasedName = block(page, rid(56)).locator('.release-name'); await releasedName.focus(); await expect(releasedName.locator('.version')).toHaveCSS('opacity', '1'); await releasedName.hover()
     await search(page).focus(); await search(page).hover(); await expect(block(page, first).locator('.ticket-row')).toHaveCount(1)
     await page.keyboard.press('Meta+A'); await expect(search(page)).toBeFocused()
@@ -163,4 +166,49 @@ test('count truncation and failed refresh stay visible instead of becoming empty
   await setup(page, { capped: true }); await page.goto('/p/PHAROS/releases'); await expect(frame(page).locator('.planning-feedback')).toContainText('lower bound')
   await page.route('**/api/projects/p-pharos/delivery/overview?**', route => route.fulfill({ status: 403, json: { error: 'Access changed' } }))
   await search(page).fill('new query'); await expect(frame(page).locator('.planning-feedback')).toContainText('Access changed'); await expect(block(page, first)).toBeVisible(); await expect(block(page, first).locator('.chevron')).toBeDisabled()
+})
+
+for (const interaction of ['hover', 'focus'] as const) test(`late saved expansion holds structural insertion during downstream ${interaction}`, async ({ page }) => {
+  const world = await setup(page)
+  const entered = barrier(), reply = barrier()
+  await page.route('**/api/preferences/releases-expanded:p-pharos', async route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    entered.release(); await reply.wait
+    await route.fulfill({ json: { value: { ids: [first] } } })
+  })
+  await page.goto('/p/PHAROS/releases'); await entered.wait
+  const control = block(page, second).locator('.chevron')
+  await expect(control).toBeVisible()
+  if (interaction === 'hover') { await search(page).focus(); await control.hover() }
+  else { await control.focus(); await search(page).hover() }
+  await expectStableControls({ controls: { downstream: control, row: block(page, second).locator('.release-row'), selector: page.getByRole('combobox', { name: 'Work to continue loading' }), apply: page.getByRole('button', { name: 'Show loaded', exact: true }) }, scrollAreas: { frame: frame(page) }, interactions: [{ name: 'saved preferences arrive', run: async () => {
+    const response = page.waitForResponse(r => r.url().includes('/preferences/releases-expanded:'))
+    reply.release(); await response
+    // Rendering frames are the barrier for the preference's promise and Vue update.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  } }] })
+  await expect(block(page, first).locator('.chevron')).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('button', { name: 'Show loaded', exact: true })).toBeEnabled()
+  expect(world.calls.filter(c => c.source === `release:${first}`)).toHaveLength(0)
+  await search(page).focus(); await search(page).hover()
+  await expect(block(page, first).locator('.ticket-row')).toHaveCount(1)
+  expect(world.errors).toEqual([])
+})
+
+test('expanded ticket rows render authorized epic, assignee and progress/ETA without node fan-out', async ({ page }) => {
+  const world = await setup(page); const nodeReads: string[] = []
+  page.on('request', request => { if (/\/api\/nodes(?:[/?]|$)/.test(new URL(request.url()).pathname)) nodeReads.push(request.url()) })
+  await page.goto('/p/PHAROS/releases'); await expect(expand(page)).toBeVisible()
+  const before = nodeReads.length
+  await expand(page).click()
+  const row = block(page, first).locator('.ticket-row')
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('.parent-chip')).toContainText('Gemeinsame Epic-Planung')
+  await expect(row.locator('.parent-chip')).toHaveCSS('opacity', '1')
+  await expect(row.locator('.c-assignee')).toContainText('Mira')
+  await expect(row.locator('.c-progress')).toContainText('42%')
+  await expect(row.locator('.c-eta .eta-cell')).toBeVisible()
+  expect(nodeReads).toHaveLength(before)
+  expect(world.calls.filter(c => c.source === `release:${first}`)).toHaveLength(1)
+  expect(world.errors).toEqual([])
 })

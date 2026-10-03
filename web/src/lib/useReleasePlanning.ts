@@ -146,12 +146,13 @@ export function useReleasePlanning(options: { read?: PlanningRead; canInsert?: (
       for (const job of running) if (job.source === source) job.abort.abort()
       for (const job of [...held]) if (job.source === source) { job.abort.abort(); held.delete(job) }
       for (let i = queue.length - 1; i >= 0; i--) if (queue[i]!.source === source) queue.splice(i, 1)
+      seen.delete(source)
       delete work[source]
     }
     pump()
   }
   function expand(id: string) { expanded.add(id); openWork(id) }
-  function expandAll() { for (const row of overview.value?.active ?? []) expanded.add(row.release_id); expanded.add('backlog'); for (const id of expanded) openWork(id) }
+  function expandAll() { for (const row of rows()) expanded.add(row.release_id); expanded.add('backlog'); for (const id of expanded) openWork(id) }
   function collapseAll() { for (const id of [...expanded]) collapse(id) }
   function more(source: 'active' | 'released') {
     const cursor = source === 'active' ? overview.value?.active_next_cursor : overview.value?.released.next_cursor

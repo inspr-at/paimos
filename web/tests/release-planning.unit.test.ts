@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { nextTick } from 'vue'
 import { useReleasePlanning } from '../src/lib/useReleasePlanning'
-import { planningQuery, type PlanningAnswer, type PlanningContext, type PlanningOverview, type PlanningRead, type PlanningSource, type ItemPage, type PlanningRelease } from '../src/lib/deliveryPlanning'
+import { planningListItem, planningQuery, type PlanningAnswer, type PlanningContext, type PlanningOverview, type PlanningRead, type PlanningSource, type ItemPage, type PlanningRelease } from '../src/lib/deliveryPlanning'
 import { filtersFromQuery } from '../src/lib/ticketList'
 const context: PlanningContext = { project: 'project', person: 'person', scope: 'all', query: 'view=planning&hide_closed=true' }
 const counts = (shown = 1, hidden = 0) => ({ matched_count: shown + hidden, shown_count: shown, hidden_count: hidden, hidden_finished: hidden, hidden_exit: 0, incomplete: false })
@@ -53,6 +53,41 @@ describe('bounded release reads', () => {
     for (const request of h.requests.slice(9)) request.resolve(page(request.limit, request.source)); await settle()
     expect(h.state.rendered.value).toBe(2000); expect(h.requests).toHaveLength(11); expect(h.state.budgetBlocked.value).toBe(true); expect(h.state.queued.value).toBe(40)
     h.state.collapse('0'); await settle(); expect(h.requests).toHaveLength(12); h.state.dispose()
+  })
+  it.each(['release:0', 'backlog:ranked', 'backlog:tail'] as const)('reopens %s after continuation with fresh cursor history', async source => {
+    const h = harness(); h.state.reset(context)
+    const answer = overview(); answer.backlog_matches = { ranked: counts(3), tail: counts(3) }
+    h.requests[0]!.resolve(answer); await settle()
+    const id = source.startsWith('backlog:') ? 'backlog' : '0'
+    h.state.expand(id)
+    const first = h.requests.find(r => r.source === source)!
+    first.resolve(page(1, 'first', 'page-2')); await settle()
+    h.state.moreWork(source); h.requests.at(-1)!.resolve(page(1, 'second', 'page-3')); await settle()
+    expect(h.state.work[source]?.items).toHaveLength(2)
+    h.state.collapse(id); h.state.expand(id)
+    h.requests.filter(r => r.source === source).at(-1)!.resolve(page(1, 'reopened', 'page-2')); await settle()
+    expect(h.state.work[source]?.error).toBe('')
+    expect(h.state.work[source]?.items.map(i => i.item_id)).toEqual(['reopened0'])
+    expect(h.state.work[source]?.cursor).toBe('page-2'); h.state.dispose()
+  })
+  it('expands loaded Upcoming and Released rows through the same request and render bounds', async () => {
+    const h = harness(); h.state.reset(context)
+    const answer = overview(1); answer.released.items = Array.from({ length: 50 }, (_, i) => ({ ...release(`history-${i}`), state: 'released' as const }))
+    h.requests[0]!.resolve(answer); await settle(); h.state.expandAll()
+    expect([...h.state.expanded]).toEqual(['0', ...answer.released.items.map(r => r.release_id), 'backlog'])
+    expect(h.state.inFlight.value).toBe(4)
+    for (let first = 1; first <= 9; first += 4) {
+      for (const request of h.requests.slice(first, first + 4)) request.resolve(page(request.limit, request.source))
+      await settle(); expect(h.state.inFlight.value).toBeLessThanOrEqual(4)
+    }
+    for (const request of h.requests.slice(9)) request.resolve(page(request.limit, request.source)); await settle()
+    expect(h.state.rendered.value).toBe(2000); expect(h.requests).toHaveLength(11)
+    expect(h.requests.slice(2).every(r => r.source.startsWith('release:history-'))).toBe(true)
+    expect(h.state.budgetBlocked.value).toBe(true); expect(h.state.queued.value).toBe(41); h.state.dispose()
+  })
+  it('preserves populated ticket context and reported progress/ETA in the reused row', () => {
+    const item = { ...page(1).items[0]!, parent: { id: 'epic', key: 'EP-1', title: 'Epic context', kind_slug: 'epic' }, epic: { id: 'epic', key: 'EP-1', title: 'Epic context' }, assignee: { id: 'person', name: 'Mira', has_avatar: true }, eta: { progress_pct: 42, eta_ready_at: '2026-10-03T14:00:00Z', finished: false } }
+    expect(planningListItem(item)).toMatchObject({ parent_id: 'epic', parent: item.parent, epic: item.epic, assignee: item.assignee, eta: item.eta })
   })
   it('expands unloaded member hits and hidden-only counts, leaves name-only hits closed', async () => {
     const h = harness(); h.state.reset({ ...context, query: `${context.query}&q=needle` })

@@ -27,7 +27,9 @@ function canInsert(source: PlanningSource) {
   return !active.some(el => !!(point.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
 }
 const planning = useReleasePlanning({ canInsert })
-const { overview, expanded, work, loading, stale, error, pageError, pending, inFlight, queued, budgetBlocked, rendered, paging, continuations } = planning
+const { overview, expanded, work, loading, stale, error, pageError, pending: pendingPages, inFlight, queued, budgetBlocked, rendered, paging, continuations } = planning
+const pendingExpansion = ref(false)
+const pending = computed(() => pendingPages.value + Number(pendingExpansion.value))
 const mode = ref<'checking' | 'journey' | 'releases' | 'error'>('checking')
 const modeError = ref(''), preferenceError = ref('')
 const owner = computed(() => JSON.stringify([props.projectId, props.person]))
@@ -43,7 +45,7 @@ const prefKey = () => `releases-expanded:${props.projectId}`
 async function loadMode() {
   statusAbort?.abort(); statusAbort = new AbortController()
   const signal = statusAbort.signal, captured = owner.value
-  mode.value = 'checking'; modeError.value = ''; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''
+  mode.value = 'checking'; modeError.value = ''; preferenceError.value = ''; touched = false; savedIds = []; readyOwner = ''; pendingExpansion.value = false
   planning.reset(null)
   // Expansion preference is separate from Outline and scoped by the authenticated
   // person on the server. Capture ownership before either asynchronous read.
@@ -70,17 +72,25 @@ watch(identity, () => {
   if (mode.value !== 'releases' || !query.value) { planning.reset(null); return }
   planning.reset({ project: props.projectId, person: props.person, scope: releaseScope(props.filters.ships_in), query: query.value })
 }, { immediate: true })
-function restoreExpansion() {
+function restoreExpansion(force = false) {
   if (touched || readyOwner !== owner.value || stale.value || !overview.value) return
+  // Opening even an empty/loading block is structural insertion. Defer it
+  // before touching expanded when it would move a hovered or focused row.
+  const loaded = [...overview.value.active, ...overview.value.released.items].map(row => row.release_id)
+  const sources: PlanningSource[] = savedIds.filter(id => !expanded.has(id)).flatMap(id => id === 'backlog'
+    ? ['backlog:ranked', 'backlog:tail'] : loaded.includes(id) ? [`release:${id}` as PlanningSource] : [])
+  if (!force && sources.some(source => !canInsert(source))) { pendingExpansion.value = true; return }
+  pendingExpansion.value = false
   // Retain saved IDs for later release pages, without a read for unloaded rows.
   for (const id of savedIds) expanded.add(id)
   for (const row of [...overview.value.active, ...overview.value.released.items]) if (expanded.has(row.release_id)) planning.expand(row.release_id)
   if (expanded.has('backlog')) planning.expand('backlog')
+  readyOwner = ''
 }
-watch(overview, restoreExpansion)
+watch(overview, () => restoreExpansion())
 let preferenceWrite: Promise<void> = Promise.resolve()
 function saveExpansion() {
-  touched = true
+  touched = true; pendingExpansion.value = false
   const captured = owner.value, key = prefKey(), ids = [...expanded].slice(0, 500)
   preferenceWrite = preferenceWrite.catch(() => undefined).then(async () => {
     if (disposed || captured !== owner.value) return
@@ -100,9 +110,10 @@ function toggle(id: string) {
 function expandAll() { planning.expandAll(); void saveExpansion() }
 function collapseAll() { for (const id of expanded) returnFocus(id); planning.collapseAll(); void saveExpansion() }
 function scope(id: string) { planning.expand(id); void saveExpansion(); emit('scope', id === 'backlog' ? 'none' : id) }
-function pointer(event: PointerEvent) { hovered = event.target instanceof Element ? event.target : null; planning.flush() }
-function leave() { hovered = null; planning.flush() }
-function focusOut() { void nextTick(() => planning.flush()) }
+function flush(force = false) { restoreExpansion(force); planning.flush(force) }
+function pointer(event: PointerEvent) { hovered = event.target instanceof Element ? event.target : null; flush() }
+function leave() { hovered = null; flush() }
+function focusOut() { void nextTick(() => flush()) }
 const nextSource = ref<PlanningSource | ''>('')
 watch(continuations, sources => { if (!sources.includes(nextSource.value as PlanningSource)) nextSource.value = sources[0] ?? '' }, { immediate: true })
 function sourceLabel(source: PlanningSource) {
@@ -110,7 +121,7 @@ function sourceLabel(source: PlanningSource) {
   const row = [...overview.value?.active ?? [], ...overview.value?.released.items ?? []].find(row => `release:${row.release_id}` === source)
   return row ? releaseName(row) : 'Release work'
 }
-function continueWork() { planning.flush(true); if (nextSource.value) planning.moreWork(nextSource.value) }
+function continueWork() { flush(true); if (nextSource.value) planning.moreWork(nextSource.value) }
 const backlogVisible = computed(() => !props.filters.q.trim() || Object.values(overview.value?.backlog_matches ?? {}).some(c => c.matched_count > 0))
 const scoped = (id: string) => props.filters.ships_in.length === 1 && props.filters.ships_in[0] === (id === 'backlog' ? 'none' : id)
 function workProps(source: PlanningSource, matches?: MatchCounts) {
@@ -137,12 +148,12 @@ defineExpose({ reload: () => mode.value === 'error' ? loadMode() : planning.rese
       <div class="work-continuation">
         <select v-model="nextSource" aria-label="Work to continue loading" :disabled="!continuations.length || stale"><option v-if="!continuations.length" value="">No work waiting</option><option v-for="source in continuations" :key="source" :value="source">{{ sourceLabel(source) }}</option></select>
         <button type="button" class="btn sm ghost" :disabled="!nextSource || stale || rendered >= 2000" @click="continueWork">Load work</button>
-        <button type="button" class="btn sm ghost" :disabled="!pending" @click="planning.flush(true)">Show loaded</button>
+        <button type="button" class="btn sm ghost" :disabled="!pending" @click="flush(true)">Show loaded</button>
       </div>
     </div>
     <div class="planning-feedback" role="status" aria-live="polite">
       <span v-if="queryError || modeError || error || pageError || preferenceError" class="error">{{ queryError || modeError || error || pageError || preferenceError }}{{ stale ? ' · showing previous data' : '' }}</span>
-      <span v-else-if="pending">{{ pending }} pages ready · Show loaded to insert them now{{ stale ? ' · previous query still shown' : '' }}</span>
+      <span v-else-if="pending">{{ pending }} {{ pendingExpansion ? 'updates' : 'pages' }} ready · Show loaded to insert them now{{ stale ? ' · previous query still shown' : '' }}</span>
       <span v-else-if="stale">Showing the previous query while the current read loads.</span>
       <span v-else-if="mode === 'checking' || loading">Loading releases…</span>
       <span v-else-if="budgetBlocked">{{ rendered }} work rows loaded · collapse a release to load more</span>

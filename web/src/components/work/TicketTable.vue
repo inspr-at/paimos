@@ -987,6 +987,8 @@ td.c-title { position: relative; overflow: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
+/* Release work keeps its context visible; its rows have no inline action tray. */
+.embedded .ticket-row.cursor .parent-chip, .embedded .ticket-row:hover .parent-chip, .embedded td.c-title:focus-within .parent-chip { opacity: 1; }
 /* Hover actions float at the end of the title. Reserve their width (two 24px
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
    leaves the cue 12px clear of Copy. Phones hide the actions. */

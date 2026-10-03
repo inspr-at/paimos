@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workquery"
 	"github.com/jackc/pgx/v5"
@@ -271,7 +272,33 @@ func (s *Store) Overview(ctx context.Context, p tenant.Principal, project, curso
 	return out, err
 }
 
+type ItemParent struct {
+	ID       string `json:"id"`
+	Key      string `json:"key"`
+	Title    string `json:"title"`
+	KindSlug string `json:"kind_slug"`
+}
+type ItemEpic struct {
+	ID    string `json:"id"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
+type ItemAssignee struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	HasAvatar bool   `json:"has_avatar"`
+}
+
+// ItemSummaries is present only on planning pages. Nil fields distinguish
+// known absence from legacy reads, which omit the summary projection entirely.
+type ItemSummaries struct {
+	Parent   *ItemParent   `json:"parent"`
+	Epic     *ItemEpic     `json:"epic"`
+	Assignee *ItemAssignee `json:"assignee"`
+	Eta      *eta.View     `json:"eta,omitempty"`
+}
 type ItemView struct {
+	*ItemSummaries
 	Placement
 	NodeRevision   time.Time  `json:"node_revision"`
 	Key            string     `json:"key"`
