@@ -1440,6 +1440,27 @@ With the reviewed Nix package, run `env "$HOME/.nix-profile/bin/aeon-agentd" pai
 
 **Connect your machine** offers the checksum-verified direct download pinned to this server’s version first; add `~/.local/bin` to PATH for that installation. On a Mac without Nix, Homebrew is always offered as `brew install inspr-at/tap/aeon-agentd`, and the pair line runs `env "$(brew --prefix)/bin/aeon-agentd" pair --url '…'`. Homebrew installs the latest INSPR release; `aeon-agentd status` tells you if this server needs a different version by checking its declared compatibility window. Neither the server nor the browser reads the tap formula. After browser approval, pairing installs the user LaunchAgent on macOS or systemd user unit on Linux. It retains Homebrew's stable `bin/aeon-agentd` link or `~/.local/bin/aeon-agentd`, so a package upgrade does not leave the service pointing at a removed version. The stable link must resolve to the binary doing the pairing; an unrelated service is never adopted or overwritten.
 
+Owner workstation step-up (AEON-580/581): the shared CLI/MCP HTTP client handles
+`428 step_up_required` by sending only the challenge ID to the local paired daemon.
+The daemon fetches the challenge from its paired origin with its own pairing proof,
+shows the server's summary verbatim in Touch ID, and signs with the pairing-pinned
+Secure Enclave key. Cancellation, expiry, unavailable Touch ID and a refused proof
+fail the action; the client retries the identical request at most once, without
+redirecting its proof. Server-side marking, action/tenant binding, single-use
+consumption and governance exclusions are owned by AEON-580.
+
+`aeon-agentd status` reports whether the pairing has a pinned confirmation key and,
+for older Mac pairings, prints the exact `aeon-agentd pair --url … --state-root …
+--workspace …` command using a new private state folder. The old pairing remains
+until the new one is verified; service configuration changes stay with its existing
+owner. Access → computers shows the pin readiness separately from connectivity.
+This prerequisite does not promise that the installed daemon can currently use
+Touch ID (a signed enclave-enabled build and the owner's graphical session are
+still required). For a nondefault pairing, set `agentd_state_root` to its absolute
+path in that instance's CLI configuration. The client checks the daemon's origin
+before prompting, keeping separate instances separate. Direct Go HTTP consumers
+set `Client.ConfirmStepUp` to their authenticated local-daemon callback.
+
 To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` before uninstalling. This freezes new work, requests server revocation, waits for owned processes to drain, then stops and removes its own service. `--once` reports one resumable step; interruption or lost connectivity leaves cleanup pending, and the same command resumes it. Vendor sign-ins and project files are preserved. Homebrew users then run `brew uninstall aeon-agentd`; checksum-installer users remove the `~/.local/bin/aeon-agentd` link and downloaded versions under `~/.local/lib/aeon`. Nix users disable/remove the service and package through their owning configuration's review path. Retain private pairing state until cleanup and any accounting recovery are complete; `--state-root` selects a nondefault pairing.
 
 Claude dependency pins preserve stable Node and SDK links, including Home Manager links. Each probe and start checks the full link chain, ownership, directory permissions, workspace exclusion and the SDK's declared package entry, then launches the resolved physical paths. Existing physical pins remain supported. To replace old pins after an update, run `aeon-agentd repin --harness claude --node-path /absolute/stable/bin/node --claude-sdk-path /absolute/stable/lib/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` (add `--state-root` for a nondefault pairing). Omit the dependency flags to discover the current global installation. The command shows old and new paths and versions; `--yes` confirms without prompting, including with `--json` in Home Manager activation. Missing old versions show as unavailable.

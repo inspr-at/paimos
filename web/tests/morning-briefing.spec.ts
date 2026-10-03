@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { setupUsage, NOW } from './usage-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { watchErrors } from './work-fixtures'
-import { usageDashboard } from './usage-data'
+import { usageAllowanceWindow, usageDashboard } from './usage-data'
 
 const START = new Date(NOW - 24 * 3600_000).toISOString()
 const AT = new Date(NOW - 3600_000).toISOString()
@@ -99,6 +99,18 @@ test('source failure is visible and keeps the person’s earlier cutoff', async 
   await expect(page.getByRole('button', { name: 'Refresh' })).toBeEnabled()
   expect(data.writes).toEqual([])
   expect(data.preference().last_visit).toBe(START)
+})
+
+test('partial account allowances keep returned windows and report truncation', async ({ page }) => {
+  await setup(page)
+  const dashboard = usageDashboard('reported')
+  Object.assign(dashboard.allowance, { state: 'partial', windows: [usageAllowanceWindow()], truncated: true })
+  await page.route('**/api/usage/dashboard**', route => route.fulfill({ json: dashboard }))
+  await page.goto('/briefing')
+  await expect(page.getByRole('heading', { name: 'Accounts now' })).toBeVisible()
+  await expect(page.getByRole('link', { name: dashboard.allowance.windows[0]!.label, exact: true })).toBeVisible()
+  await expect(page.getByText('Account budget windows are truncated.', { exact: false })).toBeVisible()
+  await expect(page.getByText('No account budget windows recorded.')).toHaveCount(0)
 })
 
 test('autopilot deliveries and skipped human checks appear from the bounded event log', async ({ page }) => {
