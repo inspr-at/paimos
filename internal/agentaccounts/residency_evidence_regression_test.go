@@ -175,7 +175,7 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 	return tx, pid
 }
 
-func TestResidencyEvidencePairingAndTreePrecedeTenantLock(t *testing.T) {
+func TestResidencyEvidencePairingThenTenantBeforeTree(t *testing.T) {
 	reset(t)
 	owner, host, profile, token, mod := groupFixture(t)
 	a := groupAccount(t, mod, owner, host, token, "lock-order", "daemon", "Order", "test")
@@ -191,8 +191,8 @@ func TestResidencyEvidencePairingAndTreePrecedeTenantLock(t *testing.T) {
 	if w != nil || !strings.Contains(query, "FROM tenants") {
 		t.Fatalf("write did not stop at tenant fence: response=%v query=%s", w, query)
 	}
-	// A tenant waiter must already hold both preceding fences. Raw try-locks
-	// isolate this assertion from the production helper.
+	// A tenant waiter must own pairing and leave tree free. Raw try-locks
+	// isolate these exact order assertions from the production helper.
 	var free bool
 	if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID).Scan(&free); err != nil {
 		t.Fatal(err)
@@ -203,14 +203,22 @@ func TestResidencyEvidencePairingAndTreePrecedeTenantLock(t *testing.T) {
 	if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, owner.TenantID).Scan(&free); err != nil {
 		t.Fatal(err)
 	}
-	if free {
-		t.Fatal("tenant waiter has not acquired tree first")
+	if !free {
+		t.Fatal("tenant waiter acquired tree before tenant")
 	}
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if w := <-done; w.Code != 200 {
-		t.Fatalf("write failed after tenant released: %d %s", w.Code, w.Body.String())
+	select {
+	case w := <-done:
+		if w.Code != 200 {
+			t.Fatalf("write failed after tenant released: %d %s", w.Code, w.Body.String())
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if n := evidenceEventCount(t, owner); n != 1 {
+		t.Fatalf("evidence audit count %d, want 1", n)
 	}
 }
 
@@ -236,8 +244,8 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			blocker, blockerPID := evidenceBlocker(t, ctx)
-			// Hold tree: evidence must own pairing while queued here, and the
-			// next writer must queue behind that pairing owner without tenant.
+			// Hold tree: evidence must own pairing/tenant while queued here,
+			// and the next writer must queue behind pairing without tenant.
 			if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, owner.TenantID); err != nil {
 				t.Fatal(err)
 			}

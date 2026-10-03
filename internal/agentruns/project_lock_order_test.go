@@ -3,6 +3,7 @@ package agentruns_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,12 +16,14 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Exercise both project authorization helpers through their HTTP writers while
-// a real pairing caller owns pairing/tenant but has not yet acquired tree.
-// A tenant waiter must leave tree free, or the resumed caller deadlocks.
-func TestProjectWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
+// a real queue/node caller owns pairing/tree. Project writes take tenant before
+// waiting for tree; their non-key fence must let the caller finish its tenant FK
+// checks and audit inserts, without allowing a concurrent authority writer.
+func TestProjectWritesSerializeWithPairingTreeAndTenantFence(t *testing.T) {
 	for _, pairedWrite := range []string{"queue", "terminal-node"} {
 		for _, projectWrite := range []string{"membership", "attachment"} {
 			t.Run(pairedWrite+"/"+projectWrite, func(t *testing.T) {
@@ -40,7 +43,7 @@ func TestProjectWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
  VALUES($1,$2,repeat('ab',32),'fixture.txt','text/plain',7,$3) RETURNING id::text`, f.person.TenantID, ticket, f.person.ID).Scan(&attachment)
 				})
 				pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
-					return strings.Contains(query, "FROM tenants") && strings.Contains(query, "FOR NO KEY UPDATE")
+					return strings.Contains(query, "pg_advisory_xact_lock") && !strings.Contains(query, "aeon-pairing:")
 				})
 				ctx, cancel := context.WithCancel(ctx)
 				defer cancel()
@@ -73,25 +76,34 @@ func TestProjectWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 					method, path, body = "PATCH", "/api/attachments/"+attachment, `{"caption":"updated"}`
 				}
 				projectResponse, projectDone := start(method, path, body)
-				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "transactionid" {
-					t.Fatalf("project writer did not wait on the pairing caller's tenant fence: lock=%q", lock)
+				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "advisory" {
+					t.Fatalf("project writer did not wait on the pairing caller's tree fence: lock=%q", lock)
 				}
 				probe, err := f.d.Admin.Begin(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer probe.Rollback(context.Background())
-				var treeFree bool
-				if err := probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, 0))`, f.person.TenantID).Scan(&treeFree); err != nil {
-					t.Fatal(err)
-				}
-				if !treeFree {
-					t.Fatal("pairing caller or project waiter took tree before tenant")
-				}
 				if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, f.person.TenantID); err != nil {
 					t.Fatalf("tenant fence blocked foreign-key key-share: %v", err)
 				}
 				if err := probe.Rollback(ctx); err != nil {
+					t.Fatal(err)
+				}
+				// The project writer must already own its tenant fence while
+				// waiting for tree; verify the exact conflict instead of accepting
+				// any error, and use a new transaction after the successful probe.
+				fenceProbe, err := f.d.Admin.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer fenceProbe.Rollback(context.Background())
+				_, err = fenceProbe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, f.person.TenantID)
+				var pe *pgconn.PgError
+				if !errors.As(err, &pe) || pe.Code != "55P03" {
+					t.Fatalf("project tree waiter did not own the tenant fence: %v", err)
+				}
+				if err := fenceProbe.Rollback(ctx); err != nil {
 					t.Fatal(err)
 				}
 				barrier.Release()
