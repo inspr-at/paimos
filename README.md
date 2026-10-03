@@ -1978,18 +1978,17 @@ linking takes that lock before the alias lock (seed 532) and principal rows.
 These access-write fences use `FOR NO KEY UPDATE` so they serialize with each
 other and membership changes while allowing event writers' tenant FK checks.
 The last-owner trigger uses the same fence during binding removal/deactivation.
-Project-role assignment and attachment writes lock the tenant, then the tree
-(seed 0), before reading current grants and resource rows. Attachment request
+Project-role assignment and attachment writes lock the tree (seed 0), then the
+tenant, before reading current grants and resource rows. Attachment request
 bodies are read before these locks; the final transaction checks permission in
 the node's current project and commits metadata and audit events together.
 Attachment writes use a shared tenant lock: access edits are fenced while
 other resource writers can finish their tenant foreign-key checks. Retained
-principal import/backfill paths take tenant, tree, then alias locks in that order.
-Pairing, readiness and residency mutations acquire pairing, then the tenant access
-fence, then tree before account/resource rows, retaining final-transaction permission
+principal import/backfill paths take tree, tenant, then alias locks in that order.
+Pairing, readiness and residency mutations acquire pairing, tree, then the tenant
+access fence before account/resource rows, retaining final-transaction permission
 checks. Their tenant fence uses `FOR NO KEY UPDATE`; access-only writers may omit
-pairing/tree but must never acquire pairing after tenant or tenant after tree.
-Event counters remain last.
+pairing/tree but must never acquire them after tenant. Event counters remain last.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty

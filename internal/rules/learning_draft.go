@@ -15,7 +15,7 @@ import (
 )
 
 // PrepareWrite opens the rules write path inside a transaction the caller
-// already began. It takes the tenant row and then the tree advisory lock,
+// already began. It takes the tenant advisory lock and then the tenant row,
 // the same order as a rules HTTP write, and it does not publish.
 func PrepareWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)`, lockTimeout, statementTimeout); err != nil {
@@ -32,10 +32,10 @@ func PrepareWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	if err = enterRules(ctx, tx, owner, agent); err != nil {
 		return err
 	}
-	if err = lockAccess(ctx, tx, p.TenantID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
+	if err = lockAccess(ctx, tx, p.TenantID); err != nil {
 		return err
 	}
 	var creator any

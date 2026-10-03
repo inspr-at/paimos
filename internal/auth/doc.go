@@ -97,7 +97,7 @@
 // cannot fit completely in the daemon's 256 UTF-8 byte limit fails with 400;
 // no name or field is shortened or omitted to fit. Reactivation and project
 // member replacement require step-up, like deactivation and workspace roles.
-// Mark/unmark locks tenant, pairing, sorted computers, then key; event is last.
+// Mark/unmark locks pairing, tree, tenant, sorted computers, then key; event is last.
 //
 // DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
 // metadata; workstation_computer_id is a personal device link, located by
