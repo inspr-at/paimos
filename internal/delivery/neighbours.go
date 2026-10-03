@@ -130,7 +130,7 @@ func neighbours(ctx context.Context, tx pgx.Tx, c Container, anchor, excludeID s
 // ItemNeighbours returns at most two ranked rows around anchor, excluding the
 // moved item. Empty anchor selects the last and first rows of the container.
 // It retains tombstones/hidden rows so their occupied keys cannot be reused.
-// The transaction's RLS/visibility apply; a future writer must hold its project
+// The transaction's RLS/visibility apply; a writer must hold its project
 // fence before calling and through the final write to keep neighbours stable.
 func ItemNeighbours(ctx context.Context, tx pgx.Tx, c Container, anchor, excludeID string) (Neighbours, error) {
 	return neighbours(ctx, tx, c, anchor, excludeID, true)

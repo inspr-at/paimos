@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,5 +201,67 @@ func TestStoreFinalRequireTxAfterRevocationFence(t *testing.T) {
 				t.Fatal("revoked write persisted effects")
 			}
 		})
+	}
+}
+
+func TestStoreCloseSamplesClockAfterWaitingForCut(t *testing.T) {
+	f := newStoreFixture(t)
+	internal := f.addRelease(t, f.project, "REL-3", "internal", "frozen", "F")
+	f.item(t, "task", "TSK-1", "done", internal.ID, "V")
+	cut := f.freeze(t, f.release)
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool { return strings.Contains(query, "UPDATE project_releases SET state=") })
+	var clock atomic.Value
+	clock.Store(f.clock)
+	store := NewStore(pool).WithClock(func() time.Time { return clock.Load().(time.Time) })
+	type result struct {
+		r   Release
+		err error
+	}
+	first, second := make(chan result, 1), make(chan result, 1)
+	go func() {
+		r, err := store.Transition(ctx, f.person, TransitionRequest{ProjectID: f.project, ReleaseID: cut.ID, ExpectedRevision: cut.Revision, Action: "cut", VersionScheme: "legacy", Version: "1.0.0"})
+		first <- result{r, err}
+	}()
+	pid := barrier.Wait(t, ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r, err := store.Transition(ctx, f.person, TransitionRequest{ProjectID: f.project, ReleaseID: internal.ID, ExpectedRevision: internal.Revision, Action: "close"})
+		second <- result{r, err}
+	}()
+	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
+		t.Fatalf("close not waiting behind cut: %q", lock)
+	}
+	later := f.clock.Add(time.Hour)
+	clock.Store(later)
+	barrier.Release()
+	a, b := dbtest.Await(t, ctx, first), dbtest.Await(t, ctx, second)
+	if a.err != nil || b.err != nil {
+		t.Fatalf("transitions: %v %v", a.err, b.err)
+	}
+	if a.r.CutAt == nil || !a.r.CutAt.Equal(f.clock) || b.r.ReleasedAt == nil || !b.r.ReleasedAt.Equal(later) {
+		t.Fatalf("clock bound to transaction start: cut=%+v close=%+v", a.r, b.r)
+	}
+}
+
+func TestStoreCancellationAfterCASRollsBack(t *testing.T) {
+	f := newStoreFixture(t)
+	id := f.item(t, "ticket", "TK-1", "open", f.release, "V")
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool { return strings.Contains(query, "UPDATE ships_in SET release_node_id=") })
+	operation, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := NewStore(pool).Place(operation, f.person, f.project, []PlacementRequest{{ItemID: id, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1}})
+		done <- err
+	}()
+	barrier.Wait(t, ctx) // The mutation happened in the uncommitted transaction.
+	cancel()
+	barrier.Release()
+	if err := dbtest.Await(t, ctx, done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled write reported %v", err)
+	}
+	if got := f.placed(t, id); got.ReleaseID != f.release || got.Revision != 1 || f.scalar(t, `SELECT count(*) FROM events`) != 0 {
+		t.Fatalf("cancelled operation persisted %+v", got)
 	}
 }

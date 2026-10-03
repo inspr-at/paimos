@@ -68,7 +68,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"delivery/store.go:SetEntryDeadline":                "delivery.Mutation",
 		"delivery/placement.go:Place":                       "delivery.Mutation",
 		"delivery/transition.go:Transition":                 "delivery.Mutation",
-		"delivery/transition.go:Publish":                    "delivery.Mutation publication.PublishTx",
+		"delivery/transition.go:Publish":                    "delivery.Mutation publication.Settle",
 		"delivery/undo.go:undoPlacements":                   "delivery.fence",
 		"delivery/undo.go:undoRank":                         "delivery.fence",
 	}
@@ -214,8 +214,8 @@ func lockOrderSequence(t *testing.T, pkg string, body *ast.BlockStmt) []string {
 					label = "delivery.fence"
 				case "s.mutate":
 					label = "delivery.Mutation"
-				case "statusautopilot.PublishTx":
-					label = "publication.PublishTx"
+				case "proof.Settle":
+					label = "publication.Settle"
 				}
 			}
 			if label != "" {

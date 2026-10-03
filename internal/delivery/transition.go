@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/releasehistory"
-	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -115,6 +115,13 @@ func (s *Store) Transition(ctx context.Context, p tenant.Principal, in Transitio
 			}
 			if err = w.firstPublished(old); err != nil {
 				return err
+			}
+			var taken bool
+			if err = w.tx.QueryRow(w.ctx, `SELECT EXISTS(SELECT 1 FROM project_releases WHERE tenant_id=$1 AND project_node_id=$2 AND version=$3 AND release_node_id<>$4)`, p.TenantID, w.project, in.Version, old.ID).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return &Conflict{"version_taken", "This version is already reserved by a release, including abandoned releases."}
 			}
 		case "close":
 			if state != "frozen" || old.Visibility != "internal" {
@@ -300,6 +307,8 @@ func (w *write) rollover(source Release, action string) ([]Placement, []Placemen
 	if err != nil {
 		return nil, nil, err
 	}
+	// Locks use UUID order; maintenance retains the source's display order.
+	sort.Slice(ids, func(i, j int) bool { return placements[ids[i]].Rank < placements[ids[j]].Rank })
 	before, after := []Placement{}, []Placement{}
 	for _, id := range ids {
 		n, old := nodes[id], placements[id]
@@ -332,9 +341,17 @@ func (w *write) rollover(source Release, action string) ([]Placement, []Placemen
 			return nil, nil, err
 		}
 	}
-	if err = w.counts([]string{source.ID, successor.ID}); err != nil {
-		return nil, nil, err
+	if moving {
+		var count int
+		if err = w.tx.QueryRow(w.ctx, `SELECT count(*) FROM (SELECT 1 FROM ships_in WHERE tenant_id=$1 AND project_node_id=$2 AND release_node_id=$3 LIMIT 1001) bounded`, w.p.TenantID, w.project, successor.ID).Scan(&count); err != nil {
+			return nil, nil, err
+		}
+		if count > 1000 {
+			return nil, nil, ErrReleaseCapacity
+		}
 	}
+	// Global caps are checked after the source's final state is written: a
+	// terminal transition frees the very slot its new successor consumes.
 	return before, after, nil
 }
 
@@ -367,6 +384,10 @@ func (w *write) requireCompletion(release string) error {
 type Publication struct {
 	Basis, Reference string
 	Capture          func(context.Context, pgx.Tx, Release) error
+	// P4a supplies statusautopilot.PublishTx here. Keeping the consumer hook
+	// injected lets P4b's statusautopilot readers import delivery without an
+	// import cycle. It runs in this transaction before the store audit flush.
+	Settle func(context.Context, pgx.Tx, Release) error
 }
 type PreparePublication func(context.Context, pgx.Tx, tenant.Principal, Release) (Publication, error)
 
@@ -397,7 +418,7 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 		if err != nil {
 			return err
 		}
-		if proof.Capture == nil || proof.Basis != "history" && proof.Basis != "attested" || len(proof.Reference) > 512 || proof.Basis == "history" && proof.Reference != "" {
+		if proof.Capture == nil || proof.Settle == nil || proof.Basis != "history" && proof.Basis != "attested" || len(proof.Reference) > 512 || proof.Basis == "history" && proof.Reference != "" {
 			return errors.New("invalid publication proof")
 		}
 		if proof.Basis == "attested" && (p.Kind != tenant.Person || proof.Reference == "") {
@@ -412,7 +433,7 @@ func (s *Store) Publish(ctx context.Context, p tenant.Principal, in ReleaseEdit,
 		}
 		// PublishTx may re-enter the tree lock, already held exclusively from
 		// the start. It runs before our audit flush; no lock upgrade occurs.
-		if err = statusautopilot.PublishTx(w.ctx, w.tx, p.TenantID, old.ID); err != nil {
+		if err = proof.Settle(w.ctx, w.tx, out); err != nil {
 			return err
 		}
 		w.audit("release.state_changed", old.ID, old, out)

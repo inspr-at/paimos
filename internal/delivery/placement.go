@@ -220,6 +220,22 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 	now := w.now().UTC()
 	before, after := []Placement{}, []Placement{}
 	touched := []string{}
+	// Undo can transfer the unique expedite flag back to a different row.
+	// Clear relinquished flags first under the complete sorted lock batch;
+	// the final CAS below increments each revision exactly once and snapshots
+	// retain the true pre-undo values. Failure rolls this temporary step back.
+	for _, request := range requests {
+		old := placements[request.ItemID]
+		if restored, ok := restore[request.ItemID]; ok && old.Expedite && !restored.Expedite {
+			tag, e := w.tx.Exec(w.ctx, `UPDATE ships_in SET expedite=false WHERE tenant_id=$1 AND project_node_id=$2 AND item_node_id=$3 AND revision=$4`, w.p.TenantID, w.project, old.ItemID, old.Revision)
+			if e != nil {
+				return nil, nil, e
+			}
+			if tag.RowsAffected() != 1 {
+				return nil, nil, ErrRevisionChanged
+			}
+		}
+	}
 	for _, id := range sortedIDs(mapItemIDs(nodes)) {
 		n, old := nodes[id], placements[id]
 		if !old.Expedite || n.deleted == nil && !Completed(n.state) && !Cancelled(n.state) {
@@ -231,6 +247,10 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		}
 		if !clear {
 			continue
+		}
+		old, err = w.neighboursFor(old)
+		if err != nil {
+			return nil, nil, err
 		}
 		next := old
 		next.Expedite = false

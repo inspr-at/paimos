@@ -275,8 +275,12 @@ func (w *write) plan(visibility, title, key string) (Release, error) {
 		if sequence == 2147483647 {
 			return Release{}, &Conflict{"sequence_exhausted", "No further release sequence is available."}
 		}
-		if _, err = w.tx.Exec(w.ctx, `UPDATE project_delivery SET next_sequence=next_sequence+1,revision=revision+1 WHERE tenant_id=$1 AND project_node_id=$2 AND next_sequence=$3`, w.p.TenantID, w.project, sequence); err != nil {
-			return Release{}, err
+		tag, e := w.tx.Exec(w.ctx, `UPDATE project_delivery SET next_sequence=next_sequence+1,revision=revision+1 WHERE tenant_id=$1 AND project_node_id=$2 AND next_sequence=$3`, w.p.TenantID, w.project, sequence)
+		if e != nil {
+			return Release{}, e
+		}
+		if tag.RowsAffected() != 1 {
+			return Release{}, ErrRevisionChanged
 		}
 		w.nextSequence++
 	}

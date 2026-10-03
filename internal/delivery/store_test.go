@@ -626,6 +626,96 @@ func TestStoreUndoRestoresExpediteTransfer(t *testing.T) {
 	}
 }
 
+func TestStoreDeadlineEditorAndUndoAdmission(t *testing.T) {
+	f := newStoreFixture(t)
+	id := f.item(t, "ticket", "TK-1", "open", f.release, "V")
+	if _, err := f.store.SetEntryDeadline(t.Context(), f.agent, ReleaseEdit{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: 1}, &f.clock); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("agent edited deadline: %v", err)
+	}
+	if _, err := f.store.Place(t.Context(), f.agent, f.project, []PlacementRequest{{ItemID: id, ExpectedProjectID: f.project, ExpectedRevision: 1, ReleaseID: f.next, ExpectedReleaseRevision: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	e := f.lastEvent(t, "ships_in.changed")
+	r, err := f.store.SetEntryDeadline(t.Context(), f.person, ReleaseEdit{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: 2}, &f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.EntryClosesAt == nil || !r.EntryClosesAt.Equal(f.clock) || r.Revision != 3 {
+		t.Fatalf("deadline edit=%+v", r)
+	}
+	if err = f.undo(t, f.agent, e); !errors.Is(err, ErrEntryClosed) {
+		t.Fatalf("undo bypassed expired entry: %v", err)
+	}
+	frozen := f.freeze(t, f.release)
+	if _, err = f.store.SetEntryDeadline(t.Context(), f.person, ReleaseEdit{ProjectID: f.project, ReleaseID: f.release, ExpectedRevision: frozen.Revision}, nil); !errors.Is(err, ErrTransition) {
+		t.Fatalf("edited deadline outside planned: %v", err)
+	}
+}
+
+func TestStoreCutVersionNeverReusedAndSchemeReplayIsExact(t *testing.T) {
+	f := newStoreFixture(t)
+	r := f.freeze(t, f.release)
+	version := "261003120000.0.0"
+	cut, err := f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: r.Revision, Action: "cut", VersionScheme: "legacy", Version: version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: cut.Revision, Action: "cut", VersionScheme: "inspr-calver-3", Version: version}); !errors.Is(err, ErrTransition) {
+		t.Fatalf("cross-scheme replay: %v", err)
+	}
+	if _, err = f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: cut.Revision, Action: "abandon"}); err != nil {
+		t.Fatal(err)
+	}
+	next := f.freeze(t, f.next)
+	_, err = f.store.Transition(t.Context(), f.person, TransitionRequest{ProjectID: f.project, ReleaseID: next.ID, ExpectedRevision: next.Revision, Action: "cut", VersionScheme: "inspr-calver-3", Version: version})
+	var conflict *Conflict
+	if !errors.As(err, &conflict) || conflict.Code != "version_taken" {
+		t.Fatalf("abandoned version reuse: %v", err)
+	}
+	if got := f.releaseRow(t, next.ID); got.Version != "" || got.Revision != next.Revision {
+		t.Fatal("version refusal changed next release")
+	}
+}
+
+func TestStorePublicationFailureAndTransactionBounds(t *testing.T) {
+	f := newStoreFixture(t)
+	id := f.item(t, "ticket", "TK-1", "done", f.release, "V")
+	r := cutRelease(t, f, f.releaseRow(t, f.release))
+	sentinel := errors.New("capture failed")
+	prepare := func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r Release) (Publication, error) {
+		var lock, statement, transaction, idle string
+		if err := tx.QueryRow(ctx, `SELECT current_setting('lock_timeout'),current_setting('statement_timeout'),current_setting('transaction_timeout'),current_setting('idle_in_transaction_session_timeout')`).Scan(&lock, &statement, &transaction, &idle); err != nil {
+			return Publication{}, err
+		}
+		if lock != "5s" || statement != "30s" || transaction == "0" || idle != transaction {
+			t.Fatalf("missing transaction bounds: %s %s %s %s", lock, statement, transaction, idle)
+		}
+		proof, err := captureUnit(id, "TK-1")(ctx, tx, p, r)
+		if err != nil {
+			return Publication{}, err
+		}
+		capture := proof.Capture
+		proof.Capture = func(ctx context.Context, tx pgx.Tx, r Release) error {
+			if err := capture(ctx, tx, r); err != nil {
+				return err
+			}
+			return sentinel
+		}
+		return proof, nil
+	}
+	before := f.scalar(t, `SELECT count(*) FROM events`)
+	out, err := f.store.Publish(t.Context(), f.person, ReleaseEdit{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: r.Revision}, prepare)
+	if !errors.Is(err, sentinel) || out.ID != "" {
+		t.Fatalf("failed capture reported %+v %v", out, err)
+	}
+	if got := f.releaseRow(t, r.ID); got.State != "frozen" || got.Revision != r.Revision || f.scalar(t, `SELECT count(*) FROM project_release_note_snapshots`) != 0 || f.scalar(t, `SELECT count(*) FROM outcome_events WHERE kind='released'`) != 0 || f.scalar(t, `SELECT count(*) FROM events`) != before {
+		t.Fatal("failed capture persisted partial publication")
+	}
+	if _, err = f.store.Publish(t.Context(), f.agent, ReleaseEdit{ProjectID: f.project, ReleaseID: r.ID, ExpectedRevision: r.Revision}, captureUnit(id, "TK-1")); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("agent attested another product reservation: %v", err)
+	}
+}
+
 func TestProjectVersionTaggedGrammar(t *testing.T) {
 	for _, tc := range []struct {
 		scheme, version string
@@ -652,7 +742,11 @@ func captureUnit(id, key string) PreparePublication {
 		if !Completed(state) {
 			return Publication{}, ErrEmptyRelease
 		}
-		return Publication{Basis: "attested", Reference: "https://example.invalid/reservation", Capture: func(ctx context.Context, tx pgx.Tx, published Release) error {
+		return Publication{Basis: "attested", Reference: "https://example.invalid/reservation", Settle: func(ctx context.Context, tx pgx.Tx, _ Release) error {
+			// Exercise the real canonical exclusive re-entry that PublishTx
+			// performs, without coupling the shared source to its consumer.
+			return authz.LockProjectWrite(ctx, tx, p.TenantID)
+		}, Capture: func(ctx context.Context, tx pgx.Tx, published Release) error {
 			snapshot := map[string]any{"schema": "aeon.release-note-snapshot.v1", "tenant_id": p.TenantID, "project_node_id": r.ProjectID, "release_node_id": r.ID, "version": r.Version, "version_scheme": r.VersionScheme, "release_revision": published.Revision, "captured_at": published.ReleasedAt, "membership_source": "ships_in.release_node_id", "field_source": "nodes.fields", "frozen": true, "tickets": []any{map[string]any{"id": id, "key": key}}}
 			body, err := json.Marshal(snapshot)
 			if err != nil {
