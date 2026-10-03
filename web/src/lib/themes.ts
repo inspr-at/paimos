@@ -26,4 +26,4 @@ export const getTheme = (id: string) => request<ThemeRecord>(`/themes/${encodeUR
 export const selectTheme = (theme_id: string | null, revision: number) => request<ActiveTheme>('/me/theme', 'PUT', { theme_id, revision })
 export const updateTheme = (theme: ThemeRecord) => request<ThemeRecord>(`/themes/${encodeURIComponent(theme.id)}`, 'PATCH', { name: theme.name.trim(), values: theme.values, revision: theme.revision })
 export const duplicateTheme = (theme: ThemeRecord, name: string) => request<ThemeRecord>(`/themes/${encodeURIComponent(theme.id)}/duplicate`, 'POST', { name, scope: 'personal', revision: theme.revision })
-export const deleteTheme = (theme: ThemeRecord) => request<void>(`/themes/${encodeURIComponent(theme.id)}?revision=${theme.revision}`, 'DELETE')
+export const deleteTheme = (theme: Pick<ThemeRecord, 'id' | 'revision'>) => request<void>(`/themes/${encodeURIComponent(theme.id)}?revision=${theme.revision}`, 'DELETE')

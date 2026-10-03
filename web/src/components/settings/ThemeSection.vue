@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useThemeEditor } from '../../stores/themeEditor'
 import type { ThemeRecord } from '../../lib/themes'
 import { derivedDark } from '../../lib/themeColours'
@@ -9,64 +9,60 @@ import SettingsCard from './SettingsCard.vue'
 import ThemeColoursCard from './ThemeColoursCard.vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
+// Every change goes through the theme editor's state model; this component
+// only renders its selectors and sends its events.
 const editor = useThemeEditor()
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-const { items, active, draft, cursor, busy, error, message, conflict, dirty, valid, selfWrite } = editor
-const renaming = ref<string | null>(null), confirming = ref<ThemeRecord | null>(null)
-function scope(theme: ThemeRecord) { return theme.scope === 'default' || theme.id === active.value?.default_theme_id ? 'Workspace default' : theme.scope === 'workspace' ? 'Workspace' : 'Yours' }
+const { items, active, draft, cursor, busy, error, message, dirty, valid, confirming, renaming, canEdit, canSave, canCreate, canChoose, canDelete, canReload } = editor
 function rename(theme: ThemeRecord) {
-  if (busy.value || !editor.editable(theme) || draft.value?.id !== theme.id) return
-  renaming.value = theme.id
+  editor.rename(theme)
+  if (renaming.value !== theme.id) return
   void nextTick(() => { const input = document.querySelector<HTMLInputElement>('.theme-name-input'); input?.focus(); input?.select() })
 }
 function keys(event: KeyboardEvent) {
   if (event.key === 'Enter' && (isMac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); void editor.save() }
   if (event.key === 'Escape') {
     if (event.target instanceof HTMLInputElement) { event.preventDefault(); event.target.blur() }
-    else { confirming.value = null; renaming.value = null }
+    else { editor.cancelDelete(); editor.renameEnd() }
   }
 }
-async function remove() {
-  const captured = confirming.value
-  if (!captured) return
-  await editor.remove(captured)
-  if (confirming.value?.id === captured.id && !error.value) confirming.value = null
-}
-watch(() => active.value?.theme.id, () => { renaming.value = null; confirming.value = null })
+function access(theme: ThemeRecord) { const owner = editor.ownership(theme); return owner.access ? `${owner.label} · ${owner.access}` : owner.label }
+onMounted(() => { void editor.enter() })
+onBeforeUnmount(() => editor.leave())
 </script>
 <template>
   <div class="theme-section" @keydown="keys">
     <SettingsCard title="Themes" icon="layers" anchor="themes">
       <template #lead>Choose the theme you work in. Duplicate any theme to make your own; only you see your themes.</template>
-      <template #aside><div class="theme-list-actions"><span class="pagination-slot"><button v-if="cursor" type="button" class="btn sm" :disabled="busy" @click="editor.more">Load more themes</button><span v-else class="btn sm pagination-placeholder" aria-hidden="true">Load more themes</span></span><button type="button" class="btn sm" :disabled="busy || dirty || !selfWrite" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></div></template>
-      <div class="theme-status" :class="{ error: !!error }"><p :role="error ? 'alert' : 'status'">{{ error || message || (busy ? 'Loading…' : dirty ? 'Save or discard your edits before choosing another theme.' : 'Everyone starts with the workspace default.') }}</p><button type="button" class="text-link" :style="{ visibility: error && !dirty ? 'visible' : 'hidden' }" :disabled="busy || !error || dirty" @click="editor.load">Reload themes</button></div>
+      <template #aside><div class="theme-list-actions"><span class="pagination-slot"><button v-if="cursor" type="button" class="btn sm" :disabled="busy" @click="editor.more">Load more themes</button><span v-else class="btn sm pagination-placeholder" aria-hidden="true">Load more themes</span></span><button type="button" class="btn sm" :disabled="!canCreate" @click="editor.newTheme"><AppIcon name="plus" :size="13" />New theme</button></div></template>
+      <div class="theme-status" :class="{ error: !!error }"><p :role="error ? 'alert' : 'status'">{{ error || message || (busy ? 'Loading…' : dirty ? 'Save or discard your edits before choosing another theme.' : 'Everyone starts with the workspace default.') }}</p><button type="button" class="text-link" :style="{ visibility: error && canReload ? 'visible' : 'hidden' }" :disabled="!error || !canReload" @click="editor.load">Reload themes</button></div>
       <div class="theme-list" aria-label="Themes list">
         <div v-for="theme in items" :key="theme.id" class="theme-row" :class="{ selected: theme.id === active?.theme.id }" :data-theme-id="theme.id">
-          <button type="button" class="theme-choice" :inert="confirming?.id === theme.id" :aria-label="`Use ${theme.name}`" :aria-pressed="theme.id === active?.theme.id" :disabled="busy || dirty || !selfWrite" @click="editor.choose(theme)">
+          <button type="button" class="theme-choice" :inert="confirming?.id === theme.id" :aria-label="`Use ${theme.name}`" :aria-pressed="theme.id === active?.theme.id" :disabled="!canChoose" @click="editor.choose(theme)">
             <span class="theme-dots" aria-hidden="true"><i :style="{ background: theme.values.primary.light }" /><i :style="{ background: theme.values.primary.dark ?? derivedDark(theme.values.primary.light) }" /><i :style="{ background: theme.values.secondary.light }" /></span><span class="choice-indicator" aria-hidden="true"><AppIcon v-if="theme.id === active?.theme.id" name="check" :size="14" /></span>
           </button>
           <div class="theme-details" :inert="confirming?.id === theme.id">
-            <input v-if="renaming === theme.id && draft?.id === theme.id" v-model="draft.name" class="theme-name-input" maxlength="80" aria-label="Theme name" :disabled="busy" @blur="renaming = null" />
+            <input v-if="renaming === theme.id && draft?.id === theme.id" :value="draft.name" class="theme-name-input" maxlength="80" aria-label="Theme name" :disabled="busy" @input="editor.update(next => next.name = ($event.target as HTMLInputElement).value)" @blur="editor.renameEnd" />
             <button v-else type="button" class="theme-name" :data-tip="draft?.id === theme.id ? draft.name : theme.name" @click="toast(draft?.id === theme.id ? draft.name : theme.name)">{{ draft?.id === theme.id ? draft.name || 'Untitled theme' : theme.name }}</button>
-            <span class="scope">{{ scope(theme) }}{{ theme.scope !== 'personal' ? editor.editable(theme) ? ' · you manage it' : ' · read-only' : '' }}</span>
+            <span class="scope">{{ access(theme) }}</span>
           </div>
           <div class="row-actions" :inert="confirming?.id === theme.id">
-            <button type="button" class="text-link" :aria-label="`Duplicate ${theme.name}`" :disabled="busy || dirty || !selfWrite" @click="editor.duplicate(theme)">Duplicate</button>
-            <button v-if="editor.editable(theme)" type="button" class="text-link" :aria-label="`Rename ${theme.name}`" :disabled="busy || draft?.id !== theme.id" @click="rename(theme)">Rename</button>
-            <button v-if="editor.editable(theme) && theme.id !== active?.default_theme_id" type="button" class="text-link" :aria-label="`Delete ${theme.name}`" :disabled="busy || dirty" @click="confirming = JSON.parse(JSON.stringify(theme))">Delete</button>
+            <button type="button" class="text-link" :aria-label="`Duplicate ${theme.name}`" :disabled="!editor.canDuplicate(theme)" @click="editor.duplicate(theme)">Duplicate</button>
+            <button v-if="editor.editable(theme)" type="button" class="text-link" :aria-label="`Rename ${theme.name}`" :disabled="!editor.canRename(theme)" @click="rename(theme)">Rename</button>
+            <button v-if="editor.offersDelete(theme)" type="button" class="text-link" :aria-label="`Delete ${theme.name}`" :disabled="!editor.canConfirmDelete(theme)" @click="editor.confirmDelete(theme)">Delete</button>
           </div>
           <div v-if="confirming?.id === theme.id" class="delete-confirm" role="group" aria-label="Delete theme confirmation">
-            <div class="confirm-actions"><button type="button" class="btn danger" :disabled="busy || dirty" @click="remove">Delete theme</button><button type="button" class="btn" :disabled="busy" @click="confirming = null">Keep theme</button></div>
+            <div class="confirm-actions"><button type="button" class="btn danger" :disabled="!canDelete" @click="editor.remove">Delete theme</button><button type="button" class="btn" :disabled="busy" @click="editor.cancelDelete">Keep theme</button></div>
             <p>Delete <strong>{{ confirming.name }}</strong>? People using it return to the workspace default.</p>
           </div>
         </div>
       </div>
     </SettingsCard>
-    <ThemeColoursCard v-if="draft" :draft="draft" :editable="editor.editable(draft) && !busy && !conflict" @change="draft = $event" />
+    <ThemeColoursCard v-if="draft" :draft="draft" :editable="canEdit" @change="editor.edit" />
     <Teleport to="body">
       <div v-if="dirty && draft" class="theme-savebar" role="region" aria-label="Unsaved theme changes" @keydown="keys">
         <p>Unsaved changes to <strong>{{ draft.name || 'Untitled theme' }}</strong><span v-if="!valid"> · Enter a name of up to 80 characters.</span></p>
-        <div><button type="button" class="btn" :disabled="busy" @click="editor.discard">Discard</button><button type="button" class="btn primary" :aria-keyshortcuts="isMac ? 'Meta+Enter' : 'Control+Enter'" :disabled="busy || !valid || !editor.editable(draft) || conflict" @click="editor.save">Save<KeyCap k="mod" /><KeyCap k="enter" /></button></div>
+        <div><button type="button" class="btn" :disabled="busy" @click="editor.discard">Discard</button><button type="button" class="btn primary" :aria-keyshortcuts="isMac ? 'Meta+Enter' : 'Control+Enter'" :disabled="!canSave" @click="editor.save">Save<KeyCap k="mod" /><KeyCap k="enter" /></button></div>
       </div>
     </Teleport>
   </div>
