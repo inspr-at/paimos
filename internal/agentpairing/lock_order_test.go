@@ -179,7 +179,9 @@ func lockOrderSequence(t *testing.T, pkg string, body *ast.BlockStmt) []string {
 				"LockProjectMutation": "project.Mutation",
 				"LockProjectWrite":    "project.Write", "authz.LockProjectMutation": "project.Mutation",
 				"authz.LockProjectWrite": "project.Write", "m.authorizeMutation": "access.Mutation",
-				"m.authorizeProjectMutation": "project.Authorize",
+				"m.authorizeProjectMutation":         "project.Authorize",
+				"operatoractor.Ensure":               "operator.Ensure",
+				"operatoractor.EnsureWithProduction": "operator.EnsureWithProduction",
 			}[name]
 			if pkg == "agentpairing" {
 				if name == "Lock" {
