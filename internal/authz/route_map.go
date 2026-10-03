@@ -24,6 +24,16 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
+	"GET /api/work-kinds":                                        "models.read",
+	"POST /api/work-kinds":                                       "model_prefs.manage",
+	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",
+	"DELETE /api/work-kinds/{kindId}":                            "model_prefs.manage",
+	"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
+
 	"GET /api/agents/plan":                         "agents.plan.read",
 	"GET /api/recurrences":                         "recurrences.manage",
 	"POST /api/recurrences":                        "recurrences.manage",

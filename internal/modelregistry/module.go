@@ -20,8 +20,9 @@ import (
 
 // Module serves /api/models.
 type Module struct {
-	pool          *pgxpool.Pool
-	routesTimeout time.Duration
+	pool            *pgxpool.Pool
+	routesTimeout   time.Duration
+	validationClock func(context.Context, pgx.Tx) (time.Time, error)
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -34,6 +35,15 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 // Mount registers model registry routes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/model-preferences", boundedPreferenceHandler(m.preferences))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("PUT /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}/rows/{kindId}", boundedPreferenceHandler(m.writePreferences))
+	mux.HandleFunc("GET /api/work-kinds", boundedPreferenceHandler(m.listWorkKinds))
+	mux.HandleFunc("POST /api/work-kinds", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("PATCH /api/work-kinds/{kindId}", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("DELETE /api/work-kinds/{kindId}", boundedPreferenceHandler(m.writeWorkKind))
+	mux.HandleFunc("POST /api/work-kinds/{kindId}/restore", boundedPreferenceHandler(m.writeWorkKind))
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)
@@ -137,64 +147,6 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusCreated, out)
-}
-
-func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	r = r.WithContext(ctx)
-
-	if err := m.requirePermission(r, p, "models.manage"); err != nil {
-		writeErr(w, err)
-		return
-	}
-	var in []Route
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	var err error
-	in, err = normalizeRouteStructure(in)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	var out []Route
-	if err := PrepareCatalog(ctx, m.pool, p, CatalogPreparation{Operation: CatalogManage, Request: r}); err != nil {
-		writeErr(w, err)
-		return
-	}
-	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
-			return err
-		}
-		current, err := workorders.CurrentKeyPrincipal(r, tx, p, "models.manage")
-		if err != nil {
-			return err
-		}
-		if err = authz.RequireTx(r.Context(), tx, current, "models.manage", authz.Scope{}); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id',true),0))`); err != nil {
-			return err
-		}
-
-		now, err := dbNow(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		out, err = replaceRoutes(r.Context(), tx, p, in, now)
-		return err
-	})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, out)
 }
 
 func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permission string) error {

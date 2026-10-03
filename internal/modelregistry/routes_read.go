@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,6 +29,9 @@ type routesRead struct {
 	Truncated           bool           `json:"truncated"`
 	DispatchFamilyOrder []string       `json:"dispatch_family_order"`
 	ReviewFloors        []string       `json:"review_floors"`
+	Routes              []Route        `json:"routes"`
+	EditToken           *string        `json:"edit_token"`
+	CanEdit             bool           `json:"can_edit"`
 }
 
 func dispatchFamilyOrder() []string {
@@ -66,8 +70,16 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 		if err := db.SetLocalStatementTimeout(ctx, tx, timeout); err != nil {
 			return err
 		}
-		if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{}); err != nil {
+		current, err := currentModelReader(r.WithContext(ctx), tx, p)
+		if err != nil {
 			return err
+		}
+		if current.Kind == tenant.Person {
+			err := authz.RequireTx(ctx, tx, current, "models.manage", authz.Scope{})
+			if err != nil && !errors.Is(err, authz.ErrForbidden) {
+				return err
+			}
+			out.CanEdit = err == nil
 		}
 		// One statement supplies both setup and the capped ladder under the same
 		// snapshot. A LEFT JOIN retains setup even if this role has no steps.
@@ -119,6 +131,16 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	out.Truncated = len(out.Steps) > routesDisplayLimit
 	if out.Truncated {
 		out.Steps = out.Steps[:routesDisplayLimit]
+	}
+	out.Routes = []Route{}
+	for _, step := range out.Steps {
+		out.Routes = append(out.Routes, step.Route)
+	}
+	out.CanEdit = out.CanEdit && out.Setup && !out.Truncated
+	if !out.Truncated {
+		token := routeEditToken(out.Role, out.Routes)
+		out.EditToken = &token
+		w.Header().Set("ETag", token)
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
 }

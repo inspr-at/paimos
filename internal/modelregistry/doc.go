@@ -23,6 +23,46 @@
 // canonical-person restrictions. Preference/placement documents use read-only
 // repeatable-read snapshots after preparation; ladder GET never initializes.
 //
+// Editor contract (AEON-633a/b/i): role-qualified PUT replaces only that role
+// and requires the GET's quoted full SHA-256 If-Match token. The read's rows and
+// token come from one statement; truncated reads have no token. Whole-tenant
+// PUT keeps its legacy semantics. Both writers reauthorize models.manage under
+// tenant then registry fences, bound rows to 50/role and 250/tenant (including
+// the complete audit snapshots), and sample clock_timestamp after the fences.
+// Unchanged stored expired holds survive reordering; expiry_policy=clear in
+// conditional compensation normalizes expired desired holds to available.
+// Confirmation is the actual stored array and ETag; equal content is a no-op.
+// Package 633g owns D1 B ordering-mode persistence, token/GET/audit extension
+// and managed-dispatch activation. This slice rejects order_mode until that
+// integration lands; it does not claim to activate saved managed order.
+//
+// Every preference person-level PUT/DELETE now requires If-Prefs-Person from
+// the coherent GET. This is a client compatibility change: all You writers,
+// including Reset/Undo, must supply it before enablement. The header only
+// compares the active canonical caller; it never chooses the mutation target.
+// Default/Project accept omitted headers for their explicit scope; supplied
+// headers are checked. All confirmations include person_id and level revision.
+// Full GET still needs workspace models.read plus supplied project nodes.read.
+// Project-only model_prefs.manage plus nodes.read retains direct scoped writes,
+// with no model catalog/work-kind read grant. Agent middleware ceilings remain.
+//
+// Policies' closed mutation set is row PUT, row DELETE, scalar-only level PUT.
+// Scalar bodies carry residency/residency_locked/prefs_locked and omit rows;
+// row bodies preserve both buckets and lock. Row Reset/Undo touches one active
+// kind, never level DELETE or visible-row replacement. Archived kinds stay in
+// storage but outside visible source audit projections; kind retirement shares
+// the preference fence and refuses a stale row action with unknown_kind.
+// Legacy whole-level API writes remain destructive and are not Policies Undo.
+// Residency changes retain stricter run stamps; restamp events flush only after
+// resource writes/response loading, before the final preference event.
+//
+// Caller inventory: searches of web/src and internal/cli for model-preferences
+// and work-kinds find no writer in this stacked base. origin/main's model prefs
+// CLI is read-only. New controller/editor callers belong to 633c/e and must
+// implement the above header and row/scalar payload constraints; existing API
+// and fixture callers must migrate You mutations. No whole-level Reset is
+// implicitly enabled by a reused component.
+//
 // Resolve walks the stored ladder. review-gate requires author_family and
 // skips that family.
 // Author families accept claude, codex and grok as aliases for anthropic,

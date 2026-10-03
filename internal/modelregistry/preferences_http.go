@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -241,4 +242,36 @@ func (m *Module) readSnapshot(ctx context.Context, tenantID string, fn func(pgx.
 		}
 		return fn(tx)
 	})
+}
+
+// preferenceFence also serializes canonical-person links and kind retirement.
+func preferenceFence(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-prefs:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+func requestedRevision(r *http.Request) (int64, error) {
+	values := r.URL.Query()["revision"]
+	if len(values) != 1 || len(values[0]) > 19 {
+		return 0, prefFail(400, "revision_required")
+	}
+	n, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil || n < 0 {
+		return 0, prefFail(400, "revision_required")
+	}
+	return n, nil
+}
+
+func levelIndex(level string) int {
+	switch level {
+	case "default":
+		return 0
+	case "person":
+		return 1
+	case "project":
+		return 2
+	}
+	return -1
 }

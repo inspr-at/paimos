@@ -295,22 +295,24 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 	return out, nil
 }
 
+// replaceRoutes is the transaction-injected legacy fixture helper. Production
+// writes enter through Module.replace with final authority and shared fences.
 func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if incoming == nil {
-		return nil, fail(http.StatusBadRequest, "routes must be an array")
+	if err := routeBounds(incoming); err != nil {
+		return nil, err
 	}
 	if err := requireCatalog(ctx, tx); err != nil {
 		return nil, err
 	}
-	normalized, err := normalizeRoutes(incoming, now)
+	before, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeStoredRoutes(incoming, before, now, false)
 	if err != nil {
 		return nil, err
 	}
 	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	before, err := listRoutes(ctx, tx)
-	if err != nil {
 		return nil, err
 	}
 	if routesEqual(before, normalized) {
@@ -324,10 +326,14 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 			return nil, err
 		}
 	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, normalized); err != nil {
+	after, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
 		return nil, err
 	}
-	return normalized, nil
+	if err := writeEvent(ctx, tx, p, evRoutes, before, after); err != nil {
+		return nil, err
+	}
+	return after, nil
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
