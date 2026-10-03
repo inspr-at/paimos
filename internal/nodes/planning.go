@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Planning columns (AEON-329). A list row carries the model its role and area
@@ -63,13 +64,16 @@ type planningView struct {
 type planningRoute struct {
 	Provider string `json:"provider,omitempty"`
 	modelregistry.Display
-	EffortLevel *int   `json:"effort_level"`
-	Label       string `json:"label"`
-	Profile     string `json:"profile"`
-	Harness     string `json:"harness"`
-	Model       string `json:"model"`
-	Effort      string `json:"effort"`
-	Revision    string `json:"revision"`
+	EffortLevel   *int   `json:"effort_level"`
+	Label         string `json:"label"`
+	Profile       string `json:"profile"`
+	Harness       string `json:"harness"`
+	Model         string `json:"model"`
+	Effort        string `json:"effort"`
+	Revision      string `json:"revision"`
+	SetBy         string `json:"set_by,omitempty"`
+	FollowsLatest bool   `json:"follows_latest,omitempty"`
+	Pinned        bool   `json:"pinned,omitempty"`
 }
 type planningTokens struct {
 	Spent  *int64 `json:"spent"`
@@ -138,16 +142,29 @@ func planningOpenWhere(c string) string {
 // planningSubtreeSQL lists (root, id) for each root in the relation roots
 // (one uuid column named root): the root, its open or done ticket and task
 // children, and theirs. Needs plan_states in scope.
-func planningSubtreeSQL(roots string) string {
+func planningSubtreeSQL(roots string, page bool) string {
 	tenant := `current_setting('aeon.tenant_id')::uuid`
+	child := func(parent, alias string) string {
+		if !page {
+			// Whole-list sorts keep batch joins; listNodes disables nested loops for
+			// their usage read, so a per-parent fence would defeat that plan.
+			return ` JOIN nodes ` + alias + ` ON ` + alias + `.tenant_id=` + tenant + ` AND ` + alias + `.parent_id=` + parent
+		}
+		// Keep page lookups dependent on their selected parent. Filter live rows
+		// here so the partial parent index applies; its order also handles skewed
+		// parent estimates without rescanning the tenant's tickets per page root.
+		return ` CROSS JOIN LATERAL (
+   SELECT id,tenant_id,kind_id,state,deleted_at FROM nodes
+   WHERE tenant_id=` + tenant + ` AND parent_id=` + parent + ` AND deleted_at IS NULL
+   ORDER BY updated_at DESC OFFSET 0
+  ) ` + alias
+	}
 	return `SELECT r.root, r.root AS id FROM (` + roots + `) r
-    UNION ALL SELECT r.root, c.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
-    WHERE ` + planningOpenWhere("c") + `
-    UNION ALL SELECT r.root, g.id FROM (` + roots + `) r
-    JOIN nodes c ON c.tenant_id=` + tenant + ` AND c.parent_id=r.root` + planningOpenChild("c") + `
-    JOIN nodes g ON g.tenant_id=` + tenant + ` AND g.parent_id=c.id` + planningOpenChild("g") + `
-    WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
+ UNION ALL SELECT r.root, c.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") + `
+ WHERE ` + planningOpenWhere("c") + `
+ UNION ALL SELECT r.root, g.id FROM (` + roots + `) r` + child("r.root", "c") + planningOpenChild("c") +
+		child("c.id", "g") + planningOpenChild("g") + `
+ WHERE ` + planningOpenWhere("c") + ` AND ` + planningOpenWhere("g")
 }
 
 // planningUsageFrom joins the sessions of subtree t (columns root, id) to
@@ -173,17 +190,27 @@ func planningPricesCTE() string {
 // any route (no area, or a role the registry did not resolve). Paid is 0 under
 // a subscription, the list rate when billed per use, and null when unknown.
 type planSortRate struct {
-	Role   string   `json:"role"`
-	Tokens float64  `json:"tokens_per_hour"`
-	List   *float64 `json:"list_per_hour"`
-	Paid   *float64 `json:"paid_per_hour"`
+	Role      string   `json:"role"`
+	Placement string   `json:"placement"`
+	Person    string   `json:"person"`
+	Project   string   `json:"project"`
+	Kind      string   `json:"kind"`
+	Bucket    string   `json:"bucket"`
+	Residency string   `json:"residency"`
+	Tokens    float64  `json:"tokens_per_hour"`
+	List      *float64 `json:"list_per_hour"`
+	Paid      *float64 `json:"paid_per_hour"`
 }
 
-// preparePlanningSort resolves each role once and stores the rates the list
+// preparePlanningSort resolves each placement and stores the rates the list
 // statement multiplies. The sort key itself is SQL over the filtered rows, so
 // a tokens or cost sort does not build a planning view per matching row.
 func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
-	raw, err := planningRates(ctx, tx, q.seen)
+	seeds, err := filteredPlanPlacements(ctx, tx, *q)
+	if err != nil {
+		return err
+	}
+	raw, err := planningRates(ctx, tx, q.seen, seeds)
 	if err != nil {
 		return err
 	}
@@ -193,11 +220,7 @@ func preparePlanningSort(ctx context.Context, tx pgx.Tx, q *listQuery) error {
 
 // planningRates is the JSON the cost statements multiply. Sort and display
 // both read it, so an estimate is one product, not two.
-func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen) (json.RawMessage, error) {
-	var seeds []planRow
-	for _, role := range []string{"scout", "mechanical", "build", "build-hard", "review-gate"} {
-		seeds = append(seeds, planRow{role: role, area: "backend"})
-	}
+func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen, seeds []planRow) (json.RawMessage, error) {
 	routes, err := resolvePlanRoutes(ctx, tx, seeds)
 	if err != nil {
 		return nil, err
@@ -214,13 +237,26 @@ func planningRates(ctx context.Context, tx pgx.Tx, seen assigneeSeen) (json.RawM
 	}
 	pl := &planner{routes: routes, samples: samples, billing: billing, calibrations: map[routeKey]calibration{}}
 	anyRoute := pl.calibration(nil)
-	rates := []planSortRate{{Role: "", Tokens: anyRoute.tokensPerHour, List: anyRoute.listPerHour}}
-	for role, route := range routes {
+	viewer := ""
+	if person := planningViewer(ctx, tx); person != nil {
+		viewer = *person
+	}
+	rates := []planSortRate{{Role: "", Person: viewer, Tokens: anyRoute.tokensPerHour, List: anyRoute.listPerHour}}
+	placements := map[string]planRow{}
+	for _, seed := range seeds {
+		placements[seed.placementKey()] = seed
+	}
+	for key, route := range routes {
 		if route.view == nil {
 			continue
 		}
 		c := pl.calibration(route)
-		rate := planSortRate{Role: role, Tokens: c.tokensPerHour, List: c.listPerHour}
+		seed := placements[key]
+		kind := seed.area
+		if kind == "" {
+			kind = "other"
+		}
+		rate := planSortRate{Placement: key, Project: seed.project, Person: seed.person, Kind: kind, Bucket: seed.bucket, Role: seed.role, Residency: seed.residency, Tokens: c.tokensPerHour, List: c.listPerHour}
 		switch billing[route.view.Harness].mode {
 		case "subscription":
 			zero := 0.0
@@ -243,8 +279,9 @@ func sortsByPlanningValue(q listQuery) bool {
 
 // planRow is one page row, or one open or done child of a page epic.
 type planRow struct {
-	id, parent, kind, role, area string
-	hours                        *float64
+	id, parent, kind, role, area       string
+	project, person, bucket, residency string
+	hours                              *float64
 }
 
 // planUsage accumulates usage rows for one root.
@@ -584,19 +621,20 @@ type planPrice struct {
 	Input, Output, Cached *string
 }
 
-// planRoute is one resolved role, shared by every row with that role. view
-// is nil when the registry selected nothing.
+// planRoute is one resolved placement, shared by rows with the same project,
+// person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
 	price    *planPrice
 	view     *planningRoute
 	key      routeKey
 	mixPrice *float64
+	gap      string
 }
 
 // planBilling is how a harness was billed most recently.
 type planBilling struct{ mode, plan string }
 
-// planner holds what one list page's estimates share: the resolved roles, the
+// planner holds what one list page's estimates share: the resolved placements, the
 // calibration samples and each routed harness's billing.
 type planner struct {
 	routes       map[string]*planRoute
@@ -618,8 +656,8 @@ type planEstimate struct {
 // route is the resolved route for a row, or nil when the role, the area or
 // the registry leaves none (the estimate then uses any route).
 func (pl *planner) route(r planRow) *planRoute {
-	route := pl.routes[r.role]
-	if route == nil || route.view == nil || r.area == "" || !modelregistry.KnownRouteArea(r.area) {
+	route := pl.routes[r.placementKey()]
+	if route == nil || route.view == nil || route.gap != "" {
 		return nil
 	}
 	return route
@@ -704,11 +742,11 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 		}
 	} else {
 		if self.role != "" {
-			switch route := pl.routes[self.role]; {
-			case self.area == "" || !modelregistry.KnownRouteArea(self.area):
+			switch route := pl.routes[self.placementKey()]; {
+			case route == nil && self.area == "":
 				view.RouteGap = "area"
-			case self.role == "review-gate":
-				view.RouteGap = "review_gate"
+			case route != nil && route.gap != "":
+				view.RouteGap = route.gap
 			case route == nil || route.view == nil:
 				view.RouteGap = "registry"
 			default:
@@ -784,7 +822,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := loadPlanRows(ctx, tx, ids)
+	rows, err := loadPlanRows(ctx, tx, ids, planningViewer(ctx, tx))
 	if err != nil {
 		return nil, err
 	}
@@ -812,7 +850,7 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 		}
 	}
 	if money == nil {
-		money, err = loadPlanMicros(ctx, tx, ids, seen)
+		money, err = loadPlanMicros(ctx, tx, ids, seen, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -857,12 +895,12 @@ func loadPlanning(ctx context.Context, tx pgx.Tx, items []listItem, seen assigne
 
 // loadPlanMicros reads list and paid micro-dollars for the page with the same
 // rounding the cost sort uses.
-func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen) (map[string]planMicros, error) {
+func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeSeen, seeds []planRow) (map[string]planMicros, error) {
 	out := map[string]planMicros{}
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rates, err := planningRates(ctx, tx, seen)
+	rates, err := planningRates(ctx, tx, seen, seeds)
 	if err != nil {
 		return nil, err
 	}
@@ -901,19 +939,19 @@ func loadPlanMicros(ctx context.Context, tx pgx.Tx, ids []string, seen assigneeS
 	return out, rows.Err()
 }
 
-// loadPlanRows reads role, area and hours for the page rows and for the open
-// and done ticket and task children of page epics.
-func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string) ([]planRow, error) {
+// loadPlanRows reads each row's placement and hours, including the open and
+// done ticket and task children of page epics. A nil viewer is the snapshot path.
+func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string, viewer *string) ([]planRow, error) {
 	hours := estimateHoursSQL("n.fields")
 	rows, err := tx.Query(ctx, `WITH `+planningStatesCTE()+`
-    SELECT n.id::text, '' AS parent, k.slug, coalesce(n.fields->>'route_role',''), coalesce(n.fields->>'area',''), `+hours+`::float8
-    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+    SELECT n.id::text, '' AS parent, k.slug, `+hours+`::float8, `+planPlacementColumns("$2")+`
+    FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id`+assigneeJoin+`
     WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL
     UNION ALL
-    SELECT n.id::text, e.id::text, nk.slug, coalesce(n.fields->>'route_role',''), coalesce(n.fields->>'area',''), `+hours+`::float8
+    SELECT n.id::text, e.id::text, nk.slug, `+hours+`::float8, `+planPlacementColumns("$2")+`
     FROM nodes e JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id AND ek.slug='epic'
-    JOIN nodes n ON n.tenant_id=e.tenant_id AND n.parent_id=e.id`+planningOpenChild("n")+`
-    WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ANY($1::uuid[]) AND `+planningOpenWhere("n"), ids)
+    JOIN nodes n ON n.tenant_id=e.tenant_id AND n.parent_id=e.id`+planningOpenChild("n")+assigneeJoin+`
+    WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ANY($1::uuid[]) AND `+planningOpenWhere("n"), ids, viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -921,7 +959,7 @@ func loadPlanRows(ctx context.Context, tx pgx.Tx, ids []string) ([]planRow, erro
 	var out []planRow
 	for rows.Next() {
 		var r planRow
-		if err := rows.Scan(&r.id, &r.parent, &r.kind, &r.role, &r.area, &r.hours); err != nil {
+		if err := rows.Scan(&r.id, &r.parent, &r.kind, &r.hours, &r.project, &r.person, &r.area, &r.bucket, &r.role, &r.residency); err != nil {
 			return nil, err
 		}
 		r.role, r.area = strings.TrimSpace(r.role), strings.TrimSpace(r.area)
@@ -969,7 +1007,7 @@ func loadPlanUsage(ctx context.Context, tx pgx.Tx, ids []string, cost func(strin
 func planUsageSQL() string {
 	return `WITH ` + planningStatesCTE() + `, ` + planningPricesCTE() + `
     SELECT t.root::text, s.project_id::text, ` + usageLineColumns + `
-    FROM (` + planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`) + `) t` + planningUsageFrom
+    FROM (` + planningSubtreeSQL(`SELECT unnest($1::uuid[]) AS root`, true) + `) t` + planningUsageFrom
 }
 
 // Hidden source costs cannot enter either spent figures or calibration rates.
@@ -978,30 +1016,66 @@ func (l *usageLine) hideCost() {
 	l.rateIn, l.rateOut, l.rateCached = nil, nil, nil
 }
 
-// resolvePlanRoutes resolves each role once through the model registry.
+type planRouteCacheKey struct{}
+
+// Resolve once per placement within the list's read transaction. Sort, totals,
+// and page display share the same decision and price row.
 func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[string]*planRoute, error) {
 	out := map[string]*planRoute{}
+	cache, _ := ctx.Value(planRouteCacheKey{}).(map[string]*planRoute)
 	revision := ""
 	now := time.Now()
 	for _, r := range rows {
-		if r.role == "" || out[r.role] != nil || !modelregistry.KnownRouteRole(r.role) {
+		if r.role == "" || out[r.placementKey()] != nil || !modelregistry.KnownRouteRole(r.role) {
 			continue
 		}
-		if len(out) == 0 {
+		if cached := cache[r.placementKey()]; cached != nil {
+			out[r.placementKey()] = cached
+			continue
+		}
+		if revision == "" {
 			var err error
 			if revision, err = modelregistry.Revision(ctx, tx); err != nil {
 				return nil, err
 			}
 		}
-		// The ladder is keyed by role; any known area resolves it.
-		resolved, err := modelregistry.ResolveTicketRoute(ctx, tx, r.role, "backend", now)
+		route := &planRoute{}
+		out[r.placementKey()] = route
+		if cache != nil {
+			cache[r.placementKey()] = route
+		}
+		if strings.HasPrefix(r.role, "review-gate") {
+			if r.area == "" {
+				route.gap = "area"
+			} else {
+				route.gap = "review_gate"
+			}
+			continue
+		}
+		complexity := "M"
+		if r.bucket == "complex" {
+			complexity = "L"
+		}
+		var person *string
+		if r.person != "" {
+			person = &r.person
+		}
+		resolved, err := modelregistry.ResolveWork(ctx, tx, tenant.Principal{}, modelregistry.WorkQuery{
+			Role: r.role, Area: r.area, Complexity: complexity, ProjectID: r.project, PersonID: person, TicketResidency: r.residency}, now)
 		if err != nil {
 			return nil, err
 		}
-		route := &planRoute{}
-		if resolved != nil {
-			p := resolved.Profile
-			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision}
+		if r.area == "" && resolved.Trace.Selector == nil {
+			route.gap = "area"
+			continue
+		}
+		if resolved.Profile != nil {
+			p := *resolved.Profile
+			setBy := ""
+			if resolved.Trace.Selector != nil {
+				setBy = resolved.Trace.SetBy
+			}
+			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest", Pinned: resolved.Trace.Mode == "pinned"}
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort)}
 			var in, outRate, cached *float64
 			price := &planPrice{}
@@ -1018,7 +1092,6 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 				route.mixPrice = &v
 			}
 		}
-		out[r.role] = route
 	}
 	return out, nil
 }
@@ -1033,12 +1106,6 @@ func modelKeySQL(expr string) string {
         WHEN strpos(` + key + `, 'sonnet') > 0 THEN 'sonnet'
         WHEN strpos(` + key + `, 'haiku') > 0 THEN 'haiku'
         ELSE ` + key + ` END ELSE ` + key + ` END`
-}
-
-// planRateRoleSQL is the role whose prepared rate prices this row. An unknown
-// area, or none, uses the any-route rate (role ”).
-func planRateRoleSQL(fields string) string {
-	return `CASE WHEN btrim(coalesce(` + fields + `->>'area','')) IN ('backend','frontend','full-stack','infra','design','docs') THEN btrim(coalesce(` + fields + `->>'route_role','')) ELSE '' END`
 }
 
 func planCostVisibleSQL(project, harnessAll, projects string) string {
@@ -1059,16 +1126,21 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
 		usageWhere += ` AND u.session_id IN (SELECT session_id FROM plan_sessions)`
 	}
 	rateCols := `raw.hours,
-            (CASE WHEN spec.role IS NOT NULL THEN spec.tokens_per_hour ELSE anyr.tokens_per_hour END)::numeric AS tokens_per_hour,
-            (CASE WHEN spec.role IS NOT NULL THEN spec.list_per_hour ELSE anyr.list_per_hour END)::numeric AS list_per_hour,
-            (CASE WHEN spec.role IS NOT NULL THEN spec.paid_per_hour ELSE anyr.paid_per_hour END)::numeric AS paid_per_hour`
+            (CASE WHEN spec.placement IS NOT NULL THEN spec.tokens_per_hour ELSE anyr.tokens_per_hour END)::numeric AS tokens_per_hour,
+            (CASE WHEN spec.placement IS NOT NULL THEN spec.list_per_hour ELSE anyr.list_per_hour END)::numeric AS list_per_hour,
+            (CASE WHEN spec.placement IS NOT NULL THEN spec.paid_per_hour ELSE anyr.paid_per_hour END)::numeric AS paid_per_hour`
 	rateJoin := `
-            LEFT JOIN plan_rates spec ON spec.role = raw.role AND raw.role <> ''
-            LEFT JOIN plan_rates anyr ON anyr.role = ''`
+            LEFT JOIN plan_rates spec ON spec.placement = raw.placement AND raw.placement <> ''
+            LEFT JOIN plan_rates anyr ON anyr.placement = ''`
 	return `, ` + planningStatesCTE() + `, ` + planningPricesCTE() + `, plan_rates AS (
-        SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
+        SELECT * FROM jsonb_to_recordset(` + ratesArg + `::jsonb) AS r(role text, placement text, project text, person text, kind text, bucket text, residency text, tokens_per_hour float8, list_per_hour float8, paid_per_hour float8)
     ), plan_sub AS MATERIALIZED (
-        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`) + `
+        ` + planningSubtreeSQL(`SELECT f.id AS root FROM filtered f WHERE f.kind_slug IN ('ticket','task','epic')`, pageUsage) + `
+    ), plan_placements AS MATERIALIZED (
+        SELECT n.id, ` + placementKeySQL("pk") + ` AS placement
+        FROM (SELECT DISTINCT id FROM plan_sub) target
+        JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=target.id` + assigneeJoin + `
+        CROSS JOIN LATERAL (SELECT ` + planPlacementColumns("(SELECT person FROM plan_rates WHERE placement='')") + `) pk
     ), plan_sessions AS MATERIALIZED (
         SELECT t.root AS id, s.id AS session_id, s.project_id
         FROM plan_sub t
@@ -1117,13 +1189,14 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
             CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.list_per_hour`) + ` END AS list_micros,
             CASE WHEN base.kind_slug <> 'epic' AND rated.hours IS NOT NULL THEN ` + usdMicrosSQL(`rated.hours * rated.paid_per_hour`) + ` END AS paid_micros
         FROM (
-            SELECT f.id, f.kind_slug, ` + estimateHoursSQL("nd.fields") + ` AS hours, ` + planRateRoleSQL("nd.fields") + ` AS role
+            SELECT f.id, f.kind_slug, ` + estimateHoursSQL("nd.fields") + ` AS hours, pp.placement
             FROM filtered f
             JOIN nodes nd ON nd.tenant_id=current_setting('aeon.tenant_id')::uuid AND nd.id=f.id
+            JOIN plan_placements pp ON pp.id=f.id
             WHERE f.kind_slug IN ('ticket','task','epic')
         ) base
         JOIN LATERAL (
-            SELECT ` + rateCols + ` FROM (SELECT base.hours, base.role) raw` + rateJoin + `
+            SELECT ` + rateCols + ` FROM (SELECT base.hours, base.placement) raw` + rateJoin + `
         ) rated ON true
     ), plan_child_est AS MATERIALIZED (
         SELECT e.id,
@@ -1134,9 +1207,10 @@ func planningSortSQL(ratesArg, harnessAll, projects string, pageUsage bool) stri
         JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=e.id AND c.deleted_at IS NULL
         JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id AND ck.slug IN ('ticket','task')
         LEFT JOIN plan_states cs ON cs.kind_id=c.kind_id AND cs.norm=` + workStateNormSQL("c.state") + `
+        JOIN plan_placements pp ON pp.id=c.id
         JOIN LATERAL (
             SELECT ` + rateCols + `
-            FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours, ` + planRateRoleSQL("c.fields") + ` AS role) raw` + rateJoin + `
+            FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours, pp.placement) raw` + rateJoin + `
         ) r ON true
         WHERE e.kind_slug='epic' AND ` + workCountBucketSQL("c.state", "cs") + ` NOT IN ('cancelled','archived')
         GROUP BY e.id

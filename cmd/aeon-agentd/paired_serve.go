@@ -172,7 +172,13 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if _, proof, proofErr := agentsetup.ReadAttachProof(root, c); proofErr == nil {
 		remote.SetAccountLinkProof(string(proof))
 	}
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
+	stepUps, stepErr := pairedStepUp(root, c, remote)
+	if stepErr != nil {
+		slog.Warn("Touch ID step-up disabled; check pairing status")
+	} else {
+		defer stepUps.Close()
+	}
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
 		PollDiagnostic: func(reason string) { slog.Warn("agentd polling diagnostic", "reason", reason) }})
 	if err != nil {
 		return err

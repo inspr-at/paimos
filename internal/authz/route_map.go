@@ -26,33 +26,40 @@ const AuthenticatedRoute = "authenticated"
 var RoutePermissions = map[string]string{
 	"GET /api/model-preferences": "models.read",
 	// Level-specific, person-only authority is rechecked under the mutation fence.
-	"PUT /api/model-preferences/levels/{level}":                  "models.read|model_prefs.manage",
-	"DELETE /api/model-preferences/levels/{level}":               "models.read|model_prefs.manage",
-	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    "models.read|model_prefs.manage",
-	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
-	"GET /api/work-kinds":                                        "models.read",
-	"POST /api/work-kinds":                                       "model_prefs.manage",
-	"PATCH /api/work-kinds/{kindId}":                             "model_prefs.manage",
-	"DELETE /api/work-kinds/{kindId}":                            "model_prefs.manage",
-	"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
-	"POST /api/models/{id}/retire":                               "models.manage",
-	"DELETE /api/models/{id}/retire":                             "models.manage",
-	"POST /api/projects/{projectId}/questions":                   "questions.ask",
-	"GET /api/projects/{projectId}/questions":                    "questions.read",
-	"GET /api/questions/{questionId}":                            "questions.read",
-	"GET /api/questions/{questionId}/status":                     "questions.read",
-	"POST /api/questions/{questionId}/decision":                  "questions.decide",
-	"GET /api/decision-desk":                                     "questions.read",
-	"GET /api/agents/plan":                                       "agents.plan.read",
-	"GET /api/recurrences":                                       "recurrences.manage",
-	"POST /api/recurrences":                                      "recurrences.manage",
-	"GET /api/recurrences/{recurrenceId}":                        "recurrences.manage",
-	"PUT /api/recurrences/{recurrenceId}":                        "recurrences.manage",
-	"POST /api/recurrences/{recurrenceId}/pause":                 "recurrences.manage",
-	"POST /api/recurrences/{recurrenceId}/resume":                "recurrences.manage",
-	"POST /api/recurrences/{recurrenceId}/run-now":               "recurrences.manage",
-	"GET /api/recurrences/{recurrenceId}/preview":                "recurrences.manage",
-	"GET /api/decision-desk/projection":                          "profile.read",
+	"PUT /api/model-preferences/levels/{level}":                                 "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}":                              "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":                   "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/levels/{level}/rows/{kindId}":                "models.read|model_prefs.manage",
+	"GET /api/work-kinds":                                                       "models.read|nodes.read",
+	"POST /api/work-kinds":                                                      "model_prefs.manage",
+	"PATCH /api/work-kinds/{kindId}":                                            "model_prefs.manage",
+	"DELETE /api/work-kinds/{kindId}":                                           "model_prefs.manage",
+	"POST /api/work-kinds/{kindId}/restore":                                     "model_prefs.manage",
+	"POST /api/models/{id}/retire":                                              "models.manage",
+	"DELETE /api/models/{id}/retire":                                            "models.manage",
+	"POST /api/projects/{projectId}/questions":                                  "questions.ask",
+	"GET /api/projects/{projectId}/questions":                                   "questions.read",
+	"GET /api/questions/{questionId}":                                           "questions.read",
+	"GET /api/questions/{questionId}/status":                                    "questions.read",
+	"POST /api/questions/{questionId}/decision":                                 "questions.decide",
+	"GET /api/decision-desk":                                                    "questions.read",
+	"GET /api/models/refresh":                                                   "models.read",
+	"POST /api/models/refresh":                                                  "models.refresh",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports": "harness.worker",
+	"POST /api/models/proposals/accept":                                         "models.manage",
+	"POST /api/models/reports":                                                  "models.report",
+	"PUT /api/models/refresh/settings":                                          "models.manage",
+	"PUT /api/models/refresh/credentials/{accountId}":                           "models.manage",
+	"GET /api/agents/plan":                                                      "agents.plan.read",
+	"GET /api/recurrences":                                                      "recurrences.manage",
+	"POST /api/recurrences":                                                     "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}":                                       "recurrences.manage",
+	"PUT /api/recurrences/{recurrenceId}":                                       "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/pause":                                "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/resume":                               "recurrences.manage",
+	"POST /api/recurrences/{recurrenceId}/run-now":                              "recurrences.manage",
+	"GET /api/recurrences/{recurrenceId}/preview":                               "recurrences.manage",
+	"GET /api/decision-desk/projection":                                         "profile.read",
 
 	"GET /api/journey/next-actions":                                           "journey.read",
 	"POST /api/agent-pairing/account-link":                                    "account.probe",
@@ -179,6 +186,9 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/tags/{tagId}":                                               "tags.manage",
 	"DELETE /api/time-entries/{id}":                                          "hours.write",
 	"DELETE /api/views/{viewId}":                                             "views.write",
+	"GET /api/agent-accounts/readiness":                                      "account.read",
+	"POST /api/agent-accounts/{accountId}/check":                             "account.manage",
+	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",
 	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
@@ -583,6 +593,15 @@ var RoutePermissions = map[string]string{
 	"PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker":                    "harness.read",
 	"GET /api/settings/inbox-delivery":                                                          "settings.read",
 	"PUT /api/settings/inbox-delivery":                                                          "settings.manage",
+}
+
+// Tier reads, worker reports and person decisions use the existing session permissions.
+func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask"] = "harness.worker"
+	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision"] = "harness.control"
 }
 
 func PermissionForPattern(pattern string) (string, bool) {

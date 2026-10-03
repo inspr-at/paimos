@@ -4,6 +4,7 @@ package authz
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -30,7 +31,12 @@ func TestCoordinatorPermissionsCoverCLIHeartbeatPath(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s has no declared permission", pattern)
 		}
-		if !slices.Contains(have, want) && !CoordinatorCeiling(have, want) {
+		// Route alternatives are OR, as in RequirePattern. A declaration such
+		// as models.read|nodes.read is not itself a grantable key scope.
+		reachable := slices.ContainsFunc(strings.Split(want, "|"), func(permission string) bool {
+			return slices.Contains(have, permission) || CoordinatorCeiling(have, permission)
+		})
+		if !reachable {
 			t.Errorf("%s needs %s, which the coordinator key set lacks", pattern, want)
 		}
 	}

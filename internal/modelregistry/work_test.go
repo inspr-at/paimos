@@ -54,15 +54,6 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 						if string(a) != string(b) {
 							t.Fatalf("%s/%s/%s/%s changed ladder: %s != %s", role, h, c, area, a, b)
 						}
-						if KnownRouteArea(area) && h == "" {
-							ticket, err := ResolveTicketRoute(t.Context(), tx, role, area, now)
-							if err != nil {
-								return err
-							}
-							if ticket == nil || ticket.Profile.ID != got.Profile.ID {
-								t.Fatal("known area route changed")
-							}
-						}
 					}
 				}
 			}
@@ -324,6 +315,35 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 		}
 		if n != 9 {
 			t.Fatal("seed not idempotent", n)
+		}
+		return nil
+	})
+}
+
+func TestCachedRoleDoesNotSharePlacementMutations(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		now := time.Now()
+		legacy, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, now)
+		if err != nil {
+			return err
+		}
+		ctx := WithResolutionCache(modelprefs.WithChainCache(t.Context()))
+		for _, residency := range []string{"any", "eu", "any", "local", "any"} {
+			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "backend", TicketResidency: residency}, now)
+			if err != nil {
+				return err
+			}
+			if residency == "any" {
+				if !reflect.DeepEqual(got, legacy) {
+					t.Fatalf("cached any changed after another placement: %+v", got)
+				}
+				// Callers own the result. Editing a returned reason cannot poison the cache.
+				got.Profile.Slug = "caller-owned"
+				got.Ladder[0].Selected = false
+				got.Ladder[0].SkipReasons = append(got.Ladder[0].SkipReasons, "caller-owned")
+			} else if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != "no "+residency+" model route" {
+				t.Fatalf("cached route escaped requirement: %+v", got)
+			}
 		}
 		return nil
 	})

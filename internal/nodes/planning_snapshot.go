@@ -58,7 +58,7 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_estimate_snapshots WHERE ticket_node_id=$1::uuid AND closed_at IS NULL)`, id).Scan(&exists); err != nil || exists {
 		return err
 	}
-	rows, err := loadPlanRows(ctx, tx, []string{id})
+	rows, err := loadPlanRows(ctx, tx, []string{id}, nil)
 	if err != nil || len(rows) == 0 {
 		return err
 	}

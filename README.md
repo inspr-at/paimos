@@ -342,8 +342,25 @@ Provider locks permit lower choices and flag a loosening in the view and trace.
 Tightening stamps active runs without stopping turns; `running_outside` identifies
 starting/running turns outside the new setting. Stamps never loosen. EU/local
 routes require valid account evidence; without it, work waits with `residency`.
+
+Ticket properties choose Kind of work from the active default and project work
+kinds, including Security, and confirm suggested complexity. Planning resolves
+each ticket's placement with its canonical person assignee, falling back to the
+viewer's canonical You setting for unassigned or agent-assigned tickets. Work-start
+estimate snapshots use only the assignee; registered sessions and dispatched runs
+save their starter's work placement separately from the model that actually runs.
+Planning and dispatch normalize `eu-e1` to `eu` and `local-l1` to `local`.
+Rebinding a session computes the new ticket's placement; detaching clears it.
+A run's frozen placement is reused only for that run's ticket.
+Operator keys have no You setting. With an empty matrix, existing planning gaps
+and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
+
+Planning details probe only the selected page's subtree, including after bulk
+imports with missing or stale statistics. Whole-list model, token and cost sorts
+retain batch joins. Both paths preserve the same tenant and project visibility
+and child-state filters.
 
 ## Agent start plan
 
@@ -464,7 +481,10 @@ Usage requires `harness.read`. Its API list value is approximate, includes
 lifetime usage of sessions **started** in the window, and is not interval spend
 or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
-reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+reported usage. Permitted windows remain visible when account budget coverage is
+partial. The briefing explains privacy omissions and the independent window/account
+truncation limit; shared windows are counted once across project reads.
+Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
 links appear only after successful reads. Merge facts use changes to a ticket’s
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
@@ -1015,11 +1035,21 @@ Create a CLI/script identity at **Settings → Access → Agents → New agent**
 
 Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
 
-People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`; migration `1061_agent_roles_models_read.sql` adds it to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
+People with `keys.manage` can edit an active key in **Access → Agents → Edit scopes** without replacing its secret. **Full access** selects every agent-grantable scope within the agent’s role, editor and original creator ceilings. Per-group **All / None** changes only visible scopes in that group; presets and **All** never extend the agent’s role. A quiet note names the person-only actions: managing members, roles, keys and settings, reading keys, the access audit log, approval decisions, rule publishing, conversation watching, harness force-stop and recovery, ownership transfer and the customer portal. **Expires after** starts at **Keep current**, or can set 30, 90 or 365 days from saving, or **Never**, without rotation. The API accepts optional `expires_at`: omission preserves expiry, `null` means Never, and a timestamp must be in the future. Scopes and expiry apply atomically, retaining the same ID and secret. The sheet names the agent role when it limits a scope. A person who also has `roles.manage` may tick a permission they hold and confirm adding it to the agent's custom workspace role and key together. Shared-role impact is shown before confirmation; built-in roles remain fixed. The server rechecks the editor, original creator and live role under the tenant/key lock, then writes both changes in one transaction with one audit entry. Generated agent roles include `models.read`, `models.report` and `models.refresh`; migration `1061_agent_roles_models_read.sql` adds only `models.read` to existing custom agent roles without changing key scopes. Unknown stored scopes are pruned and audited when the sheet loads or an edit succeeds. Changes apply on the next request and appear in the access audit. Removing every scope disables the key's access; revoked or expired keys cannot be edited.
 
 The same change is available as `aeon keys scopes <key-id> --add harness.worker --remove nodes.write --session-file <private-cookie-file>` (repeatable/comma-separated scopes). The file contains an existing signed-in person's `aeon_session` cookie value; `-` reads it from stdin without echo. Use `--url` or the configured instance URL. This command neither stores nor prints the cookie; agent credentials cannot manage scopes. Permission denials can include `reason_code` (`missing_role_permission`, `missing_project_access`, or `missing_key_scope`); only a missing key scope after role authority passes includes `scope`. Agent session registration also requires `harness.worker`, preventing generations that cannot heartbeat or stop.
 
 `whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes a stdio interface; currently only `whoami` is implemented there.
+
+Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
+
+Migration 1072 is an expansion: security-review routes live in a separate tenant-isolated table, leaving the published role table and its constraint unchanged. Current catalog reads and route replacement include both tables; previous release binaries continue using the original routes. The refresh tables use explicit forced RLS policies.
+
+**Workspace → Models** shows refresh settings, recent observations, pending profiles and the last scheduled run. Agent reports and automatic profile recording are on by default. Discovered profiles stay disabled until a person accepts them, including for accounts that allow every enabled profile. Reports never reorder ladders. Separate observations preserve immutable profile/run history: two distinct invalid-model failures at least five minutes apart suppress a profile for 24 hours; a successful run clears that pause. Every agent observation requires an available account owned by the reporter on that harness; self-registering a session cannot substitute for enrollment. Health evidence must also match the exact stored model and effort of an active caller-owned session or its managed run pin. Positive usage for a different model remains accounting data and cannot clear suppression; stopped sessions and unavailable or missing accounts also contribute usage without changing model health. Stable report IDs make retries idempotent for seven days; each principal may retain at most 1000 receipts and submit at most 200 new receipts per hour. Existing workers can report their own harness via register/heartbeat or `/model-reports` with their worker lease; standalone `aeon model report --file observations.json` needs `models.report`. Standalone model commands require both the workspace role permission and key scope; existing keys retain their scopes.
+
+`aeon model refresh` needs the agent-grantable `models.refresh` permission and accepts no profile or route writes. Refresh defaults to 1440 minutes (configurable from 60 to 43200), shared by agent triggers and scheduled runs. Vendor calls run after the reservation transaction commits, leaving catalog reads and routing available; all vendor requests share a 30-second deadline, with at most five pages and 500 identifiers per vendor and 200 observations/profile additions per run. Optional vendor API discovery is **off by default**. A person with `models.manage` may save a model-list key for an enrolled vendor account and enable it. Keys are encrypted with a separate derivation of the server's stable session key, bound to the tenant/account/vendor, and never returned or audited. Server-key rotation requires replacing these discovery keys. The job only lists models at fixed OpenAI, xAI, Anthropic or OpenRouter endpoints, refuses redirects, bounds responses and handles Anthropic pagination. API sightings do not establish CLI success; outages keep the last good catalog and mark the source stale. Cursor discovery uses agent reports. Sonnet xhigh remains absent because it has not been verified. Every completed refresh records `model.catalog_refreshed`; automatic additions do not change tenant routing policy.
+
+Refresh regression coverage includes startup upgrades, custom route and active override preservation, agent role/key ceilings, worker leases and harness binding, retry idempotency, suppression expiry, encrypted tenant/account credential isolation, and catalog preservation during vendor outages. The targeted settings browser test checks private defaults, interval changes and proposal acceptance without route writes.
 
 `paimos model resolve review-gate --author-family codex` resolves a reviewer outside the author's family. `--author-family` accepts `openai`, `anthropic`, `xai` and `cursor`, plus harness aliases `codex` → `openai`, `claude` → `anthropic` and `grok` → `xai`. `pi` is ambiguous: pass the model's family explicitly. The API response and CLI JSON echo the normalised `author_family`; omitting it for other roles returns an empty string.
 
@@ -1071,6 +1101,16 @@ and shared-inbox obligations stay outside the session thread.
 ### Agent work estimates
 
 Setting a ticket/task estimate also fills missing `route_role`, `area` and `complexity`. The server uses title and string labels/tags, then the nearest ancestor's classification or title hints, then `build` / `backend`. Explicit values win. Every server suggestion carries `<field>_source: "suggested"`, the acting principal's `<field>_by`, UTC `<field>_at`, and `<field>_confirmed: false`. A person can confirm a suggestion or an unconfirmed agent classification by resubmitting the same value without source/by/at, or with `aeon issue update KEY --role build --area backend --complexity S`. Agent values remain unconfirmed; client-supplied stamps cannot confer confirmation. Existing ticket rows are not backfilled.
+
+Startup tenants receive the nine default work kinds automatically, including
+Security. Project-only ticket readers can load the default and target project
+kinds with `GET /api/work-kinds?project_id=<id>`; other project kinds remain
+hidden. Ticket role values are `scout`, `mechanical`, `build`, `build-hard` and
+`review-gate`; the security review ladder is selected by Security work rather
+than stored as a ticket role. Planning shares role selections, kind and
+canonical-person lookups within each list transaction, and rejects more than
+4096 distinct placements before resolving routes. Placement controls stay above
+asynchronously loaded logged hours.
 
 Complexity defaults to **S** for estimates up to 2 hours, **M** above 2 and up to 8 hours, and **L** above 8 hours. `build-hard` promotes one bucket (S → M, M → L, L → L). This is a deterministic suggestion, not a measured model-performance claim. Unconfirmed server-derived complexity follows estimate or role changes; explicit complexity retains its provenance. `aeon issue update KEY --estimate 2 --role build --area backend --complexity S` supplies all three, and issue JSON returns their stamps and confirmation flags.
 
@@ -1135,7 +1175,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.4`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.6`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -1399,6 +1439,27 @@ GitHub release assets, next to `paimos-agentd` for the same four OS/architecture
 With the reviewed Nix package, run `env "$HOME/.nix-profile/bin/aeon-agentd" pair --url 'INSTANCE_ORIGIN_FROM_GUIDE'` from your working folder (bare `aeon-agentd pair` asks for the origin or resumes the saved instance). Confirm the folder, select detected signed-in harnesses, then enter the 9-digit code in the browser and approve as a person. Pairing creates its own private state; Nix/Home Manager retains service ownership.
 
 **Connect your machine** offers the checksum-verified direct download pinned to this server’s version first; add `~/.local/bin` to PATH for that installation. On a Mac without Nix, Homebrew is always offered as `brew install inspr-at/tap/aeon-agentd`, and the pair line runs `env "$(brew --prefix)/bin/aeon-agentd" pair --url '…'`. Homebrew installs the latest INSPR release; `aeon-agentd status` tells you if this server needs a different version by checking its declared compatibility window. Neither the server nor the browser reads the tap formula. After browser approval, pairing installs the user LaunchAgent on macOS or systemd user unit on Linux. It retains Homebrew's stable `bin/aeon-agentd` link or `~/.local/bin/aeon-agentd`, so a package upgrade does not leave the service pointing at a removed version. The stable link must resolve to the binary doing the pairing; an unrelated service is never adopted or overwritten.
+
+Owner workstation step-up (AEON-580/581): the shared CLI/MCP HTTP client handles
+`428 step_up_required` by sending only the challenge ID to the local paired daemon.
+The daemon fetches the challenge from its paired origin with its own pairing proof,
+shows the server's summary verbatim in Touch ID, and signs with the pairing-pinned
+Secure Enclave key. Cancellation, expiry, unavailable Touch ID and a refused proof
+fail the action; the client retries the identical request at most once, without
+redirecting its proof. Server-side marking, action/tenant binding, single-use
+consumption and governance exclusions are owned by AEON-580.
+
+`aeon-agentd status` reports whether the pairing has a pinned confirmation key and,
+for older Mac pairings, prints the exact `aeon-agentd pair --url … --state-root …
+--workspace …` command using a new private state folder. The old pairing remains
+until the new one is verified; service configuration changes stay with its existing
+owner. Access → computers shows the pin readiness separately from connectivity.
+This prerequisite does not promise that the installed daemon can currently use
+Touch ID (a signed enclave-enabled build and the owner's graphical session are
+still required). For a nondefault pairing, set `agentd_state_root` to its absolute
+path in that instance's CLI configuration. The client checks the daemon's origin
+before prompting, keeping separate instances separate. Direct Go HTTP consumers
+set `Client.ConfirmStepUp` to their authenticated local-daemon callback.
 
 To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` before uninstalling. This freezes new work, requests server revocation, waits for owned processes to drain, then stops and removes its own service. `--once` reports one resumable step; interruption or lost connectivity leaves cleanup pending, and the same command resumes it. Vendor sign-ins and project files are preserved. Homebrew users then run `brew uninstall aeon-agentd`; checksum-installer users remove the `~/.local/bin/aeon-agentd` link and downloaded versions under `~/.local/lib/aeon`. Nix users disable/remove the service and package through their owning configuration's review path. Retain private pairing state until cleanup and any accounting recovery are complete; `--state-root` selects a nondefault pairing.
 
@@ -1980,6 +2041,10 @@ the node's current project and commits metadata and audit events together.
 Attachment writes use a shared tenant lock: access edits are fenced while
 other resource writers can finish their tenant foreign-key checks. Retained
 principal import/backfill paths take tree, tenant, then alias locks in that order.
+Pairing, readiness and residency mutations acquire pairing, tree, then the tenant
+access fence before account/resource rows, retaining final-transaction permission
+checks. Their tenant fence uses `FOR NO KEY UPDATE`; access-only writers may omit
+pairing/tree but must never acquire them after tenant. Event counters remain last.
 No analytics, third-party runtime assets, or optional device storage are added.
 
 Both version surfaces use the unchanged, verified calendar bundle in Pretty
@@ -2299,6 +2364,74 @@ must be regular and at most 64 KiB; content reads remain bounded if it grows.
 Fixture mode retains its stricter private-directory exclusions. Unmanaged capture
 remains unavailable until the exact owning source is bound; live model and effort
 capture remain unimplemented.
+
+### Session service tiers (AEON-436)
+
+`aeon agents tier show --project KEY --session UUID` shows Default / Fast / Fastest,
+per-model adapter provenance, published price multipliers and pending decisions.
+`set --tier fast` uses a person key with the existing project `harness.control`
+permission. It queues a change bound to the current daemon/process generation;
+the active tier changes only after the daemon acknowledges the native mechanism
+at an idle boundary. Codex resumes its owned thread with `service_tier` for the
+next run; Claude applies its `fastMode` setting for the next turn. A rejected or
+uncertain native acknowledgement leaves the active tier unchanged. A session
+running on its own and an ended session are read-only.
+
+`ask --tier fast --reason "QA waits"` records the session agent's request without
+exposing its daemon lease or switching the tier. Persons can use `approve` or
+`decline --decision-request UUID --tier fast`; the tier API exposes requests for
+the Decision Desk. Undo uses `set` with the previous tier: it cancels an unclaimed
+change or queues a reversing change after confirmation. A claimed change must
+settle before a reversing change can be queued.
+
+The session-bound `/tier/report` endpoint carries the adapter's facts for each
+model: price, speed (unknown where unpublished), mechanism, harness/adapter
+version and checked-at. Offered tiers and all reported multipliers must match the
+pinned vendor catalog; reports cannot supply their own price or usage factors.
+The currently named Codex and Claude models have no cited tier price pins, so
+Fast and Fastest are not offered and their multipliers remain null. A paid tier
+requires a cited vendor price and mechanism before it can be enabled. Price and
+subscription capacity consumption are distinct; the fragment's illustrative factors are not
+pricing defaults. Vendor facts are pinned in `internal/servicetier`; account or
+vendor rejection remains authoritative. Usage snapshots retain tier segments and
+their multipliers, and run telemetry records the active tier. Earlier tokens are
+never repriced when a tier changes; vendor billed costs remain vendor costs.
+On Agents, the Tier column uses one small chevron per offered tier. Clicking the
+glyph, or Enter/Space, opens Change tier; plain Left/Right and the hover minus/plus
+step among offered tiers. The eight-second Undo toast cancels an unclaimed change
+or reverses the confirmed change, and refuses an intervening revision or process
+replacement. The session menu and Service tier block open the same picker;
+phones use a full-height sheet with pinned actions. Agent requests can be approved
+or declined in the session panel; Decision Desk integration remains AEON-536.
+Unavailable tiers show their adapter reason, including “not offered: no published
+price”. Unknown prices and model-time baselines remain explicit rather than
+producing last-run estimates from the design fragment's sample numbers.
+
+The tier API also returns `last_change`, including the completed control's outcome
+and reason. A rejected, expired or superseded change reports an error and clears
+its Undo receipt. Cancelling an unclaimed change is neutral: its successful Undo
+receipt uses `tier_cancelled_pending`; a cancelled control uses `tier_cancelled`.
+Neither shows a rejection alert. Other viewers following the change get a neutral
+cancellation message. A real rejection can be dismissed for the current viewer;
+starting the next change also retires it, and a later rejection still appears.
+Overlapping tier reads share one result. Confirmation reads
+back off from 1.2 seconds to 30 seconds and stop after two minutes; they stop
+while the tab is hidden or Agents is closed. Live tier revisions and control
+completion events still reconcile the result after that limit, and Check result
+allows an explicit read. Heartbeats alone do not reload the tier panel.
+Pending agent requests are carried by the session list row, so its “asks for”
+hint does not depend on opening the panel. Host controls remain visible in the
+compact layout alongside the tier control. The session list uses cards below
+760 px container width, including a 1280 px viewport with the panel open;
+1366 px and 1440 px panel-open viewports retain the table. Frozen run-cost labels,
+tier history
+and last-run comparisons are tracked in AEON-609 and must land before paid tiers
+are offered.
+
+Regression coverage includes native acknowledgement and Undo, pending replay,
+tenant/project isolation, revoked authority, vendor cooldown and stored costs
+across tier changes. Requests that leave the active tier unchanged also retain
+their idempotency receipt; reusing their ID with a different body returns 409.
 
 ### Session recovery
 
@@ -2626,7 +2759,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.4`, declared by the response-only
+The reporter contract is `harness-session/2.6`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -2729,6 +2862,23 @@ kernel needs built-in devtmpfs, virtio block/PCI and ext4 support. The pinned
 rootfs needs `/workspace`, `/tmp`, `/proc`, `/dev` mountpoints and all approved
 tools/dependencies under `/opt/aeon`. No image is produced or provisioned by
 this worker, and missing images, recipes or admission refuse execution.
+
+The Decision Desk UI (AEON-567) lives at `/decision-desk`. Open and answered
+questions are paged separately; refresh retains up to ten loaded pages per state
+(1,000 questions), with remaining results stated explicitly. Each memo freezes its
+source for the round. New arrivals wait for the next round, including rounds opened
+from Decided. Expired approvals appear in history. Approvals and tier requests
+require an explicit choice; Enter on another focused control performs that control's
+action. In a field, Enter finishes editing and the platform modifier plus Enter
+submits. Access loss, expiry and changed sources block the write and retain drafts.
+
+Tier requests are read only for sessions advertising AEON-436's `service_tier_v1`.
+AEON-455 server availability selects request-bound phone verification on every
+screen size; a server without that package keeps the existing approvals API.
+Held replies address the original principal UUID and, when supplied, its exact
+session. Related ticket records use permission-checked node relations; specialised
+Always/doctrine publishing and its context projection remain upstream package
+integration work. The unavailable stamps explain their restrictions in the memo.
 
 Decision Desk question groundwork (AEON-562): `aeon ask --project KEY
 --option '["Title","Description","Answer"]' "Question"` stores a bounded,

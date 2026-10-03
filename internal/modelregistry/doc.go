@@ -28,6 +28,6 @@
 // executed. Nothing is selected when every candidate was skipped; review-gate
 // then sets owner_required.
 //
-// ResolveTicketRoute is the read-only helper for a ticket's role and area.
-// The ladder is still keyed by role. A missing selection returns nil.
+// ResolveWork is the read-only placement resolver used by planning and
+// dispatch. KnownRouteArea validates the active default/project ticket kinds.
 package modelregistry

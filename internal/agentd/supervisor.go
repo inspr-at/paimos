@@ -27,10 +27,12 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
 type Config struct {
+	StepUps           *StepUpManager
 	MaxTokens         int64
 	MaxTurns          int64
 	API               API
@@ -109,6 +111,7 @@ type owned struct {
 	metadataSeq     uint64
 	metadataPending []harnessMetadata
 	usage           *sessionUsageReporter
+	modelReports    map[string]bool // successful content-free evidence IDs, bounded per run
 	capacityPending map[string]capacity.Reading
 	vendorLimit     *capacity.LimitHit
 	inboxCapable    bool
@@ -132,6 +135,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	stepUps             *StepUpManager
 	startedAt           time.Time
 	capacityStartedAt   time.Time
 	capacityAccountID   string
@@ -327,7 +331,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
 	s.probePendingSince = make(map[string]time.Time, len(s.accounts))
@@ -980,6 +984,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			caps = append(caps, "steer")
 		}
 	}
+	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
+		caps = append(caps, servicetier.Capability)
+	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
 	if profile.Harness != Codex {
 		registration.Model, registration.ReasoningEffort = profile.Model, profile.Effort
@@ -988,6 +995,20 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
 	if err != nil {
 		return err
+	}
+	if api, ok := s.api.(serviceTierAPI); ok {
+		report := servicetier.Advertised(profile.Harness, profile.Model, "unknown")
+		if reporter, ok := adapter.(serviceTierAdapter); ok {
+			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: s.workspace})
+			if e == nil {
+				report = observed
+			}
+		}
+		active := "default"
+		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
+			return err
+		}
+		entry.harness.ServiceTier = active
 	}
 	s.mu.Lock()
 	billing := s.accountBilling[route.AccountID]
@@ -1105,6 +1126,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	cancelStart()
 	if err != nil {
 		cancelRun()
+		if errors.Is(err, errModelInvalid) {
+			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
+		}
 		_ = entry.tools.Close()
 		// A generic Start error does not prove that a child was never forked.
 		entry.mu.Lock()
@@ -1244,6 +1268,12 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if len(ev.ModelReports) > 0 {
+		s.reportModels(entry, ev.ModelReports)
+	}
+	if ev.ErrorCode == "model_invalid" {
+		s.reportModelState(entry, "invalid")
+	}
 	mode := agentactivity.Summary
 	if policy, ok := s.api.(interface{ SessionActivityMode(string) string }); ok {
 		entry.mu.Lock()
@@ -1274,6 +1304,11 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 	}
 	if len(ev.Capacity) > 0 {
 		s.observeCapacity(entry, ev.Capacity)
+	}
+	if ev.HarnessTier != "" && servicetier.Valid(ev.HarnessTier) {
+		entry.mu.Lock()
+		entry.harness.ServiceTier = ev.HarnessTier
+		entry.mu.Unlock()
 	}
 	if ev.SessionUsage != nil {
 		entry.usage.submit(*ev.SessionUsage)
@@ -1309,6 +1344,19 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 			}
 		}
 		entry.mu.Unlock()
+	}
+	// Only positive, model-bound vendor usage can clear an invalid-model pause.
+	workingModel := ""
+	if ev.SessionUsage != nil && ev.SessionUsage.OutputTokens != nil && *ev.SessionUsage.OutputTokens > 0 {
+		workingModel = ev.SessionUsage.Model
+	} else if ev.ModelEvidence == "vendor_reported" && ev.OutputTokensDelta > 0 {
+		workingModel = ev.EffectiveModel
+	}
+	entry.mu.Lock()
+	confirmed := workingModel != "" && workingModel == entry.harness.Model
+	entry.mu.Unlock()
+	if confirmed {
+		s.reportModelState(entry, "working")
 	}
 	if ev.Kind == "" {
 		return
@@ -1537,9 +1585,14 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if operation == "force_stop" {
 				reason = "owned_group_signalled_root_exited"
 			}
+			if control.Kind == "tier" && entry.usage != nil {
+				if err := entry.usage.flush(ctx); err != nil {
+					return err
+				}
+			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if entry.managedPolicy && operation != "force_stop" {
+			if (entry.managedPolicy || control.Kind == "tier") && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -1551,6 +1604,8 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					outcome, reason, err = "rejected", "setting_rejected", nil
 				case err != nil:
 					outcome, reason, err = "rejected", "outcome_unconfirmed", nil
+				case control.Kind == "tier":
+					reason = "tier_applied_safe_point"
 				case control.Kind == "effort":
 					reason = "setting_applied_next_turn"
 				case control.Kind == "model" || control.Kind == "rename":
@@ -1685,6 +1740,7 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
 	}
@@ -1754,7 +1810,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && !entry.managedPolicy) {
+	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && req.Operation != "tier" && !entry.managedPolicy) {
 		return Receipt{}, ErrUnsupported
 	}
 
@@ -1793,7 +1849,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy {
+		if !entry.managedPolicy && req.Operation != "tier" {
 			return Receipt{}, ErrUnsupported
 		}
 		if entry.budgetStopReason() != "" {
@@ -1892,7 +1948,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if inbox || (entry.managedPolicy && fromRecoveryQueue) {
+		if inbox || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}

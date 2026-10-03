@@ -45,8 +45,11 @@
 // People read with account.read; only the linked owning person (account.manage)
 // or the connected paired host's bound runtime key (account.probe) may write.
 // An unpaired registering key, workspace admin or key creator is not implicitly
-// an owner. Writes recheck live permissions under tenant -> pairing -> account
-// locks and append account.residency_evidence_updated as the final operation.
+// an owner. Writes share the pairing -> tree -> tenant -> account lock order with
+// readiness and pairing lifecycle operations, rechecking live permissions inside
+// the final transaction. The tenant fence uses NO KEY UPDATE so FK share locks
+// remain compatible. Writes append account.residency_evidence_updated last;
+// advisory GETs avoid write fences.
 // Evidence names covered profiles, inference/storage/log country sets, explicit
 // local execution, verification/expiry times and an opaque proof reference;
 // optional retention days and training opt-out are retained as declarations.
@@ -68,23 +71,17 @@
 // tenant-isolated and idempotent; optional run IDs must use that account.
 // Derived percent windows have allowance 100 and conservatively round used
 // percent upward for the integer reservation ledger. Fresh means <=10 minutes;
-// aging <=window/6, stale beyond, expired at reset. Aging/stale readings allow
-// one estimated 1% refresh job per observation, with no other live run. If all
-// windows reset, a provisional five-minute 1% grant permits that same single
-// refresh; expiry/release never renews it without a new measured observation. Vendor denials wait until the latest unexpired deadline across all denying buckets and unnamed stops (one hour each). Only after every wait expires may one recovery run per latest denial epoch and daemon generation read again; an expired named reset never masks a later unnamed stop. A fresh allowing reading, or a later run that finishes without vendor_limit, clears that denial on its own epoch. A later unnamed stop is a separate denial and keeps its own hour, including after a daemon restart. A recovery that clears the denial without a new reading leaves one more provisional reading run, and the capacity card stays unread until that run. A spent blind recovery grant waits for the next allowed run, or for the schedule when that is what blocks.
+// aging <=window/6, stale beyond, expired at reset. Stale room is unknown:
+// estimates and unknown windows never impose a start count or serial budget.
+// Every named denial retains its own deadline, independently of other buckets.
+// Unnamed stops use durable resource-scoped recovery waits across restarts.
 // Readings never approve pairing: POST {id}/capacity/approve requires a person
 // with account.manage and records the existing separate ongoing-use approval.
 // AEON-353 permits saving this approval after the person approves pairing,
 // before helper redemption; dispatch still requires redemption and a fresh probe.
-// Without prior readings Codex/Claude get one provisional first-reading run per
-// daemon generation. No parallel second run starts before a real reading. Blind
-// Grok/Cursor/Pi use blindDayPolicy: one at a time, three daily attempts during
-// the owner's work bands; nights/off days retain the normal parallel cap, and
-// runs that start outside those bands do not count toward the three. A
-// vendor_limit signal waits one hour, then one recovery run may try again.
-// That hour is a retry limit, not a guessed vendor window. Run now does not
-// skip the stop or the three-attempt cap. Night pacing stays off for blind
-// harnesses that have no reading.
+// Unknown usage follows the actual parallel cap and the person's schedule,
+// including permitted nights and off days. Run now skips schedule pacing,
+// while vendor waits, Hold and manual limits remain authoritative.
 // Catalog and queued runs expose structured advisory waits; reservation and
 // claim recheck admission under the account lock. A person's per-run "now"
 // override skips schedule pacing, never holds, truth or ownership fences.
@@ -188,4 +185,69 @@
 // window responses expose provisional=true when a window has no positive
 // measurement for its unit or a settled reservation lacked one. Historical
 // zero telemetry cannot prove measured zero, so it remains provisional.
+// AEON-478 package A adds GET /agent-accounts/readiness (keyset pagination),
+// POST /{accountId}/check (person owner + account.manage; revision-bound,
+// idempotent/coalesced, persisted 60-second gap), and PUT /{accountId}/sharing.
+// Migration 1135 stores opaque resource memberships, per-window facts, durable
+// wait/backoff/early-recovery markers and check receipts. Unknown measurements
+// carry usage_unknown_reserve_not_enforceable and never impose a start budget.
+// Check requests express early-recovery intent only: package B consumes it
+// atomically with automatic recovery, and rechecks launch/admission authority.
+// account_readiness_check_waits freezes the resource/window/wait IDs at the
+// original click; a pending retry cannot authorize a later wait. B compares
+// that snapshot with the canonical fact wait and early_recovery_used marker.
+// Package C opts into GET /agent-accounts?include_checks=true with account.read
+// and account.probe, and reports through the existing scoped probe's optional
+// readiness object (check ID, binding revision, bounded result, at most 32 facts).
+// Revocation, relinking, archival and generation changes invalidate pending
+// checks. A provider-confirmed no-reset 402 survives all ordinary check reports;
+// only evidenced successful recovery inference may replenish it.
+// Owners and enrolling daemons see account details; teammates (including admins)
+// require the owner's sharing setting. HTTP account responses and event/SSE
+// replay apply current server-side redaction. Required old shapes remain valid
+// (empty windows/history, null timestamps); projections mark details_redacted.
+// This package supplies no daemon executable or UI. Existing
+// ledgers remain unchanged; rollback disables new callers and retains history.
+//
+// Pending captures expire after five minutes from their original requested_at;
+// aliases never renew them. Polling and reports reject expired captures, new
+// keys invalidate them and request fresh work, and old keys return 409.
+// Restart reports advance daemon generation even when carrying an old check:
+// the heartbeat commits, completion/facts are rejected with 409 stale_binding
+// and X-Aeon-Write-Committed, and the daemon refreshes pending work.
+// Account-local capture errors never affect peers.
+// Owners/registered daemons retain their own check result/controls while
+// pooled quota detail remains withheld until all resource owners share it.
+// Legacy readings and key caps use the account's canonical local membership;
+// positive key caps with unknown total balance still carry UsageUnknownReason.
+// Availability-only advice uses historical state enums. Dashboard windows and
+// harness reset details use the same current accountprivacy policy. Dashboard
+// allowances consider at most 1024 windows, mark truncation explicitly, and
+// report partial when visible windows omit withheld or truncated windows. If a
+// successful mutation's response cannot be delivered safely, the error states
+// "write committed" and sets X-Aeon-Write-Committed so callers refresh first.
+//
+// Package B uses per-run provisional ledgers for unknown usage, with no start
+// counter or serial quota fence. Real slots, schedules and manual limits bind.
+// Unnamed vendor and provider 402 waits grant one durable resource-scoped
+// recovery at expiry or on a current owner check. Failed inference advances
+// 1/2/4/8-hour backoff; only evidenced successful inference clears a 402.
+// An eligible unstarted reservation may acquire that permit during claim;
+// other queued holds stay intact and cannot launch during its recovery wait.
+// A managed run's own expired provisional estimate reaches current admission;
+// an obsolete measured hold also reaches current admission, which binds a
+// recovery permit only while a recoverable stop remains. Aging alone and a
+// cleared stop cannot strand queued holds. Manual and pairing ledgers retain
+// their expiry checks.
+// Telemetry-only denials acquire a canonical wait at claim or a fresh owner
+// check, preserving the original stop/deadline and the exact early intent.
+// Readiness evaluates the same non-mutating admission policy, including fresh
+// fact-only reserves, manual window pace and recovery eligibility, without
+// consuming the permit. Recovery uses the same current sibling/resource
+// authority at reservation and claim; withdrawn pools and stale membership
+// revisions release holds.
+// Manual allowances cap work but never make unknown vendor usage measured.
+// A restarted heartbeat survives rejection of an obsolete pending check. The
+// 409 response identifies the committed heartbeat; stale facts are discarded,
+// polling stops offering the old check, and old receipts cannot rewind it.
 package agentaccounts

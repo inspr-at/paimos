@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -192,6 +193,14 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='failed' WHERE id=$1`, run)
 		return err
 	})
+	var account string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at) VALUES($1,'reset-privacy','codex','daemon',$2,'Private account',$3,now()) RETURNING id::text`, f.person.TenantID, f.agent.ID, f.person.ID).Scan(&account); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2 WHERE id=$1`, run, account)
+		return err
+	})
 	check(false, true, "failed")
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind,error_code,limit_window,limit_resets_at) VALUES($1,$2,1,'finished','vendor_limit','5h',now()+interval '1 hour')`, f.person.TenantID, run)
@@ -205,6 +214,40 @@ func TestStateEvidenceTracksRunOutcomeAndApprovalResolution(t *testing.T) {
 		}
 		if data["vendor_limited"] != true || data["limit_window"] != "5h" || data["limit_resets_at"] == nil {
 			t.Fatal("missing vendor limit state")
+		}
+	}
+
+	// An exact run's availability remains visible; reset details require its
+	// account owner's sharing, even for a workspace administrator.
+	viewer := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Teammate')`, viewer.TenantID, viewer.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.db, viewer.TenantID, viewer.ID, "admin")
+	for _, endpoint := range []string{base + "/" + id, "/api/harness-sessions", "/api/harness-sessions/live?include_inactive=true"} {
+		for _, shared := range []bool{false, true, false} {
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=$2 WHERE id=$1`, account, shared)
+				return err
+			})
+			data := decode(t, f.call(viewer, "GET", endpoint, nil, ""))
+			if items, ok := data["items"].([]any); ok {
+				if len(items) != 1 {
+					t.Fatalf("session missing: %v", data)
+				}
+				data = items[0].(map[string]any)
+			}
+			if data["vendor_limited"] != true {
+				t.Fatalf("availability lost: %v", data)
+			}
+			if shared {
+				if data["limit_window"] != "5h" || data["limit_resets_at"] == nil {
+					t.Fatalf("shared reset missing: %v", data)
+				}
+			} else if data["limit_window"] != nil || data["limit_resets_at"] != nil {
+				t.Fatalf("private reset disclosed: %v", data)
+			}
 		}
 	}
 

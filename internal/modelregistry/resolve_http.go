@@ -83,10 +83,6 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestedPerson := params.Get("person_id")
-	if params.Has("person_id") && !uuidRE.MatchString(requestedPerson) {
-		writePreferenceError(w, prefFail(403, "person_not_caller"))
-		return
-	}
 	q := WorkQuery{Role: strings.TrimSpace(params.Get("role")), AuthorFamily: params.Get("author_family"), Harness: params.Get("harness"), Area: params.Get("area"), Complexity: params.Get("complexity"), ProjectID: project}
 	ticket := strings.TrimSpace(params.Get("ticket"))
 	if len(ticket) > 80 || params.Has("ticket") && ticket == "" || len(q.Area) > 48 || len(q.Role) > 32 || len(q.AuthorFamily) > 32 || len(q.Harness) > 32 || q.Complexity != "" && q.Complexity != "S" && q.Complexity != "M" && q.Complexity != "L" {
@@ -104,6 +100,9 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		}
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 		if params.Has("person_id") {
+			if !uuidRE.MatchString(requestedPerson) {
+				return prefFail(400, "invalid_placement")
+			}
 			person, err := modelprefs.CanonicalPerson(ctx, tx, requestedPerson)
 			if err != nil {
 				return err
@@ -127,6 +126,9 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 			if ticketProject != nil {
 				q.ProjectID = *ticketProject
 			}
+			if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: q.ProjectID}); err != nil {
+				return err
+			}
 			if project != "" && project != q.ProjectID {
 				return prefFail(400, "ticket_project_mismatch")
 			}
@@ -138,9 +140,6 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 			q.TicketResidency = placement.Residency
 			if q.Role == "" {
 				q.Role = q.TicketRole
-			}
-			if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: q.ProjectID}); err != nil {
-				return err
 			}
 		}
 		if err := readableProject(ctx, tx, p, q.ProjectID); err != nil {

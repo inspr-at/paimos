@@ -25,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -109,6 +110,7 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
+	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string
 	lastCapacity     []capacity.Reading
@@ -148,6 +150,9 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	p.eventMu.Unlock()
 	if ended {
 		return ErrNotOwned
+	}
+	if op == "tier" {
+		return p.changeTier(ctx, text)
 	}
 	inbox := op == "inbox"
 	if inbox {
@@ -247,6 +252,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if account.Account.ID != "" {
 		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
 	}
+	probe, cancelProbe := context.WithTimeout(op, 2*time.Second)
+	reportCodexModels(probe, p, observe, r.Run.ID)
+	cancelProbe()
 	cp.readCapacity(op, "start")
 	if p.vendorLimited.Load() {
 		return fail(errors.New("Codex capacity refused run"))
@@ -259,7 +267,10 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		Effort string `json:"reasoningEffort"`
 	}
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
-	config := map[string]any{}
+	config := map[string]any{"service_tier": "default"}
+	if r.ServiceTier != "" {
+		config["service_tier"] = map[string]string{"default": "default", "fast": "fast", "fastest": "ultrafast"}[r.ServiceTier]
+	}
 	if r.Rules != "" {
 		// This limits the repository AGENTS.md chain, not developer instructions.
 		// Preserve Codex's default allowance when the delivered rules are smaller.
@@ -278,7 +289,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	raw, err = p.request(op, "jsonrpc", "thread/start", threadArgs)
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
-		return fail(errors.New("Codex thread start failed"))
+		return fail(modelStartError("Codex thread start failed", err))
 	}
 	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
@@ -293,7 +304,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	// Launch parameters alone are not evidence of its effective settings.
 	observe(AdapterEvent{HarnessModel: thread.Model, HarnessEffort: thread.Effort})
 	if err := cp.startTurn(op, r); err != nil {
-		return fail(errors.New("Codex turn start failed"))
+		return fail(modelStartError("Codex turn start failed", err))
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
@@ -763,6 +774,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 }
 
 type claudeProcess struct {
+	serviceTier   string
 	answerMu      sync.Mutex
 	answer        string
 	managedPolicy bool
@@ -791,7 +803,7 @@ func (p *claudeProcess) Wait() error {
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
-	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
+	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" && op != "tier" {
 		return ErrUnsupported
 	}
 	correlation, err := randomID()
@@ -902,6 +914,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			EffectiveModel  string             `json:"effective_model"`
 			EffectiveEffort string             `json:"effective_effort"`
 			ModelEvidence   string             `json:"model_evidence_status"`
+			ServiceTier     string             `json:"service_tier"`
 			InputTokens     int64              `json:"input_tokens_total"`
 			OutputTokens    int64              `json:"output_tokens_total"`
 			CachedTokens    *int64             `json:"cached_input_tokens_total"`
@@ -982,7 +995,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			default:
 			}
 		case "settings_changed":
-			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort})
+			if servicetier.Valid(frame.ServiceTier) {
+				cp.serviceTier = frame.ServiceTier
+			}
+			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort, HarnessTier: frame.ServiceTier})
 		case "budget_exhausted":
 			if frame.Reason == "token_budget_exhausted" || frame.Reason == "turn_budget_exhausted" {
 				observe(AdapterEvent{BudgetExhausted: frame.Reason})
@@ -1009,6 +1025,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			reports := claudeModelReports(frame.Models)
 			for i := range reports {
 				report := reports[i]
+				report.ServiceTier = cp.serviceTier
+				if report.ServiceTier == "" {
+					report.ServiceTier = "default"
+				}
 				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
@@ -1028,7 +1048,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	})
 	op, cancel := operationContext(ctx)
 	defer cancel()
-	if err := p.sendContext(op, map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
+	if err := p.sendContext(op, map[string]any{"op": "start", "service_tier": "default", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
 		return p.failStart(err)
 	}
 	select {

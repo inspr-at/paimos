@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -176,6 +177,9 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	restored := decode[workKind](t, &admin, "POST", "/api/work-kinds/"+first.ID+"/restore", "", 200)
 	if restored.ArchivedAt != nil {
 		t.Fatal(restored)
+	}
+	if eventCount(t, admin, "work_kind.restored") != 1 {
+		t.Fatal("restore did not record its own event")
 	}
 	for _, method := range []string{"DELETE", "PATCH", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
@@ -389,4 +393,71 @@ func TestPreferenceOpenAPIContract(t *testing.T) {
 	if err != nil || len(round) == 0 {
 		t.Fatal(err)
 	}
+}
+
+func TestWorkKindsProjectOnlyReaders(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "kind-project-read", "person", "Admin", []string{"admin"})
+	reader := addPrincipal(t, admin.TenantID, "person", "Project reader", nil)
+	other := makePrincipal(t, "kind-foreign-read", "person", "Foreign", []string{"admin"})
+	var project, hidden, firmware string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		for i, dst := range []*string{&project, &hidden} {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID, fmt.Sprintf("KR-%d", i+1)).Scan(dst); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label,project_id) VALUES($1,'firmware','Firmware',$2) RETURNING id::text`, admin.TenantID, project).Scan(&firmware); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label,project_id) VALUES($1,'hidden-kind','Hidden',$2)`, admin.TenantID, hidden); err != nil {
+			return err
+		}
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'kind_reader','Kind reader') RETURNING id::text`, admin.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read')`, admin.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, admin.TenantID, reader.ID, role, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pattern := "GET /api/work-kinds"
+	scope, scoped, err := authz.ResolveRouteScope(t.Context(), appPool, pattern, "/api/work-kinds")
+	if err != nil || !scoped || !scope.AnyProject {
+		t.Fatalf("project kind route middleware: %+v %v", scope, err)
+	}
+	if err := authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(t.Context(), reader), appPool), pattern, scope); err != nil {
+		t.Fatal("project reader cannot reach kind handler", err)
+	}
+	page := decode[workKindPage](t, &reader, "GET", "/api/work-kinds?project_id="+project, "", 200)
+	// Built-in project guests need the same choices, without global model access.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='guest') WHERE principal_id=$1 AND scope_id=$2`, reader.ID, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	guestPage := decode[workKindPage](t, &reader, "GET", "/api/work-kinds?project_id="+project, "", 200)
+	if len(guestPage.Items) != len(page.Items) {
+		t.Fatal("guest work choices differ from project reader")
+	}
+	found := false
+	for _, k := range page.Items {
+		if k.ID == firmware {
+			found = true
+		}
+		if k.Slug == "hidden-kind" {
+			t.Fatal("hidden project kind exposed")
+		}
+	}
+	if !found {
+		t.Fatal("project reader missing firmware")
+	}
+	expectPrefError(t, reader, "GET", "/api/work-kinds", "", 403, "permission")
+	expectPrefError(t, reader, "GET", "/api/work-kinds?project_id="+hidden, "", 403, "permission")
+	expectPrefError(t, other, "GET", "/api/work-kinds?project_id="+project, "", 404, "not found")
 }

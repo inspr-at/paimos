@@ -15,6 +15,14 @@ function row(planning: Partial<TicketPlanning> | undefined, fields: Record<strin
 const tokens = (spent: number | null, estimated: number | null, extra: object = {}) => ({ spent, input: spent ?? 0, output: 0, cached: 0, sessions: spent === null ? 0 : 2, unreported: 0, estimated, ...extra })
 const cost = (extra: object) => ({ list_spent: null, list_estimated: null, list_unpriced: false, paid_spent: null, paid_estimated: null, paid_unknown: false, plans: [], ...extra })
 
+test('placement provenance labels a pin, latest, and Automatic without changing legacy cells', () => {
+  const legacy = modelCell(row({ route })).tip
+  assert.doesNotMatch(legacy, /preference/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'person', pinned: true } })).tip, /You preference · pinned version/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'project', follows_latest: true } })).tip, /Project preference · follows latest/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'default' } })).tip, /Default preference · Automatic/)
+})
+
 test('dense figures', () => {
   assert.equal(formatTokenCount(940), '940')
   assert.equal(formatTokenCount(9_120), '9.12k')
