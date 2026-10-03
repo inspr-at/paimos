@@ -679,6 +679,49 @@ func TestKeyTrimProposalKeysetPagination(t *testing.T) {
 	}
 }
 
+func TestKeyTrimProposalPageReadFailure(t *testing.T) {
+	m, owner, key, in := trimFixture(t)
+	for _, request := range []string{"10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"} {
+		in.RequestID = request
+		proposeTrim(t, m, owner, key.ID, in)
+	}
+	const path = "/api/key-trim-proposals?limit=1"
+	w := trimHTTP(m, owner, "GET", path, nil)
+	var page struct {
+		Items      []trimProposal `json:"items"`
+		HasMore    bool           `json:"has_more"`
+		NextCursor string         `json:"next_cursor"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Items) != 1 || !page.HasMore || page.NextCursor != page.Items[0].ID {
+		t.Fatal("fixture must have a readable first item and another page")
+	}
+	// Keep both proposal rows so the ID query still reports another page, but
+	// make loading the first proposal fail while decoding persisted evidence.
+	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		result, err := tx.Exec(t.Context(), `UPDATE key_trim_proposals SET evidence='[]'::jsonb WHERE tenant_id=$1::uuid AND id=$2::uuid`, owner.TenantID, page.Items[0].ID)
+		if err == nil && result.RowsAffected() != 1 {
+			t.Fatal("fixture did not corrupt exactly the first proposal")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var readErr error
+	m.inTenant = func(ctx context.Context, pool *pgxpool.Pool, tid string, fn func(pgx.Tx) error) error {
+		readErr = db.InTenant(ctx, pool, tid, fn)
+		return readErr
+	}
+	w = trimHTTP(m, owner, "GET", path, nil)
+	var decodeErr *json.UnmarshalTypeError
+	if !errors.As(readErr, &decodeErr) || decodeErr.Value != "array" || decodeErr.Type.Name() != "trimEvidence" {
+		t.Fatalf("expected first proposal evidence decode failure, got %v", readErr)
+	}
+	var body map[string]any
+	if w.Code != http.StatusInternalServerError || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body) != 1 || body["error"] != "internal" {
+		t.Fatalf("expected only the internal error response, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestKeyTrimRestoreRechecksEditorAndOriginalCreatorCeilings(t *testing.T) {
 	for _, narrow := range []string{"editor", "original-creator"} {
 		t.Run(narrow, func(t *testing.T) {
