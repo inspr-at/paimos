@@ -2,6 +2,11 @@
 
 // Package chat owns the opt-in chat-v1 conversation identity boundary.
 // History, delivery and receiver qualification are separate later packages.
+// Native references retain their first bound person, project and chat role.
+// Harness registration propagates that ownership to both supplied aliases,
+// even for an unbound replacement, and rejects conflicting history atomically.
+// Replays and paused continuations use the same guard before event writes;
+// binding also checks older registrations that predate the creation guard.
 package chat
 
 type RoleCreate struct {
