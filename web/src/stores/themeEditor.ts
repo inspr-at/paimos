@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { captureAgentThemeSave, installAgentTheme } from '../lib/agentTheme'
+import { captureAgentThemeSave, captureAgentThemeSelection, installAgentTheme } from '../lib/agentTheme'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
@@ -60,7 +60,12 @@ export function useThemeEditor() {
   async function choose(theme: ThemeRecord) {
     if (!active.value || dirty.value || !selfWrite.value) return
     const revision = active.value.revision, id = theme.id
-    await perform(async current => { const chosen = await themes.selectTheme(id, revision); if (current()) install(chosen) })
+    const reconcile = captureAgentThemeSelection(id, revision)
+    await perform(async current => {
+      const chosen = await themes.selectTheme(id, revision)
+      reconcile(chosen)
+      if (current()) install(chosen)
+    })
   }
   async function save() {
     if (!draft.value || !dirty.value || !valid.value || !editable(draft.value) || conflict.value) return
@@ -87,8 +92,10 @@ export function useThemeEditor() {
       if (!current()) return
       merge(created); message.value = 'Duplicated.'
       if (selectionRevision === undefined) return
+      const reconcile = captureAgentThemeSelection(created.id, selectionRevision)
       try {
         const chosen = await themes.selectTheme(created.id, selectionRevision)
+        reconcile(chosen)
         if (current()) install(chosen)
       } catch (failure) {
         if (current()) error.value = `The copy was created, but could not be selected. ${failure instanceof Error ? failure.message : 'Try again.'}`

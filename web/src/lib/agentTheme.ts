@@ -37,6 +37,16 @@ export function captureAgentThemeSave(themeId: string, revision: number) {
     epoch++; selection.themeRevision = saved.revision; agentTheme.value = { ...saved.values.agents }
   }
 }
+// Selection commits also outlive the editor. A response may reconcile the
+// captured CAS or an already-loaded result, but never a different selection.
+export function captureAgentThemeSelection(themeId: string, revision: number) {
+  const started = identityEpoch, owner = person
+  return (chosen: ActiveTheme) => {
+    if (started !== identityEpoch || owner !== person || !owner || chosen.theme.id !== themeId || chosen.revision < revision ||
+        !selection || (selection.revision !== revision && selection.revision !== chosen.revision)) return
+    installAgentTheme(chosen.theme.values.agents, chosen)
+  }
+}
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)
   const started = ++epoch

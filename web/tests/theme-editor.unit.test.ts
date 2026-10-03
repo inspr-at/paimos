@@ -9,7 +9,7 @@ import * as themes from '../src/lib/themes'
 const context = vi.hoisted(() => ({ session: {} as { identity: { tenant: { id: string }; principal: { id: string; kind: string } } | null } }))
 vi.mock('../src/stores/session', () => ({ useSession: () => context.session }))
 vi.mock('../src/lib/authz', () => ({ can: () => true }))
-vi.mock('../src/lib/themes', () => ({ listThemes: vi.fn(), getActiveTheme: vi.fn(), updateTheme: vi.fn(), selectTheme: vi.fn() }))
+vi.mock('../src/lib/themes', () => ({ listThemes: vi.fn(), getActiveTheme: vi.fn(), updateTheme: vi.fn(), selectTheme: vi.fn(), duplicateTheme: vi.fn() }))
 const record = (id = 'theme-a', avatar = 'robot-1', revision = 1): ThemeRecord => ({
   id, tenant_id: 'tenant', name: id, scope: 'personal', owner_principal_id: 'alice', revision, created_at: '', updated_at: '',
   values: { primary: { light: '#123456', dark: null }, secondary: { light: '#654321', dark: null }, recurring_marker: { source: 'primary', custom: null }, agents: { avatar: avatar as ThemeRecord['values']['agents']['avatar'], ring: null, hover: false, size: null, palette: 'standard' } },
@@ -101,3 +101,41 @@ it('an old active-theme read completing after Save cannot undo reconciliation', 
   expect(agentTheme.value?.avatar).toBe('sprite')
   next.stop()
 })
+
+async function pendingSelection(duplicate = false) {
+  const scope = effectScope()
+  const editor = scope.run(() => useThemeEditor())!
+  await flush()
+  const target = record('theme-b', 'sprite')
+  vi.mocked(themes.duplicateTheme).mockResolvedValue(target)
+  let release!: (value: ActiveTheme) => void
+  vi.mocked(themes.selectTheme).mockImplementation(() => new Promise(resolve => { release = resolve }))
+  const selecting = duplicate ? editor.duplicate(record()) : editor.choose(target)
+  await flush()
+  expect(themes.selectTheme).toHaveBeenCalledWith('theme-b', 7)
+  scope.stop()
+  return { editor, selecting, release, target }
+}
+for (const duplicate of [false, true]) {
+  const operation = duplicate ? 'duplicate-and-select' : 'selection'
+  it(`reconciles committed ${operation} after navigation`, async () => {
+    const { editor, selecting, release, target } = await pendingSelection(duplicate)
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value?.avatar).toBe('sprite')
+    expect(editor.active.value!.theme.id).toBe('theme-a')
+  })
+  it(`ignores ${operation} from an earlier identity session`, async () => {
+    const { selecting, release, target } = await pendingSelection(duplicate)
+    resetAgentTheme(); resetAgentTheme('tenant/alice')
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value).toBeNull()
+  })
+  it(`ignores ${operation} after a newer selection loads`, async () => {
+    const { selecting, release, target } = await pendingSelection(duplicate)
+    vi.mocked(themes.getActiveTheme).mockResolvedValue(active(record('theme-c', 'quill'), 9))
+    const next = effectScope(); next.run(() => useThemeEditor()); await flush()
+    release(active(target, 8)); await selecting
+    expect(agentTheme.value?.avatar).toBe('quill')
+    next.stop()
+  })
+}
