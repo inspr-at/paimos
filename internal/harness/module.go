@@ -446,9 +446,6 @@ func fillVendorRef(ctx context.Context, tx pgx.Tx, existing *Session, vendor []b
 			return registrationConflict(err, vendor)
 		}
 		existing.vendorRefDigest = vendor
-		if err := preserveChatAlias(ctx, tx, *existing); err != nil {
-			return err
-		}
 	} else if subtle.ConstantTimeCompare(existing.vendorRefDigest, vendor) != 1 {
 		return vendorRefConflict("vendor_session_ref differs from this active generation's existing binding", vendor)
 	}
@@ -638,6 +635,12 @@ type registration struct {
 }
 
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return m.registerBeforeEvents(r, tx, p, nil)
+}
+
+// Inline resume prepares its predecessor in the same transaction. Its event
+// must wait for native ownership validation, just like registration events.
+func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Principal, beforeEvents func() error) (any, error) {
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
 	var in registration
@@ -785,6 +788,7 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	var expired *Session
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
 	if err == nil && subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 && in.Role == "coordinator" && existing.Role == "coordinator" && existing.AgentPrincipalID == in.AgentPrincipalID && existing.Harness == in.Harness {
 		stale, e := heartbeatExpired(ctx, tx, existing)
@@ -792,9 +796,13 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, e
 		}
 		if stale {
-			if _, e = closeGeneration(ctx, tx, p, existing, StopReasonHeartbeatLost); e != nil {
+			// Release the active-reference uniqueness fence, but defer closure
+			// events until the replacement's native ownership is validated.
+			// A rejected replacement rolls this provisional stop back as well.
+			if _, e = tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped' WHERE id=$1`, existing.ID); e != nil {
 				return nil, e
 			}
+			expired = &existing
 			err = pgx.ErrNoRows
 		}
 	}
@@ -817,7 +825,18 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err
 		}
-		return existing, rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport)
+		if err = preserveChatOwnership(ctx, tx, existing); err != nil {
+			return nil, err
+		}
+		if err = rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport); err != nil {
+			return nil, err
+		}
+		if beforeEvents != nil {
+			if err = beforeEvents(); err != nil {
+				return nil, err
+			}
+		}
+		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -871,8 +890,30 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if p.Kind == tenant.Person {
 		owner = p.ID
 	}
-	if owner != "" {
+	if predecessor != nil && predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
+		// Resume retains its predecessor's owner, including admin/agent
+		// requests. Resolve that identity before propagating native aliases.
+		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, predecessor.ownerID).Scan(&s.ownerID, &s.RowVersion); err != nil {
+			return nil, err
+		}
+	} else if owner != "" {
 		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
+			return nil, err
+		}
+	}
+	if err = preserveChatOwnership(ctx, tx, s); err != nil {
+		return nil, err
+	}
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
+		return nil, err
+	}
+	if beforeEvents != nil {
+		if err = beforeEvents(); err != nil {
+			return nil, err
+		}
+	}
+	if expired != nil {
+		if _, err = closeGeneration(ctx, tx, p, *expired, StopReasonHeartbeatLost); err != nil {
 			return nil, err
 		}
 	}
@@ -882,9 +923,6 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		}
 	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
-		return nil, err
-	}
-	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	if predecessor != nil {

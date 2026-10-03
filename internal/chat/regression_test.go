@@ -4,6 +4,7 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,6 +41,24 @@ func (f *fixture) registerNative(t *testing.T, owner tenant.Principal, project, 
 	return out.ID, lease
 }
 
+// legacyNative retains the binding-time rejection coverage for registrations
+// already stored before the creation guard existed. New HTTP registrations
+// reject conflicting ownership earlier (registration_alias_test.go).
+func (f *fixture) legacyNative(t *testing.T, owner tenant.Principal, project, ref, vendor string) (string, string) {
+	t.Helper()
+	id, lease := f.session(t, owner, project, "worker", "unmanaged")
+	refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00" + ref))
+	var vendorDigest []byte
+	if vendor != "" {
+		sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
+		vendorDigest = sum[:]
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET ref_digest=$2,vendor_ref_digest=$3 WHERE id=$1`, id, refDigest[:], vendorDigest); err != nil {
+		t.Fatal(err)
+	}
+	return id, lease
+}
+
 func TestNativeContextSurvivesRegistrationGenerations(t *testing.T) {
 	for _, scenario := range []string{"person", "role", "project", "vendor_alias", "ref_to_vendor", "vendor_to_ref"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -71,7 +90,7 @@ func TestNativeContextSurvivesRegistrationGenerations(t *testing.T) {
 			case "vendor_to_ref":
 				nextRef, nextVendor = vendor, ""
 			}
-			second, _ := f.registerNative(t, owner, project, nextRef, nextVendor)
+			second, _ := f.legacyNative(t, owner, project, nextRef, nextVendor)
 			if first == second {
 				t.Fatal("fixture did not create a replacement generation")
 			}

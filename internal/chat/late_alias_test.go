@@ -88,7 +88,7 @@ func TestLateVendorAliasCannotCrossChatOwnership(t *testing.T) {
 				if field == "vendor" {
 					nextRef, nextVendor = "other-ref-"+uid(), vendor
 				}
-				next, _ := f.registerNative(t, owner, project, nextRef, nextVendor)
+				next, _ := f.legacyNative(t, owner, project, nextRef, nextVendor)
 				w := f.call(owner, "POST", "/api/chat-threads/"+target.ID+"/binding", map[string]string{"session_id": next, "expected_epoch": "0"}, "")
 				expect(t, w, http.StatusNotFound)
 				if !strings.Contains(w.Body.String(), "chat binding unavailable") {

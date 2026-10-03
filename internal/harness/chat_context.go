@@ -11,11 +11,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// preserveChatAlias extends lasting chat ownership when registration replay
-// learns a vendor alias. The caller has verified the exact lease/metadata and
-// holds tenant -> hierarchy -> session locks. The alias update and these claims
-// commit together; a conflict rolls back the alias, row version and claims.
-func preserveChatAlias(ctx context.Context, tx pgx.Tx, s Session) error {
+// preserveChatOwnership validates and extends lasting native-context ownership
+// during creation and alias replay, including registrations never chat-bound.
+// The caller has resolved the final owner and holds tenant -> hierarchy ->
+// session locks. Run before event writes; conflicts roll back the registration,
+// alias, row version and claims together.
+func preserveChatOwnership(ctx context.Context, tx pgx.Tx, s Session) error {
 	// A shared agent or a changed registration owner cannot see historical
 	// person-owned rows normally. Open only this verified session's context,
 	// including the newly stored alias, and restore it before other work.
@@ -56,7 +57,10 @@ func preserveChatAlias(ctx context.Context, tx pgx.Tx, s Session) error {
 				return workorders.Fail(409, "chat binding unavailable")
 			}
 		}
-		refs := [][]byte{s.refDigest, s.vendorRefDigest}
+		refs := [][]byte{s.refDigest}
+		if len(s.vendorRefDigest) != 0 && !bytes.Equal(s.refDigest, s.vendorRefDigest) {
+			refs = append(refs, s.vendorRefDigest)
+		}
 		slices.SortFunc(refs, bytes.Compare)
 		for _, ref := range refs {
 			// No UPDATE: historical ownership is immutable even when its owner
