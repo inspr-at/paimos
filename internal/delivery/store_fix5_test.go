@@ -187,7 +187,7 @@ func TestStoreFix5FullBatchDiscoversEverySource(t *testing.T) {
 		return f.releaseRow(t, r.ID)
 	}
 	staleSource := addSource(0)
-	stale := f.item(t, "ticket", "TK-0", "done", staleSource.ID, "V")
+	stale := f.item(t, "ticket", "TK-101", "done", staleSource.ID, "V")
 	f.exec(t, `UPDATE ships_in SET expedite=true WHERE item_node_id=$1`, stale)
 	requests := make([]PlacementRequest, 100)
 	sources := []string{staleSource.ID}
