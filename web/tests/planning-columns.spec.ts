@@ -99,7 +99,15 @@ test('approved cells show estimates, running figures, measured checks and sessio
   for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) expect(await row(page, key).locator('.c-tokens .slot').evaluate(el => el.getBoundingClientRect().width)).toBe(12)
   await measured.locator('.c-tokens .plan-figure').hover()
   await expect(page.locator('.tooltip')).toHaveText(/Estimate taken when work started/)
-  await expect(page.locator('.plan-model[tabindex], .plan-figure[tabindex]')).toHaveCount(0)
+  // Model explanations are native actions without adding sequential tab stops.
+  const modelActions = page.locator('button.plan-model')
+  await expect(modelActions).toHaveCount(7)
+  await expect(page.locator('.plan-model:not(button), .plan-figure[tabindex]')).toHaveCount(0)
+  for (const action of await modelActions.all()) {
+    await expect(action).toHaveAttribute('type', 'button')
+    await expect(action).toHaveAttribute('tabindex', '-1')
+    await expect(action).toHaveAccessibleName(/\. Why this model\?$/)
+  }
 })
 
 test('Cursor Grok hovers match profile keys and explain runs without a planned role', async ({ page }) => {
