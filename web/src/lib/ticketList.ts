@@ -8,6 +8,7 @@
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
 import { estimateHours } from './estimates.ts'
+import { compareRevision } from './liveUpdates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
@@ -421,7 +422,7 @@ export function compareDeliveryOrder(a: ListItem, b: ListItem, desc = false): nu
     if ((x === null) !== (y === null)) return x === null ? 1 : -1
     if (x !== null && y !== null && x !== y) return (x < y ? -1 : 1) * direction
   }
-  const created = (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0)
+  const created = compareRevision(a.created_at, b.created_at)
   return created ? Math.sign(created) * direction : a.id === b.id ? 0 : (a.id < b.id ? -1 : 1) * direction
 }
 export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => number {

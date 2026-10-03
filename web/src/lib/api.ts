@@ -210,7 +210,9 @@ export interface ListItem extends WorkNode {
   lead_worker?: LeadWorker | null
   // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
   planning?: TicketPlanning
-  delivery_order?: DeliveryOrder
+  // Local null means a requested projection authoritatively has no placement;
+  // undefined means the request did not ask for it. The wire omits both.
+  delivery_order?: DeliveryOrder | null
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets; facet_labels?: Record<string, Record<string, string>> }
@@ -246,6 +248,9 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   const start = tick()
   let position: number | undefined
   const page = await json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal, response => { position = parsePosition(response) })
+  const deliveryRequested = params.sort?.split(',').some(key => key.replace(/^-/, '') === 'order')
+    || !!params.ships_in?.length || params.facets?.includes('ships_in')
+  if (deliveryRequested) for (const item of page.items) item.delivery_order ??= null
   learnPictures(page.items.map(item => item.assignee))
   return stampAt(page, { position, start }, 2)
 }

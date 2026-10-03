@@ -12,6 +12,9 @@ to exclude it. Facet counts cover the filtered result before pagination;
 expedited open work first, then container position, item rank, creation time
 and ID. Ranked backlog precedes the unranked tail. Journey projects retain
 priority and creation-time ordering and have no `ships_in` placement.
+Client ordering preserves timestamp microseconds. Requested list placement
+clears after a move into a journey project; reads that do not request placement
+retain the last known projection until an authoritative refresh.
 The URL and saved views preserve both filters and the chosen sort.
 
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.

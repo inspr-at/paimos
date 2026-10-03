@@ -181,7 +181,13 @@ export class RowStore {
   // projectionFloor: the hint that triggered this batch. A page covering it may
   // advance the display while a newer hint still waits for the follow-up read.
   adopt(copy: ListItem, sent = this.clock, options: { show?: boolean; full?: boolean; projectionFloor?: number } = {}): ListItem | null {
-    return this.take(copy.id, sent, options.full ?? true, () => frozen(copy), copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
+    return this.take(copy.id, sent, options.full ?? true, () => {
+      const previous = this.entries.get(copy.id)?.latest
+      // A list read may not request placement. Keep the known projection in
+      // that case; listNodes supplies null for authoritative journey absence.
+      return frozen(copy.delivery_order === undefined && previous?.delivery_order !== undefined
+        ? { ...copy, delivery_order: previous.delivery_order } : copy)
+    }, copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
   }
   // A node read (GET, a save answer): merged over the newest copy.
   adoptNode(node: WorkNode, sent = this.clock, options: { show?: boolean } = {}): ListItem | null {
