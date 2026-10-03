@@ -249,3 +249,27 @@ owned processes. Remote browsers remain disabled pending OPS-247, so Linux
 Chromium and previous-binary runtime compatibility remain coordinator gates.
 These are local worker results, not merge, release, deployment or activation
 approval. No approved design decision was changed.
+
+AEON-619 lock-order round merged `origin/main` (`d94153bf`) normally at
+`1dd63b88`, then replaced branch-added tenant-before-tree fences with main's
+canonical helpers. Portal management, moderation, settings and public writes
+use `agentpairing.LockMutation` (pairing → tree → tenant); node tree/moderation
+entry points use `authz.LockProjectMutation` (tree → tenant, pairing first where
+required). Authorization remains inside the final fenced transaction, resource
+rows follow the fences, and the event counter remains last. The split portal
+locks and redundant intake tree acquisition were removed. Migration 1138 and
+its policy exception are unchanged in this round. Generic draft endpoints are
+not present in B1; stacked packages consume these shared entry-point fixes.
+
+Barrier regressions at `54df3190` reproduce tenant ownership while waiting for
+tree (`55P03` from a separate NOWAIT probe) on 13 node/admin/public paths, and
+detect missing tree serialization on two additional paths. Fixed code at
+`78e7597e` passes all 17 cases, checking durable mutations and exactly one
+matching audit event after the pairing fence resumes. The approved remote
+runner passes uncached nodes, portal, authz, agentpairing, agentruns and inbox
+suites, including `TestProjectWritesSerializeWithPairingTreeBeforeTenant`.
+The existing lock inventory now includes nodes and portal; its scanner and
+prior assertions are preserved. Evidence is retained locally in
+`tmp/aeon619-lock/negative-remote.log`, `positive-remote.log` and
+`static-lock-guard.log`. These are worker checks; consolidated review, push,
+merge and release remain coordinator work. No origin push or deployment ran.
