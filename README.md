@@ -10,6 +10,33 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Theme API
+
+AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
+returns visible workspace themes and the person's own themes with UUID keyset
+pagination (`after`, `limit`, maximum 100). `GET /api/me/theme` returns the active
+record, default ID, selection revision and any deletion notice. Agents may read
+the workspace default with `profile.read`; theme writes belong to people.
+
+Create with `POST /api/themes`, duplicate with `POST /api/themes/{id}/duplicate`,
+rename or replace values with `PATCH /api/themes/{id}`, and delete with
+`DELETE /api/themes/{id}?revision=N`. Updates, copies and deletes require the
+record's revision; `PUT /api/me/theme` requires the independent selection
+revision (initially 0) and a `theme_id` or null to follow the default. Stale
+revisions return 409. Personal writes require the owner and `profile.write`
+(or the portal equivalent); workspace/default writes require `settings.manage`.
+Personal records and their events remain owner-only, including for managers.
+The full schemas are in [the API contract](api/openapi.yaml).
+
+Each tenant starts with Porcelain, using the shipped light/dark accents and
+native agent artwork settings. Null accent dark means derived by the consumer;
+null agent ring/size means the chosen style's drawn default. Deletion is
+reversible through the event undo API. A selected tombstone resolves to the
+workspace default and supplies `fallback_notice` until another choice is saved.
+Undo restores availability without replacing later choices. The default itself
+cannot be deleted. This package supplies the API; Settings and applying its
+values are delivered by AEON-642–644.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
