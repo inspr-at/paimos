@@ -71,11 +71,9 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if !ok || pool == nil {
 		return ErrNoStore
 	}
-	effective, err := Load(ctx, pool, p, scope.ProjectID)
-	if err != nil {
-		return err
-	}
-	return permitEffective(p, permission, effective, scope)
+	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+		return requireTx(ctx, tx, p, permission, scope)
+	})
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -86,7 +84,10 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	if err != nil {
 		return err
 	}
-	return permitEffective(p, permission, effective, scope)
+	if err := permitEffective(p, permission, effective, scope); err != nil {
+		return err
+	}
+	return recordKeyScopeUseTx(ctx, tx, p, permission)
 }
 
 // RequireInProjects decides permission in each listed project separately; ""
@@ -109,6 +110,8 @@ func RequireInProjects(ctx context.Context, tx pgx.Tx, p tenant.Principal, permi
 
 // RequireTx makes a decision inside an existing db.InTenant transaction. It
 // is used by handlers whose resource lock and access check must be atomic.
+// A keyed agent must also be the principal in InTenant's context, so the key
+// usage fence is acquired at entry, before any handler resource locks.
 func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
 	return requireTx(ctx, tx, p, permission, scope)
 }

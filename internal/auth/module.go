@@ -28,6 +28,7 @@ import (
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
@@ -112,6 +113,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("POST /api/agent-keys/{id}/trim-proposals", m.handleProposeKeyTrim)
+	mux.HandleFunc("GET /api/key-trim-proposals", m.handleListKeyTrims)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/decision", m.handleDecideKeyTrim)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/restore", m.handleDecideKeyTrim)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -307,6 +312,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
 				return "recurrences.manage", true
 			}
+		}
+	case "agent-keys":
+		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+			return "approvals.request", true
 		}
 	case "agents":
 		if len(parts) == 2 && parts[1] == "plan" && read {
