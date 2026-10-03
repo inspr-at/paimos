@@ -387,7 +387,10 @@ Usage requires `harness.read`. Its API list value is approximate, includes
 lifetime usage of sessions **started** in the window, and is not interval spend
 or an invoice. Recorded ticket totals reuse the planning columns' measured and
 estimated figures and Paid semantics; account budget windows describe current
-reported usage. Unknown usage stays unknown. Headline usage sums only projects with
+reported usage. Permitted windows remain visible when account budget coverage is
+partial. The briefing explains privacy omissions and the independent window/account
+truncation limit; shared windows are counted once across project reads.
+Unknown usage stays unknown. Headline usage sums only projects with
 `harness.read`, using the workspace dashboard only for a workspace grant; source
 links appear only after successful reads. Merge facts use changes to a ticket’s
 recorded `fields.merge_commit`, available under project visibility; PR URLs alone
