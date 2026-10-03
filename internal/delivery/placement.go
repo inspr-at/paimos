@@ -284,6 +284,11 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if !clear {
 			continue
 		}
+		// Stale expedite cleanup and its flag-only undo share write authority,
+		// even when the unchanged container is already released.
+		if err = w.require("releases.write"); err != nil {
+			return nil, nil, err
+		}
 		next := old
 		next.Expedite = false
 		next, err = w.savePlacement(old, next, "build", now)
@@ -307,7 +312,8 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		// The automatic stale-expedite change retains the existing row's
 		// container, rank and due date. Restoring only that flag is maintenance,
 		// not permission to insert, move or rerank a deleted item.
-		maintenance := restoring && old.Revision > 0 && restored.Revision > 0 &&
+		maintenance := restoring && (n.deleted != nil || Completed(n.state) || Cancelled(n.state)) &&
+			old.Revision > 0 && restored.Revision > 0 &&
 			old.ReleaseID == restored.ReleaseID && old.Rank == restored.Rank &&
 			sameDate(old.DueOn, restored.DueOn) && !old.Expedite && restored.Expedite
 		if n.deleted != nil && !maintenance || !ItemKind(n.kind) {
@@ -317,7 +323,7 @@ func (w *write) place(requests []PlacementRequest, restore map[string]Placement)
 		if request.ReleaseID != "" && restore == nil && dest.Revision != request.ExpectedReleaseRevision {
 			return nil, nil, ErrRevisionChanged
 		}
-		history := releases[old.ReleaseID].State == "released" || dest.State == "released"
+		history := !maintenance && (releases[old.ReleaseID].State == "released" || dest.State == "released")
 		permission := "releases.write"
 		if history {
 			if w.p.Kind != tenant.Person {
