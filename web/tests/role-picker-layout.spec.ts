@@ -240,6 +240,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       controls: { panel, group: list, row, ...(await search.count() ? { search } : {}), ...(await read.count() ? { read } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
       scrollAreas: { panel, list },
       interactions: [{ name: `read ${kind} option before choosing`, run: async () => {
+        // A label toggle has already focused this row. Start a real keyboard
+        // focus transition; focusing the same node cannot emit focusin again.
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
         await page.keyboard.press('ArrowRight')
         if (await read.count()) {
           await read.focus()
