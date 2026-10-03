@@ -750,7 +750,14 @@ not a confirmed cause on mbp2607: no real pairing, vendor login or Keychain was
 accessed by the worker. `authMethod: "claude.ai"` was already accepted. Bounded,
 duplicate-free JSON must confirm loggedIn and the approved email; a different
 email or API-key login still fails closed, now with its own value-free detail.
-An expired verification remains separate from account sign-in readiness.
+An expired verification remains separate from account sign-in readiness. When
+that account's daemon probe is ready, setup reports `connected` with the
+informational action “Verification expired — run verification again”. Plain
+status includes the expired run and its pending local cleanup on the ready
+account line. Status never retries the run, refills its allowance or acknowledges
+cleanup; failed, cancelled and ownership-lost verification remains a failure.
+An interrupted poll returns its context error without publishing the interrupted
+probe, changing local account health or emitting a polling diagnostic.
 
 Plain `status` now includes ready harnesses and every approved account, including
 distinct states for siblings of one harness. It uses `OpenStoreReadOnly` for
@@ -777,9 +784,10 @@ probes succeed, plus an account line for every enrollment. Claude should become
 ready if the removed login environment caused the failure; otherwise its line
 distinguishes signed-out, different-identity and API-key results without showing
 identities or credentials. A retained verification failure may still head the
-output and does not negate ready account lines. Status reads must not introduce
-migration-lock failures. Any remaining pairing failure carries the new safe
-first cause; transient failures keep probing while dispatch remains blocked,
+output and does not negate ready account lines; an expired request alone cannot
+make its freshly probed ready account report `verification_failed`. Status reads
+must not introduce migration-lock failures. Any remaining pairing failure carries
+the new safe first cause; transient failures keep probing while dispatch remains blocked,
 and recovery clears that block on the next successful tick. Real hardened-runtime
 and Keychain behavior still requires this OPS run.
 

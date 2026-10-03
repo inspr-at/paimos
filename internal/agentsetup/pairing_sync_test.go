@@ -3,6 +3,7 @@
 package agentsetup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,61 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsecurity"
 )
+
+func TestReadyAccountExpiredVerificationIsInformationalAndReadOnly(t *testing.T) {
+	for _, tc := range []struct{ verification, account, stage string }{
+		{"expired", "ready", "connected"},
+		{"expired", "blocked", "verification_failed"},
+		{"failed", "ready", "verification_failed"},
+		{"cancelled", "ready", "verification_failed"},
+		{"ownership_lost", "ready", "verification_failed"},
+		{"queued", "ready", "verification_pending"},
+	} {
+		t.Run(tc.verification+"/"+tc.account, func(t *testing.T) {
+			e, api, local, opts, executor := engineFixture(t)
+			approveFixture(t, e, api, opts)
+			s, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.View.Enrollments[0].VerificationRunID = otherAccount
+			s.View.Enrollments[0].VerificationState = tc.verification
+			s.View.Enrollments[0].Cleanup = "pending"
+			s.View.Verification.Allowance = 1
+			if err := e.save(s, false); err != nil {
+				t.Fatal(err)
+			}
+			// A ready sibling must not turn this account's expiry informational.
+			local.states[""] = LocalStatus{DaemonID: s.View.DaemonID, State: "unconfirmed", Ready: true,
+				AccountStatuses: map[string]HarnessDetail{testAccount: {State: tc.account}, "sibling": {State: "ready"}},
+				HarnessDetails:  map[string]HarnessDetail{"codex": {State: "ready"}},
+				Unconfirmed:     []string{otherAccount},
+			}
+			before, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls, creates := len(executor.calls), api.createCount
+			api.progress = nil
+			for range 2 {
+				p, err := e.Status(t.Context())
+				if err != nil || p.Stage != tc.stage {
+					t.Fatalf("expected %s, got %s: %v", tc.stage, p.Stage, err)
+				}
+				if tc.verification == "expired" && tc.account == "ready" && (!strings.Contains(p.Action, "expired") || !strings.Contains(p.Action, "run verification again")) {
+					t.Fatal("expiry lacks informational next action", p.Action)
+				}
+				if p.Accounts[0].VerificationState != tc.verification || p.Accounts[0].VerificationRunID != otherAccount || p.Accounts[0].Cleanup != "pending" || p.LocalProcesses != "unconfirmed" || p.AccountStatuses[testAccount].State != tc.account {
+					t.Fatal("status changed verification, cleanup or account health")
+				}
+			}
+			after, err := e.Store.Read(snapshotName, 1<<20)
+			if err != nil || !bytes.Equal(before, after) || len(executor.calls) != calls || api.createCount != creates || api.progress != nil || len(local.fenced) != 0 {
+				t.Fatal("status retried, reconciled cleanup, or changed approval/allowance")
+			}
+		})
+	}
+}
 
 func TestPairingRetryPolicyAndSafeFirstCause(t *testing.T) {
 	for _, tc := range []struct {

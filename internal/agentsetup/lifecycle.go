@@ -431,7 +431,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		}
 	}
 	if p.Stage != "provisioning" {
-		pending, failed, unavailable := false, false, false
+		pending, failed, unavailable, expired := false, false, false, false
 		for _, a := range v.Enrollments {
 			if a.VerificationRunID == "" || a.State != "connected" {
 				continue
@@ -440,7 +440,15 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 			case "completed":
 			case "unavailable":
 				unavailable = true
-			case "failed", "cancelled", "ownership_lost", "expired":
+			case "expired":
+				// Expiry belongs to the old request, not a fresh account probe.
+				// A ready sibling alone cannot establish this account's readiness.
+				if p.AccountStatuses[a.AccountID].State == "ready" {
+					expired = true
+				} else {
+					failed = true
+				}
+			case "failed", "cancelled", "ownership_lost":
 				failed = true
 			default:
 				pending = true
@@ -456,6 +464,9 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 		case pending:
 			p.Stage = "verification_pending"
 			p.Action = "Approved verification is queued or running; setup will not create another run."
+		case expired:
+			p.Stage = "connected"
+			p.Action = "Verification expired — run verification again. No automatic retry or allowance refill was performed; pending local cleanup is preserved."
 		default:
 			p.Stage = "connected"
 			p.Action = "Computer connected; ongoing limits remain separately controlled."

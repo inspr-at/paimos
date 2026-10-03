@@ -459,15 +459,37 @@ func (s *Supervisor) ProbeOnce(ctx context.Context) error {
 	return s.pollOnce(ctx, false)
 }
 
-func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
+func pollContextError(ctx context.Context, causes ...error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, err := range causes {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr error) {
 	diagnostic := ""
-	defer func() { s.reportPollDiagnostic(diagnostic) }()
+	defer func() {
+		if pollContextError(ctx, resultErr) == nil {
+			s.reportPollDiagnostic(diagnostic)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var recoveryErr error
 	var runs []Run
 	if dispatch {
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
 		s.settlePending(ctx)
+	}
+	if err := pollContextError(ctx, recoveryErr); err != nil {
+		return err
 	}
 	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
 		diagnostic = "dispatch_not_allowed"
@@ -494,6 +516,9 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 	}
 	s.mu.Unlock()
 	for _, account := range accounts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if s.hasUnresolvedOldClaim(account.ID) {
 			s.freezeOnError(account.ID)
 			continue
@@ -505,6 +530,9 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 		}
 		if account.DependencyBlocked {
 			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
+				if cancelled := pollContextError(ctx, err); cancelled != nil {
+					return cancelled
+				}
 				failures = append(failures, errors.New("account probe unavailable"))
 			}
 			continue
@@ -551,6 +579,11 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 				status = probeAccount(ctx, probe, account.Key)
 			}
 		}
+		// Cancellation is not evidence about sign-in, dependencies or health.
+		// Discard the interrupted result before publishing or consuming the wait.
+		if err := pollContextError(ctx, dependencyErr, probeErr); err != nil {
+			return err
+		}
 		if pi, ok := probe.(*PiAdapter); ok && hold == "" {
 			pi.probeMu.Lock()
 			cached := pi.probes[account.Key]
@@ -580,6 +613,10 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
 		}
 		s.mu.Lock()
+		if cancelled := pollContextError(ctx, err); cancelled != nil {
+			s.mu.Unlock()
+			return cancelled
+		}
 		// A concurrent repin/hold release starts a new probe lifecycle. The old
 		// adapter's in-flight result cannot consume that wait or establish local readiness.
 		if !s.probePendingSince[account.ID].Equal(pendingSince) {
@@ -672,6 +709,9 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) error {
 		}
 	}
 	for _, run := range runs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if run.AgentPrincipalID != s.principalID {
 			failures = append(failures, ErrScope)
 			continue

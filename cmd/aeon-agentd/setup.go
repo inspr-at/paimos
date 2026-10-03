@@ -616,6 +616,12 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		if detail.Fix.Command != "" {
 			line += " fix " + detail.Fix.Command
 		}
+		if account.State == "connected" && detail.State == "ready" && account.VerificationState == "expired" && account.VerificationRunID != "" {
+			line += " verification expired — run verification again; run " + account.VerificationRunID
+			if account.Cleanup != "" {
+				line += "; local cleanup " + account.Cleanup
+			}
+		}
 		if _, err = fmt.Fprintln(out, line); err != nil {
 			return err
 		}
