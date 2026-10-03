@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { archiveAccount, setAccountState, type AgentAccount } from '../src/lib/agents'
 import { cancelRun, type AgentRunRow } from '../src/lib/agentRows'
 import { wired, wiredPage } from './wire-fixtures'
-import { disconnectComputer, removeComputer, type PairingView } from '../src/lib/agentPairing'
+import { disconnectComputer, removeComputer, PairingError, type PairingView } from '../src/lib/agentPairing'
 import type { AccountCapacity, CapacitySchedule, ScheduleOverride } from '../src/lib/capacity'
 import { APIError } from '../src/lib/api'
 import { readDeskProjection } from '../src/lib/decisionDesk'
@@ -20,6 +20,7 @@ import { useCapacity } from '../src/stores/capacity'
 
 type Server = { accounts: AgentAccount[]; runs: AgentRunRow[]; capacity: AccountCapacity[]; schedules: ScheduleOverride[]; computers: PairingView[]; desk: DeskProjection }
 let server: Server
+let computerError: Error | null = null
 let hold = false
 const held: (() => void)[] = []
 // A GET answers with what the server had when it was asked, released later while held.
@@ -53,7 +54,7 @@ vi.mock('../src/lib/capacity', async importOriginal => ({
 }))
 vi.mock('../src/lib/agentPairing', async importOriginal => ({
   ...await importOriginal<typeof import('../src/lib/agentPairing')>(),
-  listPairingComputers: () => get(() => server.computers),
+  listPairingComputers: () => computerError ? Promise.reject(computerError) : get(() => server.computers),
   removeComputer: vi.fn(), disconnectComputer: vi.fn(),
 }))
 vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ byId: () => undefined, load: async () => {} }) }))
@@ -67,6 +68,7 @@ beforeEach(() => {
   vi.mocked(readDeskProjection).mockImplementation(() => get(() => server.desk))
   setActivePinia(createPinia())
   hold = false
+  computerError = null
   held.length = 0
   server = {
     desk: { items: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: 'question', revision: 1, title: 'First canonical question', held: false, created_at: '2026-10-02T10:00:00Z', href: '/agents?needs=q:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', source: '/api/questions/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }], counts: { open: 8, held: 2, chores: 3 }, has_more: true, next_cursor: 'next', as_of: '2026-10-02T12:00:00Z' },
@@ -215,4 +217,38 @@ it.each([['access revocation', clearPermissions], ['person change', resetPositio
   await agents.loadNeeds(true)
   expect(agents.needsCount).toBe(agents.pending.length + agents.held.length)
   expect(readDeskProjection).not.toHaveBeenCalled()
+})
+
+
+it('AEON-623: a computer read failure retains the snapshot and immediately marks it stale', async () => {
+  const capacity = useCapacity()
+  await capacity.load()
+  const snapshot = capacity.computers
+  computerError = new PairingError(503, 'temporarily unavailable')
+  await capacity.load()
+  expect(capacity.computers).toBe(snapshot)
+  expect(capacity.computersLoaded).toBe(true)
+  expect(capacity.computersStale).toBe(true)
+  // The generic poller waits three failures for error, but the first is stale.
+  expect(capacity.computersState).toBe('ready')
+})
+
+it('AEON-623: only explicit optional pairing access denial becomes an empty successful read', async () => {
+  const capacity = useCapacity()
+  computerError = new PairingError(403, 'forbidden')
+  await capacity.load()
+  expect(capacity.computers).toEqual([])
+  expect(capacity.computersLoaded).toBe(true)
+  expect(capacity.computersState).toBe('ready')
+  expect(capacity.computersStale).toBe(false)
+})
+
+it('AEON-623: an initial service or parse failure is not an empty inventory', async () => {
+  const capacity = useCapacity()
+  for (const error of [new PairingError(503, 'temporarily unavailable'), new Error('invalid pairing response')]) {
+    computerError = error
+    await capacity.load()
+    expect(capacity.computersLoaded).toBe(false)
+    expect(capacity.computersState).toBe('error')
+  }
 })

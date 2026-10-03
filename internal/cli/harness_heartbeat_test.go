@@ -36,8 +36,11 @@ type hbCall struct {
 
 func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	project := map[string]any{"id": transcriptProjectID, "key": "PRJ-1", "kind_id": "project-kind", "title": "AEON", "fields": map[string]any{"project_key": "AEON"}}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		t.Helper()
 		var body map[string]any
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -670,14 +673,15 @@ func TestRunHeartbeatMissingNameSource(t *testing.T) {
 	if _, ok := beats[0].body["display_label"]; ok {
 		t.Fatal("missing name source sent a label")
 	}
-	if beats[0].body["model"] != "claude-test" {
-		t.Fatalf("model %#v", beats[0].body["model"])
+	reg := hbWhere(calls, http.MethodPost, "/harness-sessions")
+	if reg[0].body["model"] != "claude-test" || beats[0].body["model"] != nil {
+		t.Fatalf("initial model should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 	if _, ok := beats[0].body["account_label"]; ok {
 		t.Fatal("unknown account label was sent")
 	}
-	if beats[0].body["reasoning_effort"] != "high" {
-		t.Fatalf("effort %#v", beats[0].body["reasoning_effort"])
+	if reg[0].body["reasoning_effort"] != "high" || beats[0].body["reasoning_effort"] != nil {
+		t.Fatalf("initial effort should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 }
 
