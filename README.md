@@ -666,6 +666,9 @@ profile across kinds, then the existing harness/model/effort route and documente
 uncalibrated fallback tokens and costs are withheld in the UI and sort as missing.
 Epics exclude those children and label the sum partial. Frozen fallback baselines
 remain visible with an uncalibrated label so work-start comparisons survive.
+Page planning reads live descendants from their selected parents; whole-list
+model, token and cost sorts retain batch joins. The 6,000-node regression checks
+request latency and descendant node visits under stale kind statistics.
 
 Speed factors need five exact-cell samples with frozen positive size estimates:
 model-adjusted hours are size × median(active hours / size), while `estimate_hours`
