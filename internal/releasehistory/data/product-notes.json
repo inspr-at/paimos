@@ -4436,10 +4436,107 @@
     "261003095616.0.0": {
       "release_channel": "stable",
       "release_sequence": 122,
-      "snapshot_sha256": "a38427eb58e3e981fb0ca7bcbd15823c48dd1c0428008a3593a9b2b42cde585b",
-      "captured_at": "2026-10-03T09:56:22Z",
+      "snapshot_sha256": "b60b7d535cc838e06b439817e3f4d365941785777b3a7882aa96fa6492dd1ea9",
+      "captured_at": "2026-10-03T14:17:10Z",
       "release_revision": 1,
-      "items": []
+      "items": [
+        {
+          "key": "AEON-502",
+          "pill_en": "Choose models by work",
+          "pill_de": "Modelle nach Arbeit wählen",
+          "benefit_en": "Choose preferred models by type of work in the web app, with workspace, personal and project settings. Inherited choices and locks show which setting applies.",
+          "benefit_de": "Wähle in der Web-App bevorzugte Modelle nach Art der Arbeit, mit Einstellungen für Arbeitsbereich, Person und Projekt. Geerbte Werte und Sperren zeigen, welche Einstellung gilt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-524",
+          "pill_en": "Pause agents",
+          "pill_de": "Agenten pausieren",
+          "benefit_en": "You can request a pause for supported agents, one by one or in groups of up to 200 eligible agents; a completed pause saves a handover so a later run can continue from there.",
+          "benefit_de": "Du kannst für unterstützte Agenten eine Pause anfordern, einzeln oder in Gruppen von bis zu 200 berechtigten Agenten; eine abgeschlossene Pause speichert eine Übergabe, damit ein späterer Lauf dort weitermachen kann.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-536",
+          "pill_en": "Questions in one place",
+          "pill_de": "Fragen an einem Ort",
+          "benefit_en": "Agents can send questions to the Decision Desk. You answer them one at a time and see their delivery status.",
+          "benefit_de": "Agents können Fragen am Entscheidungstisch ablegen. Du beantwortest sie einzeln und siehst ihren Zustellstatus.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-564",
+          "pill_en": "Correct recorded answers",
+          "pill_de": "Antworten gezielt korrigieren",
+          "benefit_en": "New question answers wait 10 seconds before delivery; editing them restarts that window. Later corrections keep the previous answer in the record, and delivery failures remain visible.",
+          "benefit_de": "Neue Antworten auf Fragen warten vor der Zustellung zehn Sekunden; eine Änderung startet diese Frist neu. Spätere Korrekturen erhalten den bisherigen Eintrag, und Zustellfehler bleiben sichtbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-573",
+          "pill_en": "Manage recurring tickets",
+          "pill_de": "Wiederkehrende Tickets verwalten",
+          "benefit_en": "Set up recurring tickets from the Repeat menu and manage schedules in project settings, including pause, resume and run now.",
+          "benefit_de": "Lege wiederkehrende Tickets über das Menü Wiederholen an und verwalte ihre Pläne in den Projekteinstellungen, mit Pausieren, Fortsetzen und Jetzt ausführen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-580",
+          "pill_en": "Owner workstation key",
+          "pill_de": "Eigentümer verwalten per Schlüssel",
+          "benefit_en": "As owner, you can use the CLI to designate one paired workstation key for workspace administration. The key stays within its granted permissions.",
+          "benefit_de": "Als Eigentümer kannst du per CLI einen gekoppelten Arbeitsplatzschlüssel für die Verwaltung deines Arbeitsbereichs markieren. Der Schlüssel arbeitet im Rahmen seiner erteilten Rechte.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-611",
+          "pill_en": "Newest decisions first",
+          "pill_de": "Neueste Entscheidungen zuerst",
+          "benefit_en": "The Decided view shows the most recently answered questions first, so a fresh answer stays easy to find after a refresh.",
+          "benefit_de": "Die Ansicht Entschieden zeigt zuletzt beantwortete Fragen zuerst, damit eine neue Antwort nach dem Aktualisieren leicht zu finden bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-612",
+          "pill_en": "Clearer tier costs",
+          "pill_de": "Klarere Kosten je Stufe",
+          "benefit_en": "Where tier evidence is available, session cost estimates show the service tier and price multiplier; session details also show tier-change history.",
+          "benefit_de": "Wenn Nachweise zur Service-Stufe vorliegen, zeigen die Kostenschätzungen der Sitzung die Stufe und den Preisfaktor; die Sitzungsdetails zeigen auch den Verlauf von Stufenwechseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-613",
+          "pill_en": "Low quota warnings",
+          "pill_de": "Kontingent wird knapp",
+          "benefit_en": "Fresh account readings can trigger low-quota notices for active Aeon runs. Workspace admins can adjust the early and urgent thresholds.",
+          "benefit_de": "Aktuelle Kontingentmessungen können Hinweise auf knappes Kontingent für aktive Aeon-Läufe auslösen. Workspace-Admins können die frühe und die dringende Warnschwelle anpassen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-615",
+          "pill_en": "Review key permissions",
+          "pill_de": "Agentenschlüssel gezielt verschlanken",
+          "benefit_en": "Review proposed permission cuts for agent keys on the Decision Desk. You can approve or decline a proposal in one click and restore eligible changes within 30 days.",
+          "benefit_de": "Prüfe vorgeschlagene Kürzungen der Rechte von Agentenschlüsseln am Entscheidungstisch. Du kannst einen Vorschlag mit einem Klick annehmen oder ablehnen und zulässige Änderungen innerhalb von 30 Tagen wiederherstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-628",
+          "pill_en": "List controls on phones",
+          "pill_de": "Listen-Steuerung am Telefon",
+          "benefit_en": "On a phone or small tablet you can sort, choose columns and row height, select matching tickets in bulk and compare two screenshots.",
+          "benefit_de": "Auf Telefon oder kleinem Tablet kannst du sortieren, Spalten und Zeilenhöhe wählen, passende Tickets gesammelt auswählen und zwei Screenshots vergleichen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-635",
+          "pill_en": "Calmer releases page",
+          "pill_de": "Ruhigere Release-Seite",
+          "benefit_en": "The releases page keeps its controls steady while you switch views. List names can wrap across two lines, and displayed changes are grouped into features, fixes and other changes.",
+          "benefit_de": "Die Bedienelemente der Release-Seite bleiben beim Umschalten an ihrem Platz. Namen in der Liste können zweizeilig umbrechen; angezeigte Änderungen sind nach Funktionen, Fehlerbehebungen und Sonstigem gruppiert.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
