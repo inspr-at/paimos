@@ -468,6 +468,10 @@ The first visit covers 24 hours; later visits start at that person's saved
 briefing visit. The database statement start establishes the window alongside the first
 event page; only complete successful log reads advance the saved server cutoff.
 Denied logs, failed logs and log pagination limits retain the earlier cutoff.
+Usage completion totals have an independent 5,000-ticket limit. An extra row
+sets `work.truncated` and the dashboard's `truncated` flag even when all worker
+sessions started before the requested range. Capped totals are lower bounds.
+
 Pending approvals, held requests, journey actions and usage are separate current
 snapshots: their page limits or failures do not freeze completed log windows.
 Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
@@ -753,6 +757,16 @@ before either renewal is historical, so rerun preparation after both renewals,
 then request a new deployment. Journey contract `journey/1.2` adds the optional
 `next_action.renewal_action`; clients must use it when present. Existing action
 keys and reporter major versions remain unchanged.
+
+Journey contract `journey/1.4` adds the optional
+`next_action.access_renewal_action` without extending the existing renewal enum.
+An expired or revoked Access permit can be replaced with `renew_permit`, using
+its fresh approval, current release ID and journey revision. The original
+approval and evidence remain in history; stale Access handoffs cannot report
+new results. The completed deployment remains valid. Both terminal handoff
+paths (verification without Access, and Access apply) use the same transactional
+settlement as journey actions: pin the deployment version, supersede prior live
+releases, and trigger ticket publication once.
 
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native
@@ -3059,3 +3073,11 @@ outcome effects with a database-clock ten-second deadline. They do not dispatch
 messages or claim successful delivery. Always/Requirement/Doctrine publication,
 verified handover sources and post-dispatch corrections require the later adapters;
 unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
+
+Release image publication compares architecture, OS, variant, ordered rootfs
+diff IDs and runtime configuration from `docker image inspect` between the pushed
+image and the image that passed smoke, before attestation and release index
+publication. Both exports share `SOURCE_DATE_EPOCH` from
+`git show -s --format=%ct HEAD`; image IDs, `created`, history and provenance index
+digests are not compared. The PDF visual diff gate returns
+exit 2 for any missing page, including blank pages, independently of pixel tolerance.

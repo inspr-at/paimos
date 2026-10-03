@@ -305,6 +305,7 @@ func TestRehearsalBuildsAndReceiptCannotSkip(t *testing.T) {
 	}
 	_, export := named(t, w.Jobs["image-dry-run"], "Export production image with provenance locally")
 	_, push := named(t, r.Jobs["image-platform"], "Build and push")
+	push.With["build-args"] = withoutSourceEpoch(t, push.With["build-args"])
 	for _, key := range []string{"context", "platforms", "provenance", "cache-from", "build-args"} {
 		if export.With[key] != push.With[key] {
 			t.Fatalf("export differs: %s", key)

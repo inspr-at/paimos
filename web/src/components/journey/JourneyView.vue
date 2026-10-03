@@ -157,7 +157,7 @@ const next = computed<NextState>(() => {
   if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || (action.approval_request_id ? 'The action gate is unavailable or its details are missing. Refresh to check it.' : `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.`) }
   // A pending gate is approved by the same click; labels that already say "Approve",
   // or renew an approval (renewing is approving), stay as they are.
-  const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) && !action.renewal_action ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
+  const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) && !action.renewal_action && !action.access_renewal_action ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
   return { label, disabled, tip, busy: store.busy }
 })
 async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string; confirmation?: JourneyConfirmation<ActionKey> } = {}) {
@@ -187,6 +187,7 @@ const DONE: Partial<Record<string, (n: string) => string>> = {
   approve_deploy: () => 'Deployment approved.',
   renew_candidate: () => 'Candidate approval renewed. Fresh preparation and deployment evidence are required.',
   renew_deploy: () => 'Deployment approval renewed. Fresh preparation and deployment evidence are required.',
+  renew_permit: () => 'Access permit renewed. Fresh Access evidence is required.',
   retry_deploy: () => 'Deployment retried with fresh evidence.',
   approve_permit: () => 'Permit approved.',
   plan_next_release: () => 'The next release is open for planning.',
@@ -195,6 +196,7 @@ const DONE: Partial<Record<string, (n: string) => string>> = {
 const CONFIRM_LONG: Partial<Record<string, string>> = {
   renew_candidate: 'Preparation and deployment restart with fresh evidence.',
   renew_deploy: 'Preparation and deployment restart with fresh evidence.',
+  renew_permit: 'Janus resumes Access with fresh evidence. The completed deployment stays recorded.',
   retry_deploy: 'The host gets the release again, with fresh evidence.',
 }
 async function runNext() {
@@ -219,13 +221,13 @@ async function runNext() {
     catch (e) { toast(e instanceof Error ? e.message : 'The requirements were not agreed.', { tone: 'error' }) }
     return
   }
-  const key = action.renewal_action ?? action.key as ActionKey
+  const key = action.access_renewal_action ?? action.renewal_action ?? action.key as ActionKey
   const confirmation = captureJourneyConfirmation(j, key, approval.value)
   const withGate = confirmation.approval
   const asker = withGate ? askerOf(agents, withGate.agent_principal_id, withGate.agent_name).name : ''
   const gateName = gate.value === 'deploy' ? 'deployment' : gate.value
   const target = action.stage === 'deploy' ? ` ${deployTargetSentence(withGate)}` : ''
-  const body = `${withGate && withGate.decision === null ? `This approves the ${gateName} gate that ${asker === 'An agent' ? 'an agent' : asker} asked for. ` : ''}${CONFIRM_LONG[action.renewal_action ?? action.key] ?? ACTION_LONG[action.renewal_action ?? action.key]}${target}`
+  const body = `${withGate && withGate.decision === null ? `This approves the ${gateName} gate that ${asker === 'An agent' ? 'an agent' : asker} asked for. ` : ''}${CONFIRM_LONG[action.access_renewal_action ?? action.renewal_action ?? action.key] ?? ACTION_LONG[action.access_renewal_action ?? action.renewal_action ?? action.key]}${target}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return
   await act(key, { confirmation, done: DONE[key]?.(releaseLabel.value) })

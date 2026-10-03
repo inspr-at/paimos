@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/releasesettlement"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -192,6 +193,20 @@ func contains(set []string, value string) bool {
 	return false
 }
 func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization, id string, in ResultWrite) (Result, error) {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+		return Result{}, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+		return Result{}, err
+	}
+	var project string
+	if err := tx.QueryRow(ctx, `SELECT project_node_id::text FROM stage_handoffs WHERE id=$1::uuid`, id).Scan(&project); err != nil {
+		return Result{}, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid FOR NO KEY UPDATE`, project); err != nil {
+		return Result{}, err
+	}
+
 	if err := requireActiveAgent(ctx, tx, p); err != nil {
 		return Result{}, err
 	}
@@ -310,7 +325,15 @@ func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, autho
 				nextState = "released"
 			}
 		}
-		_, err = tx.Exec(ctx, `UPDATE journey_releases SET state=$2,revision=revision+1,released_at=CASE WHEN $2='released' THEN now() ELSE NULL END WHERE release_node_id=$1::uuid`, h.ReleaseNodeID, nextState)
+		var superseded []string
+		if nextState == "released" {
+			superseded, err = releasesettlement.SettleTx(ctx, tx, h.ProjectNodeID, h.ReleaseNodeID)
+			if errors.Is(err, releasesettlement.ErrVersionConflict) {
+				return Result{}, fail(409, err.Error())
+			}
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE journey_releases SET state=$2,revision=revision+1 WHERE release_node_id=$1::uuid`, h.ReleaseNodeID, nextState)
+		}
 		if err != nil {
 			return Result{}, err
 		}
@@ -318,7 +341,7 @@ func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, autho
 		if err != nil {
 			return Result{}, err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "journey.release_transitioned", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"release_node_id": h.ReleaseNodeID, "state": nextState, "handoff_id": h.ID})})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "journey.release_transitioned", NodeID: &h.ReleaseNodeID, After: withTargetEvidence(h, map[string]any{"release_node_id": h.ReleaseNodeID, "state": nextState, "handoff_id": h.ID, "superseded_release_ids": superseded})})
 		if err != nil {
 			return Result{}, err
 		}
