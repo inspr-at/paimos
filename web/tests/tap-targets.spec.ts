@@ -4,6 +4,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
 
 const sessionId = '5e000000-0000-4000-8000-000000000001'
@@ -18,6 +19,12 @@ const report: TierReport = {
   })),
 }
 async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable' | 'compact') {
+  const readinessCalls: string[] = []
+  await page.addInitScript(() => {
+    const openedTabs: string[] = []
+    Object.assign(window, { openedTabs })
+    window.open = url => { openedTabs.push(String(url)); return null }
+  })
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   data.preferences['list:display'] = { density }
@@ -40,6 +47,23 @@ async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable'
   await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: {
     session_id: sessionId, revision: 1, active_tier: 'fast', pending: null, read_only: false, reports: [report], requests: [],
   } }))
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    permissions.workspace.permissions.push('run.create')
+    return route.fulfill({ json: permissions })
+  })
+  await page.route('**/api/queue**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/queue' && route.request().method() === 'GET') return route.fulfill({ json: {
+      items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: null, warning: false },
+    } })
+    if (path === '/api/queue/n-2/readiness' && route.request().method() === 'GET') {
+      readinessCalls.push('n-2')
+      return route.fulfill({ json: { queueable: true, ready: false, missing: ['estimate', 'criteria'], suggested_estimate_hours: 3, security_review_required: false } })
+    }
+    return route.fallback()
+  })
+  return { readinessCalls }
 }
 
 // Chromium excludes the right/bottom boundary of a box. Sample -22 exactly,
@@ -107,7 +131,7 @@ for (const { width, coarse } of [
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
-      await setup(page, theme, density)
+      const { readinessCalls } = await setup(page, theme, density)
       await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse)
@@ -171,6 +195,55 @@ for (const { width, coarse } of [
             },
           })) })
         }
+      }
+      if (!phone) {
+        const queue = second.locator('.row-actions .q-btn')
+        const open = second.getByRole('button', { name: 'Open PHAROS-12 in a new tab', exact: true })
+        // Fine-pointer rows reveal their actions on hover; touch cases have
+        // already selected this row through its status action above. Focus
+        // then keeps the actions visible while their dialogs open and close.
+        if (!coarse) await second.hover()
+        await expect(queue).toBeVisible()
+        await queue.focus()
+        await expect(queue).toBeVisible(); await expect(open).toBeVisible()
+        const a = (await queue.boundingBox())!, b = (await open.boundingBox())!
+        expect(a.width).toBe(density === 'compact' ? 22 : 24)
+        expect(a.height).toBe(a.width); expect(b.width).toBe(a.width); expect(b.height).toBe(a.height)
+        const centres = b.x + b.width / 2 - (a.x + a.width / 2)
+        if (coarse) {
+          expect(centres, 'neighbouring 44px action targets must not overlap').toBeGreaterThanOrEqual(44)
+          await expectReach(queue, true); await expectReach(open, true)
+          const rowBox = (await second.boundingBox())!, title = (await second.locator('.title-link').boundingBox())!
+          expect(a.x + a.width / 2 - 22, 'Queue target starts after the title link').toBeGreaterThanOrEqual(title.x + title.width)
+          expect(b.x + b.width / 2 + 22, 'Open target stays inside its row').toBeLessThanOrEqual(rowBox.x + rowBox.width)
+        } else expect(centres).toBe(density === 'compact' ? 24 : 26)
+        const edges = coarse ? [[-21, 0], [21, 0], [0, -21], [0, 21]] as const : [[0, 0]] as const
+        const missing = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it', exact: true })
+        let openedCount = 0
+        const openedTabs = () => page.evaluate(() => (window as Window & { openedTabs: string[] }).openedTabs)
+        await expectStableControls({ controls: { row: second, actions: second.locator('.row-actions'), queue, open, title: second.locator('.title-link') }, interactions: edges.flatMap(([dx, dy]) => [
+          { name: `Queue edge ${dx},${dy}`, run: async () => {
+            const rect = (await queue.boundingBox())!, before = readinessCalls.length
+            await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
+            await expect(missing).toBeVisible()
+            await expect(missing.getByRole('status')).toContainText('Still missing: estimate, acceptance criteria.')
+            expect(readinessCalls.length).toBeGreaterThan(before)
+            expect(readinessCalls.every(id => id === 'n-2')).toBe(true)
+            expect(await openedTabs()).toHaveLength(openedCount)
+            await page.keyboard.press('Escape'); await expect(missing).toHaveCount(0)
+          } },
+          { name: `Open edge ${dx},${dy}`, run: async () => {
+            const rect = (await open.boundingBox())!, before = readinessCalls.length
+            await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
+            openedCount++
+            const opened = await openedTabs()
+            expect(opened).toHaveLength(openedCount)
+            expect(new URL(opened.at(-1)!, page.url()).pathname).toBe('/p/PHAROS/PHAROS-12')
+            expect(readinessCalls).toHaveLength(before)
+            await expect(missing).toHaveCount(0)
+          } },
+        ]) })
+        await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}-actions`)
       }
       await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}-consecutive`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)

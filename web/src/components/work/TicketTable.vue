@@ -995,6 +995,15 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn) { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
+@media (min-width: 721px) and (pointer: coarse) {
+  /* Keep the compact visuals, but reserve each full 44px reach plus the
+     existing 2px separation. Padding contains the outer edges as well. */
+  .row-actions { gap: 22px; padding: 0 10px; }
+  .compact .row-actions { gap: 24px; padding: 0 11px; }
+  .ticket-row:hover .title-cell,
+  .ticket-row.cursor .title-cell,
+  td.c-title:focus-within .title-cell { padding-right: 98px; }
+}
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
