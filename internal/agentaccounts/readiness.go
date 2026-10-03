@@ -231,6 +231,19 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 			in.CheckedAt = &t
 		}
 	}
+	if c := a.OpenRouterCredits; c != nil {
+		resource, err := localReadinessResource(ctx, tx, a)
+		if err != nil {
+			return AccountReadiness{}, err
+		}
+		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.KeyRemaining(), StopKind: "none"}}
+		if f.Remaining != nil && *f.Remaining == 0 {
+			f.CreditState = "exhausted"
+			f.StopKind = "unnamed"
+			f.DenialReason = "key_cap_exhausted"
+		}
+		in.Facts = append(in.Facts, f)
+	}
 	// Use the exact read-only reserve policy, including fact-only budgets,
 	// learned holds, shared ledgers and current early/automatic recovery intent.
 	// Advice cannot consume a permit or clear its underlying stop.

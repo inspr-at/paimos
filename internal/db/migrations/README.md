@@ -306,3 +306,56 @@ OPS-247's bootstrap and launcher remain pending (`remote-browser.log`). Linux
 Chromium verification remains a coordinator gate; no browser gate was bypassed
 and no origin push, deployment, model CLI or ticket status change ran. These
 results record worker validation, not merge or release approval.
+
+AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
+replacing unpublished migration 1136. The current shared ledger assigns
+1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
+The replacement reservations are recorded on AEON-613 before renaming; the
+coordinator must mirror 1147/1148 to the shared ledger because workers may
+author only inside their own repository. The settings/receipt SQL is unchanged.
+
+DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
+Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
+Classify `account_quota_warnings` as personal quota telemetry (resource/window
+identity, reading time, remaining percentage, reset, threshold and recovery),
+located by `(tenant_id,id)`, when merging with the inventory branch. These
+records contain no credentials, local paths or raw vendor responses.
+
+AEON-613 fix5 reserves **1148** for `account_quota_warning_observations`,
+replacing unpublished migration 1137. This stores the latest measured
+quota/window state, including healthy readings, separately from notification
+receipts in 1147. Only its filename and receipt-migration comment change.
+The reservation is recorded on AEON-613; the coordinator must mirror it to the
+shared ledger under the same ownership boundary. Existing receipts remain
+unchanged, and current availability resumes with the next fresh measurement.
+The first fenced write seeds its watermark from retained receipt reading and
+recovery times. A historical recovery with no retained healthy percentage stays
+unknown; it never synthesizes a quota figure. A newer measured observation
+replaces it, while delayed readings remain blocked across reset transitions.
+Classify this table as personal quota telemetry, located by
+`(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
+
+AEON-619 merge-main round incorporates release-122 `origin/main` (`068611ab`)
+into reviewed branch head `769876fd` with a normal local merge. Both route maps
+and README sections are retained. Git-blob checks preserve all 282 main-only
+and 31 branch-only changed files; the shared OpenAPI preserves 1,036 path and
+component entries from both parents. The automatic migration-checker merge
+retains the quota reservation regression and portal exception assertions.
+Migration 1138, its exact-byte exception and the canonical lock helpers are
+unchanged; the guard confirms 232 unique migration numbers against published
+release `v261003095616.0.0`.
+
+Sequential local checks pass for authz, portal, nodes, agentpairing, db, auth,
+httpapi and reportercontract, including lock-order and concurrent-comment FK
+regressions. Web build/lint, all 1,469 unit tests (686 Node, 783 Vitest), 25
+migration-checker tests and all 24 tests across the four portal browser specs
+pass. Admin/roadmap initially hit ambiguous locators matching the hidden status
+help sheet; only their test locators were scoped, with all assertions retained,
+and those two specs pass on rerun. Each browser run leaves zero owned processes.
+The first authz attempt preceded creation of its maintenance database; the
+subsequent package run passes, and that worker-owned database is now removed.
+Evidence: `tmp/aeon619-merge-main/summary.json`, `preservation.json` and retained
+logs. Main's release metadata and presentation pin are retained. No feature
+changes were authored. mbp2606 was not accessed under the explicit hold; no
+ticket status change, push or deployment ran. Consolidated approval and release
+remain coordinator work.

@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -205,6 +206,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
@@ -254,6 +258,9 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
+		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) && s.Harness != "" {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(s.ID + "/advertised/" + s.Model + "/" + s.ReasoningEffort), Harness: s.Harness, Model: s.Model, Effort: s.ReasoningEffort, Status: "advertised"}}
+		}
 	}
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
