@@ -51,12 +51,15 @@ type TicketGraphLink struct {
 	Kind   string `json:"kind"`
 }
 
-// Doing states match the list and the ticket UI (active is in-progress).
-// Done states are the closed ones, including cancelled and archived.
-const ticketGraphCategorySQL = `CASE
- WHEN n.state IN ('in_progress','in-progress','active','qa') THEN 'doing'
- WHEN n.state IN ('accepted','delivered','done','cancelled','canceled','archived') THEN 'done'
+// Graph categories use the same configured, normalized buckets as list counts.
+func ticketGraphCategorySQL() string {
+	return `CASE ` + workCountBucketSQL("n.state", "configured") + `
+ WHEN 'in_progress' THEN 'doing'
+ WHEN 'done' THEN 'done'
+ WHEN 'cancelled' THEN 'done'
+ WHEN 'archived' THEN 'done'
  ELSE 'open' END`
+}
 
 func (m *Module) handleTicketGraph(w http.ResponseWriter, r *http.Request) {
 	p, ok := requirePrincipal(w, r)
@@ -101,13 +104,14 @@ func loadTicketGraph(ctx context.Context, tx pgx.Tx, tenantID, projectID string,
 	}
 	// One set query. Bodies are not selected. Parent and release ids come from
 	// a join, so a row the caller cannot see contributes no id.
-	rows, err := tx.Query(ctx, `SELECT /* ticket-graph-nodes */ n.id::text, n.key, n.title, k.slug, n.state, `+ticketGraphCategorySQL+`,
+	rows, err := tx.Query(ctx, `WITH `+workStateCategoryCTE()+` SELECT /* ticket-graph-nodes */ n.id::text, n.key, n.title, k.slug, n.state, `+ticketGraphCategorySQL()+`,
  NULLIF(n.fields->>'priority',''),
  CASE WHEN parent_kind.slug IS NOT NULL THEN parent_node.id::text END,
  CASE WHEN release_node.id IS NOT NULL THEN release_node.id::text END,
  n.updated_at
  FROM nodes n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ LEFT JOIN configured ON configured.kind_id=n.kind_id AND configured.norm=`+workStateNormSQL("n.state")+`
  LEFT JOIN nodes parent_node ON parent_node.tenant_id=n.tenant_id AND parent_node.id=n.parent_id AND parent_node.deleted_at IS NULL
  LEFT JOIN node_kinds parent_kind ON parent_kind.tenant_id=parent_node.tenant_id AND parent_kind.id=parent_node.kind_id
    AND parent_kind.slug IN ('ticket','epic')
@@ -115,7 +119,7 @@ func loadTicketGraph(ctx context.Context, tx pgx.Tx, tenantID, projectID string,
  LEFT JOIN nodes release_node ON release_node.tenant_id=n.tenant_id AND release_node.id=jt.release_node_id AND release_node.deleted_at IS NULL
  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND n.project_id=$2::uuid
    AND k.slug IN ('ticket','epic')
-   AND ($3::bool OR (`+ticketGraphCategorySQL+`) <> 'done')
+   AND ($3::bool OR (`+ticketGraphCategorySQL()+`) <> 'done')
  ORDER BY n.updated_at DESC, n.id
  LIMIT $4`, tenantID, projectID, includeClosed, ticketGraphNodeLimit+1)
 	if err != nil {
