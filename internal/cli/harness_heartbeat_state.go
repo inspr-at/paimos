@@ -63,6 +63,8 @@ type heartbeatDisk struct {
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
 
+	// The observation fence survives clearing RequestedModel and helper
+	// restarts. Keep the existing JSON key for compatibility with saved state.
 	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
 }
 

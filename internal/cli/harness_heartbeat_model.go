@@ -24,7 +24,6 @@ func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSess
 		model, effort = s.disk.RequestedModel, s.disk.RequestedEffort
 	} else {
 		s.disk.RequestedModel, s.disk.RequestedEffort = "", ""
-		s.disk.RequestedModelBaseline = nil
 	}
 	observedModel, observedEffort := readHeartbeatModel(ctx, o, s)
 	if observedModel != "" {
@@ -33,9 +32,9 @@ func putHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSess
 			effort = ""
 		}
 		model = observedModel
-		// Only evidence after the request baseline supersedes its prediction.
+		// Evidence supersedes the prediction, but its observation fence must
+		// remain: a model-only record cannot revive pre-request effort.
 		s.disk.RequestedModel, s.disk.RequestedEffort = "", ""
-		s.disk.RequestedModelBaseline = nil
 	}
 	if observedEffort != "" {
 		effort = observedEffort
@@ -68,7 +67,7 @@ func readHeartbeatModel(ctx context.Context, o heartbeatOptions, s *heartbeatSes
 		id = o.SourceSession
 	}
 	var offset int64
-	if s.disk.RequestedModel != "" {
+	if s.disk.RequestedModelBaseline != nil || s.disk.RequestedModel != "" {
 		baseline := s.disk.RequestedModelBaseline
 		if baseline == nil || baseline.FileHash != heartbeatModelFileHash(target) {
 			// A legacy request, unavailable file or replaced source has no
