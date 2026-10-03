@@ -74,6 +74,14 @@ const ICONS: Record<StatKey, string[]> = {
     @mouseenter="hovered = true" @mouseleave="hovered = false" @focusin="focused = true" @focusout="focusOut"
   >
     <div v-if="stat" class="slide" role="group" aria-roledescription="slide" :aria-label="`${index + 1} of ${stats.length}: ${stat.label}`" :aria-live="paused ? 'polite' : 'off'">
+      <!-- The full series measures this shared cell once per width. A shorter
+           stat never shrinks the overview and moves the release controls. -->
+      <div v-for="sample in stats" :key="`size-${sample.key}`" class="slide-size" aria-hidden="true" inert>
+        <p class="size-label"><span class="size-icon" />{{ sample.label }}</p>
+        <p class="size-value">{{ sample.value }}</p><p class="size-sub">{{ sample.sub }}</p>
+        <div class="size-chips"><span v-for="chip in sample.chips" :key="chip" class="size-stat-chip">{{ chip }}</span></div>
+        <StatViz class="size-viz" :viz="sample.viz" />
+      </div>
       <div :key="stat.key" class="slide-in">
         <p class="label">
           <span class="icon" aria-hidden="true">
@@ -84,7 +92,7 @@ const ICONS: Record<StatKey, string[]> = {
           </span>{{ stat.label }}
         </p>
         <p class="value">{{ stat.value }}</p>
-        <p class="sub">{{ stat.sub }}</p>
+        <p class="sub" :data-tip="stat.sub">{{ stat.sub }}</p>
         <div v-if="stat.chips.length" class="chips">
           <span v-for="chip in stat.chips" :key="chip" class="stat-chip">{{ chip }}</span>
         </div>
@@ -113,15 +121,17 @@ const ICONS: Record<StatKey, string[]> = {
   background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
   box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -20px var(--card-glow, rgba(14, 111, 108, .35));
 }
-.slide { display: flex; flex-direction: column; min-width: 0; }
-.slide-in { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.label { display: flex; align-items: center; gap: 8px; margin: 0; padding-right: 108px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
-.icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); }
-.value { margin: 8px 0 0; font: 650 42px/1.05 var(--font); letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ink); }
-.sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: normal; overflow-wrap: anywhere; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.stat-chip { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); font: 600 12.5px/1 var(--font); white-space: nowrap; }
-.viz { margin-top: 12px; }
+.slide { display:grid; min-width:0; }
+.slide-size { visibility:hidden; pointer-events:none; }
+.slide-size,.slide-in { grid-area:1/1; }
+.slide-in,.slide-size { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.label,.size-label { display: flex; align-items: center; gap: 8px; margin: 0; padding-right: 108px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+.icon,.size-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); }
+.value,.size-value { margin: 8px 0 0; font: 650 42px/1.05 var(--font); letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.sub,.size-sub { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); white-space: normal; overflow-wrap: anywhere; }
+.chips,.size-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.stat-chip,.size-stat-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 5%, transparent); color: var(--teal-ink); font: 600 11px/1.3 var(--font); white-space: nowrap; }
+.viz,.size-viz { margin-top: 12px; }
 .arrows { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 4px; }
 .nav { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); cursor: pointer; }
 .nav:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -137,19 +147,20 @@ const ICONS: Record<StatKey, string[]> = {
 .dot.on { width: 22px; background: color-mix(in srgb, var(--teal) 18%, transparent); }
 .fill { display: block; height: 100%; border-radius: 999px; background: var(--teal); transition: width .1s linear; }
 .pos { margin-left: auto; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-3); }
-.pause { width: 28px; height: 28px; border-radius: 8px; }
+.pause { border-radius:8px; }
 @media (hover: none), (pointer: coarse) { .nav { width: 44px; height: 44px; } }
 /* Phones: the arrows sit in the label row, always there, 44 px. */
 .compact { padding: 16px 10px 8px 16px; }
-.compact .label { padding-right: 136px; }
+.compact .label,.compact .size-label { padding-right: 136px; }
 .compact .arrows { top: 4px; right: 4px; gap: 0; }
 .compact .nav { width: 44px; height: 44px; }
-.compact .value { font-size: 34px; }
+.compact .value,.compact .size-value { font-size: 34px; }
+.compact .sub,.compact .size-sub { white-space: normal; }
 /* Short screens keep the list in view: a tighter card. */
 @media (max-height: 800px) and (min-width: 761px) {
   .stat-card { padding: 16px 20px 10px; }
-  .value { margin-top: 4px; font-size: 34px; }
-  .viz { margin-top: 8px; }
+  .value,.size-value { margin-top: 4px; font-size: 34px; }
+  .viz,.size-viz { margin-top: 8px; }
   .foot { padding-top: 8px; }
 }
 @media (prefers-reduced-motion: no-preference) {
