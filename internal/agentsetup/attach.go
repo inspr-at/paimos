@@ -3,6 +3,14 @@ package agentsetup
 
 import "errors"
 
+// These startup failures preserve the local pairing boundary without exposing
+// lifecycle proofs or pairing state in diagnostics.
+var (
+	ErrAttachComputerDraining = errors.New("paired computer is disconnecting")
+	ErrAttachPairingCleaned   = errors.New("paired computer cleanup completed")
+	ErrAttachConfigMismatch   = errors.New("paired attach origin or workspace configuration changed")
+)
+
 // ReadAttachProof is for daemon-start registration only: it binds the lifecycle
 // proof and public hostname to the already approved runtime. Signed Mac builds
 // load it from the daemon-restricted Keychain; legacy/Linux storage is readable
@@ -19,8 +27,14 @@ func ReadAttachProof(root string, c RuntimeConfig) (host string, proof secret, e
 	if err != nil {
 		return "", "", err
 	}
-	if s.Origin != c.Origin || s.View.TenantID != c.TenantID || s.View.ComputerID != c.ComputerID || s.View.PrincipalID != c.PrincipalID || s.Request.Workspace != c.Workspace || s.ComputerCleaned || s.DisconnectAll {
-		return "", "", errors.New("paired attach proof unavailable")
+	if s.ComputerCleaned {
+		return "", "", ErrAttachPairingCleaned
+	}
+	if s.DisconnectAll {
+		return "", "", ErrAttachComputerDraining
+	}
+	if s.Origin != c.Origin || s.View.TenantID != c.TenantID || s.View.ComputerID != c.ComputerID || s.View.PrincipalID != c.PrincipalID || s.Request.Workspace != c.Workspace {
+		return "", "", ErrAttachConfigMismatch
 	}
 	return s.Request.ComputerName, s.Lifecycle, nil
 }

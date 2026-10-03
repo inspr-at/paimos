@@ -57,7 +57,7 @@ func TestGrokVerificationPlatformGate(t *testing.T) {
 	}
 	if !a.VerificationSupported() {
 		r := verificationRequest(t)
-		r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort}
+		r.Profile = Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: "xai"}
 		if _, err := a.Start(t.Context(), r, func(AdapterEvent) {}); !errors.Is(err, ErrVerificationUnavailable) {
 			t.Fatalf("unsupported platform reached Grok account or process: %v", err)
 		}

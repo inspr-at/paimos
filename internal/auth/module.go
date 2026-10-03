@@ -291,6 +291,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "agents":
+		if len(parts) == 2 && parts[1] == "plan" && read {
+			return "agents.plan.read", true
+		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
