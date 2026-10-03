@@ -4,8 +4,10 @@ package importer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -251,60 +254,106 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 }
 
+// Quiescence proves every competing goroutine reached its request or the cap.
+// Held transports make saturation deterministic, independent of network timing.
 func TestSourceRequestCapAndDelay(t *testing.T) {
-	var active, peak atomic.Int32
-	var mu sync.Mutex
-	var starts []time.Time
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := active.Add(1)
-		for {
-			old := peak.Load()
-			if n <= old || peak.CompareAndSwap(old, n) {
-				break
+	synctest.Test(t, func(t *testing.T) {
+		var active, peak atomic.Int32
+		entered := make(chan struct{}, 8)
+		failures := make(chan error, 8)
+		var wg sync.WaitGroup
+		release := make(chan struct{})
+		defer func() {
+			select {
+			case <-release:
+			default:
+				close(release)
 			}
-		}
-		mu.Lock()
-		starts = append(starts, time.Now())
-		mu.Unlock()
-		time.Sleep(25 * time.Millisecond)
-		active.Add(-1)
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-	file := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	source, err := NewHTTPSource(server.URL, file, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := source.Configure(2, 15*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	for n := 0; n < 8; n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var rows []Record
-			if err := source.get(context.Background(), "/probe", &rows); err != nil {
-				t.Error(err)
-			}
+			wg.Wait()
 		}()
-	}
-	wg.Wait()
-	if peak.Load() > 2 || peak.Load() < 2 {
-		t.Fatalf("peak requests = %d", peak.Load())
-	}
-	if len(starts) != 8 {
-		t.Fatalf("request starts = %d", len(starts))
-	}
-	for n := 1; n < len(starts); n++ {
-		if gap := starts[n].Sub(starts[n-1]); gap < 10*time.Millisecond {
-			t.Fatalf("request spacing = %s", gap)
+		base, _ := url.Parse("https://source.example.test")
+		source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			n := active.Add(1)
+			defer active.Add(-1)
+			for {
+				old := peak.Load()
+				if n <= old || peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			entered <- struct{}{}
+			<-release
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+		})}}
+		if err := source.Configure(2, 0); err != nil {
+			t.Fatal(err)
 		}
-	}
+		ctx := t.Context()
+		for n := 0; n < 8; n++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var rows []Record
+				failures <- source.get(ctx, "/probe", &rows)
+			}()
+		}
+		synctest.Wait()
+		if got := len(entered); got != 2 {
+			t.Fatalf("admitted held requests = %d, want 2", got)
+		}
+		if active.Load() != 2 {
+			t.Fatalf("held active requests = %d, want 2", active.Load())
+		}
+		close(release)
+		wg.Wait()
+		for n := 0; n < 8; n++ {
+			if err := <-failures; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := peak.Load(); got > 2 {
+			t.Fatalf("request cap exceeded: %d", got)
+		}
+		if len(entered) != 8 {
+			t.Fatalf("completed request count = %d, want 8", len(entered))
+		}
+	})
+}
+
+type sourceRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f sourceRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSourceDispatchDelayUsesInjectedClock(t *testing.T) {
+	// synctest injects the standard library clock; the production timer and
+	// transport dispatches are exercised without real elapsed-time thresholds.
+	synctest.Test(t, func(t *testing.T) {
+		origin := time.Now()
+		var starts []time.Time
+		base, _ := url.Parse("https://source.example.test")
+		source := &HTTPSource{base: base, client: &http.Client{Transport: sourceRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			starts = append(starts, time.Now())
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+		})}}
+		const delay = 15 * time.Millisecond
+		if err := source.Configure(2, delay); err != nil {
+			t.Fatal(err)
+		}
+		for n := 0; n < 8; n++ {
+			var rows []Record
+			if err := source.get(t.Context(), "/probe", &rows); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(starts) != 8 {
+			t.Fatalf("dispatches=%d, want 8", len(starts))
+		}
+		for n, at := range starts {
+			if want := origin.Add(time.Duration(n) * delay); !at.Equal(want) {
+				t.Fatalf("dispatch %d=%s, want %s", n, at, want)
+			}
+		}
+	})
 }
 
 func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {
