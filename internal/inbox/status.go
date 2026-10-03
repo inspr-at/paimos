@@ -57,7 +57,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 		items = items[:0]
 		rows, err := tx.Query(r.Context(), `SELECT m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by
  FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
- WHERE m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
+ WHERE m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
 		if err != nil {
 			return err
 		}

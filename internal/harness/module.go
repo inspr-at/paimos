@@ -463,6 +463,9 @@ func vendorRefConflict(message string, vendor []byte) error {
 }
 
 func registrationConflict(err error, vendor []byte) error {
+	if mapped := nativeContextError(err); mapped != err {
+		return mapped
+	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
 		switch pg.ConstraintName {
@@ -635,19 +638,34 @@ type registration struct {
 }
 
 func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return m.registerBeforeEvents(r, tx, p, nil)
+}
+
+// Inline resume prepares its predecessor in the same transaction. Its event
+// must wait for native ownership validation, just like registration events.
+func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Principal, beforeEvents func() error) (any, error) {
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
-	if p.Kind == tenant.Agent {
-		// A registered generation must be able to heartbeat and stop itself.
-		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
-			return nil, err
-		}
+	var in registration
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	// Alias learning and chat binding share the tenant access fence. Take it
+	// before the hierarchy/session locks, then authorize the final write.
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+		return nil, err
 	}
 	if err := project(ctx, tx, projectID); err != nil {
 		return nil, err
 	}
-	var in registration
-	if err := workorders.Decode(r, &in); err != nil {
+	if p.Kind == tenant.Agent {
+		// A registered generation must be able to heartbeat and stop itself.
+		// Endpoint also verifies the exact bearer key's harness.write scope.
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: projectID}); err != nil {
+			return nil, err
+		}
+	} else if err := authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: projectID}); err != nil {
 		return nil, err
 	}
 	if in.SucceedsID != nil {
@@ -773,6 +791,17 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
+	var owner *string
+	ownerID := p.KeyCreatorID
+	if p.Kind == tenant.Person {
+		ownerID = p.ID
+	}
+	if ownerID != "" {
+		if err = tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, ownerID).Scan(&owner); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	var expired *Session
 	existing, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND stopped_at IS NULL FOR UPDATE`, projectID, ref))
 	if err == nil && subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 && in.Role == "coordinator" && existing.Role == "coordinator" && existing.AgentPrincipalID == in.AgentPrincipalID && existing.Harness == in.Harness {
 		stale, e := heartbeatExpired(ctx, tx, existing)
@@ -780,9 +809,16 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, e
 		}
 		if stale {
-			if _, e = closeGeneration(ctx, tx, p, existing, StopReasonHeartbeatLost); e != nil {
+			// The stopped_at trigger can emit reply-obligation events. Validate
+			// and claim the replacement's entire component BEFORE that write.
+			// The same store guards the later INSERT and every replay.
+			if e = StoreNativeContextTx(ctx, tx, in.Harness, ref, vendor, owner, projectID, nil); e != nil {
 				return nil, e
 			}
+			if _, e = tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped' WHERE id=$1`, existing.ID); e != nil {
+				return nil, e
+			}
+			expired = &existing
 			err = pgx.ErrNoRows
 		}
 	}
@@ -805,7 +841,18 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err
 		}
-		return existing, rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport)
+		if err = StoreNativeContextTx(ctx, tx, existing.Harness, existing.refDigest, existing.vendorRefDigest, existing.ownerID, existing.ProjectID, nil); err != nil {
+			return nil, err
+		}
+		if err = rules.RecordClientReport(ctx, tx, existing.ID, in.ClientReport); err != nil {
+			return nil, err
+		}
+		if beforeEvents != nil {
+			if err = beforeEvents(); err != nil {
+				return nil, err
+			}
+		}
+		return existing, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -851,16 +898,26 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command))
+	if predecessor != nil && predecessor.Pause != nil && predecessor.Pause.State == "resume_requested" {
+		owner = predecessor.ownerID
+	}
+	if err = StoreNativeContextTx(ctx, tx, in.Harness, ref, vendor, owner, projectID, nil); err != nil {
+		return nil, err
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
 	}
-	owner := p.KeyCreatorID
-	if p.Kind == tenant.Person {
-		owner = p.ID
+	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
+		return nil, err
 	}
-	if owner != "" {
-		if err = tx.QueryRow(ctx, `UPDATE harness_sessions SET owner_principal_id=(SELECT coalesce(linked_to,id) FROM principals WHERE id=$2 AND kind='person') WHERE id=$1 RETURNING owner_principal_id::text,row_version`, s.ID, owner).Scan(&s.ownerID, &s.RowVersion); err != nil {
+	if beforeEvents != nil {
+		if err = beforeEvents(); err != nil {
+			return nil, err
+		}
+	}
+	if expired != nil {
+		if _, err = closeGeneration(ctx, tx, p, *expired, StopReasonHeartbeatLost); err != nil {
 			return nil, err
 		}
 	}
@@ -870,9 +927,6 @@ func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		}
 	}
 	if err = record(ctx, tx, p, s, "registered", nil, s); err != nil {
-		return nil, err
-	}
-	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
 		return nil, err
 	}
 	if predecessor != nil {

@@ -36,6 +36,7 @@ func makeRegistry() []Permission {
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
+		{"chat", "read send bind receive"},
 		{"model_prefs", "manage"}, {"models", "read manage resolve"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
 		{"events", "read undo undo_other"}, {"search", "read"}, {"outcome", "read write"},
@@ -75,7 +76,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "model_prefs.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "chat.bind", "model_prefs.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"questions.decide", "approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false
