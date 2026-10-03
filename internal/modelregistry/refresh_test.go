@@ -352,7 +352,7 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 			return err
 		}
 		if out.Profile == nil || out.Profile.ID != sol.ID {
-			t.Fatal("suppression/override did not expire")
+			t.Fatalf("suppression/override did not expire: %+v", out)
 		}
 		return nil
 	})
