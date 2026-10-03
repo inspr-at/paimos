@@ -41,4 +41,5 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/views/{viewId}/restore", m.restore)
 	mux.HandleFunc("GET /api/preferences/{key}", m.getPreference)
 	mux.HandleFunc("PUT /api/preferences/{key}", m.putPreference)
+	mux.HandleFunc("GET /api/agents/plan", m.getAgentsPlan)
 }

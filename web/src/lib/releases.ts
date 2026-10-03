@@ -11,7 +11,7 @@ export interface ReleaseChange { commit: string; subject: string; type: 'feat' |
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
-  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
+  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; pending?: string[]; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
 export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
@@ -25,7 +25,7 @@ export interface Release {
   // The release's sci-fi codename from its sequence (AEON-430), English in
   // both languages. Absent on a reservation whose sequence another release took.
   codename?: string
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved'
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }

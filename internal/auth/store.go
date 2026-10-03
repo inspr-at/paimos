@@ -951,8 +951,16 @@ func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 		creatorID = actor.KeyCreatorID
 	}
 	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: creatorID}
-	effective, err := authz.EffectiveTx(ctx, tx, agent, "")
-	if err != nil {
+	// Shared roles combine live workspace/project grants. Generated private
+	// roles additionally cap rotation at their configured workspace permissions.
+	var privatePermissions []string
+	err = tx.QueryRow(ctx, `SELECT ARRAY(
+		SELECT permission FROM role_permissions WHERE tenant_id=r.tenant_id AND role_id=r.id
+	) FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+	WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' AND NOT r.builtin AND r.key=$3`,
+		actor.TenantID, agentID, "agent_"+strings.ReplaceAll(agentID, "-", "")).Scan(&privatePermissions)
+	privateRole := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, agent)
@@ -964,10 +972,8 @@ func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principa
 		if !known || !permission.AgentGrantable || !slices.Contains(creator.Workspace.Permissions, scope) || !slices.Contains(ceiling, scope) {
 			return authz.ErrForbidden
 		}
-		// A generated workspace role has the same ceiling as a shared role.
-		// Project and self-service grants must never be promoted into it.
-		// Coordinator rules.read remains derived from live project access.
-		if effective.Workspace.Role != nil && workspaceRolePermission(scopes, scope) && !slices.Contains(effective.Workspace.Permissions, scope) {
+		// Preserve the coordinator's derived, project-confined rules.read.
+		if privateRole && workspaceRolePermission(scopes, scope) && !slices.Contains(privatePermissions, scope) {
 			return authz.ErrForbidden
 		}
 	}
