@@ -4,6 +4,7 @@ import { api } from './api.ts'
 import { AGENT_PALETTES, isAgentPalette } from './agentPalettes.ts'
 import { inkOn, isHexColour, PORCELAIN, themeTokens, type ThemeValues } from './themeValues.ts'
 import { toast } from './toast.ts'
+import { installAgentTheme, resetAgentTheme } from './agentTheme.ts'
 
 export const activeThemeValues = shallowRef<ThemeValues | null>(null)
 let generation = 0
@@ -23,6 +24,7 @@ export function applyAppearanceTheme(values: ThemeValues, dark = currentDark) {
   if (!validThemeValues(values)) throw new Error('Invalid theme colours')
   generation++
   activeThemeValues.value = structuredClone(values)
+  installAgentTheme(values.agents)
   renderAppearanceTheme(dark)
 }
 export function renderAppearanceTheme(dark: boolean) {
@@ -48,6 +50,7 @@ export function renderAppearanceTheme(dark: boolean) {
 export function resetAppearanceTheme() {
   generation++
   activeThemeValues.value = null
+  resetAgentTheme()
   if (typeof document !== 'undefined') for (const key of applied) document.documentElement.style.removeProperty(key)
   applied = []
 }

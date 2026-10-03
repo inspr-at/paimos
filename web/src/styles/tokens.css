@@ -3,7 +3,7 @@
    tokens so no component needs a literal #fff or rgba(255,…) that breaks in
    dark mode. Palette tokens keep their prototype names; components should
    prefer the semantic layer (surface-*, chip-*, keycap-*, row-*, st-*, pr-*). */
-:root, :root[data-theme="light"] {
+:root, :root[data-theme="light"], .agent-theme-preview, .agent-theme-preview.light {
   /* Palette */
   --canvas: #f7f6f2;
   --ink: #203c3d;
@@ -133,7 +133,7 @@
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"], .agent-theme-preview.dark {
   --canvas: #102327;
   --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);

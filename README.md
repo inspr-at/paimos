@@ -10,6 +10,25 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Theme settings and agent appearance
+
+Settings › Theme has separate Colours and Agents cards sharing Save and Discard.
+The Agents card uses the nine shipped renderers, with native or chosen ring/size,
+hover, five state palettes and inactive dimming. Both light and dark previews
+show a live row and Working, Waiting, Throttled, Problem and Idle. Draft appearance
+stays in the previews until a successful save; reduced motion stills artwork.
+Personal › Agents retains heartbeat warnings and estimate display.
+
+Migration 1235 copies saved personal appearance into an owner-only theme based
+on the workspace default and selects it, unless the person already saved an
+explicit theme choice. Legacy avatar/palette names and drawn geometry retain
+existing appearance; linked aliases keep physical ownership for unlink. Original
+preference rows remain for rollback and previous binaries, and heartbeat settings
+are unchanged. Creation and selection are audited with a private audience.
+Optional `agents.dim_inactive` and `agents.inactive_opacity` preserve inactive
+appearance; omitted values mean true and 55 percent. Runtime reads the active
+theme and drops stale appearance responses after identity changes.
+
 ## Theme API
 
 AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
@@ -43,8 +62,10 @@ Appearance editors can use `themeTokens(values, dark)` for their isolated previe
 and `applyAppearanceTheme(savedValues)` after a successful save/selection, or
 `restoreAppearanceTheme(identityCheck)` to read the server's active choice. These
 helpers are in `web/src/lib/themeValues.ts` and `appearanceTheme.ts`; drafts must
-never be applied to the page. Agent appearance consumes the active theme palette,
-while behaviour thresholds and inactive dimming remain personal preferences.
+never be applied to the page. Agent appearance, palette and inactive dimming
+consume the same accepted theme response as the root colour tokens. Personal
+heartbeat writes preserve stored legacy appearance for rollback rather than
+copying the effective theme into the preference row.
 
 Linking people preserves theme owners and choice rows. Linked identities can
 read, edit and undo their shared personal themes; unlink restores each original

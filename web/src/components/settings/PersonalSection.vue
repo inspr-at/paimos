@@ -94,7 +94,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Agents" icon="agent" anchor="agents">
-      <template #lead>Your indicator style, state palette, heartbeat warnings and how estimates are shown.</template>
+      <template #lead>Heartbeat warnings and how estimates are shown. Agent appearance is in Theme.</template>
       <AgentIndicatorSettings />
       <div class="eta-display">
         <span id="eta-display-label">Estimates show as</span>

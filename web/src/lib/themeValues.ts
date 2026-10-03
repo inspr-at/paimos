@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Colour maths from the accepted Theme fragment, draft 4 (AEON-638).
-import type { AgentPalette } from './agentPalettes.ts'
+import type { AgentThemeAppearance } from './agentTheme.ts'
 export interface ThemeAccent { light: string; dark: string | null }
 export interface ThemeValues {
   primary: ThemeAccent; secondary: ThemeAccent
   recurring_marker: { source: 'primary' | 'secondary' | 'neutral' | 'custom'; custom: string | null }
-  agents: { avatar: string; ring: string | null; hover: boolean; size: number | null; palette: AgentPalette }
+  agents: AgentThemeAppearance
 }
 export const WHITE_INK = '#ffffff', DARK_INK = '#102327'
 export const LIGHT_CARD = '#fffefa', DARK_CARD = '#1c393d'
