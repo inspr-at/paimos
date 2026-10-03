@@ -197,11 +197,25 @@ func groupAccount(t *testing.T, mod httpapi.Module, admin, runner tenant.Princip
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", encoded(t, map[string]any{
 		"account_key": key, "harness": "codex", "daemon_id": daemon, "label": label,
 	}), 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", encoded(t, map[string]any{
 		"daemon_id": daemon, "daemon_generation": "g1", "available": true, "host_label": host,
 	}), 200, &account)
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+account.ID+"/windows", windowBody(time.Now().Add(-time.Minute), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+	fixtureAlwaysOn(t, mod, admin, account.ID)
 	return account
+}
+
+// Routing-fence fixtures have real manual caps but no vendor measurements.
+// Give them explicit hours so the asserted fence never depends on wall time.
+func fixtureAlwaysOn(t *testing.T, mod httpapi.Module, person tenant.Principal, accountID string) {
+	t.Helper()
+	s := capacity.DefaultSchedule("UTC")
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: accountID, Schedule: &s}), 204, nil)
 }
 
 func insertProjectRun(t *testing.T, person, agent tenant.Principal, profileID, title string) (string, string) {

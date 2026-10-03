@@ -264,7 +264,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 // operator bypasses caller permissions, but cannot mint an owner binding.
 func (m *Module) setWorkspaceRoleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, roleID *string, operator bool) error {
 	if operator {
-		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+		if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
 	} else if err := m.authorizeMutation(ctx, tx, p, "members.manage", nil); err != nil {

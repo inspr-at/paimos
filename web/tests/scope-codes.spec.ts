@@ -138,6 +138,27 @@ test('an agent without live roles cannot select scopes by code', async ({ page }
   expect(world.calls.filter(c => c.method === 'POST')).toHaveLength(0)
 })
 
+for (const builtin of [false, true]) test(`Rotate combines workspace and project grants for a ${builtin ? 'built-in' : 'shared custom'} role`, async ({ page }) => {
+  const world = await open(page, world => {
+    const shared = { ...world.roles.find(r => r.key === 'viewer')!, id: 'role-shared', key: builtin ? 'viewer' : 'shared_rotation', builtin, permissions: ['nodes.read', 'nodes.delete'] }
+    world.roles.push(shared)
+    world.agents.find(a => a.principal_id === DEPLOYER)!.workspace_role = shared.id
+    world.bindings.push({ principal_id: DEPLOYER, project_id: 'p-pharos', role_id: 'role-member' })
+  })
+  const beforeRoles = structuredClone(world.roles)
+  const beforeBindings = structuredClone(world.bindings)
+  await agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
+  const sheet = page.getByRole('dialog', { name: 'Rotate key for pharos-deployer' })
+  await sheet.getByLabel('Scope code', { exact: true }).fill(encodeScopeCode(['nodes.delete', 'nodes.write']))
+  for (const scope of [/nodes\.delete/, /nodes\.write/]) await expect(sheet.getByRole('checkbox', { name: scope })).toBeChecked()
+  await sheet.getByRole('button', { name: 'Rotate key', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
+  expect(world.keys[0]!.scopes).toEqual(['nodes.delete', 'nodes.write'])
+  expect(world.keys.find(k => k.id === 'k2')!.revoked_at).not.toBeNull()
+  expect(world.roles).toEqual(beforeRoles)
+  expect(world.bindings).toEqual(beforeBindings)
+})
+
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) test(`scope proposals fit ${width}px in ${theme}`, async ({ page }, testInfo) => {
   const errors = watchErrors(page)
   await page.emulateMedia({ colorScheme: theme })

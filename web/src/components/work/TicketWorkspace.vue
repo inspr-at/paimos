@@ -626,7 +626,7 @@ defineExpose({
           <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
-            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :queue-editable="canQueue" :queue-entry="queueEntry"
+            :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
           />
@@ -713,7 +713,7 @@ defineExpose({
           <div class="side-card">
             <TicketProperties
               :class="{ 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="column" :now="now"
-              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :queue-editable="canQueue" :queue-entry="queueEntry"
+              :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
               @epic="anchor => openMenu('epic', anchor)" @release="anchor => openMenu('release', anchor)" @open-parent="openLinked"
             />
