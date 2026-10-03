@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -147,6 +148,18 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 		"allowed_model_profile_ids": []string{profile.ID},
 	}, http.StatusOK, nil, nil); err != nil {
 		return fmt.Errorf("account metadata: %w", err)
+	}
+	// The fictional screenshot desk has explicit all-day work hours. Its manual
+	// allowance cannot supply a vendor measurement or exempt it from schedules.
+	schedule := capacity.DefaultSchedule("UTC")
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	if err := s.api.do(s.admin, "", http.MethodPut, "/api/agent-accounts/capacity/schedule", map[string]any{
+		"scope": "account", "account_id": account.ID, "schedule": schedule,
+	}, http.StatusNoContent, nil, nil); err != nil {
+		return fmt.Errorf("account schedule: %w", err)
 	}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "available": true,
