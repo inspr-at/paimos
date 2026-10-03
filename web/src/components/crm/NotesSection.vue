@@ -203,7 +203,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) closeR
 .spacer { flex: 1; }
 .f-note.warn { color: var(--gold-ink); }
 .f-note.warn svg { color: var(--gold-ink); }
-.apply { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.apply { width: min(clamp(640px, 52vw, 1120px), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .apply::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .apply-card { display: grid; gap: 14px; max-height: calc(100dvh - 24px); overflow: auto; padding: 22px 24px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .apply-card h2 { font-size: 18px; }

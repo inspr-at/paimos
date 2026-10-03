@@ -376,7 +376,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; }
+.launch-dialog { width: min(clamp(600px, 52vw, 1040px), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
 .launch-card { padding: 22px 24px 20px; }
 .launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }

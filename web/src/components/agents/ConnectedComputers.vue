@@ -458,7 +458,7 @@ function assign(error: unknown, fallback: string) {
 .revoked-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .revoked-list .remove-computer, .revoked-reason { margin-left: auto; flex: none; }
 .revoked-reason { color: var(--ink-3); font-size: 12px; }
-.disconnect { width: min(420px, calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--ink); }
+.disconnect { width: min(clamp(420px, 44vw, 760px), calc(100vw - 32px)); padding: 0; border: 0; background: transparent; color: var(--ink); }
 .disconnect::backdrop { background: var(--scrim); }
 .panel { padding: 18px 18px 16px; border: 1px solid var(--glass-edge); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .panel header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
