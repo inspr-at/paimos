@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -55,8 +56,8 @@ const target = (event: Event) => event.currentTarget as HTMLElement
       <dd class="agent-chips">
         <RouterLink
           v-for="view in bound" :key="view.session.id" class="prop-btn agent-chip" :class="view.status.group" :to="`/agents/${view.session.id}`"
-          :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.harness} · ${view.status.label}`"
-        ><AppIcon name="agent" :size="13" class="faint" /><span class="agent-name">{{ view.name }}</span><AgentStateLabel class="agent-state" :class="{ quiet: view.status.state === 'working' }" :state="view.status.state" :label="view.status.label" /></RouterLink>
+          :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.name} · ${view.harness} · ${view.status.label}`"
+        ><AppIcon name="agent" :size="13" class="faint" /><span v-clip-tip class="agent-name">{{ view.name }}</span><AgentStateLabel class="agent-state" :class="{ quiet: view.status.state === 'working' }" :state="view.status.state" :label="view.status.label" /></RouterLink>
       </dd>
     </div>
     <div class="prop">
@@ -127,11 +128,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .kind.epic { color: var(--gold); }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .row .agent-chips { flex-wrap: nowrap; }
-.agent-chip { text-decoration: none; }
+.agent-chip { min-width: 0; text-decoration: none; }
+.agent-chips { min-width: 0; max-width: 100%; }
+.agent-chip > svg, .agent-state { flex: none; }
 .agent-chip.needs { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
 .agent-state { font-size: 11.5px; }
 .agent-state.quiet :deep(.state-word) { display: none; }
-.agent-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .column .agent-chips { gap: 2px 10px; }
 .epic-chip { max-width: 100%; }
 .epic-chip .mono { font-size: 11px; color: var(--ink-2); }
