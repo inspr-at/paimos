@@ -37,6 +37,8 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 // Mount registers account, allowance and routing routes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	handle := func(pattern string, fn http.HandlerFunc) { mux.HandleFunc(pattern, m.privateResponse(fn)) }
+	handle("GET /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
+	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
