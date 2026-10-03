@@ -27,7 +27,7 @@ func TestCatalogRefreshExpansionPreservesPublishedRoutes(t *testing.T) {
 		WHERE conrelid='model_role_routes'::regclass AND conname='model_role_routes_role_check'`
 	routeSQL := `SELECT to_jsonb(r)::text FROM model_role_routes r WHERE role='build'`
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
-		if name != "1072_model_catalog_refresh.sql" {
+		if name != "1126_model_catalog_refresh.sql" {
 			return nil
 		}
 		if err := d.App.QueryRow(t.Context(), constraintSQL).Scan(&oldConstraint); err != nil {

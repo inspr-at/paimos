@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -197,29 +197,40 @@ func safePerformancePlan(value any) any {
 }
 
 // Temporary fix4 diagnosis: log bounded static query categories, never arguments.
-type listQueryTrace struct { t *testing.T }
+type listQueryTrace struct{ t *testing.T }
 type listTraceKey struct{}
-type listTraceStart struct { start time.Time; sql string }
+type listTraceStart struct {
+	start time.Time
+	sql   string
+}
+
 func (tr *listQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
- return context.WithValue(ctx,listTraceKey{},listTraceStart{time.Now(),data.SQL})
+	return context.WithValue(ctx, listTraceKey{}, listTraceStart{time.Now(), data.SQL})
 }
 func (tr *listQueryTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
- s:=ctx.Value(listTraceKey{}).(listTraceStart)
- d:=time.Since(s.start)
- if d<5*time.Millisecond {return}
- label:="other"
- for _, c:= range []string{"finished AS (", "WITH done AS", "planning_values AS", "WITH RECURSIVE scope", "TRUNCATE", "INSERT INTO nodes", "ANALYZE"} {
-  if strings.Contains(s.sql,c) {label=c;break}
- }
- tr.t.Logf("diagnostic query category %q: %s",label,d)
+	s := ctx.Value(listTraceKey{}).(listTraceStart)
+	d := time.Since(s.start)
+	if d < 5*time.Millisecond {
+		return
+	}
+	label := "other"
+	for _, c := range []string{"finished AS (", "WITH done AS", "planning_values AS", "WITH RECURSIVE scope", "TRUNCATE", "INSERT INTO nodes", "ANALYZE"} {
+		if strings.Contains(s.sql, c) {
+			label = c
+			break
+		}
+	}
+	tr.t.Logf("diagnostic query category %q: %s", label, d)
 }
 func traceListQueries(t *testing.T) {
- t.Helper()
- old:=appPool
- cfg:=old.Config()
- cfg.ConnConfig.Tracer=&listQueryTrace{t}
- pool,err:=pgxpool.NewWithConfig(t.Context(),cfg)
- if err!=nil {t.Fatal(err)}
- appPool=pool
- t.Cleanup(func(){appPool=old;pool.Close()})
+	t.Helper()
+	old := appPool
+	cfg := old.Config()
+	cfg.ConnConfig.Tracer = &listQueryTrace{t}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appPool = pool
+	t.Cleanup(func() { appPool = old; pool.Close() })
 }
