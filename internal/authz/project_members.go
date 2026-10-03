@@ -171,7 +171,8 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 // rows, matching pairing callers (tenant, pairing, tree). NO KEY UPDATE fences
 // authority changes while permitting tenant FK key-share locks. Call before
 // reading the target or any grants and hold through commit; never hold these
-// locks while reading a request body.
+// locks while reading a request body. Callers that also need pairing must take
+// the tenant and pairing fences before entering either project helper.
 func LockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id); err != nil {
