@@ -671,8 +671,12 @@ Hide toggle takes precedence. These selections and automatic Hide restoration
 survive URL links and saved views. The project summary carries bounded
 `status_counts` and their buckets;
 missing or truncated detail is labelled unavailable or partial, while group
-totals remain exact. The additive `work_state` and `work_bucket` list parameters
-share the summary's canonical spellings and kind-aware buckets.
+totals remain exact. With partial detail, a single-status selection temporarily
+turns Hide off because an omitted kind category may hide that status; clearing
+the selection restores Hide, and manual toggles still take precedence. Group
+selections retain their exact bucket policy. The additive `work_state` and
+`work_bucket` list parameters share the summary's canonical spellings and
+kind-aware buckets.
 
 Ticket lists refresh worker names, progress and ETA on session registration,
 heartbeat, rebinding and stop events. The shared live feed also refreshes after

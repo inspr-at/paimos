@@ -437,7 +437,7 @@ function update(patch: Partial<ListFilters>) {
   if (patch.status !== undefined) {
     const nextStatus = patch.status
     if (!('statusScope' in patch)) patch = { ...patch, statusScope: undefined }
-    const hidden = selectionIsHidden(nextStatus, patch.statusScope, project.value?.status_counts)
+    const hidden = selectionIsHidden(nextStatus, patch.statusScope, project.value?.status_counts, undefined, project.value?.status_counts_truncated)
     const result = reconcileStatusHide(filters.value.showClosed, filters.value.hideRestore ?? false, hidden)
     patch = { ...patch, showClosed: result.showClosed, hideRestore: result.automatic || undefined }
     if (result.note) toast(result.note, { key: 'project-status-hide' })
@@ -456,8 +456,8 @@ function selectCountStatus(state: string) {
 }
 // The temporary override travels with the URL/view, so reload and navigation
 // preserve restoration. There is no per-person or per-project override cache.
-watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore], () => {
-  if (filters.value.hideRestore && !selectionIsHidden(filters.value.status, filters.value.statusScope, project.value?.status_counts)) {
+watch(() => [filters.value.status, filters.value.statusScope, filters.value.hideRestore, project.value], () => {
+  if (project.value && filters.value.hideRestore && !selectionIsHidden(filters.value.status, filters.value.statusScope, project.value.status_counts, undefined, project.value.status_counts_truncated)) {
     if (filters.value.showClosed) { update({ showClosed: false, hideRestore: undefined }); toast('Hide is on again.', { key: 'project-status-hide' }) }
   }
 })
@@ -1943,6 +1943,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 @media (max-width: 900px) { .project-view-settings { display: none; } }
 @media (max-width: 600px) {
+  .header-activity { display: none; }
   .project-page[class*="header-"] .head-flex, .project-page.header-comfortable .head-flex { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title progress" "stats stats" "description description"; gap: 4px 10px; }
   .project-page[class*="header-"] .title-line { grid-area: title; max-width: none; }
   .project-page[class*="header-"] .title-line h1 { font-size: 24px; }

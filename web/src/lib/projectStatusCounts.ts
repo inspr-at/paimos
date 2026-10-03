@@ -37,15 +37,18 @@ export function groupStates(summary: ProjectSummary, group: HeaderStatusGroup): 
 }
 // AEON-646 can replace the hidden-status policy here with hide_states without
 // changing the temporary-override lifecycle. Today it uses kind-aware buckets.
-export function statusIsHidden(state: string, counts: readonly ProjectStatusCount[] | undefined, hiddenBuckets = DEFAULT_HIDDEN_BUCKETS): boolean {
+export function statusIsHidden(state: string, counts: readonly ProjectStatusCount[] | undefined, hiddenBuckets = DEFAULT_HIDDEN_BUCKETS, countsTruncated = false): boolean {
+  // Partial pairs cannot prove visibility: another kind's hidden bucket for
+  // this same status may have been omitted. Show the selection conservatively.
+  if (countsTruncated) return hiddenBuckets.length > 0
   const matches = counts?.filter(item => item.state === canonicalStatus(state)) ?? []
   return matches.length ? matches.some(item => hiddenBuckets.includes(item.bucket)) : hiddenBuckets.includes(fallbackBucket(state))
 }
-export function selectionIsHidden(status: string[], scope: ListFilters['statusScope'], counts: readonly ProjectStatusCount[] | undefined, hiddenBuckets = DEFAULT_HIDDEN_BUCKETS): boolean {
+export function selectionIsHidden(status: string[], scope: ListFilters['statusScope'], counts: readonly ProjectStatusCount[] | undefined, hiddenBuckets = DEFAULT_HIDDEN_BUCKETS, countsTruncated = false): boolean {
   if (!status.length) return false
   if (scope && scope !== 'canonical') return scope === 'closed'
     ? hiddenBuckets.some(bucket => bucket === 'cancelled' || bucket === 'archived') : hiddenBuckets.includes(scope)
-  return status.some(state => !state.startsWith('!') && statusIsHidden(state, counts, hiddenBuckets))
+  return status.some(state => !state.startsWith('!') && statusIsHidden(state, counts, hiddenBuckets, countsTruncated))
 }
 export function reconcileStatusHide(showClosed: boolean, automatic: boolean, hiddenSelection: boolean) {
   if (!showClosed && hiddenSelection) return { showClosed: true, automatic: true, note: 'Hide is off to show the selected statuses.' }

@@ -39,6 +39,23 @@ test('automatic Hide restores on clear or visible status; manual off remains off
   assert.deepEqual(reconcileStatusHide(true, false, false), { showClosed: true, automatic: false, note: '' })
   assert.deepEqual(reconcileStatusHide(true, true, true), { showClosed: true, automatic: true, note: '' })
 })
+test('truncated custom categories cannot prove a selected status is visible under Hide', () => {
+  // QA may be configured as done and omitted, or its hidden bucket may be
+  // omitted while an open bucket for another kind is still present.
+  for (const counts of [[], [{ state: 'qa', bucket: 'open' as const, count: 2 }]]) {
+    const hidden = selectionIsHidden(['qa'], 'canonical', counts, undefined, true)
+    assert.equal(hidden, true)
+    assert.deepEqual(reconcileStatusHide(false, false, hidden), {
+      showClosed: true, automatic: true, note: 'Hide is off to show the selected statuses.',
+    })
+    assert.equal(selectionIsHidden([], 'canonical', counts, undefined, true), false)
+    assert.equal(selectionIsHidden(['!qa'], 'canonical', counts, undefined, true), false)
+    assert.equal(selectionIsHidden(['qa'], 'canonical', counts, [], true), false)
+    // Group scopes carry complete bucket information even in a partial summary.
+    assert.equal(selectionIsHidden(['qa'], 'in_progress', counts, undefined, true), false)
+  }
+  assert.equal(selectionIsHidden(['qa'], 'canonical', [{ state: 'qa', bucket: 'open', count: 2 }], undefined, false), false)
+})
 test('group links and saved views use exact server buckets even with custom states', () => {
   const group = HEADER_STATUS_GROUPS[1]
   const filters = filtersFromQuery({ status: groupStates(summary, group).join(','), status_scope: group.id, priority: 'high', closed: '1' })

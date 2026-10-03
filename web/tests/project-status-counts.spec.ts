@@ -60,6 +60,20 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     if (width === 390) {
       await expect(countRoot(page).locator('.status-count').first()).toBeHidden()
       await expect(group(page, 'closed')).toBeHidden()
+      await expect(page.locator('.header-activity')).toBeHidden()
+      const layout = await page.locator('.head-flex').evaluate(element => {
+        const title = element.querySelector('.title-line')!.getBoundingClientRect()
+        const progress = element.querySelector('.progress-line')!.getBoundingClientRect()
+        const description = element.querySelector('.description')!.getBoundingClientRect()
+        const frame = element.getBoundingClientRect()
+        return { columns: getComputedStyle(element).gridTemplateColumns.split(' ').length,
+          titleWidth: title.width, availableTitleWidth: progress.left - frame.left - 10,
+          descriptionWidth: description.width, frameWidth: frame.width }
+      })
+      expect(layout.columns, 'only the title and progress tracks exist').toBe(2)
+      expect(layout.titleWidth).toBeCloseTo(layout.availableTitleWidth, 0)
+      expect(layout.titleWidth).toBeGreaterThan(240)
+      expect(layout.descriptionWidth).toBeCloseTo(layout.frameWidth, 0)
     } else {
       await expect(countRoot(page).locator('.status-count')).toHaveCount(11)
       for (const id of ['open', 'in_progress', 'done', 'closed']) {
@@ -112,6 +126,50 @@ test('older and partial summary detail is labelled honestly', async ({ page }) =
   await expect(countRoot(page).getByText('Status counts are partial; group totals are complete.')).toBeVisible()
   await expect(status(page, 'done').locator('b')).toHaveText('—')
   await expect(group(page, 'done').locator('b')).toHaveText('3')
+})
+
+test('truncated summary keeps custom Done QA visible through reload and restores Hide on clear', async ({ page }) => {
+  const { data } = await setup(page)
+  const qa = data.nodes.find(node => node.state === 'qa')!
+  const project = data.projects[0]!
+  await page.route('**/api/projects**', route => route.fulfill({ json: { items: [{
+    id: project.id, key: project.key, title: project.title, state: project.state,
+    open: 4, in_progress: 1, done: 4, cancelled: 1, archived_count: 0, total: 10,
+    last_activity: project.last, status_counts: [{ state: 'new', bucket: 'open', count: 4 }], status_counts_truncated: true,
+  }] } }))
+  // Model this kind's QA category as done: Hide must exclude it until the
+  // single-status selection turns Hide off. The omitted pair is never guessed.
+  await page.route('**/api/nodes?*', route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('work_state') !== 'qa') return route.fallback()
+    return route.fulfill({ json: { items: query.get('hide_closed') === 'true' ? [] : [{
+      ...qa, kind_id: `k-${qa.kind_slug}`, kind_label: 'Task', deleted_at: null, position: '0',
+      project: { id: project.id, key: project.key, title: project.title },
+      children_count: 0, assignee: null, epic: null, parent: null, priority: null,
+    }], next_cursor: null } })
+  })
+  await page.reload(); await roomy(page, 1440)
+  await expect(hide(page)).toBeChecked()
+  await status(page, 'qa').click()
+  await expect(hide(page)).not.toBeChecked()
+  await expect(row(page, qa.key)).toBeVisible()
+  await expect(page).toHaveURL(/hide_restore=1/)
+  await page.reload()
+  await expect(hide(page)).not.toBeChecked()
+  await expect(row(page, qa.key)).toBeVisible()
+  await status(page, 'qa').click()
+  await expect(hide(page)).toBeChecked()
+  await expect(page).not.toHaveURL(/hide_restore=|closed=1|status=/)
+  await status(page, 'qa').click()
+  await expect(hide(page)).not.toBeChecked()
+  await expect(row(page, qa.key)).toBeVisible()
+  await hide(page).check()
+  await expect(rows(page)).toHaveCount(0)
+  await hide(page).uncheck()
+  await expect(row(page, qa.key)).toBeVisible()
+  await status(page, 'qa').click()
+  await expect(page).not.toHaveURL(/status=/)
+  await expect(hide(page)).not.toBeChecked()
 })
 
 for (const width of [1024, 1440]) test(`live count digit growth stays still at ${width}px`, async ({ page }) => {
