@@ -524,7 +524,8 @@ func TestSelectiveDisconnectKeepsSharedHookUntilLastAccountCleanup(t *testing.T)
 			if _, err := e.AddHarness(t.Context(), []Candidate{second}); err != nil {
 				t.Fatal(err)
 			}
-			e.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+			now := e.now().Add(time.Minute)
+			e.Now = func() time.Time { return now }
 			if p, err := e.Step(t.Context()); err != nil || p.Stage != "connected" {
 				t.Fatalf("second account approval failed: %s %v", p.Stage, err)
 			}
@@ -659,5 +660,29 @@ func TestPairedHookProofRepairsPersistedDuplicateReports(t *testing.T) {
 	}
 	if len(s.HookCapabilities) != 1 || s.HookCapabilities[0].Verified || s.HookCapabilities[0].Blocker != "feature_disabled" {
 		t.Fatal("fence synchronization retained invalid duplicate reports", s.HookCapabilities)
+	}
+}
+
+func TestPairedHookProofCannotPromoteConflictingReports(t *testing.T) {
+	for _, blockedFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "verified first", true: "blocked first"}[blockedFirst], func(t *testing.T) {
+			e, api, _, options, _ := engineFixture(t)
+			approveFixture(t, e, api, options)
+			s, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			verified := hookcap.Capability{Harness: "codex", Version: options.Candidates[0].Version, OS: runtime.GOOS, Verified: true}
+			blocked := verified
+			blocked.Verified, blocked.Blocker = false, "project_override"
+			s.HookCapabilities = []hookcap.Capability{verified, blocked}
+			if blockedFirst {
+				s.HookCapabilities[0], s.HookCapabilities[1] = blocked, verified
+			}
+			proof := e.proof(s)
+			if len(proof.HookCapabilities) != 1 || proof.HookCapabilities[0].Verified || proof.HookCapabilities[0].Blocker != "project_override" {
+				t.Fatal("conflicting persisted reports promoted hook readiness", proof.HookCapabilities)
+			}
+		})
 	}
 }

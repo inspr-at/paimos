@@ -218,6 +218,12 @@ func (h *HookInstaller) apply(ctx context.Context, home, workspace, computer, ha
 		}
 	}
 	if uninstall {
+		// Retire ownership only after the settings removal is confirmed, and
+		// only if the exact receipt read under the hook lock is still present.
+		current, _, err := settings.readHookSettings(file, 4<<20)
+		if err != nil || !sameHookJSON(current, after) || store.RemoveExact(name, Hash(raw)) != nil {
+			return fail("settings_changed")
+		}
 		return fail("repair_required")
 	}
 	if pin.Check() != nil {
@@ -266,6 +272,13 @@ func (e *Engine) RepairHooks(ctx context.Context, uninstall bool) (Progress, err
 }
 
 func refreshHookCapabilities(s *snapshot) {
+	// Older snapshots may contain one report per account. Repair that shape
+	// before any reconciliation or fence sync can resend an invalid list.
+	var reports []hookcap.Capability
+	for _, c := range s.HookCapabilities {
+		reports = appendHookReport(reports, c)
+	}
+	s.HookCapabilities = reports
 	for i, c := range s.HookCapabilities {
 		if !c.Verified {
 			continue
@@ -278,6 +291,27 @@ func refreshHookCapabilities(s *snapshot) {
 		}
 		s.HookCapabilities[i] = c
 	}
+}
+
+func appendHookReport(reports []hookcap.Capability, c hookcap.Capability) []hookcap.Capability {
+	if !hookcap.Valid(c) {
+		return reports
+	}
+	for i, old := range reports {
+		if old.Harness != c.Harness {
+			continue
+		}
+		if old.OS != c.OS {
+			old.OS, old.Version, old.Verified, old.Blocker = runtime.GOOS, "", false, "unsupported_platform"
+		} else if old.Version != c.Version {
+			old.Version, old.Verified, old.Blocker = "", false, "unsupported_version"
+		} else if old.Verified && !c.Verified {
+			old = c
+		}
+		reports[i] = old
+		return reports
+	}
+	return append(reports, c)
 }
 
 func (e *Engine) setupHooks(ctx context.Context, s *snapshot, uninstall bool) error {
@@ -297,21 +331,41 @@ func (e *Engine) setupHooks(ctx context.Context, s *snapshot, uninstall bool) er
 	if e.Hooks != nil && e.Hooks.Harness != "" {
 		for _, c := range previous {
 			if c.Harness != e.Hooks.Harness {
-				s.HookCapabilities = append(s.HookCapabilities, c)
+				s.HookCapabilities = appendHookReport(s.HookCapabilities, c)
 			}
 		}
 	}
+	selected := map[string]LocalCandidate{}
+	var harnesses []string
 	for _, c := range s.Candidates {
 		if e.Hooks != nil && e.Hooks.Harness != "" && e.Hooks.Harness != c.Candidate.Harness {
 			continue
 		}
-		selected := false
+		active := false
 		for _, a := range s.View.Enrollments {
-			if a.Harness == c.Candidate.Harness && a.State == "connected" && !s.Removed[a.AccountID] {
-				selected = true
+			if a.AccountKey == c.Candidate.Key && a.Harness == c.Candidate.Harness && a.Label == c.Candidate.Label && a.State == "connected" && !s.Removed[a.AccountID] {
+				active = true
+				break
 			}
 		}
-		if !selected {
+		if !active {
+			continue
+		}
+		harness := c.Candidate.Harness
+		if old, ok := selected[harness]; ok {
+			if old.Version != c.Version {
+				old.Version = "" // no single exact version can be qualified
+				selected[harness] = old
+			}
+		} else {
+			selected[harness] = c
+			harnesses = append(harnesses, harness)
+		}
+	}
+	for _, harness := range harnesses {
+		c := selected[harness]
+		if c.Version == "" && !uninstall {
+			s.HookCapabilities = appendHookReport(s.HookCapabilities, hookcap.Capability{Harness: harness, OS: runtime.GOOS, Blocker: "unsupported_version"})
 			continue
 		}
 		capability := e.Hooks.apply(ctx, home, s.Request.Workspace, s.View.ComputerID, c.Candidate.Harness, c.Version, runtime.GOOS, uninstall, os.Environ())
@@ -321,9 +375,7 @@ func (e *Engine) setupHooks(ctx context.Context, s *snapshot, uninstall bool) er
 		// New enrollment kinds must not make the additive hook report invalid
 		// and interrupt ordinary pairing. Only the hook contract's harnesses
 		// participate; unsupported integrations confer no hook capability.
-		if hookcap.Valid(capability) {
-			s.HookCapabilities = append(s.HookCapabilities, capability)
-		}
+		s.HookCapabilities = appendHookReport(s.HookCapabilities, capability)
 	}
 	return e.save(s, false)
 }

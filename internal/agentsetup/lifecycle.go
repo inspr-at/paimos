@@ -262,7 +262,19 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			if len(local.SettlementPending) > 0 {
 				p.Action = "Local process exit confirmed; retained usage journal needs authorized server accounting recovery."
 			}
-			e.removeUserHook(ctx, s, a.Harness)
+			// User hook settings are shared by every enrollment of a harness.
+			// Keep them for connected accounts and for accounts whose local
+			// processes have not finished draining and cleanup yet.
+			shared := false
+			for _, other := range v.Enrollments {
+				if other.AccountID != a.AccountID && other.Harness == a.Harness && !known[other.AccountID] {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				e.removeUserHook(ctx, s, a.Harness)
+			}
 			p.HookCapabilities = s.HookCapabilities
 			if err = e.removeAccount(a.AccountID); err != nil {
 				return p, err
