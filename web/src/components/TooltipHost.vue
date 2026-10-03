@@ -15,9 +15,16 @@ const tip = ref<HTMLElement>()
 const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
+let focusObserver: MutationObserver | undefined
 
 function find(node: EventTarget | null): HTMLElement | null {
-  return node instanceof Element ? node.closest<HTMLElement>('[data-tip]') : null
+  if (!(node instanceof Element)) return null
+  const active = node.getAttribute('aria-activedescendant')
+  const activeName = active ? document.getElementById(active)?.querySelector<HTMLElement>('[data-clip-tip]') : null
+  if (activeName) return activeName
+  return node.closest<HTMLElement>('[data-tip]')
+    ?? node.closest('button, a[href], label, [role="option"], [role="menuitemradio"]')?.querySelector<HTMLElement>('[data-clip-tip]')
+    ?? null
 }
 async function show(element: HTMLElement) {
   const value = element.dataset.tip
@@ -26,6 +33,7 @@ async function show(element: HTMLElement) {
   layer.value = element.closest<HTMLElement>('dialog[open]')
   text.value = value
   await nextTick()
+  if (target !== element || !element.isConnected) { if (target === element) hide(); return }
   const rect = element.getBoundingClientRect()
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
@@ -53,25 +61,48 @@ function over(event: PointerEvent) {
   if (element) timer = setTimeout(() => void show(element), 380)
 }
 function focusIn(event: FocusEvent) {
+  focusObserver?.disconnect()
+  const focused = event.target
+  if (!(focused instanceof Element)) return
+  const reveal = () => {
+    if (document.activeElement !== focused || !focused.matches(':focus-visible')) return
+    const element = find(focused)
+    if (element) void show(element)
+    else hide()
+  }
+  // Grids and comboboxes keep focus on their root while arrows change the
+  // active row. Reveal its clipped name without adding extra Tab stops.
+  focusObserver = new MutationObserver(reveal)
+  focusObserver.observe(focused, { attributes: true, attributeFilter: ['aria-activedescendant'] })
+  reveal()
+}
+function focusOut() { focusObserver?.disconnect(); hide() }
+function touch(event: MouseEvent) {
+  // Touch's compatibility mouse events can move focus after pointerup. Reveal
+  // after click, so that focusout cannot immediately erase the tapped name.
+  if (!('pointerType' in event) || event.pointerType !== 'touch') return
   const element = find(event.target)
-  if (element && element.matches(':focus-visible')) void show(element)
+  if (element?.hasAttribute('data-clip-tip')) void show(element)
 }
 onMounted(() => {
   document.addEventListener('pointerover', over)
   document.addEventListener('focusin', focusIn)
-  document.addEventListener('focusout', hide)
+  document.addEventListener('focusout', focusOut)
   document.addEventListener('pointerdown', hide)
+  document.addEventListener('click', touch)
   document.addEventListener('keydown', hide)
   document.addEventListener('scroll', hide, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerover', over)
   document.removeEventListener('focusin', focusIn)
-  document.removeEventListener('focusout', hide)
+  document.removeEventListener('focusout', focusOut)
   document.removeEventListener('pointerdown', hide)
+  document.removeEventListener('click', touch)
   document.removeEventListener('keydown', hide)
   document.removeEventListener('scroll', hide, true)
   clearTimeout(timer)
+  focusObserver?.disconnect()
 })
 </script>
 
@@ -83,7 +114,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tooltip {
-  position: fixed; z-index: 80; top: 0; left: 0; max-width: 320px; padding: 5px 10px; border-radius: 8px; pointer-events: none;
+  position: fixed; z-index: 80; top: 0; left: 0; max-width: min(320px, calc(100vw - 16px)); padding: 5px 10px; border-radius: 8px; pointer-events: none; overflow-wrap: anywhere;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
   box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
 }
