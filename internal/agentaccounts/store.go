@@ -355,7 +355,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
-	if report := in.Readiness; report != nil && uuidRE.MatchString(report.CheckID) &&
+	if report := in.Readiness; !in.MeasurementOnly && report != nil && uuidRE.MatchString(report.CheckID) &&
 		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
 		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
 		before.daemonGeneration != nil && *before.daemonGeneration != generation {
