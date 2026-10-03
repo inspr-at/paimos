@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -279,8 +280,16 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE metadata->>'migration'='AEON-643'`).Scan(&n); err != nil {
 					t.Fatal(err)
 				}
-				if n != 0 {
-					t.Fatalf("explicit linked choices received %d backfill events", n)
+				// Both legacy-only physical identities are retained without changing
+				// the effective explicit choice. Each gets created + selected events.
+				if n != 4 {
+					t.Fatalf("legacy physical backfill event count %d, want 4", n)
+				}
+				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE metadata->>'migration'='AEON-643' AND metadata->>'audience_principal_id'=$1`, people[1].ID).Scan(&n); err != nil || n != 0 {
+					t.Fatalf("explicit physical choice received backfill events: %d %v", n, err)
+				}
+				if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events e JOIN theme_selections s ON s.tenant_id=e.tenant_id AND s.principal_id=(e.after->>'principal_id')::uuid WHERE e.type='theme.selected' AND e.metadata->>'migration'='AEON-643' AND e.after->>'unsaved'='true' AND s.unsaved_revision=s.revision AND e.after->>'theme_id'=s.theme_id::text AND (e.after->>'revision')::bigint=s.revision`).Scan(&n); err != nil || n != 2 {
+					t.Fatalf("lower-priority selection audit mismatch: %d %v", n, err)
 				}
 				// Unlink must keep the physical explicit selection, including default.
 				if _, err := d.Admin.Exec(ctx, `UPDATE principals SET linked_to=NULL WHERE tenant_id=$1 AND id=$2`, people[1].TenantID, people[1].ID); err != nil {
@@ -290,12 +299,108 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 				if err != nil || !same(after, before) {
 					t.Fatalf("unlink changed explicit choice: %+v %v", after, err)
 				}
+				for _, p := range []tenant.Principal{people[0], people[2]} {
+					if _, err := d.Admin.Exec(ctx, `UPDATE principals SET linked_to=NULL WHERE tenant_id=$1 AND id=$2`, p.TenantID, p.ID); err != nil {
+						t.Fatal(err)
+					}
+					after, err := s.Active(ctx, p)
+					if err != nil || after.Theme.OwnerPrincipalID == nil || *after.Theme.OwnerPrincipalID != p.ID || after.Theme.Values.Agents.Avatar != "sprite" {
+						t.Fatalf("legacy physical choice lost: %+v %v", after, err)
+					}
+				}
 			})
 		}
 	}
 }
 
 func ptr[T any](value T) *T { return &value }
+
+func TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink(t *testing.T) {
+	for _, choice := range []string{"theme", "default"} {
+		t.Run(choice, func(t *testing.T) {
+			ctx := t.Context()
+			d, err := dbtest.NewUnmigrated(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := d.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			s := Store{d.App}
+			var canonical, alias tenant.Principal
+			var before Active
+			seeded := false
+			err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+				if name != "1235_agent_appearance_themes.sql" {
+					return nil
+				}
+				seeded = true
+				var tid string
+				if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('legacy-alias','Legacy alias') RETURNING id::text`).Scan(&tid); err != nil {
+					return err
+				}
+				for i, p := range []*tenant.Principal{&canonical, &alias} {
+					*p = tenant.Principal{TenantID: tid, Kind: tenant.Person}
+					if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, tid, fmt.Sprintf("Person %d", i)).Scan(&p.ID); err != nil {
+						return err
+					}
+					dbtest.BindRole(t, d, tid, p.ID, "member")
+				}
+				var selected *string
+				if choice == "theme" {
+					theme, err := s.Create(ctx, canonical, CreateInput{Name: "Explicit canonical", Scope: "personal"})
+					if err != nil {
+						return err
+					}
+					selected = &theme.ID
+				}
+				if _, err := s.Select(ctx, canonical, SelectionInput{ThemeID: selected}); err != nil {
+					return err
+				}
+				if _, err := d.Admin.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agent-indicator','{"style":"orbit","ring":"off","hovering":true,"size":67}'),($1,$2,'agent-state','{"palette":"tritan","dimInactive":false,"inactiveOpacity":73,"yellowMinutes":7}')`, tid, alias.ID); err != nil {
+					return err
+				}
+				linked, err := principallink.New(d.App).Link(ctx, "legacy-alias", alias.ID, canonical.ID)
+				if err != nil {
+					return err
+				}
+				if !linked.Changed {
+					return fmt.Errorf("link fixture did not change")
+				}
+				before, err = s.Active(ctx, alias)
+				return err
+			})
+			if err != nil || !seeded {
+				t.Fatalf("migration fixture: %v (seeded=%v)", err, seeded)
+			}
+			for _, p := range []tenant.Principal{canonical, alias} {
+				after, err := s.Active(ctx, p)
+				if err != nil || !same(after, before) {
+					t.Fatalf("explicit canonical choice displaced: %+v %v; before=%+v", after, err, before)
+				}
+			}
+			unlinked, err := principallink.New(d.App).Unlink(ctx, "legacy-alias", alias.ID)
+			if err != nil || !unlinked.Changed {
+				t.Fatalf("unlink: %+v %v", unlinked, err)
+			}
+			dbtest.BindRole(t, d, alias.TenantID, alias.ID, "member")
+			after, err := s.Active(ctx, alias)
+			want := Agents{Avatar: "orbit", Ring: ptr("off"), Hover: true, Size: ptr(67), Palette: "tritan", DimInactive: ptr(false), InactiveOpacity: ptr(73)}
+			if err != nil || after.Theme.OwnerPrincipalID == nil || *after.Theme.OwnerPrincipalID != alias.ID || !same(after.Theme.Values.Agents, want) || after.SelectedThemeID == nil || *after.SelectedThemeID != after.Theme.ID {
+				t.Fatalf("legacy alias appearance lost after unlink: %+v %v", after, err)
+			}
+			if _, err := s.Get(ctx, canonical, after.Theme.ID); err != pgx.ErrNoRows {
+				t.Fatalf("former canonical sees alias private theme: %v", err)
+			}
+			var unchanged bool
+			if err := d.Admin.QueryRow(ctx, `SELECT value='{"palette":"tritan","dimInactive":false,"inactiveOpacity":73,"yellowMinutes":7}'::jsonb FROM user_preferences WHERE tenant_id=$1 AND principal_id=$2 AND key='agent-state'`, alias.TenantID, alias.ID).Scan(&unchanged); err != nil || !unchanged {
+				t.Fatalf("legacy preference changed: %v", err)
+			}
+		})
+	}
+}
 
 func TestAgentAppearanceAPIRoundTripAndBounds(t *testing.T) {
 	f := setup(t)
