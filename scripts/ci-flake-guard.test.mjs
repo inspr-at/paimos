@@ -389,3 +389,25 @@ test('execute streams both outputs, handles launch failure and enforces an outpu
   assert.equal(bounded.overflow, true);
   assert.equal(bounded.output, '');
 });
+
+test('with CI_FLAKE_REQUIRE_JSON a failure beside another group\'s startup error is never retried green', async () => {
+  const env = { GITHUB_EVENT_NAME: 'merge_group', CI_FLAKE_REQUIRE_JSON: '1' }
+  const command = ['npm', 'run', 'ci:web:shard']
+  // Merged wrapper report: one assertion failure plus an error from a group that never started.
+  const merged = JSON.parse(pwJSON()); merged.errors = [{ message: 'Missing or invalid Playwright JSON report for status-help' }]
+  const mixed = await guard([{ code: 1, output: JSON.stringify(merged) }], { env, command, kind: 'playwright' })
+  assert.equal(mixed.code, 1)
+  assert.equal(mixed.calls.length, 1, 'infrastructure error was retried')
+  assert.equal(mixed.evidence.at(-1).label, 'FAILED')
+  // Line output only: the guard cannot see the other group, so it refuses to retry.
+  const line = '  1) [chromium] › tests/a.spec.ts:12:3 › group › needs a [safe] choice\n  1 failed'
+  const lineOnly = await guard([{ code: 1, output: line }], { env, command, kind: 'playwright' })
+  assert.equal(lineOnly.code, 1)
+  assert.equal(lineOnly.calls.length, 1)
+  // A structured retry that passes is still accepted, and a retry without a report is not.
+  const ok = await guard([{ code: 1, output: pwJSON() }, { code: 0, output: pwJSON('expected') }], { env, command, kind: 'playwright' })
+  assert.equal(ok.code, 0)
+  const noReport = await guard([{ code: 1, output: pwJSON() },
+    { code: 0, output: '[1/1] [chromium] › tests/a.spec.ts:12:3 › group › needs a [safe] choice\n1 passed' }], { env, command, kind: 'playwright' })
+  assert.equal(noReport.code, 1)
+})

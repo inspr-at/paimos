@@ -12,6 +12,8 @@
 // file:line selectors) are also supplied. PW_RETRIES is always 0. A wrapper that
 // cannot implement these filters must fail rather than rerun its whole suite.
 // Use line or JSON reporter output on stdout; file-only reports are not read.
+// With CI_FLAKE_REQUIRE_JSON=1 a failing wrapper must print its merged JSON
+// report (ci:web:shard --reporter=line,json); infrastructure errors in it fail.
 // Export GITHUB_STEP_SUMMARY; archive those files for ci-flake-report.mjs.
 import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -184,9 +186,10 @@ function pwRecord(file, line, column, title, project = '', status = 'fail') {
 }
 export function parsePlaywright(output) {
   const clean = stripAnsi(output), records = [];
-  let infrastructure = false;
+  let infrastructure = false, reports = 0;
   for (const report of jsonObjects(clean)) {
     if (!Array.isArray(report.suites)) continue;
+    reports++;
     infrastructure ||= Array.isArray(report.errors) && report.errors.length > 0;
     function visit(suite, ancestors = [], depth = 0) {
       if (depth > 100) throw new Error('Playwright report nesting exceeds limit');
@@ -212,7 +215,7 @@ export function parsePlaywright(output) {
     if (heading) records.push(pwRecord(heading[3], heading[4], heading[5], heading[6], heading[2] ?? '', heading[1].endsWith(')') ? 'fail' : 'observed'));
   }
   return { failures: unique(records.filter(value => value.status === 'fail')),
-    records: unique(records), infrastructure };
+    records: unique(records), infrastructure, reports };
 }
 
 export function isQuarantined(failure, entries, now = new Date()) {
@@ -345,7 +348,12 @@ export async function runGuard({ command, kind, env = process.env, quarantine, n
   }
   // Test failures with a zero wrapper exit code still fail. Conversely, crashes,
   // incomplete output and setup failures cannot be waived by a quarantine.
-  if (go?.incomplete || pw?.infrastructure || (result.code !== 0 && failures.length === 0)) {
+  // CI_FLAKE_REQUIRE_JSON=1 (set for the sharded web job): a wrapper that runs
+  // several config groups must hand over its complete merged JSON report. Line
+  // output cannot show that another group failed to start, so a red exit without
+  // a structured report is never retried.
+  const lacksReport = !!pw && env.CI_FLAKE_REQUIRE_JSON === '1' && result.code !== 0 && pw.reports === 0;
+  if (go?.incomplete || pw?.infrastructure || lacksReport || (result.code !== 0 && failures.length === 0)) {
     evidence({ id: '<command>', kind: kind ?? 'unknown', attempt: 1, label: 'FAILED', reason: 'unidentified or incomplete failure' });
     return result.code || 1;
   }
@@ -380,7 +388,8 @@ export async function runGuard({ command, kind, env = process.env, quarantine, n
     // full shard. Skipped/discovered cases are harmless, executed extra tests
     // are an integration failure. Go leaf retries must run their parent setup.
     const extraTests = failure.kind === 'playwright' && parsed.records.some(record => record.id !== failure.id && record.status !== 'skip');
-    if (retry.interrupted || retry.error || retry.timedOut || retry.overflow || parsed.incomplete || parsed.infrastructure || !observed || extraTests ||
+    const retryLacksReport = failure.kind === 'playwright' && env.CI_FLAKE_REQUIRE_JSON === '1' && parsed.reports === 0;
+    if (retry.interrupted || retry.error || retry.timedOut || retry.overflow || parsed.incomplete || parsed.infrastructure || retryLacksReport || !observed || extraTests ||
         (retry.code !== 0 && parsed.failures.length === 0)) {
       failed = true;
       evidence({ id: failure.id, kind: failure.kind, attempt: 2, label: 'FAILED AFTER RETRY',

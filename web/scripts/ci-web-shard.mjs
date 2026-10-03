@@ -156,7 +156,11 @@ export function planFlakeRetry(commands, env, root = webRoot) {
   if (projectAt >= 0 && test.project && command.args[projectAt + 1] !== test.project) {
     throw new Error(`Flake retry project ${test.project} differs from group project ${command.args[projectAt + 1]}`)
   }
-  const kept = command.args.slice(0, command.args.length - command.files.length)
+  // Playwright clears its output directory on start: give the retry its own, so
+  // the first attempt's traces survive next to the retry's.
+  const slug = `${file.replace(/\.spec\.ts$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-')}-${Number.isInteger(test.line) ? test.line : 'x'}`
+  const kept = command.args.slice(0, command.args.length - command.files.length).map((arg, i, all) =>
+    all[i - 1] === '--output' ? `${arg}-retry-${slug}` : arg)
   const anchored = `^${resolve(root, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
   return [{ ...command, files: [file], args: [...kept,
     ...(projectAt < 0 && test.project ? ['--project', test.project] : []),

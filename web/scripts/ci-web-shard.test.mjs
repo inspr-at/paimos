@@ -239,6 +239,9 @@ test('a flake retry selects exactly one test in its original group and fails clo
   assert.equal(only.args.filter(arg => arg.startsWith('^')).length, 1)
   assert.equal(only.args[only.args.indexOf('--grep') + 1], retryEnv.PW_GREP)
   assert.ok(only.args.includes('--retries=0'))
+  const original = planned[0].args[planned[0].args.indexOf('--output') + 1]
+  const retryOutput = only.args[only.args.indexOf('--output') + 1]
+  assert.ok(retryOutput.startsWith(`${original}-retry-`) && retryOutput !== original, 'retry reuses the first attempt output directory')
   // Reporter paths relative to the config testDir resolve to the same spec.
   assert.deepEqual(planFlakeRetry(planned, withTests({ ...test, file: spec.replace(/^[^/]+\//, '') }), webRoot)[0].files, [spec])
   for (const bad of [
